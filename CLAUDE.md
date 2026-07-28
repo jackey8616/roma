@@ -15,6 +15,12 @@ Issues live in this repo's GitHub Issues, managed via the `gh` CLI — or the Gi
 
 The five canonical triage roles, using their default label strings. See `docs/agents/triage-labels.md`.
 
+### Commit messages
+
+[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) — `type(scope): subject` in
+the imperative, with a body explaining *why*. PRs land by **squash merge**, and only when the
+user asks for the merge. See `docs/agents/commit-convention.md`.
+
 ### Domain docs
 
 Single-context — one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
