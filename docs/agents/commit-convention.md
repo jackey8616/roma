@@ -113,6 +113,29 @@ docs(adr): add ADRs for the Google Chat to Claude Code bridge
 fix(agents): correct the sub-issue id the MCP tools require
 ```
 
+## Merging
+
+**Squash merge, always.** A PR lands on `main` as exactly one commit, so `main` reads as
+one convention-shaped commit per change rather than a mix of merge commits and work in
+progress. (`main` currently carries one merge commit, from before this rule — leave it.)
+
+- **Locally**: `gh pr merge <n> --squash`
+- **In a cloud container**: `merge_pull_request` with `merge_method: "squash"`
+
+**Agents don't merge on their own.** Opening a PR is not permission to land it — merge only
+when the user asks for it in that turn, and then use squash.
+
+The squash commit is a real commit and takes the full convention:
+
+- **Subject**: the PR title, which should already be `type(scope): subject`. GitHub appends
+  ` (#15)`; that's expected and doesn't count against the 72 characters.
+- **Body**: write it. GitHub's default is a bulleted list of the branch's commit subjects,
+  which throws away the reasoning that made those bodies worth reading. Where the branch is
+  a single commit, reuse its body; where it's several, write one body that says why the
+  change as a whole exists.
+- **Footers**: carry `Closes #n` and every `Co-Authored-By` from the branch onto the squash
+  commit — they're lost otherwise.
+
 ## Enforcement
 
 None — no commitlint, no hook. The convention is upheld by whoever (or whatever) writes

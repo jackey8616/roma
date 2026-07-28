@@ -18,7 +18,8 @@ The five canonical triage roles, using their default label strings. See `docs/ag
 ### Commit messages
 
 [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) — `type(scope): subject` in
-the imperative, with a body explaining *why*. See `docs/agents/commit-convention.md`.
+the imperative, with a body explaining *why*. PRs land by **squash merge**, and only when the
+user asks for the merge. See `docs/agents/commit-convention.md`.
 
 ### Domain docs
 
