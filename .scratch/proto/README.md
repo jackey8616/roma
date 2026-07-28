@@ -25,6 +25,25 @@ node .scratch/proto/tui.mjs
 Requires `.scratch/proto/.env` containing `CLAUDE_CODE_OAUTH_TOKEN=…`
 (from `claude setup-token`). Pinned to CLI **v2.1.220** — behaviour may differ.
 
+## Drivers
+
+Unattended runs, one per question. Each writes its raw events beside this file —
+`q3-<id>.jsonl` and `q4-<id>.jsonl` for the earlier drivers,
+`q5-<arm>-<id>.jsonl` for `q5.mjs`. Those captures are committed, against the
+`.scratch/` ignore rule, because the findings documents quote them and re-running
+them costs real money.
+
+| driver | question | findings |
+| --- | --- | --- |
+| `drivers/smoke.mjs` | does a process spawn and answer at all | — |
+| `drivers/q2q3.mjs` | event density during a long turn; in-band interrupt | `docs/headless-session-verification.md` |
+| `drivers/q4.mjs` | SIGTERM + `--resume`; stray `ANTHROPIC_API_KEY` | `docs/headless-session-verification.md` |
+| `drivers/q5.mjs` | does `--include-partial-messages` emit during generation; is a stall distinguishable | `docs/partial-messages-verification.md` |
+
+`q5.mjs` runs three arms back to back and writes `q5-summary.json`: generation
+with the flag, the same prompt without it as a control, and a tool-using turn
+with the flag. A full run draws roughly $0.24 on the Shared Window.
+
 ## Isolation
 
 - `CLAUDE_CONFIG_DIR` / `CLAUDE_SECURESTORAGE_CONFIG_DIR` →

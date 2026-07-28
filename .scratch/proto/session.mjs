@@ -36,13 +36,15 @@ export function buildEnv({ oauthToken, apiKey, configDir }) {
 }
 
 export class ClaudeSession extends EventEmitter {
-  constructor({ sessionId, cwd, env, resume = false, jsonlPath = null }) {
+  constructor({ sessionId, cwd, env, resume = false, jsonlPath = null, partialMessages = false }) {
     super()
     this.sessionId = sessionId
     this.cwd = cwd
     this.env = env
     this.resume = resume
     this.jsonlPath = jsonlPath
+    // Q5: off by default so the Q1–Q4 runs above stay reproducible as measured.
+    this.partialMessages = partialMessages
 
     this.proc = null
     this.pid = null
@@ -79,6 +81,7 @@ export class ClaudeSession extends EventEmitter {
       '--replay-user-messages',
       '--verbose',
     ]
+    if (this.partialMessages) a.push('--include-partial-messages')
     // --resume and --session-id are mutually exclusive in practice: resuming
     // already names the session.
     if (this.resume) a.push('--resume', this.sessionId)
@@ -238,6 +241,15 @@ export class ClaudeSession extends EventEmitter {
           )
           .join(' ')
           .slice(0, 70)
+      }
+      case 'stream_event': {
+        // Q5: what --include-partial-messages adds. The Anthropic SSE event is
+        // nested under .event; the interesting part is its delta.
+        const inner = evt.event ?? {}
+        const delta = inner.delta ?? {}
+        const kind = delta.type ?? inner.content_block?.type ?? ''
+        const text = delta.text ?? delta.thinking ?? delta.partial_json ?? ''
+        return `${inner.type}${kind ? '/' + kind : ''} ${String(text).replace(/\s+/g, ' ').slice(0, 40)}`.trim()
       }
       case 'result':
         return `${evt.subtype} err=${evt.is_error} ${evt.duration_ms}ms cost=${evt.total_cost_usd}`
