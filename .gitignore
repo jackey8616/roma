@@ -29,3 +29,6 @@ coverage/
 
 # Agent scratch space (prototypes, working notes)
 .scratch/
+
+# Local test scratch (seam 2 working dirs, isolated claude config)
+.tmp/

@@ -1,5 +1,18 @@
 # something
 
+## Building and testing
+
+Node 22 (`.nvmrc`), TypeScript, Vitest. `npm test` is the default run — fast, free, and
+safe to run as often as you like.
+
+**`npm run test:seam2` spends real money.** It drives a real `claude -p` against the
+Shared Window everybody shares. Run it when you have changed something the stream contract
+depends on, not as a matter of course. It lives in its own Vitest config so `npm test` can
+never reach it, and it needs `CLAUDE_CODE_OAUTH_TOKEN` in a `.env` at the repo root.
+
+See `README.md` for the rest, and `test/fixtures/claude-stream/README.md` for what the
+recorded streams are and where they came from.
+
 ## Agent skills
 
 The `mattpocock/skills` set is vendored into `.claude/skills/` as editable files, installed with

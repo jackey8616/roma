@@ -1,0 +1,73 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import type { ClaudeEvent } from '../../src/stream-events.js'
+import type { FakeClaudeProcess } from './fake-claude.js'
+
+const FIXTURES = fileURLToPath(new URL('../fixtures/claude-stream/', import.meta.url))
+
+export interface RecordedStream {
+  readonly events: readonly ClaudeEvent[]
+  /**
+   * The events of one Turn, 1-based, up to and including its terminal `result`.
+   * Turn boundaries are the `result` events themselves.
+   */
+  turn(n: number): readonly ClaudeEvent[]
+}
+
+/**
+ * Load a capture of a real `claude -p` stream.
+ *
+ * These are recordings, not hand-written doubles: every one was produced by the
+ * prototype against Claude Code v2.1.220 and costs real money to reproduce. See
+ * `test/fixtures/claude-stream/README.md` for what each one caught.
+ */
+export function recordedStream(name: string): RecordedStream {
+  const events = readFileSync(`${FIXTURES}${name}.jsonl`, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => {
+      // `_t` is the prototype's own arrival timestamp, not part of the stream.
+      const { _t, ...event } = JSON.parse(line) as Record<string, unknown>
+      void _t
+      return event as ClaudeEvent
+    })
+
+  const turns: ClaudeEvent[][] = [[]]
+  for (const event of events) {
+    turns.at(-1)?.push(event)
+    if (event.type === 'result') turns.push([])
+  }
+
+  return {
+    events,
+    turn(n) {
+      const turn = turns[n - 1]
+      if (turn === undefined || turn.at(-1)?.type !== 'result') {
+        throw new Error(`recorded stream "${name}" has no Turn ${n}`)
+      }
+      return turn
+    },
+  }
+}
+
+/**
+ * Push events at a fake process as NDJSON bytes.
+ *
+ * `chunkSize` decides where the chunk boundaries fall. The default sends each
+ * whole stream in one go; a small size splits lines apart, which is what the OS
+ * does to a real stdout at unpredictable moments.
+ */
+export function feed(
+  proc: FakeClaudeProcess,
+  events: readonly ClaudeEvent[],
+  { chunkSize = Infinity }: { chunkSize?: number } = {},
+): void {
+  const ndjson = events.map((event) => JSON.stringify(event)).join('\n') + '\n'
+  if (chunkSize === Infinity) {
+    proc.emitStdout(ndjson)
+    return
+  }
+  for (let i = 0; i < ndjson.length; i += chunkSize) {
+    proc.emitStdout(ndjson.slice(i, i + chunkSize))
+  }
+}
