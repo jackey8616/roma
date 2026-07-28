@@ -4,15 +4,22 @@ Date: 2026-07-28
 
 ## Status
 
-Accepted
+Accepted. **Amended 2026-07-29** after prototype verification
+(`docs/headless-session-verification.md`, Claude Code v2.1.220).
+
+The decision is unchanged — the prototype confirmed it. What the amendments
+correct is the evidence beneath it and the severity of its failure mode.
+Amendments are marked inline.
 
 Recorded separately from ADR-0001 because this is the decision most likely to be
 revisited, and it should be possible to supersede it without disturbing the
-architecture.
+architecture. ADR-0001 has since been superseded by ADR-0003 and ADR-0004 for
+unrelated reasons; that separation still holds, and now applies to ADR-0003.
 
 ## Context
 
-The bridge described in ADR-0001 is open to every member of the Workspace. It
+The agent described in ADR-0003 is open to every member of every connected
+channel — at the time of writing, every member of the Workspace (ADR-0004). It
 has to authenticate to Anthropic somehow. Three options were on the table:
 
 1. One personal Claude Code subscription token, shared by everyone.
@@ -28,6 +35,20 @@ has to authenticate to Anthropic somehow. Three options were on the table:
 "requires Claude subscription", so headless `-p` runs draw on subscription quota
 rather than metered API billing. That is the property we are after.
 
+**Amended — this is now verified rather than inferred from help text.** Under
+`CLAUDE_CODE_OAUTH_TOKEN` alone, with `ANTHROPIC_API_KEY` absent and no keychain
+login reachable, runs succeed and emit a `rate_limit_event`:
+
+```json
+{"status":"allowed","resetsAt":1785271200,"rateLimitType":"five_hour",
+ "overageStatus":"rejected","isUsingOverage":false}
+```
+
+`rateLimitType: "five_hour"` is direct evidence that headless runs draw on the
+subscription's rolling window rather than metered API billing. `total_cost_usd`
+is populated — neither zero nor absent — so cost is observable on the
+subscription path too.
+
 Option 2 was recommended and declined. Option 3 was declined for cost.
 
 ### Credential handling is per-invocation, not per-container
@@ -42,6 +63,26 @@ So the obvious approach — keeping an API key in the container environment for
 the overflow valve below — would silently route *every* run to metered billing
 and never touch the subscription. There is no warning; it would surface as an
 unexpected invoice.
+
+**Amended — confirmed, and worse than described. The key takes the model with
+it.** With both credentials present, the prototype observed:
+
+```
+apiKeySource="ANTHROPIC_API_KEY"   model=claude-opus-5[1m]
+```
+
+Under the OAuth token every run used `claude-sonnet-5`. The stray key did not
+merely convert billing to metered — it silently switched to a substantially more
+expensive model at the same time, so the unexpected invoice is larger than the
+reasoning above implies. ADR-0003 pins `--model claude-sonnet-5` explicitly and
+has the startup self-check assert on both `system/init.apiKeySource` and the
+reported model, which is what makes this detectable rather than merely feared.
+
+**A second aggravating factor: the bad credential does not fail fast.** It
+produced 10 `api_retry` events across 182 seconds before surfacing the 401, so a
+misconfiguration occupies a concurrency slot for over three minutes. That
+consequence lands on ADR-0003's concurrency cap, which now bounds the retry
+storm.
 
 Therefore each `claude` process is spawned with an explicitly constructed
 environment:
@@ -69,6 +110,11 @@ On exhaustion the bot states plainly that quota is spent, gives the expected
 reset time, and queues the task. It also offers an **overflow valve**: a button
 that reruns the task on a metered API key.
 
+**Amended — the expected reset time has a real source.** It is `resetsAt` on the
+`rate_limit_event` above, not an estimate. `overageStatus` and `isUsingOverage`
+on the same event tell us whether overage is even available before we offer the
+valve.
+
 The valve is **off by default** and offered at the moment a task is blocked,
 rather than as a setting to be enabled in advance — people are poor at
 predicting which work will turn out to be interruptible, and are well placed to
@@ -93,10 +139,16 @@ carries it.
 - Peak contention is real. Several concurrent users can drain the shared window
   before midday, blocking everyone for the remainder of it.
 - Per-user attribution does not exist at the provider. It has to come from our
-  own audit log, which is why ADR-0001 records the caller and cost of every task.
+  own audit log, which is why ADR-0003 records the caller and cost of every task.
 - The monthly overflow figure is the number that makes the eventual argument for
   or against moving fully to API billing. Without it that discussion is
   conducted on impressions.
+- **Amended — that figure must be computed from per-turn deltas.**
+  `total_cost_usd` is a cumulative session total, not a per-turn figure; on a
+  resident multi-turn process the fifth task in a session is otherwise recorded
+  at the sum of tasks one through five. Both the monthly overflow cap and the
+  eventual API-billing argument would be made on inflated numbers. ADR-0003
+  specifies the fix.
 
 **Upstream direction.** The documented trajectory — `--bare` recommended for
 scripted use and slated to become the `-p` default, while never reading OAuth —
@@ -107,5 +159,10 @@ decision runs against that current and should be expected to need revisiting.
 
 Migrating to option 2 (per-member tokens) or option 3 (API key) changes only the
 environment map handed to each spawned process, plus a binding flow for option
-2. ADR-0001 is unaffected. This was a deliberate goal when the credential
-handling was placed at the spawn boundary.
+2. ADR-0003 and ADR-0004 are unaffected. This was a deliberate goal when the
+credential handling was placed at the spawn boundary.
+
+One amendment-era caveat: because the credential also determines the model, a
+migration must set `--model` deliberately rather than inherit whatever the new
+credential defaults to. Otherwise a change of billing silently becomes a change
+of capability and cost.

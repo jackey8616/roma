@@ -4,7 +4,29 @@ Date: 2026-07-28
 
 ## Status
 
-Accepted
+Superseded by ADR-0003 (channel-agnostic agent core) and ADR-0004 (Google Chat as
+the first channel), 2026-07-29.
+
+**The body below is preserved unedited.** It was written from documentation and
+`--help` output, before any of it had been run. Both reasons it was replaced are
+worth keeping visible:
+
+- **Its scope was wrong.** It framed Google Chat as the architecture. Only three
+  of its sections are actually channel-bound — Transport, Session identity, and
+  the message-editing half of Progress reporting. The rest describe a core that
+  has nothing to do with which product a message arrived from. ADR-0003 and
+  ADR-0004 split it along that line so that adding a second channel is an
+  adapter, not a rewrite.
+- **Four of its decisions rested on wrong assumptions** — progress reporting, the
+  audit cost figure, the concurrency cap, and `/stop`. A prototype (branch
+  `prototype/headless-persistent-session`) disproved them; the evidence is in
+  `docs/headless-session-verification.md`.
+
+Note that none of those four reversed a decision — only its mechanism or the
+evidence under it. **That is why this document still reads as correct, and it is
+the trap it is preserved to illustrate:** an ADR derived from documentation can be
+wrong in ways that leave no trace in its own prose. Prefer running the thing
+before marking a decision Accepted.
 
 ## Context
 
