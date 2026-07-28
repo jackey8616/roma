@@ -44,10 +44,20 @@ event with `isReplay: true` plus a `uuid` and `session_id`, which is enough to
 correlate our messages to the stream.
 
 **⚠️ Breaks ADR-0001's progress-reporting design.** During pure token
-generation the stream goes **completely silent for 10.4 seconds** (measured max
-gap: 10368ms, between `assistant`/thinking and the final message; every other
-gap in the run was under 3s). Tool-using turns emit events steadily; generating
+generation the stream goes **completely silent**. The gap measured here ran
+10368ms, between `assistant`/thinking and the final message, against every other
+gap in the run being under 3s. Tool-using turns emit events steadily; generating
 turns emit nothing at all.
+
+> **Corrected 2026-07-29 — 10368ms is a floor, not the maximum.** That gap was
+> ended by this prototype's own interrupt, fired on a 15-second timer, not by the
+> model; the turn ended `aborted_streaming` after 2881 characters. It measures how
+> long the driver waited before cutting the turn off. The same prompt run to
+> completion without the flag went quiet for **66747ms**, and that scales with
+> output length, so it has no ceiling either
+> (`docs/partial-messages-verification.md`, arm B). The finding below stands —
+> generation is silent without the flag — but this document understated it by a
+> factor of six.
 
 ADR-0001 specifies "edit that same message in place (throttled to every 5–10s)
 **as stream events arrive**". During a long generation no stream events arrive,
@@ -55,9 +65,21 @@ so the progress message would sit unchanged for longer than the throttle
 interval it was designed around. **Fix:** add `--include-partial-messages`,
 which is what actually produces incremental output.
 
-**Validates ADR-0001's decision to decline stall detection.** With no events
-during generation, "stalled" and "thinking" are genuinely indistinguishable from
-the event stream. That decision was asserted; it is now evidence-backed.
+**~~Validates ADR-0001's decision to decline stall detection.~~ Withdrawn
+2026-07-29 — see below.** With no events during generation, "stalled" and
+"thinking" are genuinely indistinguishable from the event stream. That decision
+was asserted; it is now evidence-backed.
+
+> **Why it is withdrawn.** The validation held only because this run was made
+> without `--include-partial-messages` — the flag this same section prescribes as
+> the fix. With it on, **0 of 207** mid-stream gaps in a 72-second generating turn
+> exceeded 3s, worst **2641ms**, so silence during generation is no longer the
+> signal this paragraph rests on. What survives is narrower and covers **tool
+> execution only**. The decision to decline stall detection still stands; this
+> measurement is no longer what backs it. The evidence that replaces it is in
+> `docs/partial-messages-verification.md` (Q5c, and "The judgement ADR-0003 asked
+> for"), and ADR-0003's "Progress reporting" carries the decision — including what
+> that run still leaves unmeasured.
 
 ## Q3 — A turn can be stopped in-band without losing the session
 
