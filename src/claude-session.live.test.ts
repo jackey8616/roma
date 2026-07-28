@@ -98,27 +98,28 @@ describe('a Session over a real claude -p', () => {
   })
 })
 
+/** Run `claude` to its exit, for the invocations that are meant to be refused. */
+async function runClaude(args: string[]): Promise<{ code: number | null; stderr: string }> {
+  const { configDir, cwd } = liveSessionDirs(`flags-${args.join('-').replace(/\W+/g, '')}`)
+  const stderr: string[] = []
+  return await new Promise((resolve) => {
+    const proc = spawnClaudeProcess({
+      command: 'claude',
+      args,
+      cwd,
+      env: buildEnv({ credential: sharedWindowCredential(), configDir, inherit: process.env }),
+    })
+    proc.onStderr((chunk) => stderr.push(chunk))
+    proc.onExit(({ code }) => resolve({ code, stderr: stderr.join('') }))
+    proc.closeStdin()
+  })
+}
+
 // The constraint the Session's one `resume` boolean encodes. It is worth a live
 // check because the design depends on the CLI genuinely rejecting both flags —
 // if it ever accepted them, the pool's first-spawn-versus-resume rule would be
 // solving a problem that no longer exists.
 describe('--session-id and --resume', () => {
-  async function runClaude(args: string[]): Promise<{ code: number | null; stderr: string }> {
-    const { configDir, cwd } = liveSessionDirs(`flags-${args.join('-').replace(/\W+/g, '')}`)
-    const stderr: string[] = []
-    return await new Promise((resolve) => {
-      const proc = spawnClaudeProcess({
-        command: 'claude',
-        args,
-        cwd,
-        env: buildEnv({ credential: sharedWindowCredential(), configDir, inherit: process.env }),
-      })
-      proc.onStderr((chunk) => stderr.push(chunk))
-      proc.onExit(({ code }) => resolve({ code, stderr: stderr.join('') }))
-      proc.closeStdin()
-    })
-  }
-
   it('are refused together, and refused for that reason rather than a missing Session', async () => {
     const sessionId = randomUUID()
 
@@ -138,10 +139,14 @@ describe('--session-id and --resume', () => {
     // still picks between them, but the reason is the narrower one.
     expect(both.stderr).toContain('--fork-session')
   })
+})
 
-  // ADR-0003's invocation block omits --verbose and would not start. Pinned here
-  // so the flag reads as a requirement rather than as clutter someone tidies away.
-  it('need --verbose alongside them, which ADR-0003 does not record', async () => {
+// --verbose is a precondition of the output format, not a verbosity preference.
+// Pinned so it reads as a requirement rather than as clutter someone tidies away
+// — an invocation missing it produces no events at all. ADR-0003's invocation
+// block cites this test.
+describe('--output-format stream-json under --print', () => {
+  it('refuses to start without --verbose', async () => {
     const withoutVerbose = await runClaude([
       '-p',
       '--input-format',
@@ -150,6 +155,7 @@ describe('--session-id and --resume', () => {
       'stream-json',
     ])
 
+    expect(withoutVerbose.code).not.toBe(0)
     expect(withoutVerbose.stderr).toContain('requires --verbose')
   })
 })
