@@ -44,6 +44,12 @@ whether stall detection is possible once it does. Findings are in
 `docs/partial-messages-verification.md`, and those corrections are folded in the
 same way. One earlier number did not survive it: see the flag's bullet below.
 
+Two claims about the invocation itself are pinned by tests rather than by a
+transcript: the **seam 2** tests in `src/claude-session.live.test.ts` drive a real
+`claude -p` on the same build. They are excluded from the default test run and
+run with `npm run test:seam2`. Where a decision below names one, a future reader
+re-runs it rather than re-deriving it.
+
 **Read the citations as the boundary of what is known.** Claims backed by the
 prototype quote the measurement inline. Claims without one have not been run —
 including some of the fixes below, which are corrections derived from a measured
@@ -102,12 +108,19 @@ A **persistent `claude -p` process per resident session**, with bidirectional
 streaming:
 
 ```
-claude -p --input-format stream-json --output-format stream-json \
+claude -p --input-format stream-json --output-format stream-json --verbose \
        --include-partial-messages --replay-user-messages \
        --permission-mode bypassPermissions \
        --model claude-sonnet-5 \
        --session-id <uuid>
 ```
+
+Substitute a uuid and that runs as printed — **verified** as the flag set seam 2
+spawns, in `src/claude-session.live.test.ts`, *"a Session over a real `claude -p`"*.
+Resuming an existing Session replaces the last line with `--resume <session-id>`,
+and that is the only thing that varies between a first spawn and a resume. Two
+parts of the block are load-bearing in a way they do not look — `--verbose`, and
+that last line — and each has its own bullet below.
 
 - `--input-format stream-json` accepts realtime input, so one process serves a
   whole conversation. **Verified:** two messages into one process retained
@@ -116,6 +129,18 @@ claude -p --input-format stream-json --output-format stream-json \
   message**. That measurement is the entire quantitative basis for keeping
   processes resident, and it holds.
 - `--output-format stream-json` yields structured events.
+- **`--verbose` is a precondition of `--output-format stream-json` under
+  `--print`, not a verbosity preference.** Without it the process exits before a
+  single event reaches the stream. **Verified** against Claude Code **v2.1.220**:
+
+  ```
+  Error: When using --print, --output-format=stream-json requires --verbose
+  ```
+
+  Earlier revisions of the block above omitted the flag and therefore printed an
+  invocation that does not start. Pinned by seam 2 —
+  `src/claude-session.live.test.ts`, *"`--output-format stream-json` under
+  `--print` › refuses to start without `--verbose`"*.
 - **`--include-partial-messages` is required, not optional.** Without it the
   stream goes completely silent during pure token generation. **Verified, with
   the same prompt run both ways back to back:** flag on, **209 events** in the
@@ -147,6 +172,28 @@ claude -p --input-format stream-json --output-format stream-json \
   Upstream documents `--bare` as the recommended mode for scripted calls and
   states it will become the default for `-p` in a future release, which is one of
   the two silent-degradation modes the startup self-check exists to catch.
+- **`--session-id` and `--resume` never appear together in an invocation roma
+  makes.** The CLI's own reason is narrower than a flat exclusion — **verified**
+  against Claude Code **v2.1.220**:
+
+  ```
+  Error: --session-id can only be used with --continue or --resume if --fork-session is also specified.
+  ```
+
+  The two flags do combine, but only to fork. **roma never forks**: every
+  invocation either creates a Session or resumes one, and nothing in this ADR or
+  in the pool below branches an existing Session into a second one. So
+  `--fork-session` is never passed, the exclusion holds for every invocation roma
+  makes, and the first-spawn-versus-resume rule in the next bullet is unaffected.
+
+  Recorded because the correction narrows the *reason*, not the decision. It was
+  previously stated as flat mutual exclusion, on the grounds that resuming
+  already names the Session; a future reader who wants forked Sessions would be
+  wrong to conclude from that the two can never appear together. Pinned by seam 2
+  — `src/claude-session.live.test.ts`, *"`--session-id` and `--resume` › are
+  refused together, and refused for that reason rather than a missing Session"*,
+  which runs `--resume` alone as a control so the refusal cannot be a
+  missing-Session error wearing a disguise.
 - Idle processes are reaped after 15 minutes; the session then resumes cold via
   `--resume`. At most 10 resident processes, evicted LRU. **Verified:** SIGTERM
   mid-turn exits **143** as documented, and a subsequent `--resume` recovered the

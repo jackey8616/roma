@@ -28,8 +28,9 @@ describe('how the process is invoked', () => {
     expect(claude.lastSpawn.args).not.toContain('--resume')
   })
 
-  // Resuming already names the Session, so the two flags are mutually exclusive.
-  // One boolean produces exactly one of them; there is no way to ask for both.
+  // The CLI refuses the two flags together unless --fork-session is present, and
+  // roma never forks (ADR-0003). One boolean produces exactly one of them; there
+  // is no way to ask for both.
   it('reaches an existing Session with --resume and never both flags', () => {
     const { claude, session } = newSession({ resume: true })
 
