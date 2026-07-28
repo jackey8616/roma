@@ -38,6 +38,12 @@ Claude Code **v2.1.220** (`darwin-arm64`). Findings are in
 wrong assumptions; the corrections are folded into the relevant sections below
 rather than kept in a separate errata document.
 
+A second run on the same build measured the two claims this ADR previously marked
+unverified — that `--include-partial-messages` emits during generation, and
+whether stall detection is possible once it does. Findings are in
+`docs/partial-messages-verification.md`, and those corrections are folded in the
+same way. One earlier number did not survive it: see the flag's bullet below.
+
 **Read the citations as the boundary of what is known.** Claims backed by the
 prototype quote the measurement inline. Claims without one have not been run —
 including some of the fixes below, which are corrections derived from a measured
@@ -111,12 +117,22 @@ claude -p --input-format stream-json --output-format stream-json \
   processes resident, and it holds.
 - `--output-format stream-json` yields structured events.
 - **`--include-partial-messages` is required, not optional.** Without it the
-  stream goes completely silent during pure token generation: measured maximum
-  gap **10368ms**, against every other gap in the run being under 3s. Tool-using
-  turns emit events steadily; generating turns emit nothing at all. This flag is
-  a correction derived from that measured silence — the flag itself has not been
-  run, and the progress-reporting design below depends on it doing what it
-  claims. Verify it before the first deploy.
+  stream goes completely silent during pure token generation. **Verified, with
+  the same prompt run both ways back to back:** flag on, **209 events** in the
+  turn, worst gap between them **2641ms**, and **0 of 207** mid-stream gaps over
+  3s; flag off, **6 events**, the whole 17093-character answer arriving in a
+  single `assistant` event after **66747ms** of dead stream. Tool-using turns
+  emit events steadily; generating turns emit nothing at all.
+  - This bullet, and `docs/headless-session-verification.md` Q2, previously
+    quoted **10368ms** as that silence. It is a floor, not a maximum: that gap
+    was ended by the prototype's own interrupt on a 15-second timer, not by the
+    model — the turn ended `aborted_streaming` after 2881 characters — so it
+    measures how long the driver waited before cutting the turn off. The figure
+    run to completion is the 66747ms above, and because it is a function of
+    output length it has no ceiling either. The flag is more load-bearing than
+    the old number implied, not less.
+  - Still unmeasured: **n = 1 per arm, one prompt.** 2641ms is the largest gap in
+    a single 72-second generating turn, not a distribution.
 - `--replay-user-messages` returns our own input as a `user` event with
   `isReplay: true`, a `uuid`, and a `session_id`. That is enough to correlate our
   messages to their streams across a pool of concurrent sessions.
@@ -218,16 +234,37 @@ arrives on its own.
 
 ADR-0001 specified updating "as stream events arrive", which was written without
 knowing that generation emits no events at all. The throttle has something to
-throttle only because of `--include-partial-messages`.
+throttle only because of `--include-partial-messages`. **Verified:** with the flag
+on, the longest a renderer would have waited for new content during generation was
+**2641ms** — shorter than even the 5s floor of the 5–10s throttle above, so every
+scheduled update had fresh text to show. The prose arrives as
+`stream_event.event.delta.text`; the complete final message still arrives as its
+own `assistant` event, 85ms before the terminal `result`, so the
+separate-final-message rule is served from that event rather than from the deltas.
 
-**Stall detection stays declined — but its supporting evidence no longer
-applies.** The prototype found generation genuinely silent, which makes "stalled"
-and "thinking" indistinguishable, and that reads as confirming the decision.
-Turning on `--include-partial-messages` removes exactly that silence. Whether a
-stall is then distinguishable from a slow tool call has not been measured. The
-decision stands on its original ground — no timeout, humans stop tasks — and
-should be re-examined against a run with the flag on rather than treated as
-settled.
+**Stall detection stays declined, and the evidence for it is narrower than it
+was.** The original ground was that generation is silent, which makes "stalled"
+and "thinking" indistinguishable. That no longer holds: with the flag on, **0 of
+207** mid-stream gaps in a 72-second generating turn exceeded 3s. What survives is
+tool execution. The stream marks a tool starting and then says nothing until it
+finishes — **25339ms** of silence in a turn whose largest generating gap was 208ms
+— and tool runtime is unbounded, so a stalled tool call and a slow one are the
+same signal, and no threshold separates them without also killing legitimate work.
+The decision stands on its original ground: no timeout, humans stop tasks.
+
+**What makes that tolerable is that the wrapper always knows which phase a silence
+belongs to**, from the last event before it. A gap after `text_delta` is
+generation; a gap after the `assistant` message carrying `tool_use`, or after
+`system/task_started`, is a tool running — and `system/task_started.description`
+names the running tool, so the progress message can show *what* is running through
+a window in which nothing else arrives.
+
+**One hole remains in "generation is no longer silent": long thinking phases are
+uncharacterised.** The two thinking blocks measured lasted **14ms** and **372ms**.
+Whether a 30-second extended-thinking phase streams `thinking_delta` steadily or
+goes quiet is unmeasured — and `thinking_delta` carries `"thinking": ""` with only
+an `estimated_tokens` count, so a renderer can say thinking is happening and
+roughly how much, never what.
 
 ### Isolation
 
