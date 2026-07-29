@@ -26,6 +26,43 @@ export interface TerminalResult {
   readonly terminalReason: string | null
 }
 
+/** The `system/init` event, reduced to what the startup self-check reads. */
+export interface SystemInit {
+  /**
+   * Where Claude Code resolved its credential from.
+   *
+   * `"none"` under the OAuth token and `"ANTHROPIC_API_KEY"` when a key is
+   * present. The only field in the stream that says which of the two is paying,
+   * and it says so before the first API call — which is what makes it worth
+   * asserting on at boot rather than after a Turn.
+   */
+  readonly apiKeySource: string | null
+  /**
+   * The model this process will actually use.
+   *
+   * Not necessarily the one asked for: it follows the credential. Measured under
+   * a stray key without `--model` pinned, the prototype got `claude-opus-5[1m]`.
+   */
+  readonly model: string | null
+  /** Everything here is version-specific, so a mismatch needs to name the build. */
+  readonly claudeCodeVersion: string | null
+}
+
+/**
+ * Read a `system/init` event, or null if this is not one.
+ *
+ * One arrives at the start of every Turn, not once per process — nothing may
+ * treat it as a spawn signal.
+ */
+export function readSystemInit(event: ClaudeEvent): SystemInit | null {
+  if (event.type !== 'system' || event['subtype'] !== 'init') return null
+  return {
+    apiKeySource: asString(event['apiKeySource']),
+    model: asString(event['model']),
+    claudeCodeVersion: asString(event['claude_code_version']),
+  }
+}
+
 /**
  * One `api_retry` event, reduced to what it can tell roma about the failure.
  *

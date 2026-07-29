@@ -2,7 +2,12 @@ import { EventEmitter } from 'node:events'
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawnClaudeProcess, type SpawnClaudeProcess } from './claude-process.js'
-import { ClaudeExitedError, ClaudeSession, type Turn } from './claude-session.js'
+import {
+  ClaudeExitedError,
+  ClaudeSession,
+  TERMINATE_GRACE_MS,
+  type Turn,
+} from './claude-session.js'
 import { defaultConfig, type RetryBudget } from './config.js'
 import { readApiRetry, type ApiRetry, type ClaudeEvent } from './stream-events.js'
 
@@ -13,13 +18,6 @@ const IDLE_REAP_MS = 15 * 60_000
 /** ADR-0003: one working directory per Session, reclaimed after seven days idle. */
 const WORK_DIR_TTL_MS = 7 * 24 * 60 * 60_000
 const RECLAIM_INTERVAL_MS = 60 * 60_000
-/**
- * How long a SIGTERM is given before SIGKILL. Eviction is awaited, so a process
- * that ignores SIGTERM would otherwise stall every later message in the pool —
- * the "bot halted" state ADR-0003 lists under accepted risks, reached without a
- * single Task hanging.
- */
-const TERMINATE_GRACE_MS = 5_000
 /**
  * What `claude --resume` says when the transcript it was pointed at is not there.
  * Measured, not assumed — seam 2 runs `--resume` at an unknown id and gets
@@ -468,25 +466,16 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   }
 
   /**
-   * SIGTERM, then SIGKILL if it is ignored. Never for stopping a Turn — a
-   * subsequent `--resume` is what makes ending the process safe.
+   * End a resident's process. Never for stopping a Turn — a subsequent
+   * `--resume` is what makes ending the process safe.
    */
   async #terminate(resident: Resident): Promise<void> {
     if (!resident.session.alive) return
+    // Set before the signal, so that the exit this causes is not logged as news.
     resident.leaving = true
-
-    let grace: NodeJS.Timeout | undefined
-    const expired = new Promise<'expired'>((resolve) => {
-      grace = setTimeout(() => resolve('expired'), TERMINATE_GRACE_MS)
-      grace.unref?.()
-    })
-    const gone = resident.session.terminate('SIGTERM').then(() => 'gone' as const)
-    const outcome = await Promise.race([gone, expired])
-    clearTimeout(grace)
-    if (outcome === 'gone') return
-
-    this.#log({ event: 'kill', sessionId: resident.sessionId, graceMs: TERMINATE_GRACE_MS })
-    await resident.session.terminate('SIGKILL')
+    await resident.session.terminateOrKill(TERMINATE_GRACE_MS, () =>
+      this.#log({ event: 'kill', sessionId: resident.sessionId, graceMs: TERMINATE_GRACE_MS }),
+    )
   }
 
   /**

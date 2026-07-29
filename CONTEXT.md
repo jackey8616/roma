@@ -134,6 +134,14 @@ a Turn that is not going to arrive.
 _Avoid_: backoff, rate limiting, timeout (there is no wall-clock timeout on a
 Task; this bounds retrying, not working)
 
+**Startup Self-Check**:
+The live Turn roma drives at boot to prove that auth resolves to the credential
+it means to run on, and on the pinned model. Failure blocks startup: nothing that
+could accept an Ingress Message is built until it has passed.
+_Avoid_: health check, preflight, smoke test, and `claude auth status` — that
+reports a token valid right up to the moment it 401s, which is why this is a real
+invocation instead
+
 ### Paying for it
 
 **Shared Window**:
