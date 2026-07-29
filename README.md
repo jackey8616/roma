@@ -99,6 +99,13 @@ booted there. What the image is checked against instead is `claude --version` in
 its refusal on an empty environment. `scripts/verify-image.sh` is both, and
 `src/packaging.test.ts` fails if a workflow ever reaches for the money.
 
+**The Claude Code pin is watched, not bumped.** Weekly, `claude-code-drift.yml` compares the
+Dockerfile's `ARG CLAUDE_CODE_VERSION` against the latest published version and — when they
+differ — opens an issue saying what moving it would cost and which files carry evidence
+about the pinned one. It opens no pull request and edits nothing: moving that pin is a
+re-verification event a human does on purpose (ADR-0006), so the check makes the decision
+visible rather than making it. Declining one is a normal outcome; closing the issue is how.
+
 **roma provisions nothing.** The Pub/Sub topic, the subscription, the service account and
 the grant that lets Chat publish all exist before roma starts; the variables below name
 them. Creating them is not roma's job and it has no code that could —

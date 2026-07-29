@@ -167,12 +167,16 @@ It runs as a non-root user, on `node:22-slim`.
 - **Nothing here narrows ADR-0003's other accepted risk.** Any member of any
   connected channel can still direct Claude Code to do anything inside the
   container.
-- **Nothing watches for Claude Code going stale.** The pin will fall behind and
-  nothing will say so. Accepted here rather than overlooked: an automated bump
-  pull request would look like routine maintenance while silently invalidating six
+- **Knowing the pin has fallen behind is not the same as it being safe to move.**
+  `.github/workflows/claude-code-drift.yml` closes the gap this ADR left open —
+  it compares the `ARG` against the registry weekly and opens an issue naming
+  both versions, what re-verification costs, and which files carry evidence about
+  the pinned one. Notify-only, for the reason above: an automated bump pull
+  request would look like routine maintenance while silently invalidating six
   documents' worth of evidence, and CI would pass. `.github/dependabot.yml` is
-  therefore the base image and the actions only. A notify-only drift check is
-  worth its own ticket.
+  still the base image and the actions only. What the check removes is the part
+  where nobody knows there is a decision to make; the decision itself is still a
+  human reading a behavioural diff and spending Shared Window money to get one.
 - **The release workflow cannot be tested before it is merged.** It fires on
   tags, and tags come after merge. The first `0.1.0` is its first real run; if it
   fails, fix it and tag again.

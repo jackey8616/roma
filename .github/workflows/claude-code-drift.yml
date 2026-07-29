@@ -1,0 +1,148 @@
+name: claude-code-drift
+
+# Notify-only, and that is the decision. ADR-0006 accepted that nothing watches
+# the Claude Code pin for going stale; this is that watch, and it is deliberately
+# not the automation the same ADR rejected. It opens an issue. It never edits the
+# pin, and it never opens a pull request that does — a bump would look like
+# routine maintenance while invalidating every measurement in `docs/`, and the
+# check on it would go green, because seam 2 does not run in CI. A green tick on
+# an unverified claim is worse than no check at all.
+#
+# Weekly, matching the cadence `.github/dependabot.yml` uses for the things it
+# does watch, and by hand when somebody wants to ask now. Weekly rather than
+# daily because this report is meant to be read: most of them will be declined,
+# and a check people mute is a check that has stopped working.
+on:
+  schedule:
+    - cron: '17 9 * * 1'
+  workflow_dispatch:
+
+# One at a time, and not cancelled by the next. A cancelled run leaves the report
+# unfiled and says nothing about having done so, which is the silence this whole
+# workflow exists to remove.
+concurrency:
+  group: claude-code-drift
+
+# `issues: write` is the whole point, and `contents: read` is the rest of it.
+# Nothing here can push a commit, and — as `src/packaging.test.ts` enforces for
+# every workflow in this directory — nothing here is handed a Shared Window
+# token, so the report cannot quietly become the re-verification it is asking a
+# human to decide about.
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    name: is the pin still the latest?
+    runs-on: ubuntu-latest
+
+    # Named rather than left to the default, because naming it is what turns
+    # `pipefail` on. The filing step reads what GitHub answered through `jq` and
+    # `grep`; under `bash -e` alone a pipeline reports only its last command, so
+    # a `jq` that failed would read as "no previous report" and file a second one.
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # `npm view` needs no `npm ci` and this job has no other use for one — it
+      # reads two files and asks the registry a question.
+      #
+      # `REPORT` is repeated on the step below rather than set once on the job,
+      # because the `runner` context is not available in a job-level `env` —
+      # `runner.temp` there resolves to nothing, and the report would be written
+      # to, and looked for at, `/claude-code-drift.md`.
+      - name: compare the pin against the registry
+        id: compare
+        env:
+          REPORT: ${{ runner.temp }}/claude-code-drift.md
+        run: |
+          status=0
+          title="$(./scripts/claude-code-drift.sh "${REPORT}")" || status=$?
+
+          # Only 0 and 2 are verdicts. Everything else is the script saying it
+          # could not make the comparison, and it ends the run red rather than
+          # passing quietly — a green tick here reads as "the pin is current".
+          case "${status}" in
+            0)
+              echo 'The pin is the latest published version.' >> "${GITHUB_STEP_SUMMARY}"
+              ;;
+            2)
+              if [ -z "${title}" ] || [ ! -s "${REPORT}" ]; then
+                echo 'drift was reported without a title or a report' >&2
+                exit 1
+              fi
+              # The title through a delimiter rather than as `title=…`, which is
+              # a line format that cannot carry a value holding a newline —
+              # and the one thing an output read straight out of a registry
+              # answer must not be is trusted to be one line.
+              {
+                echo 'drift=true'
+                echo 'title<<END_OF_TITLE'
+                echo "${title}"
+                echo 'END_OF_TITLE'
+              } >> "${GITHUB_OUTPUT}"
+              ;;
+            *)
+              exit "${status}"
+              ;;
+          esac
+
+      - name: file the report, or update the one already open
+        if: steps.compare.outputs.drift == 'true'
+        env:
+          REPORT: ${{ runner.temp }}/claude-code-drift.md
+          TITLE: ${{ steps.compare.outputs.title }}
+          LABEL: claude-code-drift
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Created here rather than by hand, so that the first run works in a
+          # fresh clone of this repository. `--force` because the second run
+          # would otherwise fail on the label already existing.
+          gh label create "${LABEL}" --force \
+            --color ededed \
+            --description 'The pinned Claude Code is behind the latest published version' \
+            > /dev/null
+
+          # The marker the report carries, treated here as an opaque token — the
+          # script owns what goes in it, and this only ever asks whether some
+          # earlier report carried the same one.
+          if ! marker="$(grep -m 1 -o '<!-- claude-code-drift latest=[^>]*-->' "${REPORT}")"; then
+            echo 'the report carries no marker' >&2
+            exit 1
+          fi
+
+          previous="$(gh issue list --label "${LABEL}" --state all --limit 1 \
+            --json number,state,body --jq '.[0] // empty')"
+
+          if [ -n "${previous}" ]; then
+            number="$(printf '%s' "${previous}" | jq -r '.number')"
+            state="$(printf '%s' "${previous}" | jq -r '.state' | tr '[:lower:]' '[:upper:]')"
+
+            # Still open: the same drift, still undecided. Edited in place, title
+            # and all, so that a report which sat through two releases says what
+            # is true today rather than what was true when it was filed.
+            if [ "${state}" = 'OPEN' ]; then
+              gh issue edit "${number}" --title "${TITLE}" --body-file "${REPORT}"
+              echo "Updated #${number} — ${TITLE}" >> "${GITHUB_STEP_SUMMARY}"
+              exit 0
+            fi
+
+            # Closed, and it reported this same version: a human read this and
+            # declined it. Re-filing the same numbers a week later is how a check
+            # gets muted, so this one stays quiet. The consequence is worth
+            # stating: a report closed by accident will not come back until a
+            # newer version is published. That is the trade, and the manual run
+            # above is the way out of it.
+            if printf '%s' "${previous}" | jq -r '.body' | grep -qF -- "${marker}"; then
+              echo "#${number} reported this and was closed." >> "${GITHUB_STEP_SUMMARY}"
+              exit 0
+            fi
+          fi
+
+          filed="$(gh issue create --title "${TITLE}" --body-file "${REPORT}" --label "${LABEL}")"
+          echo "Filed ${filed}" >> "${GITHUB_STEP_SUMMARY}"
