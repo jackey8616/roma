@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 /**
- * The three claims ADR-0006 makes about the image that nothing else keeps.
+ * The three claims ADR-0007 makes about the image that nothing else keeps.
  *
  * Written in the idiom `src/channels/google-chat/provisioning.test.ts` uses —
  * read the file, fail on what must not be in it — because all three are claims
@@ -55,23 +55,27 @@ describe('the image carries its own Claude Code, pinned exactly', () => {
   })
 })
 
-describe('the image defaults the paths whose loss is by design', () => {
-  it('names a work root and a Claude config dir, both reclaimable by design', () => {
+describe('the image defaults the one path whose loss is by design', () => {
+  it('names a work root, the one a weekly reclaim deletes on purpose', () => {
     expect(dockerfile()).toMatch(/^\s*ROMA_WORK_ROOT=\S+/m)
-    expect(dockerfile()).toMatch(/^\s*ROMA_CLAUDE_CONFIG_DIR=\S+/m)
   })
 
-  it('sets no audit root, because losing that one is data loss', () => {
-    // `readRomaEnv` refuses to start without it, deliberately. An image that
-    // helpfully defaulted it would put the Audit Records in the container's
-    // writable layer, where they vanish with the container — and ADR-0002 is
-    // explicit that per-user attribution exists nowhere else.
+  it('sets no audit root and no Claude config dir — losing either is data loss', () => {
+    // `readRomaEnv` refuses to start without either, deliberately. An image that
+    // helpfully defaulted one would put that data in the container's writable
+    // layer, where it vanishes with the container — the Audit Records, which
+    // ADR-0002 says are the only place per-user attribution ever exists, or the
+    // Transcript, which ADR-0005 says is the only account there is of what an
+    // agent did and ADR-0006 says roma deletes nothing from.
     //
-    // The directory is made and owned all the same, which is a different act:
-    // an empty named volume mounted over a path the image never created comes
-    // out `root:root` and roma runs as `node`. So this looks for the assignment
-    // rather than the name.
-    expect(dockerfile()).not.toMatch(/ROMA_AUDIT_ROOT\s*=/)
+    // Both directories are made and owned all the same, which is a different
+    // act: an empty named volume mounted over a path the image never created
+    // comes out `root:root` and roma runs as `node`. So this looks for the
+    // assignment rather than the name — and for both spellings of one, because
+    // `ENV NAME value` without the `=` is legacy Dockerfile syntax that still
+    // works and would otherwise slip past.
+    expect(dockerfile()).not.toMatch(/ROMA_AUDIT_ROOT[\s=]/)
+    expect(dockerfile()).not.toMatch(/ROMA_CLAUDE_CONFIG_DIR[\s=]/)
   })
 })
 

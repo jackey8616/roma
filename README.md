@@ -11,7 +11,7 @@ channel-agnostic core) and ADR-0004 (Google Chat) before changing anything here.
 - **Node 22** — `.nvmrc` pins it; `nvm use` picks it up.
 - **Claude Code v2.1.220** on `PATH`, for the seam 2 tests. Behaviour is version-specific
   and every measurement in `docs/` is against that build — which is why the image pins the
-  same version exactly, and why moving it is a re-verification event (ADR-0006).
+  same version exactly, and why moving it is a re-verification event (ADR-0007).
 - **Docker**, only to build or run the image.
 
 ```bash
@@ -59,29 +59,35 @@ in it — and the image runs `node dist/channels/google-chat/main.js` under `npm
 docker run --rm \
   -e CLAUDE_CODE_OAUTH_TOKEN -e ROMA_PUBSUB_PROJECT_ID -e ROMA_PUBSUB_SUBSCRIPTION \
   -e ROMA_AUDIT_ROOT=/var/lib/roma/audit \
+  -e ROMA_CLAUDE_CONFIG_DIR=/var/lib/roma/claude \
   -v roma-audit:/var/lib/roma/audit \
+  -v roma-claude:/var/lib/roma/claude \
   ghcr.io/jackey8616/roma:0.1.0
 ```
 
 It carries **its own Claude Code, pinned to v2.1.220** — the version every measurement in
 `docs/` was taken against. Moving that pin is a re-verification event that costs Shared
 Window money, not a dependency bump, and nothing automated will ever move it for you.
-ADR-0006 is why, and `src/packaging.test.ts` is what keeps it.
+ADR-0007 is why, and `src/packaging.test.ts` is what keeps it.
 
 There is **no `latest` tag, and no `0.1` or `0`**. A tag that moves is a deployment whose
 Claude Code changes underneath it, which is the whole thing the pin exists to prevent, so
 `docker run` without a tag fails rather than guessing.
 
-`ROMA_WORK_ROOT` and `ROMA_CLAUDE_CONFIG_DIR` are defaulted in the image, because losing
-either is by design. **`ROMA_AUDIT_ROOT` is not**, because losing that one is data loss and
-where it goes is not the image's to decide — run it with no volume and it refuses to start,
-naming it. Mount something durable there.
+`ROMA_WORK_ROOT` is defaulted in the image, because losing it is by design — a week
+untouched and it is reclaimed anyway. **`ROMA_AUDIT_ROOT` and `ROMA_CLAUDE_CONFIG_DIR` are
+not**, because losing either is data loss and where they go is not the image's to decide —
+run it with no volumes and it refuses to start, naming both. Mount something durable at
+each: the Audit Records are the only place per-user attribution exists (ADR-0002), and the
+Transcript is the only account there is of what an agent did (ADR-0005), which roma deletes
+nothing from (ADR-0006).
 
-roma runs as `node`, uid 1000. A **named volume** at `/var/lib/roma/audit` inherits that
-ownership, because the image makes the directory even though it points nothing at it. A
-**bind mount** brings the host's own ownership instead, so `chown 1000:1000` the host
-directory first — otherwise roma starts, clears the refusal, and then loses the first Audit
-Record to a permission error, which is the same data gone by a longer route.
+roma runs as `node`, uid 1000. **Named volumes** at `/var/lib/roma/audit` and
+`/var/lib/roma/claude` inherit that ownership, because the image makes both directories
+even though it points nothing at either. A **bind mount** brings the host's own ownership
+instead, so `chown 1000:1000` each host directory first — otherwise roma starts, clears the
+refusal, and then loses the first Audit Record or the first Transcript to a permission
+error, which is the same data gone by a longer route.
 
 The image is `node:22-slim`, `linux/amd64`, non-root, with `git`, `ca-certificates` and
 `tini` and nothing else. roma's agent runs arbitrary shell commands, so that list is a
@@ -116,7 +122,7 @@ Terraform cannot do, in the order they have to happen.
 | `CLAUDE_CODE_OAUTH_TOKEN` | **Required.** The Shared Window token everybody's Turns run on (`claude setup-token`). |
 | `ROMA_WORK_ROOT` | **Required.** Where Sessions get their working directories. Reclaimed after a week untouched. |
 | `ROMA_AUDIT_ROOT` | **Required.** Where Audit Records go, one file per calendar month. Deliberately not under `ROMA_WORK_ROOT`, which is reclaimed. |
-| `ROMA_CLAUDE_CONFIG_DIR` | **Required**, and it decides two separate things. `CLAUDE_SECURESTORAGE_CONFIG_DIR` is what keeps a host keychain login out of a Claude Code process; `CLAUDE_CONFIG_DIR` is where that process writes the Transcript — the only account there is of what an agent did (ADR-0005). **Give it durable storage that only grows**: roma deletes nothing from here (ADR-0006), so unlike `ROMA_WORK_ROOT` it is never reclaimed. Roughly 4 GB a year at a hundred Tasks a day. |
+| `ROMA_CLAUDE_CONFIG_DIR` | **Required**, and it decides two separate things. `CLAUDE_SECURESTORAGE_CONFIG_DIR` is what keeps a host keychain login out of a Claude Code process; `CLAUDE_CONFIG_DIR` is where that process writes the Transcript — the only account there is of what an agent did (ADR-0005). **Give it durable storage that only grows**: roma deletes nothing from here (ADR-0006), so unlike `ROMA_WORK_ROOT` it is never reclaimed. Order of 1.5 GB a year at a hundred Tasks a day — extrapolated from a recorded stream rather than measured from a Transcript, so plan for the magnitude and not the number (#41). |
 | `ROMA_PUBSUB_PROJECT_ID` | **Required.** The project the subscription lives in. |
 | `ROMA_PUBSUB_SUBSCRIPTION` | **Required.** The subscription's name. Read, never created. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Google's own, not roma's: a service account key file, or nothing at all on a Google host with a metadata server. |

@@ -95,6 +95,16 @@ inherited.
 _Avoid_: history, session file, event log, and the bare word "log" (that reads
 as the Operator Log, which is roma's and says something else entirely)
 
+**Working Directory**:
+Where a Session does its work. roma's, unlike the Transcript: roma makes it and
+ADR-0003 reclaims it after seven idle days. It is named here because it is the
+Transcript's opposite number and the two are easily mistaken for one kind of
+thing — they sit side by side and have opposite lifetimes, because losing this
+one costs a checkout and losing the other destroys the only account there is of
+what an agent did.
+_Avoid_: workspace, checkout, sandbox, and using this word for the directory the
+Transcript lives in — that one is nobody's to reclaim
+
 **Session Generation**:
 Which of a Conversation's Sessions is the current one. A Conversation Key never
 changes, so `/new` moves this instead: the Session id derives from the key and

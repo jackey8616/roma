@@ -1,5 +1,5 @@
 # roma, as the thing ADR-0003 said it would run as: a container on a long-running
-# GCE VM. ADR-0006 is the decision record for everything below.
+# GCE VM. ADR-0007 is the decision record for everything below.
 #
 # Two stages, because they want opposite things. The builder needs the whole
 # toolchain — TypeScript, the test-only dependencies, the lot — and produces one
@@ -13,7 +13,9 @@
 # to, and CI would stay green while it happened — seam 2 does not run there.
 # Moving this number is a re-verification event, not a dependency bump:
 # `src/packaging.test.ts` carries the second copy that turns editing it alone
-# red, and `docs/adr/0006-*.md` says what the re-verification is.
+# red, and `docs/adr/0007-a-container-image-pinned-to-one-claude-code.md` says
+# what the re-verification is. Named exactly rather than globbed: `0006-*` used
+# to match this file and matches a different decision now.
 ARG CLAUDE_CODE_VERSION=2.1.220
 
 # ---------------------------------------------------------------------------
@@ -68,36 +70,42 @@ COPY --from=builder /app/dist ./dist
 
 # The asymmetry here is the decision, not an oversight.
 #
-# These two are defaulted because losing them is by design: the work root is
-# reclaimed weekly and the Claude config dir — where the Transcript lives, and
-# where `CLAUDE_SECURESTORAGE_CONFIG_DIR` keeps a host keychain login out of the
-# process — is per-container by intent.
+# ROMA_WORK_ROOT is defaulted because losing it is by design: a Session's
+# working directory is reclaimed after a week untouched, so the image can name a
+# path with nothing riding on it.
 #
-# ROMA_AUDIT_ROOT is deliberately absent, and there is no default that would be
-# right. `readRomaEnv` refuses to start without it precisely so the records
-# cannot land somewhere a reclaim deletes; defaulting it here would re-open that
-# hole from a new direction, with the records in the container's writable layer,
-# gone with the container. ADR-0002 is explicit that per-user attribution does
-# not exist at the provider, so the Audit Records are the only place it ever
-# exists.
-# `docker run` with no volume is therefore refused, naming it — which makes the
-# operator answer a question this image genuinely cannot.
+# ROMA_AUDIT_ROOT and ROMA_CLAUDE_CONFIG_DIR are deliberately absent, and there
+# is no default that would be right for either. `readRomaEnv` refuses to start
+# without them precisely so the data cannot land somewhere a reclaim deletes;
+# defaulting either here would re-open that hole from a new direction, with the
+# data in the container's writable layer, gone with the container. ADR-0002 is
+# explicit that per-user attribution does not exist at the provider, so the Audit
+# Records are the only place it ever exists — and ADR-0005 makes the Transcript
+# the only account there is of what an agent did, which ADR-0006 then decided
+# roma deletes nothing from. A default is roma doing the deleting anyway, on a
+# schedule nobody chose.
+# The Claude config dir decides a second thing besides where the Transcript goes:
+# `CLAUDE_SECURESTORAGE_CONFIG_DIR` is pointed at it too, which is what keeps a
+# host keychain login out of a Claude Code process. Both reasons want it named
+# rather than guessed.
+# `docker run` with no volumes is therefore refused, naming both — which makes
+# the operator answer two questions this image genuinely cannot.
 #
 # HOME is set explicitly rather than left to the daemon's passwd lookup, because
 # `buildEnv` passes it through to every Claude Code process and a Claude Code
 # process without one has nowhere to put the things it keeps outside
 # CLAUDE_CONFIG_DIR.
 ENV HOME=/home/node \
-    ROMA_WORK_ROOT=/var/lib/roma/work \
-    ROMA_CLAUDE_CONFIG_DIR=/var/lib/roma/claude
+    ROMA_WORK_ROOT=/var/lib/roma/work
 
-# `audit` is made and owned here even though nothing points at it. Setting the
-# variable and making the directory are different acts: an empty named volume
-# mounted over a path the image never created is materialised `root:root`, and
-# roma runs as `node` — so the operator who mounts one would clear the refusal
-# above and then lose the first Audit Record to EACCES, which is the same data
-# gone by a longer route. A bind mount brings the host's own ownership and needs
-# to be writable by uid 1000; the README says so.
+# `audit` and `claude` are made and owned here even though nothing points at
+# either. Setting the variable and making the directory are different acts: an
+# empty named volume mounted over a path the image never created is materialised
+# `root:root`, and roma runs as `node` — so the operator who mounts one would
+# clear the refusal above and then lose the first Audit Record, or the first
+# Transcript, to EACCES, which is the same data gone by a longer route. A bind
+# mount brings the host's own ownership and needs to be writable by uid 1000;
+# the README says so.
 RUN mkdir -p /var/lib/roma/work /var/lib/roma/claude /var/lib/roma/audit \
   && chown -R node:node /var/lib/roma
 
