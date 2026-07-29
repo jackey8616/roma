@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 /**
- * The three claims ADR-0006 makes about the image that nothing else keeps.
+ * The three claims ADR-0007 makes about the image that nothing else keeps.
  *
  * Written in the idiom `src/channels/google-chat/provisioning.test.ts` uses —
  * read the file, fail on what must not be in it — because all three are claims

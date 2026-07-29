@@ -11,7 +11,7 @@ channel-agnostic core) and ADR-0004 (Google Chat) before changing anything here.
 - **Node 22** — `.nvmrc` pins it; `nvm use` picks it up.
 - **Claude Code v2.1.220** on `PATH`, for the seam 2 tests. Behaviour is version-specific
   and every measurement in `docs/` is against that build — which is why the image pins the
-  same version exactly, and why moving it is a re-verification event (ADR-0006).
+  same version exactly, and why moving it is a re-verification event (ADR-0007).
 - **Docker**, only to build or run the image.
 
 ```bash
@@ -66,7 +66,7 @@ docker run --rm \
 It carries **its own Claude Code, pinned to v2.1.220** — the version every measurement in
 `docs/` was taken against. Moving that pin is a re-verification event that costs Shared
 Window money, not a dependency bump, and nothing automated will ever move it for you.
-ADR-0006 is why, and `src/packaging.test.ts` is what keeps it.
+ADR-0007 is why, and `src/packaging.test.ts` is what keeps it.
 
 There is **no `latest` tag, and no `0.1` or `0`**. A tag that moves is a deployment whose
 Claude Code changes underneath it, which is the whole thing the pin exists to prevent, so

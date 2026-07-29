@@ -595,7 +595,7 @@ was written on.
 handling for progress updates, per-channel authorisation.
 
 The container image's build and update process was on that list and is now
-ADR-0006, which also carries the consequence this ADR asks for: the pinned Claude
+ADR-0007, which also carries the consequence this ADR asks for: the pinned Claude
 Code version lives in the image, so moving it is a re-verification event rather
 than a dependency bump.
 

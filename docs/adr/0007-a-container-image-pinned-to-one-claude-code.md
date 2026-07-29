@@ -1,4 +1,4 @@
-# 6. A container image pinned to one Claude Code
+# 7. A container image pinned to one Claude Code
 
 Date: 2026-07-29
 

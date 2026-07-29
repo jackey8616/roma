@@ -1,5 +1,5 @@
 # roma, as the thing ADR-0003 said it would run as: a container on a long-running
-# GCE VM. ADR-0006 is the decision record for everything below.
+# GCE VM. ADR-0007 is the decision record for everything below.
 #
 # Two stages, because they want opposite things. The builder needs the whole
 # toolchain — TypeScript, the test-only dependencies, the lot — and produces one
@@ -13,7 +13,9 @@
 # to, and CI would stay green while it happened — seam 2 does not run there.
 # Moving this number is a re-verification event, not a dependency bump:
 # `src/packaging.test.ts` carries the second copy that turns editing it alone
-# red, and `docs/adr/0006-*.md` says what the re-verification is.
+# red, and `docs/adr/0007-a-container-image-pinned-to-one-claude-code.md` says
+# what the re-verification is. Named exactly rather than globbed: `0006-*` used
+# to match this file and matches a different decision now.
 ARG CLAUDE_CODE_VERSION=2.1.220
 
 # ---------------------------------------------------------------------------
