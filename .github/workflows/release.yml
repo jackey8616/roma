@@ -69,7 +69,7 @@ jobs:
 
       - run: npm test
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # Loaded rather than pushed, because it is verified before anybody can pull
       # it. `linux/amd64` alone, which is what makes a single-platform `load`
