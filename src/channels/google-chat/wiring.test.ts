@@ -67,7 +67,8 @@ async function boot() {
   const claude = new FakeClaude({ exitOnKill: true })
   const workRoot = mkdtempSync(join(tmpdir(), 'roma-wiring-'))
   const auditRoot = mkdtempSync(join(tmpdir(), 'roma-wiring-audit-'))
-  roots.push(workRoot, auditRoot)
+  const configDir = mkdtempSync(join(tmpdir(), 'roma-wiring-claude-'))
+  roots.push(workRoot, auditRoot, configDir)
 
   // Chat with the network taken out, and nothing else taken out: the requests
   // recorded here are the ones Google would have been sent.
@@ -89,6 +90,7 @@ async function boot() {
     transport: new PubSubTransport({ subscription, log: () => {} }),
     workRoot,
     auditRoot,
+    configDir,
     spawn: claude.spawn,
     log: () => {},
     selfCheckTimeoutMs: 1_000,

@@ -62,8 +62,16 @@ export interface StartRomaOptions {
    * who spent what, and it cannot be reconstructed after the fact.
    */
   readonly auditRoot: string
-  /** CLAUDE_CONFIG_DIR and CLAUDE_SECURESTORAGE_CONFIG_DIR, both pointed here. */
-  readonly configDir?: string
+  /**
+   * CLAUDE_CONFIG_DIR and CLAUDE_SECURESTORAGE_CONFIG_DIR, both pointed here.
+   *
+   * Required, for two promises that would otherwise be conditional on a
+   * deployment remembering it. It is what keeps a Session's credential
+   * resolution off the host's keychain (ADR-0002), and it is where Claude Code
+   * writes the Transcript — which ADR-0005 makes the only record there is of
+   * what an agent did, on the strength of it living somewhere roma named.
+   */
+  readonly configDir: string
   /** The pinned model. Defaults to the one every Session runs on. */
   readonly model?: string
   readonly maxConcurrentTasks?: number
@@ -137,7 +145,7 @@ export async function startRoma({
   // Built once and handed to both the check and the pool, so that what was
   // verified is the environment roma actually runs on rather than one built the
   // same way and hoped to be identical.
-  const env = buildEnv({ credential, ...(configDir === undefined ? {} : { configDir }) })
+  const env = buildEnv({ credential, configDir })
 
   const probeCwd = selfCheckCwd ?? mkdtempSync(join(tmpdir(), 'roma-self-check-'))
   let selfCheck: StartupSelfCheckReport
@@ -162,12 +170,7 @@ export async function startRoma({
     [credential.kind]: env,
     ...(overflow === undefined
       ? {}
-      : {
-          overflow: buildEnv({
-            credential: overflow.credential,
-            ...(configDir === undefined ? {} : { configDir }),
-          }),
-        }),
+      : { overflow: buildEnv({ credential: overflow.credential, configDir }) }),
   }
 
   const pool = new SessionPool({

@@ -53,7 +53,8 @@ function boot({ overflow = true }: { overflow?: boolean } = {}) {
   const claude = new FakeClaude({ exitOnKill: true })
   const workRoot = mkdtempSync(join(tmpdir(), 'roma-serve-'))
   const auditRoot = mkdtempSync(join(tmpdir(), 'roma-serve-audit-'))
-  roots.push(workRoot, auditRoot)
+  const configDir = mkdtempSync(join(tmpdir(), 'roma-serve-claude-'))
+  roots.push(workRoot, auditRoot, configDir)
   const channel = new RecordingAdapter()
   const transport = new FakeTransport()
 
@@ -65,6 +66,7 @@ function boot({ overflow = true }: { overflow?: boolean } = {}) {
     transport,
     workRoot,
     auditRoot,
+    configDir,
     spawn: claude.spawn,
     log: () => {},
     selfCheckTimeoutMs: 1_000,

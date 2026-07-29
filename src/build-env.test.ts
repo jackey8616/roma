@@ -16,11 +16,15 @@ const HOST = {
   AWS_SECRET_ACCESS_KEY: 'nothing-to-do-with-claude',
 }
 
+/** Where a Session's Claude Code state goes. Required, so every call names one. */
+const CONFIG_DIR = '/work/claude-home'
+
 describe('buildEnv', () => {
   describe('under a Shared Window credential', () => {
     const env = buildEnv({
       credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
       inherit: HOST,
+      configDir: CONFIG_DIR,
     })
 
     it('passes the OAuth token', () => {
@@ -39,6 +43,7 @@ describe('buildEnv', () => {
     const env = buildEnv({
       credential: { kind: 'overflow', apiKey: 'api-key' },
       inherit: HOST,
+      configDir: CONFIG_DIR,
     })
 
     it('passes the API key', () => {
@@ -54,6 +59,7 @@ describe('buildEnv', () => {
     const env = buildEnv({
       credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
       inherit: HOST,
+      configDir: CONFIG_DIR,
     })
 
     expect(env['PATH']).toBe('/usr/bin:/bin')
@@ -66,6 +72,7 @@ describe('buildEnv', () => {
     const env = buildEnv({
       credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
       inherit: { PATH: '/usr/bin' },
+      configDir: CONFIG_DIR,
     })
 
     expect('TMPDIR' in env).toBe(false)
@@ -73,14 +80,17 @@ describe('buildEnv', () => {
 
   // Both are needed to isolate a Session's credential resolution: without the
   // securestorage dir the process can still reach the machine's keychain login.
+  // The same directory is where Claude Code writes the Transcript, which
+  // ADR-0005 makes the only record of what an agent did — so this one variable
+  // decides both, and neither is conditional on a deployment naming it.
   it('isolates credential resolution by setting both Claude config dirs', () => {
     const env = buildEnv({
       credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
       inherit: HOST,
-      configDir: '/work/claude-home',
+      configDir: CONFIG_DIR,
     })
 
-    expect(env['CLAUDE_CONFIG_DIR']).toBe('/work/claude-home')
-    expect(env['CLAUDE_SECURESTORAGE_CONFIG_DIR']).toBe('/work/claude-home')
+    expect(env['CLAUDE_CONFIG_DIR']).toBe(CONFIG_DIR)
+    expect(env['CLAUDE_SECURESTORAGE_CONFIG_DIR']).toBe(CONFIG_DIR)
   })
 })

@@ -105,7 +105,13 @@ function attempted<T>(read: () => T, problems: string[]): T | null {
  * Nothing here provisions anything or has a fallback that would quietly change
  * what roma runs on. A missing token is refused rather than defaulted to the
  * host's own login; a missing audit root is refused rather than put somewhere
- * under the working directories, which a weekly reclaim would delete.
+ * under the working directories, which a weekly reclaim would delete; a missing
+ * config dir is refused rather than left to Claude Code's own default, which is
+ * under the `HOME` roma passes through — so every Session's Transcript would
+ * land in the host user's `~/.claude/projects/`, mixed in with whatever Claude
+ * Code that person runs themselves and in a directory roma never reclaims.
+ * ADR-0005 makes the Transcript the only account of what an agent did, which is
+ * a claim that needs roma to have named where it lives.
  */
 export function readRomaEnv(env: Environment): RomaEnv {
   const problems: string[] = []
@@ -113,9 +119,9 @@ export function readRomaEnv(env: Environment): RomaEnv {
   const oauthToken = required(env, 'CLAUDE_CODE_OAUTH_TOKEN', problems)
   const workRoot = required(env, 'ROMA_WORK_ROOT', problems)
   const auditRoot = required(env, 'ROMA_AUDIT_ROOT', problems)
+  const configDir = required(env, 'ROMA_CLAUDE_CONFIG_DIR', problems)
 
   const overflow = readOverflow(env, problems)
-  const configDir = envValue(env, 'ROMA_CLAUDE_CONFIG_DIR')
   const model = envValue(env, 'ROMA_MODEL')
   const maxConcurrentTasks = wholeNumber(env, 'ROMA_MAX_CONCURRENT_TASKS', problems)
 
@@ -129,8 +135,8 @@ export function readRomaEnv(env: Environment): RomaEnv {
     credential,
     workRoot: certain(workRoot),
     auditRoot: certain(auditRoot),
+    configDir: certain(configDir),
     ...(overflow === null ? {} : { overflow }),
-    ...(configDir === null ? {} : { configDir }),
     ...(model === null ? {} : { model }),
     ...(maxConcurrentTasks === null ? {} : { maxConcurrentTasks }),
   }

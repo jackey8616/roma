@@ -60,7 +60,7 @@ function selfCheck({ credential = OAUTH, model, timeoutMs, events = HEALTHY }: S
 
   const check = startupSelfCheck({
     credential,
-    env: buildEnv({ credential, inherit: {} }),
+    env: buildEnv({ credential, inherit: {}, configDir: '/work/claude-home' }),
     cwd,
     spawn: claude.spawn,
     ...(model === undefined ? {} : { model }),

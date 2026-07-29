@@ -6,14 +6,16 @@ const MINIMAL = {
   CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token',
   ROMA_WORK_ROOT: '/srv/roma/sessions',
   ROMA_AUDIT_ROOT: '/var/lib/roma/audit',
+  ROMA_CLAUDE_CONFIG_DIR: '/srv/roma/claude',
 }
 
 describe('reading roma out of the environment', () => {
-  it('reads the Shared Window credential and the two directories', () => {
+  it('reads the Shared Window credential and the three directories', () => {
     expect(readRomaEnv(MINIMAL)).toEqual({
       credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
       workRoot: '/srv/roma/sessions',
       auditRoot: '/var/lib/roma/audit',
+      configDir: '/srv/roma/claude',
     })
   })
 
@@ -29,7 +31,20 @@ describe('reading roma out of the environment', () => {
       expect((error as ConfigurationMissing).message).toContain('CLAUDE_CODE_OAUTH_TOKEN')
       expect((error as ConfigurationMissing).message).toContain('ROMA_WORK_ROOT')
       expect((error as ConfigurationMissing).message).toContain('ROMA_AUDIT_ROOT')
+      expect((error as ConfigurationMissing).message).toContain('ROMA_CLAUDE_CONFIG_DIR')
     }
+  })
+
+  // Refused on its own and not only alongside everything else, because the
+  // deployment this is here for is the one that set every other variable.
+  // ADR-0005 makes the Transcript the only record of what an agent did, which
+  // needs roma to have named where it lives — unset, `HOME` is on `buildEnv`'s
+  // passthrough list and every Session's lands in the host user's own
+  // `~/.claude/projects/`, in a directory roma never reclaims.
+  it('refuses to start without somewhere of roma’s own for the Transcript', () => {
+    const { ROMA_CLAUDE_CONFIG_DIR: _omitted, ...withoutIt } = MINIMAL
+
+    expect(() => readRomaEnv(withoutIt)).toThrow(/ROMA_CLAUDE_CONFIG_DIR/)
   })
 
   // An empty string is not a value. It is what a shell leaves behind when a
@@ -105,16 +120,14 @@ describe('reading roma out of the environment', () => {
   })
 
   describe('the settings a deployment may override and usually does not', () => {
-    it('passes through the config directory, the model and the concurrency cap', () => {
+    it('passes through the model and the concurrency cap', () => {
       expect(
         readRomaEnv({
           ...MINIMAL,
-          ROMA_CLAUDE_CONFIG_DIR: '/srv/roma/claude',
           ROMA_MODEL: 'claude-sonnet-5',
           ROMA_MAX_CONCURRENT_TASKS: '5',
         }),
       ).toMatchObject({
-        configDir: '/srv/roma/claude',
         model: 'claude-sonnet-5',
         maxConcurrentTasks: 5,
       })
@@ -126,6 +139,7 @@ describe('reading roma out of the environment', () => {
     it('leaves them out entirely when they are not set', () => {
       expect(Object.keys(readRomaEnv(MINIMAL)).sort()).toEqual([
         'auditRoot',
+        'configDir',
         'credential',
         'workRoot',
       ])
@@ -166,6 +180,7 @@ describe('the Core and its Channel, read as one configuration', () => {
         'CLAUDE_CODE_OAUTH_TOKEN is not set.',
         'ROMA_WORK_ROOT is not set.',
         'ROMA_AUDIT_ROOT is not set.',
+        'ROMA_CLAUDE_CONFIG_DIR is not set.',
         'CHANNEL_THING is not set.',
       ])
     }
