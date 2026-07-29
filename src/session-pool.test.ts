@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SessionPool, type PoolLogRecord, type SessionPoolOptions } from './session-pool.js'
 import type { Turn } from './claude-session.js'
-import { FakeClaude, type FakeClaudeProcess } from '../test/support/fake-claude.js'
+import { FakeClaude, flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
 import { feed, recordedStream, withTotalCostUsd } from '../test/support/recorded-stream.js'
 import type { ClaudeEvent } from './stream-events.js'
 
@@ -18,15 +18,6 @@ function sessionId(n: number): string {
 
 const A = sessionId(1)
 const B = sessionId(2)
-
-/**
- * Let everything the pool has queued run: spawning, eviction, and the Turn's own
- * promise all settle on the microtask queue, and the fake process cannot be fed
- * until the process it belongs to exists.
- */
-function flush(): Promise<void> {
-  return new Promise((resolve) => setImmediate(resolve))
-}
 
 let pools: SessionPool[] = []
 let workRoots: string[] = []

@@ -39,6 +39,17 @@ It needs a Shared Window token — `CLAUDE_CODE_OAUTH_TOKEN` in a `.env` at the 
 skipping: a silently skipped seam 2 reports green while the one contract the whole
 architecture rests on goes unchecked.
 
+## Where the Channel-specific code goes
+
+Everything in `src/` is the Core, and none of it may name a Channel — not Google Chat,
+not Pub/Sub, not any other. A Channel Adapter goes in `src/channels/<channel>/`, which will
+be the only place that knowledge is allowed to exist. No Adapter has been built yet, so
+that directory does not exist either.
+
+`src/core.test.ts` enforces this by reading the sources, because "Google Chat is the first
+road, not the destination" is a claim that would otherwise stop being true without anyone
+noticing until a second Channel turned out to be a rewrite.
+
 ## Where the tests are
 
 Three seams, deliberately non-overlapping — see the Testing Decisions section of the spec,
