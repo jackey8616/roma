@@ -1,6 +1,6 @@
 {
   "name": "roma",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "One central Claude Code agent a team reaches from any messaging channel",
@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "tsx src/channels/google-chat/main.ts",
+    "build": "rm -rf dist && tsc --project tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
