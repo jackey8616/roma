@@ -122,9 +122,16 @@ subscription's rolling window rather than metered API billing. It also gives
 ADR-0002's promised "expected reset time" a real source instead of a guess.
 
 **⚠️ Breaks ADR-0001's audit record.** `total_cost_usd` is a **cumulative
-session total**, not a per-turn figure. Across two turns `modelUsage` summed:
+process total**, not a per-turn figure. Across two turns `modelUsage` summed:
 `inputTokens` 2 → 4, `outputTokens` 4 → 7, `cacheRead` 23684 → 55867. Only the
 top-level `usage` object is per-turn.
+
+This section previously called it a cumulative *session* total, which this run
+could not tell apart from a process total: one process served the whole session
+throughout. The session pool's seam 2 separated them — a session that had spent
+**$0.0822846** was evicted with SIGTERM and resumed, and its first turn on the
+new process reported **$0.0105342**, with context intact. The total belongs to
+the process, and a resumed one starts again from zero.
 
 ADR-0001 specifies "Per-task audit record: who, session, duration,
 `total_cost_usd`". Logged as-is on a resident multi-turn process, the fifth task
@@ -132,7 +139,7 @@ in a session is recorded at the sum of tasks one through five. ADR-0002 leans on
 that same figure for the monthly overflow cap and calls it "the number that
 makes the eventual argument for or against moving fully to API billing" — built
 on inflated values, that argument is made on bad data. **Fix:** diff consecutive
-`total_cost_usd` values within a session, or compute from per-turn `usage`.
+`total_cost_usd` values within one process, or compute from per-turn `usage`.
 
 **The self-check has a real signal.** `system/init` carries `apiKeySource`:
 `"none"` under the OAuth token, `"ANTHROPIC_API_KEY"` when a key is present.

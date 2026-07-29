@@ -79,9 +79,9 @@ describe('a Session over a real claude -p', () => {
     console.log(`seam 2 ran against Claude Code ${String(init?.['claude_code_version'])}`)
   })
 
-  // total_cost_usd is a cumulative Session total. Two Turns is the smallest run
-  // that can tell a delta apart from it.
-  it('reports per-Turn cost as a delta of the cumulative Session total', () => {
+  // total_cost_usd is a cumulative total for the process. Two Turns is the
+  // smallest run that can tell a delta apart from it.
+  it('reports per-Turn cost as a delta of the running total', () => {
     const [first, second] = turns
     expect(first?.costUsd).toBeGreaterThan(0)
     expect(second?.costUsd).toBeGreaterThan(0)

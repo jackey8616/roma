@@ -51,6 +51,23 @@ export function recordedStream(name: string): RecordedStream {
 }
 
 /**
+ * The same recorded Turn with a different `total_cost_usd` on its terminal event.
+ *
+ * For the one thing no single recording can supply: what a `--resume`d process
+ * reports. Seam 2 measured that it counts from zero rather than continuing the
+ * Session total, and this is how that second process's stream is built out of a
+ * real Turn rather than hand-written.
+ */
+export function withTotalCostUsd(
+  events: readonly ClaudeEvent[],
+  totalCostUsd: number,
+): ClaudeEvent[] {
+  return events.map((event) =>
+    event.type === 'result' ? { ...event, total_cost_usd: totalCostUsd } : event,
+  )
+}
+
+/**
  * Push events at a fake process as NDJSON bytes.
  *
  * `chunkSize` decides where the chunk boundaries fall. The default sends each
