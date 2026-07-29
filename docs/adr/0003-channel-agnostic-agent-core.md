@@ -388,6 +388,31 @@ wrapper.
   same event. Failure blocks startup. This catches the three silent-degradation
   modes: a `-p` default change to `--bare`, a stray `ANTHROPIC_API_KEY`, and a
   model swap.
+- **The check drives a completed Turn, not just a spawn.** Two measurements
+  forced this, both **verified** at seam 2 against v2.1.220:
+
+  `system/init` **does not arrive on spawn**. A process left with an idle stdin
+  emitted nothing at all for 5s, against the ~500ms an init takes once a message
+  has been written. The cheaper design — spawn, read the stream, assert, kill —
+  would not have hung a test; it would have hung the boot.
+
+  And stopping *at* `system/init` would reproduce the blind spot below.
+  `apiKeySource` and the model are reported before the first API call, so a token
+  that 401s produces a perfectly healthy init. Only completing the Turn sees it.
+
+  What that costs, measured: **3682ms and $0.0709632** per boot, the spend
+  dominated by the cached system prompt rather than by the probe's four output
+  tokens. A wrong credential is still refused at init in ~1.2s, without waiting
+  for the Turn — which matters, because a wrong credential is precisely the case
+  that then retries for three minutes.
+- **Pinning `--model` narrows what the model assertion catches.** The prototype
+  watched a stray `ANTHROPIC_API_KEY` move the model to `claude-opus-5[1m]`, and
+  that run did not pass `--model`. With the model pinned, seam 2 measured the
+  same stray key leaving the model at `claude-sonnet-5` and moving only
+  `apiKeySource`. So `apiKeySource` is what catches a stray key; the model
+  assertion covers the case where Claude Code stops honouring `--model` at all.
+  Both are still worth asserting — they simply do not catch the same thing, and a
+  reader who expects the model to give a stray key away would be wrong.
 - **`claude auth status` cannot serve this purpose.** It reports
   `loggedIn: true` for any non-empty string, including a token that fails with
   401 on first use. ADR-0001's choice of a live `-p` invocation was right, and

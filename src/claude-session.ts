@@ -127,8 +127,29 @@ interface PendingTurn {
   readonly fail: (error: Error) => void
 }
 
-const DEFAULT_MODEL = 'claude-sonnet-5'
+/**
+ * The model every Session runs on, pinned rather than left to default.
+ *
+ * It is the dominant cost and capability variable and it is not stable by
+ * default: it follows the credential, and the prototype watched a stray
+ * `ANTHROPIC_API_KEY` move it from `claude-sonnet-5` to `claude-opus-5[1m]`
+ * without a word. Pinning changes nothing that was already correct — it turns a
+ * silent drift into a mismatch the startup self-check can assert on, which is
+ * why that check and this constant have to name the same model.
+ */
+export const PINNED_MODEL = 'claude-sonnet-5'
 const COMMAND = 'claude'
+
+/**
+ * How long a SIGTERM is given before SIGKILL.
+ *
+ * Ending a process is always awaited by somebody, so a process that ignores
+ * SIGTERM does not merely linger — it stalls whoever is waiting. In the pool
+ * that is every later message, which is the "bot halted" state ADR-0003 lists
+ * under accepted risks, reached without a single Task hanging. At startup it is
+ * the boot itself.
+ */
+export const TERMINATE_GRACE_MS = 5_000
 
 /**
  * One `claude -p` process, seen as a sequence of Turns.
@@ -170,7 +191,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     this.#cwd = options.cwd
     this.#env = options.env
     this.#resume = options.resume ?? false
-    this.#model = options.model ?? DEFAULT_MODEL
+    this.#model = options.model ?? PINNED_MODEL
     this.#spawn = options.spawn ?? spawnClaudeProcess
   }
 
@@ -308,6 +329,39 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     const exited = new Promise<ClaudeProcessExit>((resolve) => this.once('exit', resolve))
     proc.kill(signal)
     return await exited
+  }
+
+  /**
+   * End the process for certain — SIGTERM, then SIGKILL if it is ignored.
+   *
+   * `terminate` on its own waits for an exit that a wedged process never
+   * produces, so every caller that *awaits* the ending needs this rather than
+   * that: eviction, which holds up the next message, and the startup self-check,
+   * whose whole purpose is that a boot cannot hang. The distinction is easy to
+   * miss precisely because the process nearly always goes on the first signal.
+   *
+   * `onGraceExpired` fires only when the escalation was needed, which is the
+   * moment worth recording — a process that had to be killed is a fact about
+   * that process, not about the eviction that asked it to go.
+   */
+  async terminateOrKill(
+    graceMs: number = TERMINATE_GRACE_MS,
+    onGraceExpired?: () => void,
+  ): Promise<void> {
+    if (!this.alive) return
+
+    let grace: NodeJS.Timeout | undefined
+    const expired = new Promise<'expired'>((resolve) => {
+      grace = setTimeout(() => resolve('expired'), graceMs)
+      grace.unref?.()
+    })
+    const gone = this.terminate('SIGTERM').then(() => 'gone' as const)
+    const outcome = await Promise.race([gone, expired])
+    clearTimeout(grace)
+    if (outcome === 'gone') return
+
+    onGraceExpired?.()
+    await this.terminate('SIGKILL')
   }
 
   /** One NDJSON frame onto stdin — the counterpart of the framing in `#onStdout`. */
