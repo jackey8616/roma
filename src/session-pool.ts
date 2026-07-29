@@ -26,6 +26,13 @@ const RECLAIM_INTERVAL_MS = 60 * 60_000
  * "No conversation found with session ID: …" (`claude-session.live.test.ts`).
  */
 const NO_CONVERSATION = /no conversation found/i
+/**
+ * What `claude --session-id` says when a transcript for that id already exists.
+ * Measured, not assumed — `docs/transcript-collision-verification.md` Q2 and Q3
+ * run it at a reclaimed working directory and get "Error: Session ID … is
+ * already in use." on Claude Code v2.1.220 (`#wrongFlag` is where it is read).
+ */
+const ALREADY_IN_USE = /session id .* is already in use/i
 
 /**
  * One operational moment in the pool's life.
@@ -88,7 +95,19 @@ export type PoolLogRecord =
       readonly status: number | null
       readonly error: string | null
     }
-  | { readonly event: 'resume-lost'; readonly sessionId: string; readonly stderr: string }
+  | {
+      /**
+       * Both are a spawn that guessed wrong about whether the Session already
+       * exists, and both are recovered by retrying with the other flag. They
+       * differ in which way the guess was wrong: `resume-lost` reached for a
+       * transcript that is not there, `transcript-survived` created one that is.
+       */
+      readonly event: 'resume-lost' | 'transcript-survived'
+      readonly sessionId: string
+      readonly stderr: string
+      /** The flag the Turn was retried with, so the recovery reads as one record. */
+      readonly retryWith: '--resume' | '--session-id'
+    }
   | {
       readonly event: 'reclaim'
       readonly sessionId: string
@@ -319,10 +338,13 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * Runs on a timer as well, because a directory only goes stale by *not* being
    * used and nothing else would ever come and look.
    *
-   * **Known gap:** the Session's transcript belongs to Claude Code and is not
-   * ours to delete, so a Conversation that goes quiet for more than seven days
-   * and then comes back is created again with `--session-id` at an id that may
-   * still have a transcript on disk. What the CLI does with that is unmeasured.
+   * The Transcript is deliberately left behind. It belongs to Claude Code and
+   * ADR-0006 upheld that it is not roma's to delete, so a Conversation that goes
+   * quiet for more than seven days comes back to a directory that is gone and a
+   * Transcript that is not. That used to be a known gap with an unmeasured
+   * outcome; it is measured now, and `#wrongFlag` is where it is handled — the
+   * spawn is refused as already in use and the Turn retries with `--resume`,
+   * which reaches the Session having forgotten nothing.
    */
   reclaimIdleWorkDirs(): string[] {
     let entries
@@ -368,7 +390,18 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     )
   }
 
-  async #turn(resident: Resident, text: string): Promise<Turn> {
+  /**
+   * Run one Turn on a resident, correcting a spawn that guessed wrong once.
+   *
+   * `corrected` is what bounds that to once, and it has to be carried rather
+   * than inferred. Each correction flips the flag, so the *opposite* diagnosis
+   * becomes available to the retry — and a CLI that refuses whichever flag it is
+   * given would otherwise be answered with `--session-id`, `--resume`,
+   * `--session-id`, for as long as the pool is willing to spawn. `#spawn` is
+   * serialised through `#spawning`, so that loop would starve every other
+   * Session as well as this one.
+   */
+  async #turn(resident: Resident, text: string, corrected = false): Promise<Turn> {
     resident.busy = true
     this.#cancelReap(resident)
     try {
@@ -377,14 +410,24 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       // The process died because the pool killed it, so what the caller needs
       // is the reason it did — not the exit that carried the decision out.
       if (resident.storm !== null) throw resident.storm
-      if (!this.#lostTranscript(resident, error)) throw error
-      // The resume was aimed at a Session Claude Code has no transcript for.
-      // Create it instead of leaving this Conversation permanently broken.
-      this.#log({ event: 'resume-lost', sessionId: resident.sessionId, stderr: resident.stderr })
+      // Two spawns can be wrong about whether this Session already exists, in
+      // opposite directions, and each is recoverable by trying the other flag.
+      // Reaching for the other flag was the whole remedy, so a Turn that has
+      // already used it has nowhere left to go.
+      if (corrected) throw error
+      const correction = this.#wrongFlag(resident, error)
+      if (correction === null) throw error
+      this.#log({
+        event: correction.event,
+        sessionId: resident.sessionId,
+        stderr: resident.stderr,
+        retryWith: correction.resume ? '--resume' : '--session-id',
+      })
       this.#forget(resident)
       return await this.#turn(
-        await this.#spawn(resident.sessionId, resident.credential, false),
+        await this.#spawn(resident.sessionId, resident.credential, correction.resume),
         text,
+        true,
       )
     } finally {
       resident.busy = false
@@ -482,7 +525,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     session.on('turn-start', (text) => this.emit('turn-start', sessionId, text))
     session.on('turn-end', (turn) => this.emit('turn-end', sessionId, turn))
     // Kept whole rather than forwarded: it is the only place a process that
-    // refuses to run at all explains itself, and the resume-lost check reads it.
+    // refuses to run at all explains itself, and `#wrongFlag` reads it.
     session.on('stderr', (chunk) => {
       resident.stderr += chunk
     })
@@ -676,7 +719,13 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * eviction takes.
    */
   #markUsed(resident: Resident): void {
-    if (this.#residents.delete(resident.sessionId)) {
+    // Identity, not presence — the same check `#forget` makes, and for the same
+    // reason. A recovery replaces the resident under a Turn that is still
+    // running, so this can be reached for one that has already been supplanted;
+    // re-inserting on presence alone would put the dead one back over the live
+    // one and orphan a working process.
+    if (this.#residents.get(resident.sessionId) === resident) {
+      this.#residents.delete(resident.sessionId)
       this.#residents.set(resident.sessionId, resident)
     }
     resident.lastUsedAt = Date.now()
@@ -699,11 +748,34 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     }
   }
 
-  #lostTranscript(resident: Resident, error: unknown): boolean {
-    return (
-      resident.resumed &&
-      error instanceof ClaudeExitedError &&
-      NO_CONVERSATION.test(resident.stderr)
-    )
+  /**
+   * A spawn refused because the flag was wrong about whether the Session exists,
+   * and which flag to try instead. Null for every other failure.
+   *
+   * The working directory is the pool's record of existence, and it can be wrong
+   * both ways. It exists before the first spawn, so a Session that died before
+   * Claude Code wrote its transcript looks created and is not — `--resume` finds
+   * nothing. It is deleted by the seven-day reclaim while the transcript stays,
+   * so a Conversation that went quiet looks new and is not — `--session-id` hits
+   * a transcript that is still there. Left alone either one poisons that
+   * Conversation for good, because every later message repeats the same spawn.
+   *
+   * Reacting to what the CLI said rather than reading the transcript's own path
+   * to decide up front: that path is
+   * `$CLAUDE_CONFIG_DIR/projects/<slug-of-cwd>/<id>.jsonl`, undocumented and
+   * Claude Code's to change, and ADR-0006 keeps the pool from knowing the config
+   * directory at all. A wasted spawn costs a process that exits immediately.
+   */
+  #wrongFlag(
+    resident: Resident,
+    error: unknown,
+  ): { readonly event: 'resume-lost' | 'transcript-survived'; readonly resume: boolean } | null {
+    if (!(error instanceof ClaudeExitedError)) return null
+    if (resident.resumed) {
+      return NO_CONVERSATION.test(resident.stderr) ? { event: 'resume-lost', resume: false } : null
+    }
+    return ALREADY_IN_USE.test(resident.stderr)
+      ? { event: 'transcript-survived', resume: true }
+      : null
   }
 }
