@@ -80,9 +80,17 @@ Code processes. Knows nothing about which Channel a message came from.
 _Avoid_: backend, server, bridge, engine
 
 **Session**:
-The Claude Code state backing one Conversation: an on-disk transcript, a session
-id, and a working directory.
+The Claude Code state backing one Conversation: a Transcript, a session id, and a
+working directory.
 _Avoid_: context, history, conversation
+
+**Transcript**:
+Claude Code's own record of a Session, holding every event of every Turn it has
+served. Not roma's: roma names the directory it lives in, reads nothing out of
+it, and writes no second copy — so this is the only account there is of what an
+agent actually did.
+_Avoid_: history, session file, event log, and the bare word "log" (that reads
+as the Operator Log, which is roma's and says something else entirely)
 
 **Session Generation**:
 Which of a Conversation's Sessions is the current one. A Conversation Key never
@@ -190,7 +198,15 @@ never reached a terminal event spent real tokens nothing will ever name, and tha
 is written down as unpriced rather than as free. Everybody shares one token, so the provider knows only
 that somebody spent it; this is the only place the question of who is answerable,
 and the only place a calendar month can be added up.
-_Avoid_: the bare word "log" for one of these — the Session Pool writes an
+_Avoid_: the bare word "log" for one of these — the Operator Log is the
 operational one and the two are not the same thing, so the qualified "audit log"
 is the collection and an Audit Record is a line of it. Also: metric, usage
 record, telemetry
+
+**Operator Log**:
+The running commentary roma writes for whoever is running it: an Eviction, a
+Reaping, a credential swap, a refusal. What roma decided and why, as it happens —
+never what an agent did, which is the Transcript's, and never the account of the
+money, which is the Audit Records'. Nothing is totalled from it.
+_Avoid_: audit log (that is the Audit Records), event log (that is nearer the
+Transcript), telemetry, metrics
