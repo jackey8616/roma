@@ -1,7 +1,8 @@
 import type { ChannelAdapter, IngressMessage, OutboundInstruction } from './channel-adapter.js'
 import { TurnFailedError } from './claude-session.js'
 import { sessionIdFor } from './session-id.js'
-import type { SessionPool } from './session-pool.js'
+import { RetryStormError, type SessionPool } from './session-pool.js'
+import type { TaskQueue } from './task-queue.js'
 
 export interface CoreOptions {
   /**
@@ -15,6 +16,15 @@ export interface CoreOptions {
    */
   readonly channel: ChannelAdapter
   readonly pool: SessionPool
+  /**
+   * Shared with every other Core, exactly as the pool is.
+   *
+   * Required rather than defaulted, because a queue each Core made for itself
+   * would still work and would still be wrong: the cap is three Tasks across
+   * the whole of roma, and one queue per Channel silently makes it three per
+   * Channel.
+   */
+  readonly queue: TaskQueue
 }
 
 /**
@@ -35,8 +45,9 @@ export interface CoreOptions {
 export class Core {
   readonly #channel: ChannelAdapter
   readonly #pool: SessionPool
+  readonly #queue: TaskQueue
 
-  constructor({ channel, pool }: CoreOptions) {
+  constructor({ channel, pool, queue }: CoreOptions) {
     if (!channel.capabilities.stableConversationKey) {
       // No Adapter should ever declare this false: a Channel without a stable key
       // of its own mints and persists one inside its Adapter, so the key is
@@ -49,10 +60,17 @@ export class Core {
     }
     this.#channel = channel
     this.#pool = pool
+    this.#queue = queue
   }
 
   /**
    * Run one Task: the message in, the Turn it drives, the outcome back out.
+   *
+   * The Task waits its turn first. Its Session may already be busy — two
+   * messages in one Conversation are handled one at a time, because two
+   * processes writing one Session file corrupt it — or roma may already be
+   * running as much as it runs at once. Either way the Conversation is told it
+   * is waiting rather than left with silence.
    *
    * Resolves when the Conversation has been told how it went. It rejects only
    * if the Channel could not be told at all — a failed Task is an outcome, not
@@ -66,7 +84,24 @@ export class Core {
 
     let instruction: OutboundInstruction
     try {
-      const turn = await this.#pool.send(sessionId, message.text)
+      const turn = await this.#queue.run(
+        sessionId,
+        () => this.#pool.send(sessionId, message.text),
+        // Best-effort, and the only instruction that is. A Channel too broken
+        // to carry this one is too broken to carry the failure that abandoning
+        // the Task would produce, so refusing to run it buys no less silence —
+        // it only adds losing the work to it. The result is the promise; this
+        // is the courtesy. `async` so that an Adapter that throws where it
+        // could have rejected is absorbed here too.
+        async (position) => {
+          try {
+            await this.#channel.deliver({ kind: 'queued', conversationKey, position })
+          } catch {
+            // Nothing to do with it: there is no second Channel to tell, and a
+            // Task that is going to run anyway has no failure to report yet.
+          }
+        },
+      )
       instruction = { kind: 'result', conversationKey, text: turn.text }
     } catch (error) {
       instruction = { kind: 'failure', conversationKey, reason: reasonFor(error) }
@@ -97,6 +132,25 @@ const ROMA_FAILED = 'roma could not run this Task.'
  * not ours, and it is more use than anything the Core could write about it.
  */
 function reasonFor(error: unknown): string {
+  if (error instanceof RetryStormError) return retryStormReason(error)
   if (error instanceof TurnFailedError && error.turn.text !== '') return error.turn.text
   return ROMA_FAILED
+}
+
+/**
+ * What to say about a Task roma stopped waiting on.
+ *
+ * Named rather than folded into `ROMA_FAILED`, because this is the one failure
+ * where roma made the decision and the person can act on it. A 401 here is a
+ * credential someone has to go and fix; a 529 is worth sending again in a
+ * minute. Neither is deducible from "roma could not run this Task."
+ *
+ * The status comes from the retry events themselves. The error proper never
+ * arrives — it surfaces only once the retries are exhausted, which is precisely
+ * the wait that was cut short.
+ */
+function retryStormReason({ retries, lastRetry }: RetryStormError): string {
+  const cause = [lastRetry.errorStatus, lastRetry.error].filter((part) => part !== null).join(' ')
+  const gaveUp = `roma gave up after ${retries} API ${retries === 1 ? 'retry' : 'retries'}`
+  return cause === '' ? `${gaveUp}.` : `${gaveUp} (${cause}).`
 }

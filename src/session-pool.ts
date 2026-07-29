@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, readdirSync, rmSync, statSync, utimesSync } from
 import { join } from 'node:path'
 import { spawnClaudeProcess, type SpawnClaudeProcess } from './claude-process.js'
 import { ClaudeExitedError, ClaudeSession, type Turn } from './claude-session.js'
-import type { ClaudeEvent } from './stream-events.js'
+import { defaultConfig, type RetryBudget } from './config.js'
+import { readApiRetry, type ApiRetry, type ClaudeEvent } from './stream-events.js'
 
 /** ADR-0003: at most ten resident processes, evicted least-recently-used. */
 const MAX_RESIDENT = 10
@@ -56,6 +57,20 @@ export type PoolLogRecord =
       readonly signal: string | null
     }
   | { readonly event: 'kill'; readonly sessionId: string; readonly graceMs: number }
+  | {
+      /**
+       * A Turn abandoned mid-retry. Where an operator finds out that a
+       * credential is wrong, since the caller is only told the Task is over.
+       */
+      readonly event: 'retry-storm'
+      readonly sessionId: string
+      readonly retries: number
+      readonly elapsedMs: number
+      /** Which of the two budgets ran out first. */
+      readonly limit: 'retries' | 'window'
+      readonly status: number | null
+      readonly error: string | null
+    }
   | { readonly event: 'resume-lost'; readonly sessionId: string; readonly stderr: string }
   | {
       readonly event: 'reclaim'
@@ -71,6 +86,38 @@ export const logToStderr: PoolLog = (record) => {
   process.stderr.write(`${JSON.stringify(record)}\n`)
 }
 
+/**
+ * A Turn abandoned because it was retrying more than the budget allows.
+ *
+ * Its own class rather than a `ClaudeExitedError`, because the two are opposite
+ * news: a process that died is roma failing, and this is roma deciding. The
+ * caller has a Task that is over either way, but only this one can say what it
+ * was over.
+ */
+export class RetryStormError extends Error {
+  /** Retries roma saw before it stopped waiting. */
+  readonly retries: number
+  /** How long the Turn had been retrying, from its first retry. */
+  readonly elapsedMs: number
+  /**
+   * The last retry seen, and the only account of the underlying failure roma
+   * has: the error proper surfaces after the retries are exhausted, which is
+   * exactly the wait being cut short here.
+   */
+  readonly lastRetry: ApiRetry
+
+  constructor(retries: number, elapsedMs: number, lastRetry: ApiRetry) {
+    super(
+      `Turn abandoned after ${retries} API retries over ${elapsedMs}ms ` +
+        `(status=${lastRetry.errorStatus ?? 'null'}, error=${lastRetry.error ?? 'null'})`,
+    )
+    this.name = 'RetryStormError'
+    this.retries = retries
+    this.elapsedMs = elapsedMs
+    this.lastRetry = lastRetry
+  }
+}
+
 export interface SessionPoolOptions {
   /** Working directories live directly under here, one per Session. */
   readonly workRoot: string
@@ -79,6 +126,8 @@ export interface SessionPoolOptions {
   readonly model?: string
   readonly maxResident?: number
   readonly reclaimIntervalMs?: number
+  /** How much retrying a Turn may do before it is abandoned. */
+  readonly retryBudget?: RetryBudget
   readonly spawn?: SpawnClaudeProcess
   readonly log?: PoolLog
 }
@@ -87,6 +136,21 @@ export interface SessionPoolEvents {
   event: [sessionId: string, event: ClaudeEvent]
   'turn-start': [sessionId: string, text: string]
   'turn-end': [sessionId: string, turn: Turn]
+}
+
+/**
+ * What the running Turn has spent of its retry budget.
+ *
+ * Its presence is the fact that this Turn has started retrying at all, which is
+ * why it is one nullable object rather than counters that have to be reset in
+ * step with each other.
+ */
+interface RetryWatch {
+  count: number
+  readonly startedAt: number
+  /** The wall-clock backstop, armed on the first retry. */
+  timer: NodeJS.Timeout | null
+  last: ApiRetry
 }
 
 interface Resident {
@@ -101,6 +165,10 @@ interface Resident {
   reapTimer: NodeJS.Timeout | null
   /** Set when the pool is the one ending the process, so its exit is not news. */
   leaving: boolean
+  /** Null until the running Turn's first retry, and again once it ends. */
+  retry: RetryWatch | null
+  /** Set when this Turn was abandoned, so its process's death is explained. */
+  storm: RetryStormError | null
 }
 
 /**
@@ -130,6 +198,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   readonly #env: Readonly<Record<string, string>>
   readonly #model: string | undefined
   readonly #maxResident: number
+  readonly #retryBudget: RetryBudget
   readonly #spawnProcess: SpawnClaudeProcess
   readonly #log: PoolLog
 
@@ -152,6 +221,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     this.#env = options.env
     this.#model = options.model
     this.#maxResident = options.maxResident ?? MAX_RESIDENT
+    this.#retryBudget = options.retryBudget ?? defaultConfig.retryBudget
     this.#spawnProcess = options.spawn ?? spawnClaudeProcess
     this.#log = options.log ?? logToStderr
 
@@ -174,6 +244,9 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * pinned against eviction until the Turn ends. Serialisation between Tasks is
    * not done here: two concurrent messages to one Session is a caller bug, and
    * queueing belongs to the Task queue.
+   *
+   * Rejects with `RetryStormError` if the Turn spends its retry budget, which
+   * is the one way a Turn ends that nobody asked for.
    */
   async send(sessionId: string, text: string): Promise<Turn> {
     return await this.#turn(await this.#acquire(sessionId), text)
@@ -253,6 +326,9 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     try {
       return await resident.session.send(text)
     } catch (error) {
+      // The process died because the pool killed it, so what the caller needs
+      // is the reason it did — not the exit that carried the decision out.
+      if (resident.storm !== null) throw resident.storm
       if (!this.#lostTranscript(resident, error)) throw error
       // The resume was aimed at a Session Claude Code has no transcript for.
       // Create it instead of leaving this Conversation permanently broken.
@@ -261,6 +337,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       return await this.#turn(await this.#spawn(resident.sessionId, false), text)
     } finally {
       resident.busy = false
+      this.#clearRetryWatch(resident)
       // Move to the most-recently-used end here as well as on acquisition, so
       // that eviction order and the idle time it logs are the same measurement.
       // A Turn that ran for minutes finished later than one started after it.
@@ -317,9 +394,15 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       lastUsedAt: Date.now(),
       reapTimer: null,
       leaving: false,
+      retry: null,
+      storm: null,
     }
 
-    session.on('event', (event) => this.emit('event', sessionId, event))
+    session.on('event', (event) => {
+      this.emit('event', sessionId, event)
+      const retry = readApiRetry(event)
+      if (retry !== null) this.#onRetry(resident, retry)
+    })
     session.on('turn-start', (text) => this.emit('turn-start', sessionId, text))
     session.on('turn-end', (turn) => this.emit('turn-end', sessionId, turn))
     // Kept whole rather than forwarded: it is the only place a process that
@@ -329,6 +412,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     })
     session.on('exit', (exit) => {
       this.#cancelReap(resident)
+      this.#clearRetryWatch(resident)
       this.#forget(resident)
       if (resident.leaving) return
       this.#log({ event: 'exit', sessionId, code: exit.code, signal: exit.signal })
@@ -397,6 +481,86 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
 
     this.#log({ event: 'kill', sessionId: resident.sessionId, graceMs: TERMINATE_GRACE_MS })
     await resident.session.terminate('SIGKILL')
+  }
+
+  /**
+   * Count one retry against the running Turn's budget, and end the Turn if it
+   * has run out.
+   *
+   * Only while a Turn is in flight. A retry arriving outside one belongs to
+   * nothing roma is waiting on, and there is no Turn for it to be the next
+   * one's problem either.
+   */
+  #onRetry(resident: Resident, retry: ApiRetry): void {
+    if (!resident.busy || resident.storm !== null) return
+
+    let watch = resident.retry
+    if (watch === null) {
+      watch = { count: 1, startedAt: Date.now(), timer: null, last: retry }
+      // Armed on the first retry, so the window measures how long this Turn has
+      // been retrying rather than how long it has been running. A Turn that
+      // works for ten minutes and then hits a bad credential gets the same
+      // minute as one that hits it immediately.
+      watch.timer = setTimeout(() => this.#abandon(resident, 'window'), this.#retryBudget.windowMs)
+      watch.timer.unref?.()
+      resident.retry = watch
+    } else {
+      watch.count += 1
+      watch.last = retry
+    }
+
+    if (watch.count < this.#retryBudget.maxApiRetries) return
+    this.#abandon(resident, 'retries')
+  }
+
+  /**
+   * Stop waiting on a Turn that is only retrying, and give its slot back.
+   *
+   * The process goes rather than the Turn being interrupted. An interrupt is
+   * measured against a process that is *working* — ~20ms, and it stays alive —
+   * and says nothing about one asleep in a 35-second backoff. This cap exists
+   * precisely for the case where the process is not doing what roma hopes, so
+   * it uses the ending that does not depend on the process agreeing to it. The
+   * Session survives: the next message resumes it from the transcript on disk.
+   */
+  #abandon(resident: Resident, limit: 'retries' | 'window'): void {
+    const watch = resident.retry
+    if (watch === null || resident.storm !== null) return
+
+    const elapsedMs = Date.now() - watch.startedAt
+    resident.storm = new RetryStormError(watch.count, elapsedMs, watch.last)
+    this.#clearRetryWatch(resident)
+    this.#cancelReap(resident)
+    this.#forget(resident)
+    // The caller is told the status too, because a 401 is someone's to go and
+    // fix. This record is what an operator gets on top of that: which Session,
+    // how long it retried, and which of the two budgets ran out.
+    this.#log({
+      event: 'retry-storm',
+      sessionId: resident.sessionId,
+      retries: watch.count,
+      elapsedMs,
+      limit,
+      status: watch.last.errorStatus,
+      error: watch.last.error,
+    })
+    // Not awaited: the Turn's own rejection is what the caller is waiting on,
+    // and it arrives with the process's exit. Termination cannot reject —
+    // signals and waiting — and the catch is here so it can never become an
+    // unhandled rejection either.
+    void this.#terminate(resident).catch(() => {})
+  }
+
+  /**
+   * End the retry watch, which is also what gives the next Turn a full budget.
+   *
+   * Called where a Turn ends, in `#turn`'s `finally` — a watch only ever starts
+   * inside a Turn, so that is the whole of its life. The `exit` listener clears
+   * it too, so that the window timer cannot outlive the process it was watching.
+   */
+  #clearRetryWatch(resident: Resident): void {
+    if (resident.retry?.timer != null) clearTimeout(resident.retry.timer)
+    resident.retry = null
   }
 
   #scheduleReap(resident: Resident): void {

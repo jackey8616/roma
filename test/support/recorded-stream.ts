@@ -51,6 +51,19 @@ export function recordedStream(name: string): RecordedStream {
 }
 
 /**
+ * The `api_retry` events of a recorded stream, in the order they arrived.
+ *
+ * `auth-failure` holds ten of them, spread over 182 seconds under a bad
+ * credential — the real storm the retry budget exists to cut short, carrying the
+ * real 401. Slice as many as a test needs to spend a budget.
+ */
+export function apiRetries(name: string): ClaudeEvent[] {
+  return recordedStream(name).events.filter(
+    (event) => event.type === 'system' && event['subtype'] === 'api_retry',
+  )
+}
+
+/**
  * The same recorded Turn with a different `total_cost_usd` on its terminal event.
  *
  * For the one thing no single recording can supply: what a `--resume`d process
