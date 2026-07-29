@@ -41,9 +41,18 @@ text. Everything else the Channel knew is gone by this point.
 _Avoid_: event, payload, request
 
 **Outbound Instruction**:
-What the Core hands back to an Adapter — the result of a Task, or why there
-isn't one. It says what happened, never how it should look.
+What the Core hands back to an Adapter — the result of a Task, why there isn't
+one, or what the Task is doing meanwhile. It says what happened, never how it
+should look.
 _Avoid_: response, reply, command (a command is `/new` or `/stop`)
+
+**Acknowledgement**:
+The one message roma posts as soon as a Task arrives and then keeps editing
+while it runs — that it is waiting, that a tool is running, the answer as it is
+written. One per Task, throttled, and never the final result: that is always a
+separate message. Where a Channel cannot edit, the acknowledgement is posted
+once and nothing follows it.
+_Avoid_: status message, progress bar, typing indicator
 
 ### Running work
 

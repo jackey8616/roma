@@ -1,7 +1,10 @@
+import { randomUUID } from 'node:crypto'
 import type { ChannelAdapter, IngressMessage, OutboundInstruction } from './channel-adapter.js'
-import { TurnFailedError } from './claude-session.js'
+import { TurnFailedError, type Turn } from './claude-session.js'
+import { ProgressReporter } from './progress-reporter.js'
 import { sessionIdFor } from './session-id.js'
 import { RetryStormError, type SessionPool } from './session-pool.js'
+import type { ClaudeEvent } from './stream-events.js'
 import type { TaskQueue } from './task-queue.js'
 
 export interface CoreOptions {
@@ -66,11 +69,13 @@ export class Core {
   /**
    * Run one Task: the message in, the Turn it drives, the outcome back out.
    *
-   * The Task waits its turn first. Its Session may already be busy — two
-   * messages in one Conversation are handled one at a time, because two
-   * processes writing one Session file corrupt it — or roma may already be
-   * running as much as it runs at once. Either way the Conversation is told it
-   * is waiting rather than left with silence.
+   * The Task is acknowledged before it has produced anything, and that
+   * acknowledgement keeps changing while it runs, so nobody is left guessing
+   * whether it is alive. It waits its turn first — its Session may already be
+   * busy, since two messages in one Conversation are handled one at a time
+   * because two processes writing one Session file corrupt it, or roma may
+   * already be running as much as it runs at once — and waiting is a thing the
+   * acknowledgement says rather than a silence.
    *
    * Resolves when the Conversation has been told how it went. It rejects only
    * if the Channel could not be told at all — a failed Task is an outcome, not
@@ -81,33 +86,68 @@ export class Core {
     // No lookup, no record, nothing to have gone stale: the Conversation Key is
     // the Session id, one hash apart.
     const sessionId = sessionIdFor(conversationKey)
+    // Minted here rather than derived, because it names this Task and not the
+    // Conversation: two messages in one Conversation can be in flight at once,
+    // each with an acknowledgement of its own for the Adapter to keep up to
+    // date.
+    const taskId = randomUUID()
+
+    const reporter = new ProgressReporter({
+      // The Adapter is told whether it may edit; the Core is what obeys the
+      // answer. Where it cannot, the acknowledgement is sent once and nothing
+      // follows it.
+      updates: this.#channel.capabilities.messageMutation,
+      deliver: (progress) =>
+        this.#channel.deliver({ kind: 'progress', taskId, conversationKey, progress }),
+    })
 
     let instruction: OutboundInstruction
     try {
       const turn = await this.#queue.run(
         sessionId,
-        () => this.#pool.send(sessionId, message.text),
-        // Best-effort, and the only instruction that is. A Channel too broken
-        // to carry this one is too broken to carry the failure that abandoning
-        // the Task would produce, so refusing to run it buys no less silence —
-        // it only adds losing the work to it. The result is the promise; this
-        // is the courtesy. `async` so that an Adapter that throws where it
-        // could have rejected is absorbed here too.
-        async (position) => {
-          try {
-            await this.#channel.deliver({ kind: 'queued', conversationKey, position })
-          } catch {
-            // Nothing to do with it: there is no second Channel to tell, and a
-            // Task that is going to run anyway has no failure to report yet.
-          }
-        },
+        () => this.#runTurn(sessionId, message.text, reporter),
+        // The one thing roma will go without, and it is the reporter that
+        // absorbs the failure: a Channel too broken to carry this is too broken
+        // to carry the failure that abandoning the Task would produce, so
+        // refusing to run it buys no less silence — it only adds losing the
+        // work to it.
+        (position) => reporter.update({ phase: 'queued', position }),
       )
-      instruction = { kind: 'result', conversationKey, text: turn.text }
+      instruction = { kind: 'result', taskId, conversationKey, text: turn.text }
     } catch (error) {
-      instruction = { kind: 'failure', conversationKey, reason: reasonFor(error) }
+      instruction = { kind: 'failure', taskId, conversationKey, reason: reasonFor(error) }
     }
 
+    // Nothing more is scheduled, and nothing in flight is waited on: an update
+    // the Channel has not finished taking is not a reason to hold back the one
+    // message roma owes unconditionally.
+    reporter.stop()
     await this.#channel.deliver(instruction)
+  }
+
+  /**
+   * Drive the Turn, reporting on it as the stream says what it is doing.
+   *
+   * The acknowledgement goes out here rather than on arrival, so that a Task
+   * that had to wait says it was waiting first and only then says it is
+   * running. Both are the same message; this is the second thing it says.
+   *
+   * Filtered by Session id because the pool is shared by every Core, so its
+   * events are every Conversation's. The listener is a Turn's worth long: one
+   * Task, one subscription, dropped in the `finally` whichever way the Turn
+   * ended.
+   */
+  async #runTurn(sessionId: string, text: string, reporter: ProgressReporter): Promise<Turn> {
+    reporter.update({ phase: 'working' })
+    const onEvent = (id: string, event: ClaudeEvent): void => {
+      if (id === sessionId) reporter.observe(event)
+    }
+    this.#pool.on('event', onEvent)
+    try {
+      return await this.#pool.send(sessionId, text)
+    } finally {
+      this.#pool.off('event', onEvent)
+    }
   }
 }
 

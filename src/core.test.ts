@@ -2,9 +2,13 @@ import { readdirSync, readFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Core } from './core.js'
-import type { IngressMessage, OutboundInstruction } from './channel-adapter.js'
+import type {
+  ChannelCapabilities,
+  IngressMessage,
+  OutboundInstruction,
+} from './channel-adapter.js'
 import type { RetryBudget } from './config.js'
 import { sessionIdFor } from './session-id.js'
 import { SessionPool } from './session-pool.js'
@@ -12,7 +16,7 @@ import type { ClaudeEvent } from './stream-events.js'
 import { TaskQueue } from './task-queue.js'
 import { FakeClaude, flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
-import { apiRetries, feed, recordedStream } from '../test/support/recorded-stream.js'
+import { apiRetries, feed, recordedStream, upToFirst } from '../test/support/recorded-stream.js'
 
 const stream = recordedStream('three-turns-one-process')
 /** One complete Turn of a real recorded stream. Its text is "ok". */
@@ -20,6 +24,22 @@ const OK = stream.turn(1)
 const FAILED = recordedStream('auth-failure').turn(1)
 /** The real `api_retry` events a bad credential produced, 401 and all. */
 const RETRIES = apiRetries('auth-failure')
+/** 72 seconds of generation with `--include-partial-messages` on: 194 `text_delta` events. */
+const GENERATING = recordedStream('generation-partial-messages').turn(1)
+/**
+ * A tool-using Turn up to the moment the tool starts.
+ *
+ * Where 25339ms of complete silence began in the capture, which is what a Task
+ * that "produces no events for an extended period" actually looks like now that
+ * generation itself is not silent.
+ */
+const TOOL_STARTS = upToFirst(
+  recordedStream('tool-use-partial-messages').turn(1),
+  'system/task_started',
+)
+
+/** ADR-0003's throttle interval, as `ProgressReporter` sizes it. */
+const THROTTLE = 5_000
 
 const KEY = 'conversation-one'
 const OTHER_KEY = 'conversation-two'
@@ -29,8 +49,13 @@ let workRoots: string[] = []
 
 function newCore({
   workRoot = mkdtempSync(join(tmpdir(), 'roma-core-')),
+  capabilities,
   ...options
-}: { workRoot?: string; retryBudget?: RetryBudget } = {}) {
+}: {
+  workRoot?: string
+  retryBudget?: RetryBudget
+  capabilities?: Partial<ChannelCapabilities>
+} = {}) {
   const claude = new FakeClaude({ exitOnKill: true })
   workRoots.push(workRoot)
   const pool = new SessionPool({
@@ -44,7 +69,7 @@ function newCore({
 
   // The real cap, so what the tests below see is what roma does.
   const queue = new TaskQueue()
-  const adapter = new RecordingAdapter()
+  const adapter = new RecordingAdapter(capabilities)
   const core = new Core({ channel: adapter, pool, queue })
 
   /** Deliver one message to the Core and serve the Turn it drives from a recording. */
@@ -76,9 +101,41 @@ function ingress(text: string, conversationKey = KEY): IngressMessage {
   return { conversationKey, caller: 'someone', text }
 }
 
+/**
+ * Instructions with their Task ids taken off.
+ *
+ * Most of what follows is about what a Conversation sees rather than about
+ * correlating messages, and a uuid nothing asserts on only makes it harder to
+ * read. Where the ids themselves matter they are asserted on directly.
+ */
+function posted(instructions: readonly OutboundInstruction[]) {
+  return instructions.map(({ taskId, ...rest }) => rest)
+}
+
+/** Every progress instruction the Channel was given, in order. */
+function progressOf(adapter: RecordingAdapter) {
+  return adapter.instructions.filter((instruction) => instruction.kind === 'progress')
+}
+
+/** The ones that told a caller it was waiting. */
+function queuedIn(adapter: RecordingAdapter) {
+  return progressOf(adapter).filter((instruction) => instruction.progress.phase === 'queued')
+}
+
+beforeEach(() => {
+  // setImmediate stays real so `flush` can still drain the microtask queue while
+  // the progress throttle, the reap and the reclaim timers are under the test's
+  // control.
+  vi.useFakeTimers({
+    toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+    now: 1_800_000_000_000,
+  })
+})
+
 afterEach(async () => {
   for (const pool of pools) await pool.shutdown()
   pools = []
+  vi.useRealTimers()
   for (const root of workRoots) rmSync(root, { recursive: true, force: true })
   workRoots = []
 })
@@ -129,13 +186,17 @@ describe('finding the Session a message belongs to', () => {
 
 describe('what the Channel is asked to post', () => {
   // The final result is its own message, unconditionally. It is what people
-  // search for, quote, and reply to months later.
-  it('posts the result of the Turn and nothing else', async () => {
+  // search for, quote, and reply to months later, so it is never the
+  // acknowledgement edited one last time.
+  it('acknowledges the Task, then posts the result as its own message', async () => {
     const { adapter, say } = newCore()
 
     await say('hello')
 
-    expect(adapter.instructions).toEqual([{ kind: 'result', conversationKey: KEY, text: 'ok' }])
+    expect(posted(adapter.instructions)).toEqual([
+      { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
+      { kind: 'result', conversationKey: KEY, text: 'ok' },
+    ])
   })
 
   it("posts each Conversation's result back to its own Conversation", async () => {
@@ -144,10 +205,11 @@ describe('what the Channel is asked to post', () => {
     await say('hello')
     await say('hello', { key: OTHER_KEY })
 
-    expect(adapter.instructions.map((instruction) => instruction.conversationKey)).toEqual([
-      KEY,
-      OTHER_KEY,
-    ])
+    expect(
+      adapter.instructions
+        .filter((instruction) => instruction.kind === 'result')
+        .map((instruction) => instruction.conversationKey),
+    ).toEqual([KEY, OTHER_KEY])
   })
 
   // A Task that fails and says nothing leaves someone waiting on work that is
@@ -158,7 +220,8 @@ describe('what the Channel is asked to post', () => {
 
     await say('hello', { events: FAILED })
 
-    expect(adapter.instructions).toEqual([
+    expect(posted(adapter.instructions)).toEqual([
+      { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
       { kind: 'failure', conversationKey: KEY, reason: expect.stringContaining('401') },
     ])
   })
@@ -175,7 +238,8 @@ describe('what the Channel is asked to post', () => {
     claude.process.emitExit({ code: 1, signal: null })
     await task
 
-    expect(adapter.instructions).toEqual([
+    expect(posted(adapter.instructions)).toEqual([
+      { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
       { kind: 'failure', conversationKey: KEY, reason: 'roma could not run this Task.' },
     ])
   })
@@ -251,7 +315,9 @@ describe('handling one Conversation one Task at a time', () => {
     feed(proc, stream.turn(3))
     await second
 
-    expect(adapter.instructions.filter((instruction) => instruction.kind === 'result')).toEqual([
+    expect(
+      posted(adapter.instructions.filter((instruction) => instruction.kind === 'result')),
+    ).toEqual([
       { kind: 'result', conversationKey: KEY, text: 'ok' },
       { kind: 'result', conversationKey: KEY, text: '47' },
     ])
@@ -264,7 +330,14 @@ describe('handling one Conversation one Task at a time', () => {
     const second = core.runTask(ingress('second'))
     await flush()
 
-    expect(adapter.instructions).toEqual([{ kind: 'queued', conversationKey: KEY, position: 1 }])
+    // Two Tasks in one Conversation, each acknowledged on its own message —
+    // which is why an acknowledgement is named by a Task id and not by the
+    // Conversation it is in.
+    expect(posted(adapter.instructions)).toEqual([
+      { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
+      { kind: 'progress', conversationKey: KEY, progress: { phase: 'queued', position: 1 } },
+    ])
+    expect(new Set(progressOf(adapter).map((instruction) => instruction.taskId)).size).toBe(2)
 
     const proc = claude.processFor(join(workRoot, sessionIdFor(KEY)))
     feed(proc, OK)
@@ -299,9 +372,9 @@ describe('running only so much at once', () => {
     )
     await flush()
 
-    expect(adapter.instructions).toEqual([
-      { kind: 'queued', conversationKey: 'four', position: 1 },
-      { kind: 'queued', conversationKey: 'five', position: 2 },
+    expect(posted(queuedIn(adapter))).toEqual([
+      { kind: 'progress', conversationKey: 'four', progress: { phase: 'queued', position: 1 } },
+      { kind: 'progress', conversationKey: 'five', progress: { phase: 'queued', position: 2 } },
     ])
 
     for (const proc of claude.processes) feed(proc, OK)
@@ -316,14 +389,14 @@ describe('running only so much at once', () => {
 
     await say('hello')
 
-    expect(adapter.instructions.map((instruction) => instruction.kind)).toEqual(['result'])
+    expect(queuedIn(adapter)).toEqual([])
   })
 
-  // The queue notice is the one instruction roma will go without. A Channel too
-  // broken to carry it is too broken to carry the failure that abandoning the
-  // Task would produce, so dropping the work buys no less silence — it only
-  // adds losing the work to it.
-  it('still runs a Task whose caller could not be told it was waiting', async () => {
+  // Progress is the one instruction roma will go without. A Channel too broken
+  // to carry it is too broken to carry the failure that abandoning the Task
+  // would produce, so dropping the work buys no less silence — it only adds
+  // losing the work to it.
+  it('still runs a Task whose caller could not be told anything about it', async () => {
     const { claude, pool, queue, workRoot, core: first } = newCore()
     const delivered: OutboundInstruction[] = []
     const core = new Core({
@@ -331,7 +404,7 @@ describe('running only so much at once', () => {
         capabilities: { messageMutation: true, stableConversationKey: true },
         toIngress: (event: IngressMessage) => event,
         deliver: (instruction) => {
-          if (instruction.kind === 'queued') throw new Error('the Channel is down')
+          if (instruction.kind === 'progress') throw new Error('the Channel is down')
           delivered.push(instruction)
         },
       },
@@ -350,7 +423,7 @@ describe('running only so much at once', () => {
     feed(proc, stream.turn(3))
     await behind
 
-    expect(delivered).toEqual([{ kind: 'result', conversationKey: KEY, text: '47' }])
+    expect(posted(delivered)).toEqual([{ kind: 'result', conversationKey: KEY, text: '47' }])
   })
 
   // The result is not the courtesy: an instruction that never reached the
@@ -397,7 +470,8 @@ describe('giving up on a Task that is only retrying', () => {
     feed(proc, RETRIES.slice(0, 3))
     await task
 
-    expect(adapter.instructions).toEqual([
+    expect(posted(adapter.instructions)).toEqual([
+      { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
       {
         kind: 'failure',
         conversationKey: KEY,
@@ -420,8 +494,8 @@ describe('giving up on a Task that is only retrying', () => {
 
     // Nothing is free, so it waits — but it is told so, and it is not refused.
     expect(claude.processes).toHaveLength(3)
-    expect(adapter.instructions).toEqual([
-      { kind: 'queued', conversationKey: 'four', position: 1 },
+    expect(posted(queuedIn(adapter))).toEqual([
+      { kind: 'progress', conversationKey: 'four', progress: { phase: 'queued', position: 1 } },
     ])
 
     for (const proc of claude.processes) feed(proc, RETRIES.slice(0, 3))
@@ -430,7 +504,7 @@ describe('giving up on a Task that is only retrying', () => {
     feed(claude.processFor(join(workRoot, sessionIdFor('four'))), OK)
     await fourth
 
-    expect(adapter.instructions.at(-1)).toEqual({
+    expect(posted(adapter.instructions).at(-1)).toEqual({
       kind: 'result',
       conversationKey: 'four',
       text: 'ok',
@@ -444,7 +518,154 @@ describe('giving up on a Task that is only retrying', () => {
     feed(proc, [...RETRIES.slice(0, 2), ...OK])
     await task
 
-    expect(adapter.instructions).toEqual([{ kind: 'result', conversationKey: KEY, text: 'ok' }])
+    expect(posted(adapter.instructions).at(-1)).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: 'ok',
+    })
+  })
+})
+
+describe('telling a Conversation its Task is alive', () => {
+  it('acknowledges the Task before it has produced anything at all', async () => {
+    const { adapter, start } = newCore()
+
+    const { task, proc } = await start('hello')
+
+    expect(posted(adapter.instructions)).toEqual([
+      { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
+    ])
+
+    feed(proc, OK)
+    await task
+  })
+
+  // One message, edited. Every update carries the Task id the acknowledgement
+  // carried, which is what tells an Adapter it is editing rather than posting —
+  // and the result carries it too, so the Adapter knows which acknowledgement
+  // is finished with.
+  it('keeps every update on the acknowledgement rather than posting again', async () => {
+    const { adapter, start } = newCore()
+
+    const { task, proc } = await start('hello')
+    feed(proc, GENERATING.slice(0, -1))
+    await vi.advanceTimersByTimeAsync(THROTTLE)
+    feed(proc, GENERATING.slice(-1))
+    await task
+
+    const updates = progressOf(adapter)
+    expect(updates.map((instruction) => instruction.progress.phase)).toEqual(['working', 'writing'])
+    expect(new Set(updates.map((instruction) => instruction.taskId)).size).toBe(1)
+    expect(adapter.instructions.at(-1)).toMatchObject({
+      kind: 'result',
+      taskId: updates[0]?.taskId,
+    })
+  })
+
+  // 194 `text_delta` events in one Turn. A renderer that edited a message per
+  // event would make 194 Channel calls, and nobody can read that fast anyway.
+  it('does not turn a burst of stream events into a burst of updates', async () => {
+    const { adapter, start } = newCore()
+
+    const { task, proc } = await start('hello')
+    feed(proc, GENERATING.slice(0, -1))
+    await flush()
+
+    expect(progressOf(adapter)).toHaveLength(1)
+
+    feed(proc, GENERATING.slice(-1))
+    await task
+  })
+
+  // The stream marks a tool starting and then says nothing until it finishes.
+  // Naming what is running is the only thing that keeps the acknowledgement from
+  // going stale for as long as the tool takes.
+  it('names the tool that is running, so a tool window does not go stale', async () => {
+    const { adapter, start } = newCore()
+
+    const { task, proc } = await start('hello')
+    feed(proc, TOOL_STARTS)
+    await vi.advanceTimersByTimeAsync(THROTTLE)
+
+    expect(adapter.instructions.at(-1)).toMatchObject({
+      kind: 'progress',
+      progress: { phase: 'tool', tool: expect.stringContaining('awk') },
+    })
+
+    feed(proc, OK)
+    await task
+  })
+
+  // Suppression is the degrade ADR-0003 left open and now records. The result
+  // is a separate message either way — that is the rule nothing makes
+  // conditional.
+  it('degrades to the acknowledgement alone where the Channel cannot edit', async () => {
+    const { adapter, start } = newCore({ capabilities: { messageMutation: false } })
+
+    const { task, proc } = await start('hello')
+    feed(proc, GENERATING.slice(0, -1))
+    await vi.advanceTimersByTimeAsync(20 * THROTTLE)
+    feed(proc, GENERATING.slice(-1))
+    await task
+
+    expect(posted(adapter.instructions)).toEqual([
+      { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
+      { kind: 'result', conversationKey: KEY, text: expect.any(String) },
+    ])
+  })
+
+  // Progress is the one instruction roma will go without, so it must not become
+  // the one that can silence a Task: a Channel that never finishes taking an
+  // update still gets the result. Waiting on it before posting would make the
+  // unconditional message hostage to the best-effort one.
+  it('posts the result even where the Channel never finishes taking an update', async () => {
+    const { claude, pool, queue, workRoot } = newCore()
+    const delivered: OutboundInstruction[] = []
+    const core = new Core({
+      channel: {
+        capabilities: { messageMutation: true, stableConversationKey: true },
+        toIngress: (event: IngressMessage) => event,
+        deliver: (instruction) => {
+          if (instruction.kind === 'progress') return new Promise<void>(() => {})
+          delivered.push(instruction)
+        },
+      },
+      pool,
+      queue,
+    })
+
+    const task = core.runTask(ingress('hello'))
+    await flush()
+    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    await task
+
+    expect(posted(delivered)).toEqual([{ kind: 'result', conversationKey: KEY, text: 'ok' }])
+  })
+
+  // Generation is no longer silent, so an extended silence now means a tool is
+  // running — and tool runtime is unbounded, which is exactly why no threshold
+  // separates a stalled tool call from a slow one. The rule that a Task ends
+  // when it finishes or when a human stops it is unchanged; only the reason for
+  // it moved, so do not reinstate a timeout on the old "generation is silent"
+  // argument.
+  it('runs no stall handling and no timeout on a Task that has gone quiet', async () => {
+    const { adapter, start } = newCore()
+
+    const { task, proc } = await start('hello')
+    feed(proc, TOOL_STARTS)
+    await vi.advanceTimersByTimeAsync(30 * 60_000)
+
+    expect(proc.signals).toEqual([])
+    expect(proc.sent.filter((frame) => frame['type'] === 'control_request')).toEqual([])
+
+    feed(proc, OK)
+    await task
+
+    expect(posted(adapter.instructions).at(-1)).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: 'ok',
+    })
   })
 })
 

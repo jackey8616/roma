@@ -301,6 +301,12 @@ unconditional. Where an adapter declares no message mutation, progress degrades
 to periodic new messages or is suppressed entirely — the final result still
 arrives on its own.
 
+**Of those two, roma suppresses** (settled when this was built, #7). The
+acknowledgement is still posted once, because a task nobody has confirmed
+received is what makes people resend; everything after it is dropped. Periodic
+new messages at 5–10s would be thirty to sixty messages over a five-minute task,
+which buries the conversation it is reporting into.
+
 ADR-0001 specified updating "as stream events arrive", which was written without
 knowing that generation emits no events at all. The throttle has something to
 throttle only because of `--include-partial-messages`. **Verified:** with the flag

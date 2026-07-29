@@ -51,6 +51,40 @@ export function recordedStream(name: string): RecordedStream {
 }
 
 /**
+ * How these captures name one event: its type, plus whichever sub-name the
+ * stream uses for it — `system/task_started`, `stream_event/text_delta`.
+ *
+ * Deliberately its own reading of the stream rather than the one in
+ * `src/stream-events.ts`. A test that located its fixtures with the code under
+ * test would agree with it about the field paths by construction, and the field
+ * paths are most of what there is to get wrong.
+ */
+export function kindOf(event: ClaudeEvent): string {
+  if (event.type === 'system') return `system/${String(event['subtype'])}`
+  if (event.type !== 'stream_event') return event.type
+  const inner = event['event'] as Record<string, unknown>
+  const delta = inner['delta'] as Record<string, unknown> | undefined
+  return `stream_event/${String(delta === undefined ? inner['type'] : delta['type'])}`
+}
+
+/** The events of one kind, in the order they arrived. */
+export function ofKind(events: readonly ClaudeEvent[], kind: string): ClaudeEvent[] {
+  return events.filter((event) => kindOf(event) === kind)
+}
+
+/**
+ * A recorded Turn cut off after the first event of one kind.
+ *
+ * How a test stops a stream part-way — at `system/task_started`, say, which is
+ * where 25339ms of complete silence began in the tool capture.
+ */
+export function upToFirst(events: readonly ClaudeEvent[], kind: string): ClaudeEvent[] {
+  const at = events.findIndex((event) => kindOf(event) === kind)
+  if (at === -1) throw new Error(`this recording has no ${kind} event`)
+  return events.slice(0, at + 1)
+}
+
+/**
  * The `api_retry` events of a recorded stream, in the order they arrived.
  *
  * `auth-failure` holds ten of them, spread over 182 seconds under a bad
