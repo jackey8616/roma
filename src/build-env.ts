@@ -11,6 +11,14 @@ export type Credential =
   | { readonly kind: 'shared-window'; readonly oauthToken: string }
   | { readonly kind: 'overflow'; readonly apiKey: string }
 
+/**
+ * Which of the two a Task ran on, without the secret that goes with it.
+ *
+ * What an audit record carries: the question it answers is which of the two
+ * bills a Task landed on, and the token itself has no business on disk.
+ */
+export type CredentialKind = Credential['kind']
+
 export interface BuildEnvOptions {
   readonly credential: Credential
   /**

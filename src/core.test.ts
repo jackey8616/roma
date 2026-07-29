@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { AuditLog } from './audit-log.js'
 import { Core } from './core.js'
 import type {
   ChannelCapabilities,
@@ -17,7 +18,14 @@ import type { ClaudeEvent } from './stream-events.js'
 import { TaskQueue } from './task-queue.js'
 import { FakeClaude, flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
-import { apiRetries, feed, recordedStream, upToFirst } from '../test/support/recorded-stream.js'
+import {
+  apiRetries,
+  feed,
+  recordedStream,
+  upToFirst,
+  withApiKeySource,
+  withTotalCostUsd,
+} from '../test/support/recorded-stream.js'
 
 const stream = recordedStream('three-turns-one-process')
 /** One complete Turn of a real recorded stream. Its text is "ok". */
@@ -45,20 +53,26 @@ const THROTTLE = 5_000
 const KEY = 'conversation-one'
 const OTHER_KEY = 'conversation-two'
 
+/** The clock these tests run on, and therefore the month their records are filed in. */
+const NOW = 1_800_000_000_000
+const MONTH = new Date(NOW).toISOString().slice(0, 7)
+
 let pools: SessionPool[] = []
 let workRoots: string[] = []
 
 function newCore({
   workRoot = mkdtempSync(join(tmpdir(), 'roma-core-')),
+  auditDir = mkdtempSync(join(tmpdir(), 'roma-core-audit-')),
   capabilities,
   ...options
 }: {
   workRoot?: string
+  auditDir?: string
   retryBudget?: RetryBudget
   capabilities?: Partial<ChannelCapabilities>
 } = {}) {
   const claude = new FakeClaude({ exitOnKill: true })
-  workRoots.push(workRoot)
+  workRoots.push(workRoot, auditDir)
   const pool = new SessionPool({
     workRoot,
     env: { PATH: '/usr/bin' },
@@ -72,7 +86,15 @@ function newCore({
   const queue = new TaskQueue()
   const sessions = new SessionGenerations({ workRoot })
   const adapter = new RecordingAdapter(capabilities)
-  const core = new Core({ channel: adapter, pool, queue, sessions })
+  const audit = new AuditLog({ dir: auditDir })
+  const core = new Core({
+    channel: adapter,
+    pool,
+    queue,
+    sessions,
+    audit,
+    credential: 'shared-window',
+  })
 
   /**
    * Deliver one message to the Core and serve the Turn it drives from a
@@ -106,7 +128,12 @@ function newCore({
     return { task, proc: claude.processFor(join(workRoot, sessionIdFor(key))) }
   }
 
-  return { adapter, claude, core, pool, queue, sessions, workRoot, say, start }
+  return { adapter, audit, claude, core, pool, queue, sessions, workRoot, say, start }
+}
+
+/** Every Audit Record these tests have produced, in the order the Tasks ended. */
+function recordsIn(audit: AuditLog) {
+  return audit.readMonth(MONTH)
 }
 
 function ingress(text: string, conversationKey = KEY): IngressMessage {
@@ -140,7 +167,7 @@ beforeEach(() => {
   // control.
   vi.useFakeTimers({
     toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
-    now: 1_800_000_000_000,
+    now: NOW,
   })
 })
 
@@ -268,7 +295,7 @@ describe('what the Channel is asked to post', () => {
   // Channel looks, from the Conversation, exactly like a message that was never
   // received — so whoever handed it in has to hear about it.
   it('does not swallow an instruction the Channel never carried out', async () => {
-    const { pool, queue, sessions, claude, workRoot } = newCore()
+    const { audit, pool, queue, sessions, claude, workRoot } = newCore()
     // A second Core over the same pool and queue: one Core per Channel is what
     // keeps the Core free of Channel identity, and both are shared between them.
     const core = new Core({
@@ -282,6 +309,8 @@ describe('what the Channel is asked to post', () => {
       pool,
       queue,
       sessions,
+      audit,
+      credential: 'shared-window',
     })
 
     const task = core.handle(ingress('hello'))
@@ -410,7 +439,7 @@ describe('running only so much at once', () => {
   // would produce, so dropping the work buys no less silence — it only adds
   // losing the work to it.
   it('still runs a Task whose caller could not be told anything about it', async () => {
-    const { claude, pool, queue, sessions, workRoot, core: first } = newCore()
+    const { audit, claude, pool, queue, sessions, workRoot, core: first } = newCore()
     const delivered: OutboundInstruction[] = []
     const core = new Core({
       channel: {
@@ -424,6 +453,8 @@ describe('running only so much at once', () => {
       pool,
       queue,
       sessions,
+      audit,
+      credential: 'shared-window',
     })
 
     const running = first.handle(ingress('first'))
@@ -444,7 +475,7 @@ describe('running only so much at once', () => {
   // Channel looks, from the Conversation, exactly like a message that was never
   // received, so whoever handed it in still has to hear about it.
   it('does not extend that to the result of a Task that waited', async () => {
-    const { claude, pool, queue, sessions, workRoot, core: first } = newCore()
+    const { audit, claude, pool, queue, sessions, workRoot, core: first } = newCore()
     const core = new Core({
       channel: {
         capabilities: { messageMutation: true, stableConversationKey: true },
@@ -456,6 +487,8 @@ describe('running only so much at once', () => {
       pool,
       queue,
       sessions,
+      audit,
+      credential: 'shared-window',
     })
 
     const running = first.handle(ingress('first'))
@@ -634,7 +667,7 @@ describe('telling a Conversation its Task is alive', () => {
   // update still gets the result. Waiting on it before posting would make the
   // unconditional message hostage to the best-effort one.
   it('posts the result even where the Channel never finishes taking an update', async () => {
-    const { claude, pool, queue, sessions, workRoot } = newCore()
+    const { audit, claude, pool, queue, sessions, workRoot } = newCore()
     const delivered: OutboundInstruction[] = []
     const core = new Core({
       channel: {
@@ -648,6 +681,8 @@ describe('telling a Conversation its Task is alive', () => {
       pool,
       queue,
       sessions,
+      audit,
+      credential: 'shared-window',
     })
 
     const task = core.handle(ingress('hello'))
@@ -995,12 +1030,220 @@ describe('the two Commands roma answers itself', () => {
   })
 })
 
+describe('the record every Task leaves behind', () => {
+  /** A real interrupt: the aborted Turn cost $0.000625 and the capture says so. */
+  const INTERRUPTED = recordedStream('interrupted-turn')
+
+  // Per-user attribution does not exist at the provider — everybody shares one
+  // token — so this file is the only place the question "who spent this" is ever
+  // answerable. Nothing else in roma has both halves: the pool knows the Session
+  // and the cost, and only the Core knows who asked.
+  it('says who asked, which Session ran it, how long it took and what it cost', async () => {
+    const { audit, say } = newCore()
+
+    await say('hello')
+
+    expect(recordsIn(audit)).toEqual([
+      {
+        at: new Date(NOW).toISOString(),
+        taskId: expect.any(String),
+        caller: 'someone',
+        sessionId: sessionIdFor(KEY),
+        outcome: 'result',
+        costUsd: 0.010312900000000002,
+        durationMs: 0,
+        turnMs: 0,
+        credential: 'shared-window',
+        apiKeySource: 'none',
+      },
+    ])
+  })
+
+  // The headline of #9 and the number ADR-0002's monthly Overflow cap is built
+  // on. `total_cost_usd` is cumulative for the process, so a fifth Task logged
+  // raw is recorded at the sum of Tasks one through five — and every argument
+  // made from these figures would be made on numbers roughly five times too big.
+  it('records five Tasks of one Session at five separate costs', async () => {
+    const { audit, say } = newCore()
+
+    // One process serving five Turns, its running total climbing as Claude Code
+    // reports it.
+    for (const total of [0.01, 0.02, 0.035, 0.05, 0.06]) {
+      await say('hello', { events: withTotalCostUsd(OK, total) })
+    }
+
+    const costs = recordsIn(audit).map((record) => Number(record.costUsd.toFixed(6)))
+    expect(costs).toEqual([0.01, 0.01, 0.015, 0.015, 0.01])
+    // The fifth Task is not the whole Session, and the five together are.
+    expect(costs.reduce((sum, cost) => sum + cost, 0)).toBeCloseTo(0.06, 6)
+  })
+
+  // Two numbers because they answer different questions. The Task's own wall
+  // clock is what the person endured, queueing and cold start included; the
+  // Turn's is what Claude Code was actually working for, and the difference is
+  // what the concurrency cap costs.
+  it('separates how long the person waited from how long the Turn took', async () => {
+    const { audit, claude, core, workRoot } = newCore()
+
+    const first = core.handle(ingress('first'))
+    const second = core.handle(ingress('second'))
+    await flush()
+    const proc = claude.processFor(join(workRoot, sessionIdFor(KEY)))
+    // Three seconds of the second Task's life spent waiting for the first.
+    await vi.advanceTimersByTimeAsync(3_000)
+    feed(proc, OK)
+    await first
+    await flush()
+    await vi.advanceTimersByTimeAsync(1_000)
+    feed(proc, stream.turn(3))
+    await second
+
+    expect(recordsIn(audit).at(-1)).toMatchObject({ durationMs: 4_000, turnMs: 1_000 })
+  })
+
+  it('records a Task per Task rather than a Task per Conversation', async () => {
+    const { audit, say } = newCore()
+
+    await say('hello')
+    await say('hello', { key: OTHER_KEY })
+
+    expect(recordsIn(audit).map((record) => record.sessionId)).toEqual([
+      sessionIdFor(KEY),
+      sessionIdFor(OTHER_KEY),
+    ])
+    expect(new Set(recordsIn(audit).map((record) => record.taskId)).size).toBe(2)
+  })
+
+  // A Turn that failed still spent money, and a Task nobody can account for is
+  // exactly the hole this exists to close.
+  it('records a Task that failed', async () => {
+    const { audit, say } = newCore()
+
+    await say('hello', { events: FAILED })
+
+    expect(recordsIn(audit)).toMatchObject([{ outcome: 'failure', costUsd: 0 }])
+  })
+
+  it('records a Task somebody stopped, at what the interrupted Turn had spent', async () => {
+    const { audit, core, start } = newCore()
+    const { task, proc } = await start('write me an essay')
+
+    await core.handle(ingress('/stop'))
+    feed(proc, INTERRUPTED.turn(1))
+    await task
+
+    expect(recordsIn(audit)).toMatchObject([{ outcome: 'stopped', costUsd: 0.000625 }])
+  })
+
+  // Stopped while it was still queued, so there is no Turn to have cost
+  // anything. It is still a Task somebody sent and still one the log has to
+  // account for, and its duration is the only one it has.
+  it('records a Task that was stopped before it ever reached Claude Code', async () => {
+    const { audit, claude, core, workRoot } = newCore()
+    const busy = ['one', 'two', 'three'].map((key) => core.handle(ingress('hello', key)))
+    await flush()
+    const waiting = core.handle(ingress('a long job', 'four'))
+    await flush()
+
+    await core.handle(ingress('/stop', 'four'))
+    for (const key of ['one', 'two', 'three']) {
+      feed(claude.processFor(join(workRoot, sessionIdFor(key))), OK)
+    }
+    await Promise.all(busy)
+    await waiting
+
+    expect(recordsIn(audit).find((record) => record.sessionId === sessionIdFor('four'))).toMatchObject(
+      { outcome: 'stopped', costUsd: 0, turnMs: null },
+    )
+  })
+
+  // roma stopped waiting rather than Claude Code finishing, so no terminal event
+  // arrived and no cost was ever reported. Zero is the honest reading of that:
+  // the retries this abandoned were 401s, which buy nothing.
+  it('records a Task abandoned mid-retry-storm', async () => {
+    const { audit, start } = newCore({ retryBudget: { maxApiRetries: 3, windowMs: 60_000 } })
+
+    const { task, proc } = await start('hello')
+    feed(proc, RETRIES.slice(0, 3))
+    await task
+
+    expect(recordsIn(audit)).toMatchObject([{ outcome: 'failure', costUsd: 0, turnMs: null }])
+  })
+
+  // A Command is not a Task: it drives no Turn, costs nothing, and is not queued
+  // or counted. Recording one would put rows in the log that no money belongs to
+  // and inflate every count taken off it.
+  it('records nothing for a Command', async () => {
+    const { audit, core, say } = newCore()
+
+    await say('hello')
+    await core.handle(ingress('/stop'))
+    await core.handle(ingress('/new'))
+
+    expect(recordsIn(audit)).toHaveLength(1)
+  })
+
+  // The record is written before the Channel is told, because those are two
+  // different obligations and only one of them can be met by trying again. A
+  // Task whose result never reached anybody still spent the money.
+  it('records a Task whose outcome the Channel never took', async () => {
+    const { audit, claude, pool, queue, sessions, workRoot } = newCore()
+    const core = new Core({
+      channel: {
+        capabilities: { messageMutation: true, stableConversationKey: true },
+        toIngress: (event: IngressMessage) => event,
+        deliver: () => {
+          throw new Error('the Channel is down')
+        },
+      },
+      pool,
+      queue,
+      sessions,
+      audit,
+      credential: 'shared-window',
+    })
+
+    const task = core.handle(ingress('hello'))
+    task.catch(() => {})
+    await flush()
+    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    await expect(task).rejects.toThrow('the Channel is down')
+
+    expect(recordsIn(audit)).toMatchObject([{ outcome: 'result', costUsd: 0.010312900000000002 }])
+  })
+
+  // Both halves, because they can disagree and the disagreement is the whole
+  // point. ADR-0002's worst silent failure is a stray ANTHROPIC_API_KEY moving
+  // every run onto metered billing: roma believes it is spending quota, the
+  // invoice says otherwise, and this field is the only evidence either way.
+  it('records what roma ran the Task on and what Claude Code says paid for it', async () => {
+    const { audit, say } = newCore()
+
+    await say('hello', { events: withApiKeySource(OK, 'ANTHROPIC_API_KEY') })
+
+    expect(recordsIn(audit)).toMatchObject([
+      { credential: 'shared-window', apiKeySource: 'ANTHROPIC_API_KEY' },
+    ])
+    expect(audit.totalFor(MONTH)).toMatchObject({ tasks: 1, mismatched: 1 })
+  })
+})
+
 describe('knowing nothing about which Channel a message came from', () => {
   it('refuses a Channel that cannot supply a stable Conversation Key', () => {
-    const { pool, queue, sessions } = newCore()
+    const { audit, pool, queue, sessions } = newCore()
     const adapter = new RecordingAdapter({ stableConversationKey: false })
 
-    expect(() => new Core({ channel: adapter, pool, queue, sessions })).toThrow(/stable/i)
+    expect(
+      () =>
+        new Core({
+          channel: adapter,
+          pool,
+          queue,
+          sessions,
+          audit,
+          credential: 'shared-window',
+        }),
+    ).toThrow(/stable/i)
   })
 
   // "Google Chat is the first road, not the destination" is a claim the code has

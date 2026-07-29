@@ -115,6 +115,24 @@ export function withTotalCostUsd(
 }
 
 /**
+ * The same recorded Turn with a different `apiKeySource` on its `system/init`.
+ *
+ * For the pairing no capture holds: a Turn that succeeds while reporting that a
+ * key, rather than the subscription, is paying for it. Both values are real —
+ * `auth-failure` was captured under `ANTHROPIC_API_KEY` and every other capture
+ * under the OAuth token — but the one run under the key also failed on it, so
+ * the healthy-and-billed-elsewhere case has to be built out of the two.
+ */
+export function withApiKeySource(
+  events: readonly ClaudeEvent[],
+  apiKeySource: string,
+): ClaudeEvent[] {
+  return events.map((event) =>
+    kindOf(event) === 'system/init' ? { ...event, apiKeySource } : event,
+  )
+}
+
+/**
  * Push events at a fake process as NDJSON bytes.
  *
  * `chunkSize` decides where the chunk boundaries fall. The default sends each

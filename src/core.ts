@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto'
+import type { AuditLog, TaskOutcome } from './audit-log.js'
+import type { CredentialKind } from './build-env.js'
 import type { ChannelAdapter, IngressMessage, OutboundInstruction } from './channel-adapter.js'
 import { TurnFailedError, wasInterrupted, type Turn } from './claude-session.js'
 import { readCommand, type Command } from './commands.js'
 import { ProgressReporter } from './progress-reporter.js'
 import type { SessionGenerations } from './session-generation.js'
 import { RetryStormError, type SessionPool } from './session-pool.js'
-import type { ClaudeEvent } from './stream-events.js'
+import { readSystemInit, type ClaudeEvent } from './stream-events.js'
 import type { TaskQueue } from './task-queue.js'
 
 export interface CoreOptions {
@@ -39,6 +41,26 @@ export interface CoreOptions {
    * the `/new`.
    */
   readonly sessions: SessionGenerations
+  /**
+   * Where every Task is written down, and shared like everything else here.
+   *
+   * Required rather than optional, though an optional one would be easy: a Core
+   * built without it would run perfectly and quietly produce nothing, and what
+   * it produces nothing of is the only record of who spent what. Per-user
+   * attribution does not exist at the provider (ADR-0002), so an audit log that
+   * was accidentally left out cannot be reconstructed afterwards from anywhere.
+   */
+  readonly audit: AuditLog
+  /**
+   * Which credential the Tasks this Core runs are paid for by.
+   *
+   * Per Core today because it is per process: every Session in the pool is
+   * spawned from one environment built from one credential. Overflow will make
+   * it a per-Task decision, at which point this moves onto the Task — the field
+   * on the record is already per-Task, which is what makes that a change of
+   * where the value comes from rather than a change of what is recorded.
+   */
+  readonly credential: CredentialKind
 }
 
 /**
@@ -62,6 +84,12 @@ interface RunningTask {
   readonly sessionId: string
   /** Set by `/stop`, and read at each point the Task can still be stopped. */
   stopped: boolean
+  /**
+   * What Claude Code said its credential resolved to while serving this Task,
+   * off the `system/init` its Turn began with. Null until one arrives, and for a
+   * Task whose Turn never began.
+   */
+  apiKeySource: string | null
 }
 
 /**
@@ -84,6 +112,8 @@ export class Core {
   readonly #pool: SessionPool
   readonly #queue: TaskQueue
   readonly #sessions: SessionGenerations
+  readonly #audit: AuditLog
+  readonly #credential: CredentialKind
   /**
    * The Tasks this Core has taken on and not yet answered — queued ones
    * included, since a Task that has not started is still one a person can stop.
@@ -94,7 +124,7 @@ export class Core {
    */
   readonly #running = new Set<RunningTask>()
 
-  constructor({ channel, pool, queue, sessions }: CoreOptions) {
+  constructor({ channel, pool, queue, sessions, audit, credential }: CoreOptions) {
     if (!channel.capabilities.stableConversationKey) {
       // No Adapter should ever declare this false: a Channel without a stable key
       // of its own mints and persists one inside its Adapter, so the key is
@@ -109,6 +139,8 @@ export class Core {
     this.#pool = pool
     this.#queue = queue
     this.#sessions = sessions
+    this.#audit = audit
+    this.#credential = credential
   }
 
   /**
@@ -223,6 +255,10 @@ export class Core {
     // each with an acknowledgement of its own for the Adapter to keep up to
     // date.
     const taskId = randomUUID()
+    // From arrival rather than from admission: queueing and cold start are time
+    // the person spent waiting, and a Task stopped before it started has no
+    // other duration at all.
+    const startedAt = Date.now()
 
     const reporter = new ProgressReporter({
       // The Adapter is told whether it may edit; the Core is what obeys the
@@ -235,6 +271,12 @@ export class Core {
 
     let instruction: OutboundInstruction
     let running: RunningTask | null = null
+    /**
+     * The Turn this Task drove, however it ended — kept because a Turn that
+     * failed or was interrupted still spent money, and the audit record is
+     * where that has to land.
+     */
+    let turn: Turn | null = null
     try {
       // No lookup and nothing to have gone stale: the Conversation Key is the
       // Session id, one hash apart. The one thing read is which generation of it
@@ -247,11 +289,16 @@ export class Core {
       const sessionId = this.#sessions.sessionFor(conversationKey)
       // Known from here on rather than from the first token, so that `/stop`
       // reaches a Task that is queued or still starting its process.
-      const task: RunningTask = { conversationKey, sessionId, stopped: false }
+      const task: RunningTask = {
+        conversationKey,
+        sessionId,
+        stopped: false,
+        apiKeySource: null,
+      }
       running = task
       this.#running.add(task)
 
-      const turn = await this.#queue.run(
+      turn = await this.#queue.run(
         sessionId,
         () => this.#runTurn(task, message.text, reporter),
         // The one thing roma will go without, and it is the reporter that
@@ -263,6 +310,9 @@ export class Core {
       )
       instruction = { kind: 'result', taskId, conversationKey, text: turn.text }
     } catch (error) {
+      // A Turn that failed reports its own cost, and a Task that cost money must
+      // be recorded whether or not it produced anything.
+      if (error instanceof TurnFailedError) turn = error.turn
       // A Task somebody stopped is neither of the two endings a Task usually
       // has — see the `stopped` instruction for why it is not reported as a
       // failure.
@@ -272,6 +322,31 @@ export class Core {
     } finally {
       if (running !== null) this.#running.delete(running)
     }
+
+    // Written before the Channel is told, because the two obligations are
+    // different and only one of them is anybody's to try again. An instruction
+    // the Channel refuses is reported to whoever handed the message in; a record
+    // dropped because the Channel was down would be a Task that spent money and
+    // left no trace of who spent it, and nothing later can reconstruct it. This
+    // cannot throw — see `AuditLog.record` — so it also cannot silence a Task.
+    this.#audit.record({
+      taskId,
+      caller: message.caller,
+      // Null only where the Task failed before roma could work out which Session
+      // it belonged to, which is the one failure that happens before it has one.
+      sessionId: running?.sessionId ?? null,
+      // Read off the instruction rather than tracked alongside it, so the record
+      // and the Conversation cannot end up telling different stories.
+      outcome: outcomeOf(instruction),
+      // The per-Turn delta, and zero where no Turn completed: a Task stopped in
+      // the queue never started one, and one abandoned mid-retry-storm never got
+      // the terminal event a cost arrives on.
+      costUsd: turn?.costUsd ?? 0,
+      durationMs: Date.now() - startedAt,
+      turnMs: turn?.durationMs ?? null,
+      credential: this.#credential,
+      apiKeySource: running?.apiKeySource ?? null,
+    })
 
     // Nothing more is scheduled, and nothing in flight is waited on: an update
     // the Channel has not finished taking is not a reason to hold back the one
@@ -300,7 +375,13 @@ export class Core {
     const { sessionId } = task
     reporter.update({ phase: 'working' })
     const onEvent = (id: string, event: ClaudeEvent): void => {
-      if (id === sessionId) reporter.observe(event)
+      if (id !== sessionId) return
+      // The audit record's other half: which credential Claude Code itself says
+      // is paying, rather than which one roma believes it handed over. One
+      // arrives at the start of every Turn, so this is this Turn's own answer.
+      const init = readSystemInit(event)
+      if (init !== null) task.apiKeySource = init.apiKeySource
+      reporter.observe(event)
     }
     // The window a `/stop` cannot act on by itself: from here until Claude Code
     // has the message, there is no Turn to interrupt, and a cold start makes
@@ -355,6 +436,20 @@ class TaskStopped extends Error {
     super('Task stopped before its Turn began')
     this.name = 'TaskStopped'
   }
+}
+
+/**
+ * How a Task ended, as the audit record names it.
+ *
+ * Taken from the instruction the Conversation is about to be given rather than
+ * remembered separately, so that the two can never disagree about how a Task
+ * went. The other two instruction kinds cannot arrive here: `progress` is not an
+ * ending, and a `command-outcome` belongs to a Command, which is not a Task.
+ */
+function outcomeOf(instruction: OutboundInstruction): TaskOutcome {
+  if (instruction.kind === 'result') return 'result'
+  if (instruction.kind === 'stopped') return 'stopped'
+  return 'failure'
 }
 
 /**

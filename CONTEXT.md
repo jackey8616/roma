@@ -154,3 +154,13 @@ _Avoid_: rate limit, quota, budget
 Running one blocked Task on metered API billing instead of the Shared Window.
 Off by default and offered per-Task at the moment of blocking.
 _Avoid_: fallback, API mode, paid mode, spillover
+
+**Audit Record**:
+The line roma writes when a Task ends: who asked, which Session ran it, how long
+they waited, what it cost, and which credential paid. One per Task — a failed or
+stopped one included — and the cost on it is the Turn's own delta, never the
+Session's running total. Everybody shares one token, so the provider knows only
+that somebody spent it; this is the only place the question of who is answerable,
+and the only place a calendar month can be added up.
+_Avoid_: log (that is the operational stream the Session Pool writes), metric,
+usage record, telemetry

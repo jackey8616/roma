@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -24,7 +24,8 @@ let workRoots: string[] = []
 function boot() {
   const claude = new FakeClaude({ exitOnKill: true })
   const workRoot = mkdtempSync(join(tmpdir(), 'roma-startup-'))
-  workRoots.push(workRoot)
+  const auditRoot = mkdtempSync(join(tmpdir(), 'roma-startup-audit-'))
+  workRoots.push(workRoot, auditRoot)
   const channel = new RecordingAdapter()
 
   let resolved = false
@@ -32,6 +33,7 @@ function boot() {
     credential: OAUTH,
     channel,
     workRoot,
+    auditRoot,
     spawn: claude.spawn,
     log: () => {},
     selfCheckTimeoutMs: 1_000,
@@ -45,6 +47,7 @@ function boot() {
     claude,
     channel,
     workRoot,
+    auditRoot,
     starting,
     hasStarted: () => resolved,
     /** Answer the probe Turn, the way a real process would. */
@@ -114,5 +117,45 @@ describe('starting roma', () => {
     expect(roma.channel.instructions).toContainEqual(
       expect.objectContaining({ kind: 'result', text: 'ok' }),
     )
+  })
+
+  // The other half of that wiring, and the half nothing else would notice was
+  // missing: a roma whose audit log was not connected answers every message
+  // perfectly and records nobody's spending, which cannot be reconstructed
+  // afterwards because the provider never knew who anyone was.
+  it('writes the Task down, on the credential it was started with', async () => {
+    const roma = boot()
+    await roma.answerProbe()
+    const { core, audit } = await roma.starting
+
+    const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
+    await flush()
+    feed(roma.claude.processFor(join(roma.workRoot, sessionIdFor(KEY))), HEALTHY)
+    await handled
+
+    const month = new Date().toISOString().slice(0, 7)
+    expect(audit.readMonth(month)).toMatchObject([
+      {
+        caller: 'someone',
+        sessionId: sessionIdFor(KEY),
+        outcome: 'result',
+        credential: 'shared-window',
+        apiKeySource: 'none',
+      },
+    ])
+    // Under a directory of its own rather than the Session Pool's work root,
+    // which is walked by a reclaim that deletes what has gone a week untouched.
+    expect(readdirSync(roma.auditRoot)).toEqual([`${month}.jsonl`])
+  })
+
+  // The probe Turn is roma's own, driven before anything can accept a message,
+  // and there is no Task and no caller to attribute it to. Recording it would
+  // put a Task in the log that nobody sent.
+  it('does not record the self-check as a Task', async () => {
+    const roma = boot()
+    await roma.answerProbe()
+    const { audit } = await roma.starting
+
+    expect(audit.readMonth(new Date().toISOString().slice(0, 7))).toEqual([])
   })
 })
