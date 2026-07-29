@@ -32,7 +32,8 @@ _Avoid_: chat, thread (thread is a Google Chat term, not a roma one)
 
 **Conversation Key**:
 The stable string an Adapter supplies to name one Conversation. The Session id
-is derived from it, which is why roma needs no database.
+is derived from it — and from the Session Generation, which is the only thing
+`/new` can move — which is why roma needs no database.
 _Avoid_: thread id, chat id, room id
 
 **Ingress Message**:
@@ -66,6 +67,14 @@ The Claude Code state backing one Conversation: an on-disk transcript, a session
 id, and a working directory.
 _Avoid_: context, history, conversation
 
+**Session Generation**:
+Which of a Conversation's Sessions is the current one. A Conversation Key never
+changes, so `/new` moves this instead: the Session id derives from the key and
+the generation together, and every Conversation starts at the first. Written
+down, because a restart that forgot it would resume the context `/new` was used
+to drop.
+_Avoid_: reset, epoch, version, session number
+
 **Resident Session**:
 A Session whose Claude Code process is currently alive, so the next message
 skips cold start.
@@ -88,6 +97,16 @@ _Avoid_: killing a Session, closing a Session, expiring
 Ending a Resident Session's process because it has gone unused, rather than to
 make room. Distinct from Eviction only in what prompted it.
 _Avoid_: timing out, garbage collection, idling out
+
+**Command**:
+One of the two messages roma answers itself instead of handing to Claude Code:
+`/stop` ends the work this Conversation has in flight — running, queued, or
+still starting — and `/new` gives the Conversation a fresh Session. Recognised in the Core, never in a Channel Adapter, and only when the
+whole message is one of the two — everything else, Claude Code's own slash
+commands included, is work. A Command is not a Task: it drives no Turn, is not
+queued, and is not counted against the concurrency cap.
+_Avoid_: slash command (those are Claude Code's, and roma passes them through),
+instruction (that is an Outbound Instruction)
 
 **Task**:
 One message from one person, from arrival to final result. The unit that is

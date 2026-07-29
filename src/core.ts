@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import type { ChannelAdapter, IngressMessage, OutboundInstruction } from './channel-adapter.js'
-import { TurnFailedError, type Turn } from './claude-session.js'
+import { TurnFailedError, wasInterrupted, type Turn } from './claude-session.js'
+import { readCommand, type Command } from './commands.js'
 import { ProgressReporter } from './progress-reporter.js'
-import { sessionIdFor } from './session-id.js'
+import type { SessionGenerations } from './session-generation.js'
 import { RetryStormError, type SessionPool } from './session-pool.js'
 import type { ClaudeEvent } from './stream-events.js'
 import type { TaskQueue } from './task-queue.js'
@@ -28,6 +29,39 @@ export interface CoreOptions {
    * Channel.
    */
   readonly queue: TaskQueue
+  /**
+   * Which Session each Conversation is on — only a question because `/new` can
+   * move one.
+   *
+   * Shared with every other Core over the same working directories, for the
+   * reason the pool and the queue are: a Conversation two Cores each kept their
+   * own answer for would be two Conversations, one of which never heard about
+   * the `/new`.
+   */
+  readonly sessions: SessionGenerations
+}
+
+/**
+ * One Task this Core is in the middle of, as `/stop` needs to see it.
+ *
+ * Kept because neither of the other two places knows enough on its own. The
+ * pool knows which Sessions have a Turn in flight, but not which Conversation
+ * asked for one, and not about a Task whose process is still starting; the
+ * queue knows what is waiting, but only as opaque keys. This is the Core's own
+ * record of the work it has taken on, and it is what makes `/stop` mean "the
+ * work I asked for" rather than "whatever is running in the Session I am on
+ * now".
+ */
+interface RunningTask {
+  readonly conversationKey: string
+  /**
+   * The Session it is on, which is not always the one its Conversation is on: a
+   * `/new` in between moves the Conversation and leaves the Task where it
+   * started.
+   */
+  readonly sessionId: string
+  /** Set by `/stop`, and read at each point the Task can still be stopped. */
+  stopped: boolean
 }
 
 /**
@@ -49,8 +83,18 @@ export class Core {
   readonly #channel: ChannelAdapter
   readonly #pool: SessionPool
   readonly #queue: TaskQueue
+  readonly #sessions: SessionGenerations
+  /**
+   * The Tasks this Core has taken on and not yet answered — queued ones
+   * included, since a Task that has not started is still one a person can stop.
+   *
+   * A set rather than an index by Conversation: it holds at most the three Tasks
+   * running plus whatever is waiting, so finding a Conversation's own is a walk
+   * over a handful of entries, and there is no map of empty sets to prune.
+   */
+  readonly #running = new Set<RunningTask>()
 
-  constructor({ channel, pool, queue }: CoreOptions) {
+  constructor({ channel, pool, queue, sessions }: CoreOptions) {
     if (!channel.capabilities.stableConversationKey) {
       // No Adapter should ever declare this false: a Channel without a stable key
       // of its own mints and persists one inside its Adapter, so the key is
@@ -64,6 +108,101 @@ export class Core {
     this.#channel = channel
     this.#pool = pool
     this.#queue = queue
+    this.#sessions = sessions
+  }
+
+  /**
+   * Take one message: a Command roma answers itself, or a Task.
+   *
+   * The two are told apart here rather than in an Adapter, so that `/stop` means
+   * the same thing on every Channel and a Channel cannot invent a third
+   * Command. Everything that is not one of the two is work, including every
+   * slash command Claude Code has of its own.
+   *
+   * Resolves when the Conversation has been told how it went. It rejects only
+   * if the Channel could not be told at all — a failed Task is an outcome, not
+   * an error, and reporting it is how this method succeeds.
+   */
+  async handle(message: IngressMessage): Promise<void> {
+    const command = readCommand(message.text)
+    if (command !== null) return await this.#runCommand(command, message)
+    return await this.#runTask(message)
+  }
+
+  /**
+   * Carry out a Command and say what it did.
+   *
+   * Outside the Task queue, which is not an optimisation: a Command that queued
+   * would be serialised against its own Conversation, so `/stop` would wait for
+   * the Task it was sent to stop and arrive after it had finished. It also
+   * takes no concurrency slot — a Command drives no Turn, so counting it against
+   * the three Tasks roma runs at once would let people asking it to stop things
+   * crowd out the work.
+   *
+   * A Command produces one instruction and no acknowledgement. There is nothing
+   * to acknowledge: it is over by the time the Conversation could be told it had
+   * begun.
+   */
+  async #runCommand(command: Command, { conversationKey }: IngressMessage): Promise<void> {
+    // Not a Task, and it still gets an id — see `TaskAddress` for why.
+    const taskId = randomUUID()
+
+    let instruction: OutboundInstruction
+    try {
+      const carriedOut = this.#carryOut(command, conversationKey)
+      instruction = { kind: 'command-outcome', taskId, conversationKey, command, carriedOut }
+    } catch {
+      // Silence is not an outcome here either. Nothing routine reaches this —
+      // it takes a generation record roma cannot read, or a Conversation Key an
+      // Adapter emptied — and either way the person is owed the difference
+      // between a Command that did nothing because there was nothing to do and
+      // one that did nothing because roma is broken.
+      instruction = { kind: 'failure', taskId, conversationKey, reason: ROMA_FAILED_COMMAND }
+    }
+
+    await this.#channel.deliver(instruction)
+  }
+
+  /** Do what the Command asks, and say whether there was anything to do. */
+  #carryOut(command: Command, conversationKey: string): boolean {
+    if (command === 'new') {
+      // Nothing is torn down. `/new` is aimed at what the *next* message
+      // reaches: a Task already running in the old Session finishes and still
+      // answers the person who asked, and the process behind it is left to the
+      // pool, which reaps or evicts it like any other Session nobody is talking
+      // to any more. Always true — a Conversation can always be given a Session
+      // with nothing in it, including one that has never had a Session at all.
+      this.#sessions.freshSession(conversationKey)
+      return true
+    }
+    return this.#stop(conversationKey)
+  }
+
+  /**
+   * End this Conversation's work, and say whether there was any.
+   *
+   * Aimed at the Tasks roma is actually in the middle of rather than at the
+   * Session the Conversation is on now, because those are not always the same
+   * Session: a `/new` between the message and the `/stop` moves the Conversation
+   * on while the work it was asked to stop carries on where it started. Asking
+   * the generation would answer about an empty Session and leave the Task
+   * running with the person told there was nothing to stop.
+   *
+   * A Task is stopped whether or not it has reached Claude Code yet. Between
+   * arriving and its first token a Task can be queued behind three others and
+   * then waiting on a cold start, which is minutes in which it is visibly
+   * running, `/stop` is exactly what a person would send, and there is no Turn
+   * to interrupt. Marking it is what covers that window: a Task stopped before
+   * it starts never starts, and one stopped while its process is still coming up
+   * is interrupted the moment its Turn begins.
+   */
+  #stop(conversationKey: string): boolean {
+    const mine = [...this.#running].filter((task) => task.conversationKey === conversationKey)
+    for (const task of mine) {
+      task.stopped = true
+      this.#pool.interrupt(task.sessionId)
+    }
+    return mine.length > 0
   }
 
   /**
@@ -76,16 +215,9 @@ export class Core {
    * because two processes writing one Session file corrupt it, or roma may
    * already be running as much as it runs at once — and waiting is a thing the
    * acknowledgement says rather than a silence.
-   *
-   * Resolves when the Conversation has been told how it went. It rejects only
-   * if the Channel could not be told at all — a failed Task is an outcome, not
-   * an error, and reporting it is how this method succeeds.
    */
-  async runTask(message: IngressMessage): Promise<void> {
+  async #runTask(message: IngressMessage): Promise<void> {
     const { conversationKey } = message
-    // No lookup, no record, nothing to have gone stale: the Conversation Key is
-    // the Session id, one hash apart.
-    const sessionId = sessionIdFor(conversationKey)
     // Minted here rather than derived, because it names this Task and not the
     // Conversation: two messages in one Conversation can be in flight at once,
     // each with an acknowledgement of its own for the Adapter to keep up to
@@ -102,10 +234,26 @@ export class Core {
     })
 
     let instruction: OutboundInstruction
+    let running: RunningTask | null = null
     try {
+      // No lookup and nothing to have gone stale: the Conversation Key is the
+      // Session id, one hash apart. The one thing read is which generation of it
+      // `/new` has left the Conversation on, and a Conversation that has never
+      // used `/new` is on the first. Read on arrival rather than on admission,
+      // so that a message already waiting in the queue when a `/new` lands still
+      // goes to the Session it was sent to — and read inside the try, because a
+      // Conversation roma cannot work out the Session for is one that would
+      // otherwise be answered with silence.
+      const sessionId = this.#sessions.sessionFor(conversationKey)
+      // Known from here on rather than from the first token, so that `/stop`
+      // reaches a Task that is queued or still starting its process.
+      const task: RunningTask = { conversationKey, sessionId, stopped: false }
+      running = task
+      this.#running.add(task)
+
       const turn = await this.#queue.run(
         sessionId,
-        () => this.#runTurn(sessionId, message.text, reporter),
+        () => this.#runTurn(task, message.text, reporter),
         // The one thing roma will go without, and it is the reporter that
         // absorbs the failure: a Channel too broken to carry this is too broken
         // to carry the failure that abandoning the Task would produce, so
@@ -115,7 +263,14 @@ export class Core {
       )
       instruction = { kind: 'result', taskId, conversationKey, text: turn.text }
     } catch (error) {
-      instruction = { kind: 'failure', taskId, conversationKey, reason: reasonFor(error) }
+      // A Task somebody stopped is neither of the two endings a Task usually
+      // has — see the `stopped` instruction for why it is not reported as a
+      // failure.
+      instruction = wasStopped(error)
+        ? { kind: 'stopped', taskId, conversationKey }
+        : { kind: 'failure', taskId, conversationKey, reason: reasonFor(error) }
+    } finally {
+      if (running !== null) this.#running.delete(running)
     }
 
     // Nothing more is scheduled, and nothing in flight is waited on: an update
@@ -133,20 +288,34 @@ export class Core {
    * running. Both are the same message; this is the second thing it says.
    *
    * Filtered by Session id because the pool is shared by every Core, so its
-   * events are every Conversation's. The listener is a Turn's worth long: one
-   * Task, one subscription, dropped in the `finally` whichever way the Turn
+   * events are every Conversation's. The listeners are a Turn's worth long: one
+   * Task, one subscription each, dropped in the `finally` whichever way the Turn
    * ended.
    */
-  async #runTurn(sessionId: string, text: string, reporter: ProgressReporter): Promise<Turn> {
+  async #runTurn(task: RunningTask, text: string, reporter: ProgressReporter): Promise<Turn> {
+    // Stopped while it waited its turn. Starting it now would spend a Turn on
+    // work somebody has already said they do not want, and then interrupt it.
+    if (task.stopped) throw new TaskStopped()
+
+    const { sessionId } = task
     reporter.update({ phase: 'working' })
     const onEvent = (id: string, event: ClaudeEvent): void => {
       if (id === sessionId) reporter.observe(event)
     }
+    // The window a `/stop` cannot act on by itself: from here until Claude Code
+    // has the message, there is no Turn to interrupt, and a cold start makes
+    // that seconds rather than an instant. The Turn beginning is the first
+    // moment the request can land, so it is sent then.
+    const onTurnStart = (id: string): void => {
+      if (id === sessionId && task.stopped) this.#pool.interrupt(sessionId)
+    }
     this.#pool.on('event', onEvent)
+    this.#pool.on('turn-start', onTurnStart)
     try {
       return await this.#pool.send(sessionId, text)
     } finally {
       this.#pool.off('event', onEvent)
+      this.#pool.off('turn-start', onTurnStart)
     }
   }
 }
@@ -163,6 +332,44 @@ export class Core {
  * — an `exit` record with the code and the signal — where operators look.
  */
 const ROMA_FAILED = 'roma could not run this Task.'
+
+/**
+ * The same, for a Command.
+ *
+ * Its own sentence because "Task" is the wrong word for `/stop`, and because
+ * what the person does next differs: a Task can be sent again, and a Command
+ * that roma could not carry out will fail the same way until somebody looks at
+ * it.
+ */
+const ROMA_FAILED_COMMAND = 'roma could not carry out that command.'
+
+/**
+ * A Task that was stopped before it ever reached Claude Code.
+ *
+ * The other way a stopped Task ends. A Turn that was interrupted says so itself,
+ * on the Turn; one that never began has no Turn to say anything, and the Task
+ * still has to end as stopped rather than as a failure.
+ */
+class TaskStopped extends Error {
+  constructor() {
+    super('Task stopped before its Turn began')
+    this.name = 'TaskStopped'
+  }
+}
+
+/**
+ * Whether a Task ended because `/stop` reached it.
+ *
+ * Read off the ending rather than remembered from the Command: the Command is
+ * carried out on another Task's behalf and returns immediately, so what stopped
+ * a Task and what the Task's own outcome was would be two separate stories to
+ * keep in step. There is no third party to consider either — roma interrupts a
+ * Turn nowhere else, and abandons a retry storm by ending the process instead.
+ */
+function wasStopped(error: unknown): boolean {
+  if (error instanceof TaskStopped) return true
+  return error instanceof TurnFailedError && wasInterrupted(error.turn)
+}
 
 /**
  * What to tell the Conversation about a Task that produced no result.

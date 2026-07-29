@@ -241,6 +241,11 @@ and none anticipated by ADR-0001:
 The session id is `uuidv5(<conversation key>)`, where the conversation key comes
 from the adapter. The mapping is derivable, so **no database is required**.
 
+`/new` adds one qualification, and only one: the derivation also takes a
+generation, and which generation a conversation is on is written down. The
+mapping stays derivable and nothing is looked up — see "Where a fresh session
+comes from" below.
+
 Channels that cannot supply a stable key mint and persist one inside their own
 adapter. The core's rule is only that the key is stable and that the id derives
 from it; every channel-specific detail of *what* the key is belongs in that
@@ -421,6 +426,65 @@ wrapper.
 
 There is no wall-clock timeout: tasks end when they finish or when a human stops
 them.
+
+**Recognised in the core, not in an adapter**, and only when the whole message is
+the command. Claude Code has slash commands of its own and every one of them is
+passed through as work — a prefix match would swallow commands that are not
+roma's, and would swallow more of them with every Claude Code release. Neither of
+roma's two takes an argument, so nothing meant for roma is turned away by that
+rule.
+
+A command is not a task: it drives no turn, is not queued, and does not count
+against the concurrency cap. That is forced rather than tidy — tasks of one
+session are serialised, so a queued `/stop` would wait for the very task it was
+sent to stop and arrive after it had finished.
+
+**A stopped task is reported as stopped**, which is neither of the two endings a
+task otherwise has. `terminal_reason: "aborted_streaming"` is what distinguishes
+it; `subtype` says `error_during_execution`, which is what any error during
+execution says. Reported as a failure it reads as roma breaking, and the text it
+would carry as its reason is the half-written answer the interrupt cut off.
+`/stop` with nothing in flight says so rather than saying nothing: told a task was
+stopped when none was running, a person stops watching a task that is in fact
+still going.
+
+**`/stop` follows the task, not the session the conversation is on**, and the
+core keeps its own record of the tasks it has taken on to do it. Two windows make
+that necessary and neither is narrow. A task can be queued behind three others
+and then waiting on a cold start — minutes in which it is visibly running and
+there is no turn to interrupt — so a task is marked stopped as well as
+interrupted: one stopped before it starts never starts, and one stopped while its
+process is coming up is interrupted the moment its turn begins. And a `/new`
+between the message and the `/stop` moves the conversation to a new session while
+the work carries on in the old one, so asking which session the conversation is
+on would interrupt an empty session and report that nothing was running.
+
+### Where a fresh session comes from
+
+`/new` needs a session id that is not the one the conversation is already on, and
+the id is `uuidv5(<conversation key>)` — a pure derivation from a key the channel
+owns and never changes. So the derivation takes a **generation**: zero is the
+plain `uuidv5(<conversation key>)` every conversation starts on, and `/new` moves
+the conversation to the next one.
+
+**The generation is written to disk**, one small file per conversation that has
+ever used `/new`, alongside the session working directories. Held in memory it
+would survive until the next deploy and then be silently undone: the conversation
+would resume the transcript it asked to be rid of, with no sign of it anywhere
+except Claude Code remembering things that were supposed to be gone.
+
+This does not reintroduce the database. Nothing is looked up — the session id is
+still derived, a conversation that has never used `/new` has no record at all, and
+losing every one of these files costs the conversations that rotated their last
+rotation rather than roma's ability to find anybody's session.
+
+**Rejected: resetting the session in place** — deleting the working directory so
+the next spawn passes `--session-id` at the same id. It needs no new concept, but
+it turns on unmeasured behaviour: Claude Code's transcript for that id is still on
+disk, and what the CLI does with `--session-id` at an id it already has a
+transcript for has never been run. It is the same gap the seven-day working-
+directory reclaim already carries; `/new` would make it a routine path rather than
+a rare one.
 
 ## Consequences
 

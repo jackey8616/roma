@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { ClaudeExitedError, ClaudeSession, TurnFailedError, type Turn } from './claude-session.js'
+import {
+  ClaudeExitedError,
+  ClaudeSession,
+  TurnFailedError,
+  wasInterrupted,
+  type Turn,
+} from './claude-session.js'
 import { FakeClaude } from '../test/support/fake-claude.js'
 import { feed, recordedStream, withTotalCostUsd } from '../test/support/recorded-stream.js'
 
@@ -279,6 +285,44 @@ describe('staying resident', () => {
     })
     expect(claude.process.signals).toEqual([])
     expect((await next).text).toBe('alive')
+  })
+
+  // What roma reports "there was nothing to stop" from. Sending the control
+  // request regardless would be the same call whether or not it interrupted
+  // anything, and `/stop` a second after sending — while the process is still
+  // starting — would end nothing while saying it had.
+  it('says there was nothing to interrupt when no Turn is in flight', async () => {
+    const { claude, session } = newSession()
+    const stream = recordedStream('interrupted-turn')
+    session.start()
+
+    expect(session.interrupt()).toBe(false)
+    expect(claude.process.sent).toEqual([])
+
+    const turn = session.send('sleep for a while')
+    expect(session.interrupt()).toBe(true)
+
+    feed(claude.process, stream.turn(1))
+    await expect(turn).rejects.toBeInstanceOf(TurnFailedError)
+    expect(session.interrupt()).toBe(false)
+  })
+
+  // The one field that separates the ending somebody asked for from the ones
+  // nobody did. `subtype` says `error_during_execution`, which is what any error
+  // during execution says.
+  it('marks an interrupted Turn as interrupted rather than merely failed', async () => {
+    const { claude, session } = newSession()
+    const stream = recordedStream('interrupted-turn')
+    session.start()
+
+    const turn = session.send('sleep for a while')
+    session.interrupt()
+    feed(claude.process, stream.turn(1))
+
+    await expect(turn).rejects.toSatisfy((error: TurnFailedError) => wasInterrupted(error.turn))
+    const finished = session.send('are you still alive')
+    feed(claude.process, stream.turn(2))
+    expect(wasInterrupted(await finished)).toBe(false)
   })
 
   it('ends the process on terminate and reports how it exited', async () => {

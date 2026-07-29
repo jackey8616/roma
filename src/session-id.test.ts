@@ -41,6 +41,45 @@ describe('a Session id derived from a Conversation Key', () => {
   })
 })
 
+describe('a Session generation', () => {
+  // What `/new` moves. The Conversation Key cannot change — it is the Channel's,
+  // and the same DM keeps it forever — so a fresh Session has to come from
+  // somewhere else, and this is the only thing in the derivation roma owns.
+  it('is a different Session for the same Conversation', () => {
+    expect(sessionIdFor('conversation-one', 1)).not.toBe(sessionIdFor('conversation-one'))
+    expect(sessionIdFor('conversation-one', 2)).not.toBe(sessionIdFor('conversation-one', 1))
+  })
+
+  it('is still derived, so the same generation always reaches the same Session', () => {
+    expect(sessionIdFor('conversation-one', 3)).toBe(sessionIdFor('conversation-one', 3))
+  })
+
+  it('is still a uuid, whichever generation it is', () => {
+    expect(sessionIdFor('conversation-one', 7)).toMatch(V5)
+  })
+
+  // The generation is not part of the Conversation Key, so no key an Adapter
+  // could mint names another Conversation's later generation. A key and a
+  // generation joined with a printable separator would have let one do exactly
+  // that.
+  it('cannot be spelled out in a Conversation Key', () => {
+    expect(sessionIdFor('conversation-one#1')).not.toBe(sessionIdFor('conversation-one', 1))
+    expect(sessionIdFor('conversation-one 1')).not.toBe(sessionIdFor('conversation-one', 1))
+  })
+
+  // Generation zero is where every Conversation starts and where all of them are
+  // today, so its ids are the ones already on disk. Rotating a Session must not
+  // rename the Sessions that never rotated.
+  it('leaves the first generation at the id it already had', () => {
+    expect(sessionIdFor('conversation-one', 0)).toBe('4a03e16d-42d9-58c9-9eae-8468b8b6efae')
+  })
+
+  it('refuses a generation that is not a whole count', () => {
+    expect(() => sessionIdFor('conversation-one', -1)).toThrow(/generation/i)
+    expect(() => sessionIdFor('conversation-one', 1.5)).toThrow(/generation/i)
+  })
+})
+
 describe('uuidv5', () => {
   // The published vectors. This is the test that says the implementation is
   // uuidv5 rather than something that merely looks like it.

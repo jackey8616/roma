@@ -252,9 +252,15 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     return await this.#turn(await this.#acquire(sessionId), text)
   }
 
-  /** Ask a resident Session to abandon its running Turn. Its process survives. */
-  interrupt(sessionId: string): void {
-    this.#residents.get(sessionId)?.session.interrupt()
+  /**
+   * Ask a resident Session to abandon its running Turn. Its process survives.
+   *
+   * False if there was no Turn to abandon — including the case where the Session
+   * is not resident at all, which is what a Conversation that has been quiet all
+   * morning looks like.
+   */
+  interrupt(sessionId: string): boolean {
+    return this.#residents.get(sessionId)?.session.interrupt() ?? false
   }
 
   /** End a Session's process now. It resumes with its context on the next message. */
