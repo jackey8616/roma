@@ -160,7 +160,16 @@ describe('naming a Session versus reaching it again', () => {
     expect((await turn).text).toBe('ok')
     expect(claude.spawns[0]?.args).toContain('--resume')
     expect(claude.spawns[1]?.args).toContain('--session-id')
-    expect(log.map((record) => record.event)).toContain('resume-lost')
+    // The whole record, not just its name. An operator reading this needs the
+    // flag roma retried with as well as what it found, and `retryWith` is the
+    // only part that says what roma *did* — the rest of the trail is two spawn
+    // records they would have to pair up themselves.
+    expect(log).toContainEqual({
+      event: 'resume-lost',
+      sessionId: A,
+      stderr: expect.stringContaining('No conversation found'),
+      retryWith: '--session-id',
+    })
   })
 
   // The mirror of the gap above, and the one ADR-0003 left unmeasured. Nothing
@@ -183,7 +192,15 @@ describe('naming a Session versus reaching it again', () => {
     expect((await turn).text).toBe('ok')
     expect(claude.spawns[0]?.args).toContain('--session-id')
     expect(claude.spawns[1]?.args).toContain('--resume')
-    expect(log.map((record) => record.event)).toContain('transcript-survived')
+    // `retryWith` is the opposite of the sibling above, which is the point of
+    // carrying it: the two recoveries are told apart by what roma did next, not
+    // only by which refusal it saw.
+    expect(log).toContainEqual({
+      event: 'transcript-survived',
+      sessionId: A,
+      stderr: expect.stringContaining('is already in use'),
+      retryWith: '--resume',
+    })
   })
 
   // The recovery is one attempt, not a loop. A retry that is refused in turn has
