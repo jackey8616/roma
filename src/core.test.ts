@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { readdirSync, readFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,6 +10,7 @@ import type {
   OutboundInstruction,
 } from './channel-adapter.js'
 import type { RetryBudget } from './config.js'
+import { SessionGenerations } from './session-generation.js'
 import { sessionIdFor } from './session-id.js'
 import { SessionPool } from './session-pool.js'
 import type { ClaudeEvent } from './stream-events.js'
@@ -69,17 +70,28 @@ function newCore({
 
   // The real cap, so what the tests below see is what roma does.
   const queue = new TaskQueue()
+  const sessions = new SessionGenerations({ workRoot })
   const adapter = new RecordingAdapter(capabilities)
-  const core = new Core({ channel: adapter, pool, queue })
+  const core = new Core({ channel: adapter, pool, queue, sessions })
 
-  /** Deliver one message to the Core and serve the Turn it drives from a recording. */
+  /**
+   * Deliver one message to the Core and serve the Turn it drives from a
+   * recording.
+   *
+   * `session` is which Session is expected to serve it, and defaults to the one
+   * a Conversation that has never used `/new` is on.
+   */
   const say = async (
     text: string,
-    { key = KEY, events = OK }: { key?: string; events?: readonly ClaudeEvent[] } = {},
+    {
+      key = KEY,
+      events = OK,
+      session = sessionIdFor(key),
+    }: { key?: string; events?: readonly ClaudeEvent[]; session?: string } = {},
   ): Promise<void> => {
-    const task = core.runTask(ingress(text, key))
+    const task = core.handle(ingress(text, key))
     await flush()
-    feed(claude.processFor(join(workRoot, sessionIdFor(key))), events)
+    feed(claude.processFor(join(workRoot, session)), events)
     await task
   }
 
@@ -88,13 +100,13 @@ function newCore({
     text: string,
     key = KEY,
   ): Promise<{ task: Promise<void>; proc: FakeClaudeProcess }> => {
-    const task = core.runTask(ingress(text, key))
+    const task = core.handle(ingress(text, key))
     task.catch(() => {})
     await flush()
     return { task, proc: claude.processFor(join(workRoot, sessionIdFor(key))) }
   }
 
-  return { adapter, claude, core, pool, queue, workRoot, say, start }
+  return { adapter, claude, core, pool, queue, sessions, workRoot, say, start }
 }
 
 function ingress(text: string, conversationKey = KEY): IngressMessage {
@@ -233,7 +245,7 @@ describe('what the Channel is asked to post', () => {
   it("says so when the Session could not run at all, in roma's own words", async () => {
     const { adapter, claude, core } = newCore()
 
-    const task = core.runTask(ingress('hello'))
+    const task = core.handle(ingress('hello'))
     await flush()
     claude.process.emitExit({ code: 1, signal: null })
     await task
@@ -256,7 +268,7 @@ describe('what the Channel is asked to post', () => {
   // Channel looks, from the Conversation, exactly like a message that was never
   // received — so whoever handed it in has to hear about it.
   it('does not swallow an instruction the Channel never carried out', async () => {
-    const { pool, queue, claude, workRoot } = newCore()
+    const { pool, queue, sessions, claude, workRoot } = newCore()
     // A second Core over the same pool and queue: one Core per Channel is what
     // keeps the Core free of Channel identity, and both are shared between them.
     const core = new Core({
@@ -269,9 +281,10 @@ describe('what the Channel is asked to post', () => {
       },
       pool,
       queue,
+      sessions,
     })
 
-    const task = core.runTask(ingress('hello'))
+    const task = core.handle(ingress('hello'))
     await flush()
     feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
 
@@ -285,8 +298,8 @@ describe('handling one Conversation one Task at a time', () => {
   it('does not send a second message while the first Task is still running', async () => {
     const { claude, core, workRoot } = newCore()
 
-    const first = core.runTask(ingress('first'))
-    const second = core.runTask(ingress('second'))
+    const first = core.handle(ingress('first'))
+    const second = core.handle(ingress('second'))
     await flush()
     const proc = claude.processFor(join(workRoot, sessionIdFor(KEY)))
 
@@ -305,8 +318,8 @@ describe('handling one Conversation one Task at a time', () => {
   it('answers both, in the order they arrived', async () => {
     const { adapter, claude, core, workRoot } = newCore()
 
-    const first = core.runTask(ingress('first'))
-    const second = core.runTask(ingress('second'))
+    const first = core.handle(ingress('first'))
+    const second = core.handle(ingress('second'))
     await flush()
     const proc = claude.processFor(join(workRoot, sessionIdFor(KEY)))
     feed(proc, OK)
@@ -326,8 +339,8 @@ describe('handling one Conversation one Task at a time', () => {
   it('tells the second caller it is waiting rather than leaving it silent', async () => {
     const { adapter, claude, core, workRoot } = newCore()
 
-    const first = core.runTask(ingress('first'))
-    const second = core.runTask(ingress('second'))
+    const first = core.handle(ingress('first'))
+    const second = core.handle(ingress('second'))
     await flush()
 
     // Two Tasks in one Conversation, each acknowledged on its own message —
@@ -352,7 +365,7 @@ describe('running only so much at once', () => {
   it('runs at most three Tasks across every Conversation', async () => {
     const { claude, core } = newCore()
 
-    const tasks = ['one', 'two', 'three', 'four'].map((key) => core.runTask(ingress('hello', key)))
+    const tasks = ['one', 'two', 'three', 'four'].map((key) => core.handle(ingress('hello', key)))
     await flush()
 
     expect(claude.processes).toHaveLength(3)
@@ -368,7 +381,7 @@ describe('running only so much at once', () => {
     const { adapter, claude, core } = newCore()
 
     const tasks = ['one', 'two', 'three', 'four', 'five'].map((key) =>
-      core.runTask(ingress('hello', key)),
+      core.handle(ingress('hello', key)),
     )
     await flush()
 
@@ -397,7 +410,7 @@ describe('running only so much at once', () => {
   // would produce, so dropping the work buys no less silence — it only adds
   // losing the work to it.
   it('still runs a Task whose caller could not be told anything about it', async () => {
-    const { claude, pool, queue, workRoot, core: first } = newCore()
+    const { claude, pool, queue, sessions, workRoot, core: first } = newCore()
     const delivered: OutboundInstruction[] = []
     const core = new Core({
       channel: {
@@ -410,11 +423,12 @@ describe('running only so much at once', () => {
       },
       pool,
       queue,
+      sessions,
     })
 
-    const running = first.runTask(ingress('first'))
+    const running = first.handle(ingress('first'))
     await flush()
-    const behind = core.runTask(ingress('second'))
+    const behind = core.handle(ingress('second'))
 
     const proc = claude.processFor(join(workRoot, sessionIdFor(KEY)))
     feed(proc, OK)
@@ -430,7 +444,7 @@ describe('running only so much at once', () => {
   // Channel looks, from the Conversation, exactly like a message that was never
   // received, so whoever handed it in still has to hear about it.
   it('does not extend that to the result of a Task that waited', async () => {
-    const { claude, pool, queue, workRoot, core: first } = newCore()
+    const { claude, pool, queue, sessions, workRoot, core: first } = newCore()
     const core = new Core({
       channel: {
         capabilities: { messageMutation: true, stableConversationKey: true },
@@ -441,11 +455,12 @@ describe('running only so much at once', () => {
       },
       pool,
       queue,
+      sessions,
     })
 
-    const running = first.runTask(ingress('first'))
+    const running = first.handle(ingress('first'))
     await flush()
-    const behind = core.runTask(ingress('second'))
+    const behind = core.handle(ingress('second'))
     behind.catch(() => {})
 
     const proc = claude.processFor(join(workRoot, sessionIdFor(KEY)))
@@ -487,9 +502,9 @@ describe('giving up on a Task that is only retrying', () => {
   it('takes new work while three Tasks are all stuck on a bad credential', async () => {
     const { adapter, claude, core, workRoot } = newCore({ retryBudget })
 
-    const stormed = ['one', 'two', 'three'].map((key) => core.runTask(ingress('hello', key)))
+    const stormed = ['one', 'two', 'three'].map((key) => core.handle(ingress('hello', key)))
     await flush()
-    const fourth = core.runTask(ingress('is anyone there?', 'four'))
+    const fourth = core.handle(ingress('is anyone there?', 'four'))
     await flush()
 
     // Nothing is free, so it waits — but it is told so, and it is not refused.
@@ -619,7 +634,7 @@ describe('telling a Conversation its Task is alive', () => {
   // update still gets the result. Waiting on it before posting would make the
   // unconditional message hostage to the best-effort one.
   it('posts the result even where the Channel never finishes taking an update', async () => {
-    const { claude, pool, queue, workRoot } = newCore()
+    const { claude, pool, queue, sessions, workRoot } = newCore()
     const delivered: OutboundInstruction[] = []
     const core = new Core({
       channel: {
@@ -632,9 +647,10 @@ describe('telling a Conversation its Task is alive', () => {
       },
       pool,
       queue,
+      sessions,
     })
 
-    const task = core.runTask(ingress('hello'))
+    const task = core.handle(ingress('hello'))
     await flush()
     feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
     await task
@@ -669,12 +685,322 @@ describe('telling a Conversation its Task is alive', () => {
   })
 })
 
+describe('the two Commands roma answers itself', () => {
+  /** A real interrupt: the aborted Turn, then the Turn the same process served next. */
+  const INTERRUPTED = recordedStream('interrupted-turn')
+
+  // The whole point of the in-band interrupt over SIGTERM: the Session is not
+  // spent stopping a Task, so the next message can redirect it immediately
+  // rather than start over from a cold resume.
+  it('ends the Task running now and leaves the Session able to take the next message', async () => {
+    const { claude, core, start, say } = newCore()
+    const { task, proc } = await start('write me an essay')
+
+    await core.handle(ingress('/stop'))
+
+    expect(proc.sent.at(-1)).toMatchObject({
+      type: 'control_request',
+      request: { subtype: 'interrupt' },
+    })
+    expect(proc.signals).toEqual([])
+
+    feed(proc, INTERRUPTED.turn(1))
+    await task
+    await say('are you still there', { events: INTERRUPTED.turn(2) })
+
+    expect(claude.processes).toHaveLength(1)
+    expect(claude.process.pid).toBe(proc.pid)
+  })
+
+  // Not a failure: roma did not break, and the reason a failure carries would be
+  // the half-written answer the interrupt cut off. Not a silent completion
+  // either — a Task that ends with nothing said leaves someone waiting for a
+  // result that is never coming.
+  it('reports a stopped Task as stopped', async () => {
+    const { adapter, core, start } = newCore()
+    const { task, proc } = await start('write me an essay')
+
+    await core.handle(ingress('/stop'))
+    feed(proc, INTERRUPTED.turn(1))
+    await task
+
+    expect(posted(adapter.instructions)).toEqual([
+      { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
+      { kind: 'command-outcome', conversationKey: KEY, command: 'stop', carriedOut: true },
+      { kind: 'stopped', conversationKey: KEY },
+    ])
+    // The outcome belongs to the Task that was stopped, not to the Command that
+    // stopped it: it is that Task's acknowledgement the Conversation is watching.
+    const [acknowledgement, command, stopped] = adapter.instructions
+    expect(stopped?.taskId).toBe(acknowledgement?.taskId)
+    expect(command?.taskId).not.toBe(acknowledgement?.taskId)
+  })
+
+  // A Command that queued would be serialised against its own Conversation and
+  // would therefore wait for the Task it was sent to stop, arriving once that
+  // Task had finished — the one moment it is no use at all.
+  it('does not wait behind the Task it is stopping', async () => {
+    const { core, queue, start } = newCore()
+    const { task, proc } = await start('write me an essay')
+
+    await core.handle(ingress('/stop'))
+
+    expect(queue.running).toBe(1)
+    expect(queue.waiting).toBe(0)
+
+    feed(proc, INTERRUPTED.turn(1))
+    await task
+  })
+
+  // Nor does it take a concurrency slot. With all three Tasks running, a Command
+  // that counted as a fourth would be exactly the message that cannot get
+  // through: the one asking roma to stop doing something.
+  it('gets through while roma is running as much as it runs at once', async () => {
+    const { adapter, claude, core, workRoot } = newCore()
+    const tasks = ['one', 'two', 'three'].map((key) => core.handle(ingress('hello', key)))
+    for (const task of tasks) task.catch(() => {})
+    await flush()
+
+    await core.handle(ingress('/stop', 'one'))
+
+    expect(posted(adapter.instructions).at(-1)).toEqual({
+      kind: 'command-outcome',
+      conversationKey: 'one',
+      command: 'stop',
+      carriedOut: true,
+    })
+
+    feed(claude.processFor(join(workRoot, sessionIdFor('one'))), INTERRUPTED.turn(1))
+    for (const key of ['two', 'three']) {
+      feed(claude.processFor(join(workRoot, sessionIdFor(key))), OK)
+    }
+    await Promise.all(tasks)
+  })
+
+  // A Task and its Conversation can end up on different Sessions, and only one
+  // of them is the Task: `/new` moves the Conversation on while the work it was
+  // asked to stop carries on where it started. Asking which Session the
+  // Conversation is on now would interrupt an empty one and report that nothing
+  // was running, while the Task nobody wants keeps going.
+  it('stops the Task it was sent to stop, even after a /new moved the Conversation', async () => {
+    const { adapter, core, start } = newCore()
+    const { task, proc } = await start('write me an essay')
+
+    await core.handle(ingress('/new'))
+    await core.handle(ingress('/stop'))
+
+    expect(proc.sent.at(-1)).toMatchObject({
+      type: 'control_request',
+      request: { subtype: 'interrupt' },
+    })
+
+    feed(proc, INTERRUPTED.turn(1))
+    await task
+
+    expect(posted(adapter.instructions).at(-1)).toEqual({ kind: 'stopped', conversationKey: KEY })
+  })
+
+  // Between arriving and its first token a Task can be queued behind three
+  // others — minutes in which it is visibly running, `/stop` is exactly what a
+  // person would send, and there is no Turn to interrupt. A Task stopped there
+  // must not quietly run later.
+  it('stops a Task that has not started yet, rather than letting it run later', async () => {
+    const { adapter, claude, core, workRoot } = newCore()
+    const busy = ['one', 'two', 'three'].map((key) => core.handle(ingress('hello', key)))
+    await flush()
+    const waiting = core.handle(ingress('a long job', 'four'))
+    await flush()
+
+    await core.handle(ingress('/stop', 'four'))
+
+    for (const key of ['one', 'two', 'three']) {
+      feed(claude.processFor(join(workRoot, sessionIdFor(key))), OK)
+    }
+    await Promise.all(busy)
+    await waiting
+
+    // Never spawned: the fourth Session has no process at all.
+    expect(claude.processes).toHaveLength(3)
+    expect(
+      posted(adapter.instructions).filter(({ conversationKey }) => conversationKey === 'four'),
+    ).toEqual([
+      { kind: 'progress', conversationKey: 'four', progress: { phase: 'queued', position: 1 } },
+      { kind: 'command-outcome', conversationKey: 'four', command: 'stop', carriedOut: true },
+      { kind: 'stopped', conversationKey: 'four' },
+    ])
+  })
+
+  // The same window at the other end: admitted, and waiting on a cold start.
+  // There is nothing to interrupt yet, so the request is sent the moment the
+  // Turn begins instead — the alternative is a Task that was stopped answering
+  // as though it never had been.
+  it('stops a Task whose process has not finished starting', async () => {
+    const { adapter, claude, core, workRoot } = newCore()
+    const task = core.handle(ingress('write me an essay'))
+    task.catch(() => {})
+
+    await core.handle(ingress('/stop'))
+    await flush()
+
+    const proc = claude.processFor(join(workRoot, sessionIdFor(KEY)))
+    expect(proc.sent.map((frame) => frame['type'])).toEqual(['user', 'control_request'])
+
+    feed(proc, INTERRUPTED.turn(1))
+    await task
+
+    expect(posted(adapter.instructions).at(-1)).toEqual({ kind: 'stopped', conversationKey: KEY })
+  })
+
+  // Everything this Conversation has in flight, not just the one at the front.
+  // Stopping the running Task and then starting the one queued behind it would
+  // be roma carrying on with work the person has just said to stop, and the
+  // second message is the one they would have to watch for.
+  it('stops both messages of a Conversation that sent two', async () => {
+    const { adapter, core, start } = newCore()
+    const { task: first, proc } = await start('write me an essay')
+    const second = core.handle(ingress('and another one'))
+    await flush()
+
+    await core.handle(ingress('/stop'))
+    feed(proc, INTERRUPTED.turn(1))
+    await Promise.all([first, second])
+
+    expect(posted(adapter.instructions).filter(({ kind }) => kind === 'stopped')).toEqual([
+      { kind: 'stopped', conversationKey: KEY },
+      { kind: 'stopped', conversationKey: KEY },
+    ])
+    // The second never ran: one Turn was sent, and it is the one that was
+    // interrupted.
+    expect(proc.sent.filter((frame) => frame['type'] === 'user')).toHaveLength(1)
+  })
+
+  // "Handled without error" is not the same as handled silently. Someone who
+  // types `/stop` a moment after the Task they meant to stop has finished needs
+  // to know that nothing was stopped — told it was, they stop watching a Task
+  // that is in fact still running.
+  it('says there was nothing to stop rather than nothing at all', async () => {
+    const { adapter, claude, core, say } = newCore()
+
+    await core.handle(ingress('/stop'))
+    await say('hello')
+    await core.handle(ingress('/stop'))
+
+    expect(posted(adapter.instructions).filter(({ kind }) => kind === 'command-outcome')).toEqual([
+      { kind: 'command-outcome', conversationKey: KEY, command: 'stop', carriedOut: false },
+      { kind: 'command-outcome', conversationKey: KEY, command: 'stop', carriedOut: false },
+    ])
+    expect(claude.process.sent.filter((frame) => frame['type'] === 'control_request')).toEqual([])
+  })
+
+  // `/new` cannot mean a different Conversation Key — the key is the Channel's,
+  // and a DM carries the same one forever — so it means a different Session
+  // under the same key. Created rather than resumed is the whole of "the old
+  // context does not come with it".
+  it('gives the Conversation a Session with nothing in it', async () => {
+    const { adapter, claude, core, say } = newCore()
+    await say('hello')
+
+    await core.handle(ingress('/new'))
+    await say('and now', { session: sessionIdFor(KEY, 1) })
+
+    expect(claude.lastSpawn.args).toContain(sessionIdFor(KEY, 1))
+    expect(claude.lastSpawn.args).toContain('--session-id')
+    expect(claude.lastSpawn.args).not.toContain('--resume')
+    expect(claude.lastSpawn.args).not.toContain(sessionIdFor(KEY))
+    expect(posted(adapter.instructions).filter(({ kind }) => kind === 'command-outcome')).toEqual([
+      { kind: 'command-outcome', conversationKey: KEY, command: 'new', carriedOut: true },
+    ])
+  })
+
+  // Held in memory this would survive until the next deploy and then be silently
+  // undone: the Conversation resumes the transcript it asked to be rid of, and
+  // the only evidence is Claude Code remembering things that were supposed to be
+  // gone.
+  it("is still the Conversation's Session after roma has restarted", async () => {
+    const first = newCore()
+    await first.say('hello')
+    await first.core.handle(ingress('/new'))
+
+    const second = newCore({ workRoot: first.workRoot })
+    await second.say('and now', { session: sessionIdFor(KEY, 1) })
+
+    expect(second.claude.lastSpawn.args).toContain(sessionIdFor(KEY, 1))
+    expect(second.claude.lastSpawn.args).not.toContain(sessionIdFor(KEY))
+  })
+
+  // `/new` is aimed at what the next message reaches, not at the work in flight.
+  // A Task torn down here would be one nobody stopped and nobody was told about.
+  it('leaves a Task that is already running to finish and answer', async () => {
+    const { adapter, core, start } = newCore()
+    const { task, proc } = await start('a long job')
+
+    await core.handle(ingress('/new'))
+    feed(proc, OK)
+    await task
+
+    expect(proc.signals).toEqual([])
+    expect(posted(adapter.instructions).at(-1)).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: 'ok',
+    })
+  })
+
+  // Claude Code's own slash commands are work, and there are more of them every
+  // release. roma interpreting anything beyond its two would quietly swallow one
+  // of them — and the person would never find out which.
+  it('interprets no command string but those two', async () => {
+    const { adapter, claude, say } = newCore()
+
+    await say('/clear')
+
+    expect(claude.process.sent.at(-1)).toMatchObject({
+      type: 'user',
+      message: { content: [{ text: '/clear' }] },
+    })
+    expect(posted(adapter.instructions).at(-1)).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: 'ok',
+    })
+  })
+
+  // Silence is not an outcome the Core has, and that does not stop at Tasks. A
+  // Conversation whose record of which Session it is on cannot be read is
+  // answered, badly, rather than not at all.
+  it('says so when it cannot work out which Session a Conversation is on', async () => {
+    const { adapter, core, workRoot } = newCore()
+    // Reaching for `SessionGenerations`' own file, because a half-written record
+    // is a state nothing else can produce — a machine that lost power mid-write
+    // can, and this is the only way to be in the room when it happens.
+    writeFileSync(join(workRoot, `${sessionIdFor(KEY)}.generation`), 'half a wr')
+
+    await core.handle(ingress('hello'))
+    await core.handle(ingress('/new'))
+
+    expect(posted(adapter.instructions)).toEqual([
+      { kind: 'failure', conversationKey: KEY, reason: 'roma could not run this Task.' },
+      { kind: 'failure', conversationKey: KEY, reason: 'roma could not carry out that command.' },
+    ])
+  })
+
+  it('never hands a Command to Claude Code as work', async () => {
+    const { claude, core, say } = newCore()
+    await say('hello')
+
+    await core.handle(ingress('/stop'))
+    await core.handle(ingress('/new'))
+
+    expect(claude.process.sent.filter((frame) => frame['type'] === 'user')).toHaveLength(1)
+  })
+})
+
 describe('knowing nothing about which Channel a message came from', () => {
   it('refuses a Channel that cannot supply a stable Conversation Key', () => {
-    const { pool, queue } = newCore()
+    const { pool, queue, sessions } = newCore()
     const adapter = new RecordingAdapter({ stableConversationKey: false })
 
-    expect(() => new Core({ channel: adapter, pool, queue })).toThrow(/stable/i)
+    expect(() => new Core({ channel: adapter, pool, queue, sessions })).toThrow(/stable/i)
   })
 
   // "Google Chat is the first road, not the destination" is a claim the code has

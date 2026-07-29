@@ -1,3 +1,5 @@
+import type { Command } from './commands.js'
+
 /**
  * One message from one person, on its way into the Core.
  *
@@ -90,7 +92,14 @@ export type TaskProgress =
  * message to edit.
  */
 interface TaskAddress {
-  /** Unique to one Task, and the same on every instruction that Task produces. */
+  /**
+   * Unique to one Task, and the same on every instruction that Task produces.
+   *
+   * A Command gets one too, though it is not a Task and produces exactly one
+   * instruction. An Adapter that had to ask which kind of thing it was looking
+   * at before it knew how to address the message it posts would be carrying a
+   * distinction that belongs to the Core.
+   */
   readonly taskId: string
   readonly conversationKey: string
 }
@@ -133,6 +142,42 @@ export type OutboundInstruction = TaskAddress &
         /** Say that a Task ended without a result, and why. Its own message too. */
         readonly kind: 'failure'
         readonly reason: string
+      }
+    | {
+        /**
+         * Say that a Task ended because someone stopped it.
+         *
+         * Its own outcome rather than a failure, because it is the one ending
+         * that was asked for. Rendered as a failure it reads as roma breaking,
+         * and it would carry the half-written answer the interrupt cut off as
+         * its reason — the Turn's own text is all a failure has to explain
+         * itself with, and an interrupted Turn's text is whatever it had got
+         * through.
+         *
+         * Carries nothing. What was written before it stopped is already in the
+         * acknowledgement, and there is no result: that is what stopping is.
+         */
+        readonly kind: 'stopped'
+      }
+    | {
+        /**
+         * Say what a Command did.
+         *
+         * A Command is not a Task — it drives no Turn, waits for nothing, and
+         * has no result — so this is the whole of what one emits.
+         */
+        readonly kind: 'command-outcome'
+        readonly command: Command
+        /**
+         * Whether it had anything to do.
+         *
+         * False only for `/stop` in a Conversation with no work in it. It is not
+         * an error and an Adapter should not render it as one — the person asked
+         * for something that had already happened — but it is not the same
+         * message as "stopped" either: told a Task was stopped when none was
+         * running, they stop watching one that is still going.
+         */
+        readonly carriedOut: boolean
       }
   )
 

@@ -35,6 +35,31 @@ export interface Turn {
 }
 
 /**
+ * What Claude Code calls a Turn that was interrupted.
+ *
+ * Measured, not assumed: the prototype's in-band interrupt ended the Turn with
+ * `subtype: "error_during_execution"`, `terminal_reason: "aborted_streaming"`
+ * and `is_error: true` — the capture is `interrupted-turn.jsonl`, and ADR-0003
+ * records the run. `terminal_reason` rather than `subtype` because
+ * `error_during_execution` is what any error during execution says, and only
+ * this field distinguishes the ending somebody asked for from the ones nobody
+ * did.
+ */
+const ABORTED = 'aborted_streaming'
+
+/**
+ * Whether this Turn ended because it was interrupted rather than because it
+ * failed.
+ *
+ * The difference matters exactly once, at the end, where a Task somebody stopped
+ * is reported as stopped rather than as a failure — the `stopped` outbound
+ * instruction is where that is argued.
+ */
+export function wasInterrupted(turn: Turn): boolean {
+  return turn.terminalReason === ABORTED
+}
+
+/**
  * A Turn that ended in failure.
  *
  * Thrown rather than returned so that no caller can mistake a failed Turn for a
@@ -247,20 +272,28 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
   }
 
   /**
-   * Ask Claude Code to abandon the running Turn.
+   * Ask Claude Code to abandon the running Turn, and say whether there was one.
    *
    * In-band over stdin, so the process survives and the next message is served
    * normally. The Turn still ends — as a failure, with whatever it had already
    * spent.
+   *
+   * False means nothing was interrupted, and the caller has to be able to tell:
+   * `/stop` a second after sending is a real thing for a person to do, and in
+   * that second the process may still be starting. Sending the control request
+   * anyway would leave the Turn to run to completion while the Conversation had
+   * been told it was stopped, which is worse than saying there was nothing to
+   * stop — that at least is true, and can be acted on by asking again.
    */
-  interrupt(): void {
-    if (this.#process === null || this.#exit !== null) return
+  interrupt(): boolean {
+    if (this.#process === null || this.#exit !== null || this.#pending === null) return false
     this.#controlRequests += 1
     this.#writeFrame({
       type: 'control_request',
       request_id: `req_${this.#controlRequests}_${this.sessionId}`,
       request: { subtype: 'interrupt' },
     })
+    return true
   }
 
   /**

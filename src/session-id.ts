@@ -13,6 +13,18 @@ export const ROMA_NAMESPACE = 'd34e4bf8-6828-4829-9f5b-a6f0ce25205f'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
+ * Joins a Conversation Key to a Session generation without either being able to
+ * spell the other.
+ *
+ * A printable separator would let one Conversation name another's later
+ * generation: with `#`, a Channel that minted the key `a#1` would derive the
+ * same id as generation 1 of the key `a` — one Conversation reading and writing
+ * another's Session, with nothing anywhere saying so. A NUL is the one byte a
+ * Channel's own identifiers cannot carry.
+ */
+const GENERATION_SEPARATOR = '\u0000'
+
+/**
  * The Session backing one Conversation.
  *
  * Derived rather than looked up, which is the whole reason roma needs no
@@ -20,12 +32,26 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
  * a redeploy, or a different machine, with nothing persisted anywhere. What the
  * key *is* belongs to the Channel Adapter that supplied it — the Core's only
  * rule is that it is stable.
+ *
+ * A Conversation Key names a Conversation for as long as that Conversation
+ * exists, which is exactly what makes `/new` impossible without the second
+ * argument: the key cannot move, so the generation is what does. Generation zero
+ * is the plain derivation and every Conversation starts there, so a Session that
+ * has never been rotated has the id it always had — see `SessionGenerations` for
+ * where the current generation is kept.
  */
-export function sessionIdFor(conversationKey: string): string {
+export function sessionIdFor(conversationKey: string, generation = 0): string {
   if (conversationKey.trim() === '') {
     throw new Error('a Conversation Key cannot be empty')
   }
-  return uuidv5(conversationKey, ROMA_NAMESPACE)
+  if (!Number.isInteger(generation) || generation < 0) {
+    throw new Error(`a Session generation counts from zero: ${generation}`)
+  }
+  const name =
+    generation === 0
+      ? conversationKey
+      : `${conversationKey}${GENERATION_SEPARATOR}${generation}`
+  return uuidv5(name, ROMA_NAMESPACE)
 }
 
 /**

@@ -462,14 +462,32 @@ describe('driving a resident Session', () => {
     const { pool, processFor, send } = newPool()
     await send(A, 'hello', OK)
     await send(B, 'hello', OK)
+    const running = pool.send(A, 'something long')
+    await flush()
 
-    pool.interrupt(A)
+    expect(pool.interrupt(A)).toBe(true)
 
     expect(processFor(A).sent.at(-1)).toMatchObject({
       type: 'control_request',
       request: { subtype: 'interrupt' },
     })
     expect(processFor(B).sent).toHaveLength(1)
+
+    feed(processFor(A), recordedStream('interrupted-turn').turn(1))
+    await expect(running).rejects.toThrow()
+  })
+
+  // What `/stop` in a Conversation that is not doing anything has to be able to
+  // find out. A control request sent into a Session with nothing in flight would
+  // report a Task stopped that was never running.
+  it('says so when there is no Turn to interrupt', async () => {
+    const { pool, processFor, send } = newPool()
+    await send(A, 'hello', OK)
+
+    expect(pool.interrupt(A)).toBe(false)
+    expect(pool.interrupt(B)).toBe(false)
+
+    expect(processFor(A).sent).toHaveLength(1)
   })
 
   // Progress reporting reads the stream, and with more than one Session resident
