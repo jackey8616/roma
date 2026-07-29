@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { AuditLog } from './audit-log.js'
 import { buildEnv, type Credential } from './build-env.js'
 import type { ChannelAdapter } from './channel-adapter.js'
 import type { SpawnClaudeProcess } from './claude-process.js'
@@ -29,6 +30,18 @@ export interface StartRomaOptions {
   readonly channel: ChannelAdapter
   /** Where Sessions get their working directories, one each. */
   readonly workRoot: string
+  /**
+   * Where the Audit Records go, one file per calendar month.
+   *
+   * Required, and deliberately not defaulted to somewhere under `workRoot`: that
+   * tree is walked by a reclaim that deletes what nothing has touched for seven
+   * days, and a default that quietly landed there would delete the log over a
+   * quiet week. A deployment naming a durable path is the whole of what makes
+   * "records survive a restart" true, and it is not something to be guessed at
+   * on a deployment's behalf — the number in these files is the only record of
+   * who spent what, and it cannot be reconstructed after the fact.
+   */
+  readonly auditRoot: string
   /** CLAUDE_CONFIG_DIR and CLAUDE_SECURESTORAGE_CONFIG_DIR, both pointed here. */
   readonly configDir?: string
   /** The pinned model. Defaults to the one every Session runs on. */
@@ -54,6 +67,8 @@ export interface Roma {
   readonly pool: SessionPool
   readonly queue: TaskQueue
   readonly sessions: SessionGenerations
+  /** Every Task roma has run, and what each one cost. */
+  readonly audit: AuditLog
   /** What the self-check found, for the boot log. */
   readonly selfCheck: StartupSelfCheckReport
   /** End every resident process. Sessions keep their context on disk. */
@@ -80,6 +95,7 @@ export async function startRoma({
   credential,
   channel,
   workRoot,
+  auditRoot,
   configDir,
   model,
   maxConcurrentTasks,
@@ -122,12 +138,17 @@ export async function startRoma({
     maxConcurrentTasks === undefined ? {} : { maxConcurrent: maxConcurrentTasks },
   )
   const sessions = new SessionGenerations({ workRoot })
+  const audit = new AuditLog({ auditRoot })
 
   return {
-    core: new Core({ channel, pool, queue, sessions }),
+    // The credential is handed over as well as the environment built from it,
+    // because the record has to say which of the two bills a Task landed on and
+    // the environment is a map of secrets rather than an answer to that.
+    core: new Core({ channel, pool, queue, sessions, audit, credential: credential.kind }),
     pool,
     queue,
     sessions,
+    audit,
     selfCheck,
     shutdown: () => pool.shutdown(),
   }

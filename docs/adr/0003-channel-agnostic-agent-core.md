@@ -418,7 +418,34 @@ wrapper.
   401 on first use. ADR-0001's choice of a live `-p` invocation was right, and
   this is why.
 - Per-task audit record: who, session, duration, cost, and which credential
-  served it.
+  served it. One JSONL file per calendar month, because the monthly overflow cap
+  is a calendar-month sum and nothing else — and under a root of its own rather
+  than under the session pool's work root, which is walked by a reclaim that
+  deletes whatever has gone seven days untouched. An audit log surviving a quiet
+  week is the whole point of it.
+  - **Both credentials are recorded — the one roma ran the task on and the
+    `apiKeySource` Claude Code reported while running it.** They agree by
+    construction: the environment is built per invocation and the self-check
+    asserts on it at boot. Recording both anyway is cheap, and the disagreement
+    it would catch is the one ADR-0002 fears most — a stray key moving every run
+    onto metered billing. The alternative is discovering it from an invoice, by
+    which point the month is spent.
+  - **Cost has three values, because "free" and "unpriced" are different facts.**
+    A number where a turn was priced; **zero** only where no turn ever began, so
+    nothing can have been spent — a task stopped while it was still queued;
+    **null** where a turn began and no terminal event ever arrived, which is
+    where the cost is reported. A task abandoned mid-retry-storm or cut short by
+    a process that died had spent real tokens that nothing will now name, and
+    recording those as zero reports money as free — the same class of wrong as
+    the cumulative total above, pointing the other way. A monthly total therefore
+    carries a count of the unpriced tasks in it, and reads as a floor rather than
+    an answer. Neither kind is omitted: a log that disagreed with the number of
+    messages people sent would fail the other thing it is read for.
+  - **Duration is two numbers**: the task's own wall clock, from arrival to the
+    caller being told, and the turn's. The first is what a person endured and the
+    only one a task stopped in the queue has; the difference between them is what
+    queueing and cold start cost, which is the measurement any future argument
+    about the concurrency cap needs.
 - **The cost figure must be a per-turn delta.** `total_cost_usd` is a
   **cumulative process total**, not a per-turn figure — across two turns
   `modelUsage` summed: `inputTokens` 2 → 4, `outputTokens` 4 → 7, `cacheRead`

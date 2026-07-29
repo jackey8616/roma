@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { Credential } from './build-env.js'
+import { apiKeySourceFor, type Credential } from './build-env.js'
 import type { SpawnClaudeProcess } from './claude-process.js'
 import { ClaudeSession, PINNED_MODEL, TurnFailedError } from './claude-session.js'
 import { readSystemInit, type SystemInit } from './stream-events.js'
@@ -118,8 +118,15 @@ export interface StartupSelfCheckReport {
    */
   readonly claudeCodeVersion: string | null
   readonly durationMs: number
-  /** What proving this cost. Small, and it is spent on every boot. */
-  readonly costUsd: number
+  /**
+   * What proving this cost. Small, and it is spent on every boot.
+   *
+   * Null if the probe's terminal event carried no total, which would itself be
+   * news — every capture we hold has one — and is reported rather than smoothed
+   * to zero for the same reason an Audit Record is: a boot that says it cost
+   * nothing and a boot that could not tell are different things to read.
+   */
+  readonly costUsd: number | null
 }
 
 /**
@@ -231,18 +238,13 @@ export async function startupSelfCheck({
   }
 }
 
-/** What `system/init` must say for this credential to be the one in use. */
-function expectedApiKeySource(credential: Credential): string {
-  return credential.kind === 'shared-window' ? 'none' : 'ANTHROPIC_API_KEY'
-}
-
 function checkInit(
   init: SystemInit,
   credential: Credential,
   model: string,
 ): SelfCheckFailure[] {
   const failures: SelfCheckFailure[] = []
-  const expectedSource = expectedApiKeySource(credential)
+  const expectedSource = apiKeySourceFor(credential.kind)
 
   if (init.apiKeySource !== expectedSource) {
     failures.push({
