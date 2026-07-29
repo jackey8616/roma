@@ -244,9 +244,16 @@ async function main() {
     console.log('*** running against the SHARED WINDOW everybody shares ***')
   }
 
+  // The scratch Sessions are rebuilt every run and nothing outlives them.
   rmSync(ROOT, { recursive: true, force: true })
-  rmSync(OUT, { recursive: true, force: true })
+  // The captured streams are NOT. They are the primary source the write-up and
+  // the tickets cite, and wiping them here is how one `--only=P5` run silently
+  // destroyed P0-P4's evidence and then committed the deletion. A run overwrites
+  // the probes it actually runs and leaves every other probe's capture alone.
   mkdirSync(OUT, { recursive: true })
+  if (ONLY === null) {
+    for (const stale of readdirSync(OUT)) rmSync(join(OUT, stale), { force: true })
+  }
 
   const configDir = join(ROOT, 'claude-home')
   const cwd = join(ROOT, 'work/conversation-one')
@@ -415,7 +422,10 @@ console.log('\n=== P4 — in-place reset: same id, Transcript AND cwd gone ===')
     sessionId,
     findings,
   }
-  writeFileSync(join(OUT, 'summary.json'), JSON.stringify(summary, null, 2))
+  // Named for the run, so an --only= run cannot overwrite the full run's summary
+  // the way it once overwrote its captures.
+  const summaryFile = ONLY === null ? 'summary.json' : `summary-${ONLY.toLowerCase()}.json`
+  writeFileSync(join(OUT, summaryFile), JSON.stringify(summary, null, 2))
 
   console.log(`\n=== done — ${budget.spent}/${budget.cap} turns spent ===`)
   console.log(`raw streams and summary: ${OUT.replace(REPO, '')}`)
