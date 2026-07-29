@@ -1,0 +1,149 @@
+{
+  "ranAt": "2026-07-29T10:09:08.160Z",
+  "credential": "shared-window",
+  "dryRun": false,
+  "turnsSpent": 2,
+  "turnCap": 8,
+  "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  "findings": [
+    {
+      "probe": "P0",
+      "question": "where does the Transcript land, and does one Turn create it?",
+      "argv": [
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--permission-mode",
+        "bypassPermissions",
+        "--replay-user-messages",
+        "--verbose",
+        "--session-id",
+        "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      ],
+      "turn": {
+        "outcome": "answered",
+        "text": "OK",
+        "cost": 0.0704842,
+        "isError": false
+      },
+      "transcripts": [
+        {
+          "path": ".tmp/proto-transcript/claude-home/projects/-Users-clode-Program-something--tmp-proto-transcript-work-conversation-one/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jsonl",
+          "bytes": 14089,
+          "lines": 7
+        }
+      ]
+    },
+    {
+      "probe": "P1",
+      "question": "what does --session-id do at an id with a live Transcript?",
+      "argv": [
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--permission-mode",
+        "bypassPermissions",
+        "--replay-user-messages",
+        "--verbose",
+        "--session-id",
+        "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      ],
+      "exited": {
+        "code": 1,
+        "signal": null,
+        "at": 1785319736581
+      },
+      "stderr": [
+        "Error: Session ID aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee is already in use."
+      ],
+      "eventsBeforeSend": [],
+      "turn": null
+    },
+    {
+      "probe": "P2",
+      "question": "does roma's reclaim leave a Conversation unservable?",
+      "argv": [
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--permission-mode",
+        "bypassPermissions",
+        "--replay-user-messages",
+        "--verbose",
+        "--session-id",
+        "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      ],
+      "exited": {
+        "code": 1,
+        "signal": null,
+        "at": 1785319736977
+      },
+      "stderr": [
+        "Error: Session ID aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee is already in use."
+      ],
+      "turn": null
+    },
+    {
+      "probe": "P3",
+      "question": "what does --resume do with no Transcript?",
+      "argv": [
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--permission-mode",
+        "bypassPermissions",
+        "--replay-user-messages",
+        "--verbose",
+        "--resume",
+        "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      ],
+      "exited": {
+        "code": 1,
+        "signal": null,
+        "at": 1785319738010
+      },
+      "stderr": [
+        "No conversation found with session ID: aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      ],
+      "eventsBeforeSend": [
+        {
+          "type": "result",
+          "subtype": "error_during_execution"
+        }
+      ]
+    },
+    {
+      "probe": "P4",
+      "question": "can an id be reused once its Transcript is gone?",
+      "argv": [
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--permission-mode",
+        "bypassPermissions",
+        "--replay-user-messages",
+        "--verbose",
+        "--session-id",
+        "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      ],
+      "exited": null,
+      "stderr": [],
+      "turn": {
+        "outcome": "answered",
+        "text": "NONE",
+        "cost": 0.038449199999999996,
+        "isError": false
+      }
+    }
+  ]
+}
