@@ -137,6 +137,56 @@ export type OutboundInstruction = TaskAddress &
          */
         readonly kind: 'result'
         readonly text: string
+        /**
+         * What this Task cost, present only where it ran on metered billing.
+         *
+         * ADR-0002 requires the spend to be shown in the reply, and only for
+         * Overflow: a Shared Window Task costs quota rather than money, and
+         * pricing every reply would turn every answer into an invoice. Null
+         * where the Turn was never priced — see the Audit Record for what that
+         * means.
+         */
+        readonly overflowCostUsd?: number | null
+      }
+    | {
+        /**
+         * Say that the Shared Window is spent, when it comes back, and whether
+         * Overflow can be taken.
+         *
+         * Its own message rather than an edit of the acknowledgement, because it
+         * may carry an offer someone has to act on, and an acknowledgement is
+         * mutating — the offer would be overwritten by the next update. The Task
+         * is not over: it runs when the window returns, and this is what stops
+         * the wait being silent.
+         */
+        readonly kind: 'blocked'
+        /**
+         * When the window comes back, in unix seconds.
+         *
+         * Off the stream's own `rate_limit_event` rather than estimated, which
+         * is the only reason it is worth quoting to anybody.
+         */
+        readonly resetsAt: number
+        /**
+         * Whether the Adapter should offer Overflow at all.
+         *
+         * False where the provider says overage is unavailable, or where roma
+         * has no metered credential. An Adapter that offered it anyway would
+         * spend somebody's attention on a button that cannot work.
+         */
+        readonly overflowOffered: boolean
+      }
+    | {
+        /**
+         * Say that Overflow was asked for and refused by the monthly cap.
+         *
+         * Not a failure: the Task is still waiting for the window, and the
+         * person can still stop it. The numbers are here so the refusal can be
+         * stated rather than merely asserted.
+         */
+        readonly kind: 'overflow-refused'
+        readonly capUsd: number
+        readonly spentUsd: number
       }
     | {
         /** Say that a Task ended without a result, and why. Its own message too. */
@@ -231,6 +281,22 @@ export interface ChannelAdapter<Event = unknown> {
    * it is not one roma should answer.
    */
   toIngress(event: Event): IngressMessage | null
+  /**
+   * Turn one of this Channel's events into the id of the Task whose offer of
+   * Overflow is being taken, or null if it is not one.
+   *
+   * Optional, because a Channel with no way to present an offer needs no way to
+   * read one being taken — and because the offer is the only thing in roma
+   * anybody can answer with anything but a message.
+   *
+   * Its own reader rather than a third Command or a field on an ingress message.
+   * A Command would be one anybody could type at any moment, including when
+   * nothing is blocked, and ADR-0003 is explicit that there are two; a field on
+   * the ingress message would make every Channel carry a concept for the sake of
+   * one. What comes back here is a Task id roma minted and put on the offer, so
+   * it can only ever answer an offer roma actually made.
+   */
+  toOverflowTaken?(event: Event): string | null
   /** Carry out one instruction. Rejecting means it reached nobody. */
   deliver(instruction: OutboundInstruction): void | Promise<void>
 }

@@ -87,6 +87,50 @@ export function readIngressMessage(event: ChatEvent): IngressMessage | null {
   return { conversationKey: direct || thread === null ? spaceName : thread, caller, text }
 }
 
+/**
+ * Chat's own name for a button press, and roma's name for the one it has.
+ *
+ * The action name travels out on the button and comes back on the click, so
+ * these two constants are the whole of the round trip.
+ */
+const CARD_CLICKED = 'CARD_CLICKED'
+export const TAKE_OVERFLOW = 'takeOverflow'
+export const TASK_ID_PARAMETER = 'taskId'
+
+/**
+ * Read a click on the Overflow button as the Task it was about, or null.
+ *
+ * Written from Google's documented shape rather than from a capture — like every
+ * Chat event in this repo, and for the same reason: nothing here can produce a
+ * real one. Both parameter shapes are read because Chat has two. `common.parameters`
+ * is an object on the current interaction event; `action.parameters` is a list of
+ * `{key, value}` pairs on the older one, and which arrives depends on how the
+ * event was delivered. Reading one and not the other would make the button do
+ * nothing at all, silently, for whichever half of the deliveries carries the
+ * other — and a button that does nothing is worse than no button, because
+ * somebody waiting on a blocked Task presses it and then keeps waiting.
+ * https://developers.google.com/workspace/chat/read-form-data
+ */
+export function readOverflowTaken(event: ChatEvent): string | null {
+  if (asString(event['type']) !== CARD_CLICKED) return null
+
+  const common = asRecord(event['common'])
+  if (asString(common?.['invokedFunction']) === TAKE_OVERFLOW) {
+    const taskId = asString(asRecord(common?.['parameters'])?.[TASK_ID_PARAMETER])
+    if (taskId !== null) return taskId
+  }
+
+  const action = asRecord(event['action'])
+  if (asString(action?.['actionMethodName']) !== TAKE_OVERFLOW) return null
+  const parameters = action?.['parameters']
+  if (!Array.isArray(parameters)) return null
+  for (const entry of parameters) {
+    const pair = asRecord(entry)
+    if (asString(pair?.['key']) === TASK_ID_PARAMETER) return asString(pair?.['value'])
+  }
+  return null
+}
+
 function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
   return value as Readonly<Record<string, unknown>>

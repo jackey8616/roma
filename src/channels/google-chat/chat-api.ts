@@ -5,6 +5,27 @@
  * the Adapter decided — which thread, what the words are — is already settled by
  * the time one of these exists.
  */
+/**
+ * Something a person can do to a message roma posted, as a button on it.
+ *
+ * Shaped like roma's use of Chat rather than like Chat — the same judgement
+ * `ChatApi` below is built on. Whatever speaks HTTP turns this into the
+ * `cardsV2` payload Chat wants; what matters at this boundary is which action a
+ * click means and which Task it is about, because those are what come back.
+ *
+ * One action per message, because roma has exactly one thing anybody can press:
+ * taking Overflow on a blocked Task. A second would be a reason to revisit this,
+ * not a reason to generalise it now.
+ */
+export interface ChatAction {
+  /** What the button says. */
+  readonly label: string
+  /** Chat's `action.function` — the name a click comes back carrying. */
+  readonly action: string
+  /** Chat's `action.parameters`, which is how a click says which Task it is about. */
+  readonly parameters: Readonly<Record<string, string>>
+}
+
 export interface ChatMessage {
   /** `spaces/{space}`, taken from the event that started the Conversation. */
   readonly space: string
@@ -27,6 +48,15 @@ export interface ChatMessage {
    * thread ever comes to exist.
    */
   readonly replyOption?: 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD'
+  /**
+   * A button on this message, where there is something to press.
+   *
+   * Only on the message that says the Shared Window is spent, and only when
+   * Overflow is on offer — ADR-0002 puts the valve at the moment of blocking
+   * rather than in a setting, and a button on the message that reports the block
+   * is that moment.
+   */
+  readonly action?: ChatAction
 }
 
 /**

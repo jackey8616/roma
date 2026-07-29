@@ -4,9 +4,15 @@ import type {
   IngressMessage,
   OutboundInstruction,
 } from '../../channel-adapter.js'
-import type { ChatApi, ChatMessage } from './chat-api.js'
-import { readIngressMessage, type ChatEvent } from './chat-events.js'
-import { outcomeMessages, progressText } from './render.js'
+import type { ChatAction, ChatApi, ChatMessage } from './chat-api.js'
+import {
+  readIngressMessage,
+  readOverflowTaken,
+  TASK_ID_PARAMETER,
+  TAKE_OVERFLOW,
+  type ChatEvent,
+} from './chat-events.js'
+import { OVERFLOW_BUTTON, outcomeMessages, progressText } from './render.js'
 
 /** Chat's own name for the option that makes a reply establish a thread. */
 const REPLY_OR_START_THREAD = 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD'
@@ -82,6 +88,17 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
   }
 
   /**
+   * A click on the Overflow button, as the Task it was about.
+   *
+   * The other half of `#offer` below: what goes out as a parameter on the button
+   * comes back as one on the click, so the Task id makes the round trip and roma
+   * needs to remember nothing between the offer and its being taken.
+   */
+  toOverflowTaken(event: ChatEvent): string | null {
+    return readOverflowTaken(event)
+  }
+
+  /**
    * Carry out one instruction, as one or more Chat messages.
    *
    * Progress edits the acknowledgement in place; everything else is a new
@@ -103,8 +120,38 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
     // messages are posted rather than after, so that a post that throws still
     // leaves nothing behind.
     this.#acknowledgements.delete(taskId)
+    // Only the message that reports a block can carry one, and only when the
+    // valve is on offer — ADR-0002 puts it at the moment of blocking rather than
+    // in a setting somebody turns on in advance.
+    const offer =
+      instruction.kind === 'blocked' && instruction.overflowOffered
+        ? this.#offer(taskId)
+        : undefined
     for (const text of outcomeMessages(instruction)) {
-      await this.#api.post(this.#addressed(conversationKey, text))
+      await this.#api.post({
+        ...this.#addressed(conversationKey, text),
+        ...(offer === undefined ? {} : { action: offer }),
+      })
+    }
+  }
+
+  /**
+   * The button that takes Overflow for one Task.
+   *
+   * Named by the Task rather than by the Conversation, because that is what the
+   * offer is about: a Conversation can have a second Task blocked behind this
+   * one, and a button that meant "the blocked Task here" would spend money on
+   * whichever of them roma looked at first.
+   *
+   * Anyone in the Conversation may press it, which is ADR-0002's decision rather
+   * than an oversight — restricting it to an admin turns a person into an
+   * approval queue and strands urgent work whenever they are offline.
+   */
+  #offer(taskId: string): ChatAction {
+    return {
+      label: OVERFLOW_BUTTON,
+      action: TAKE_OVERFLOW,
+      parameters: { [TASK_ID_PARAMETER]: taskId },
     }
   }
 

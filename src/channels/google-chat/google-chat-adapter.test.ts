@@ -419,3 +419,136 @@ describe('what a Conversation is told', () => {
     expect(api.texts[0]).not.toBe('')
   })
 })
+
+describe('a Task the Shared Window has blocked', () => {
+  // Plainly that quota is spent, with the reset time the event gave — and that
+  // the Task is kept, because told only that quota is spent people send the
+  // message again, which is the behaviour the acknowledgement exists to prevent.
+  it('says quota is spent, when it comes back, and that the Task is kept', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: false }))
+
+    expect(api.texts).toEqual([
+      'The shared Claude quota is spent. It comes back at 2026-07-28 20:40 UTC — I have kept your task and will run it then.',
+    ])
+  })
+
+  // The offer is a button on that message, which is ADR-0002's "offered at the
+  // moment of blocking" made literal — not a setting somebody turns on in
+  // advance and then forgets is on.
+  it('carries the offer as a button naming the Task it is about', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(
+      to(THREAD, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: true }, 'task-77'),
+    )
+
+    expect(api.messages[0]?.posted.action).toEqual({
+      label: 'Run it on metered billing',
+      action: 'takeOverflow',
+      parameters: { taskId: 'task-77' },
+    })
+  })
+
+  // A button that cannot work is worse than no button: somebody waiting on a
+  // blocked Task presses it and then keeps waiting.
+  it('posts no button where the Core did not offer one', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: false }))
+
+    expect(api.messages[0]?.posted.action).toBeUndefined()
+  })
+
+  // The round trip: what went out as a parameter on the button comes back as one
+  // on the click, so roma remembers nothing between offering and its being taken.
+  it('reads a click on it as the Task it was offered for', () => {
+    const { adapter } = newAdapter()
+
+    expect(
+      adapter.toOverflowTaken({
+        type: 'CARD_CLICKED',
+        common: { invokedFunction: 'takeOverflow', parameters: { taskId: 'task-77' } },
+      }),
+    ).toBe('task-77')
+  })
+
+  // Chat has two parameter shapes and which one arrives depends on how the event
+  // was delivered. Reading one and not the other would make the button do
+  // nothing for half of them, silently.
+  it('reads the older parameter shape too', () => {
+    const { adapter } = newAdapter()
+
+    expect(
+      adapter.toOverflowTaken({
+        type: 'CARD_CLICKED',
+        action: {
+          actionMethodName: 'takeOverflow',
+          parameters: [{ key: 'taskId', value: 'task-77' }],
+        },
+      }),
+    ).toBe('task-77')
+  })
+
+  it('reads an ordinary message as no such click', () => {
+    const { adapter } = newAdapter()
+
+    expect(adapter.toOverflowTaken(inSpace())).toBeNull()
+  })
+
+  // A click is not a message. Answering one as though it were would spend a Turn
+  // asking Claude Code what to make of a button press.
+  it('reads a click as no ingress message either', () => {
+    const { adapter } = newAdapter()
+
+    expect(
+      adapter.toIngress({
+        type: 'CARD_CLICKED',
+        common: { invokedFunction: 'takeOverflow', parameters: { taskId: 'task-77' } },
+      }),
+    ).toBeNull()
+  })
+
+  it('says what the cap was when Overflow is refused, and that the Task waits on', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, { kind: 'overflow-refused', capUsd: 20, spentUsd: 21.5 }))
+
+    expect(api.texts).toEqual([
+      'Overflow is capped at $20.00 a month and this month has spent $21.50, so it is off ' +
+        'until the month turns. Your task is still waiting for the shared quota to reset.',
+    ])
+  })
+})
+
+describe('showing what an Overflow Task spent', () => {
+  // ADR-0002 requires the spend in the reply, and its own message rather than
+  // appended to the answer: the answer is what gets quoted months later, and a
+  // price tag inside it would be quoted with it.
+  it('posts the answer and then what it cost', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, { kind: 'result', text: 'done', overflowCostUsd: 0.42 }))
+
+    expect(api.texts).toEqual(['done', 'Ran on metered billing: $0.42.'])
+  })
+
+  it('says nothing about money for an ordinary Task', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, { kind: 'result', text: 'done' }))
+
+    expect(api.texts).toEqual(['done'])
+  })
+
+  // "$0.00" would report money as free, which is the one claim the Audit Record
+  // refuses to make about a Turn nothing priced.
+  it('does not price a Turn nothing priced', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, { kind: 'result', text: 'done', overflowCostUsd: null }))
+
+    expect(api.texts).toEqual(['done', 'Ran on metered billing. What it cost was never reported.'])
+  })
+})
