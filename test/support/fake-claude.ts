@@ -98,6 +98,17 @@ export class FakeClaudeProcess implements ClaudeProcess {
   }
 }
 
+/**
+ * Let everything already queued run.
+ *
+ * A fake process cannot be fed until the thing that spawns it has finished
+ * spawning it, and spawning settles on the microtask queue — so a test that
+ * drives a Turn has to give way once between asking for it and answering.
+ */
+export function flush(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
 export interface FakeClaudeOptions {
   /**
    * Whether killing a process makes it exit, the way a real one does.

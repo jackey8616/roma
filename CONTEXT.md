@@ -35,6 +35,16 @@ The stable string an Adapter supplies to name one Conversation. The Session id
 is derived from it, which is why roma needs no database.
 _Avoid_: thread id, chat id, room id
 
+**Ingress Message**:
+What an Adapter hands the Core: a Conversation Key, a caller identity, and the
+text. Everything else the Channel knew is gone by this point.
+_Avoid_: event, payload, request
+
+**Outbound Instruction**:
+What the Core hands back to an Adapter — the result of a Task, or why there
+isn't one. It says what happened, never how it should look.
+_Avoid_: response, reply, command (a command is `/new` or `/stop`)
+
 ### Running work
 
 **Core**:
