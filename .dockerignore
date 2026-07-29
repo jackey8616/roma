@@ -1,0 +1,21 @@
+# The build context is only ever asked for the manifests, the two tsconfigs and
+# `src` — every `COPY` above names what it wants. This file is what keeps the
+# rest from being uploaded to the daemon first and then ignored, and what stops a
+# stray `.env` or a local `dist/` from being in the context at all.
+.git
+.github
+.claude
+.scratch
+.tmp
+node_modules
+dist
+build
+coverage
+infra
+docs
+test
+*.md
+.env
+.env.*
+Dockerfile
+.dockerignore

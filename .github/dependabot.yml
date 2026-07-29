@@ -1,0 +1,23 @@
+# The base image and the actions, and nothing else.
+#
+# npm is deliberately absent. The dependency that matters most in this repository
+# is Claude Code, and it is not in `package.json` — it is a pinned `npm install
+# --global` in the Dockerfile, which no ecosystem here watches. That is the
+# decision, not an oversight: an automated bump would look like routine
+# maintenance while silently invalidating every measurement in `docs/`, and CI
+# would pass, because seam 2 does not run there. Moving that pin is a
+# re-verification event a human does on purpose (ADR-0006).
+#
+# Nothing watches for it going stale either. The pin will fall behind and nothing
+# will say so. A notify-only drift check is worth its own ticket.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -1,0 +1,20 @@
+{
+  // What ships. `tsconfig.json` is what an editor and `npm run typecheck` read,
+  // and its `include` covers `test` and the Vitest configs on purpose — a naive
+  // emit from it would compile the tests, the fakes and the recorded streams into
+  // `dist/` and put roma's test doubles inside the image.
+  //
+  // Emit needs no source changes: every relative import in `src/` already carries
+  // its `.js` extension, because `nodenext` requires it of the TypeScript too.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  // `src` alone, and its tests taken back out. Both halves matter: narrowing
+  // `include` to `src` is what drops `test/`, and the exclusion is what stops the
+  // `*.test.ts` files sitting next to the code they test from coming with it.
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
+}

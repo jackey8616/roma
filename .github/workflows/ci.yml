@@ -1,0 +1,91 @@
+name: ci
+
+# Every pull request, and main itself so that a branch protection rule has
+# something to require and so a squash merge is checked as the commit it became.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# One run per ref. A superseded push has nothing left to prove, and the image
+# job is the expensive half of this file.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # One job with three steps rather than three jobs: all three want the same
+  # `npm ci`, and the suite itself runs in under three seconds, so splitting them
+  # would spend more on checkouts and installs than the checks cost.
+  #
+  # `typecheck` and `build` are not redundant. `build` compiles `src` alone, so
+  # it would not typecheck the tests; `typecheck` covers everything and emits
+  # nothing.
+  checks:
+    name: typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      # The default run: fast, free, deterministic. It cannot reach seam 2 —
+      # those tests live in their own Vitest config, and `src/packaging.test.ts`
+      # fails if any workflow here ever names one or is handed the token they
+      # need. Nothing in this file has a Shared Window credential to spend.
+      - run: npm test
+
+      - run: npm run build
+
+      - name: dist is src alone, and runnable
+        run: |
+          if [ ! -f dist/channels/google-chat/main.js ]; then
+            echo 'dist/ has no entrypoint' >&2
+            exit 1
+          fi
+          compiled_tests="$(find dist -name '*.test.js')"
+          if [ -n "${compiled_tests}" ]; then
+            echo 'the tests were compiled into dist/:' >&2
+            echo "${compiled_tests}" >&2
+            exit 1
+          fi
+
+  # Built on every pull request, pushed on none.
+  #
+  # A Dockerfile only exercised at tag time breaks at the most expensive moment —
+  # after the release has been decided — and usually because of a change merged
+  # weeks earlier. Building without pushing is also the only shape a fork's pull
+  # request can run at all, so contributors and maintainers take the same path.
+  image:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          # ADR-0003's runtime is a GCE VM. An architecture nothing deploys to is
+          # an artifact with no evidence behind it.
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: roma:ci
+          build-args: |
+            REVISION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - run: ./scripts/verify-image.sh roma:ci

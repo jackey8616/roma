@@ -9,8 +9,10 @@ channel-agnostic core) and ADR-0004 (Google Chat) before changing anything here.
 ## Requirements
 
 - **Node 22** — `.nvmrc` pins it; `nvm use` picks it up.
-- **Claude Code v2.1.220** on `PATH`, for the seam 2 tests only. Behaviour is
-  version-specific and every measurement in `docs/` is against that build.
+- **Claude Code v2.1.220** on `PATH`, for the seam 2 tests. Behaviour is version-specific
+  and every measurement in `docs/` is against that build — which is why the image pins the
+  same version exactly, and why moving it is a re-verification event (ADR-0006).
+- **Docker**, only to build or run the image.
 
 ```bash
 npm install
@@ -20,10 +22,11 @@ npm install
 
 | command | does |
 | --- | --- |
-| `npm start` | Runs roma against Google Chat. See below. |
+| `npm start` | Runs roma against Google Chat from the sources, via `tsx`. See below. |
 | `npm test` | The default run. Fast, free, deterministic. |
 | `npm run test:watch` | The same, watching. |
-| `npm run typecheck` | `tsc --noEmit`. |
+| `npm run typecheck` | `tsc --noEmit`, over `src` **and** `test`. |
+| `npm run build` | `src` alone to `dist/`, which is what the image runs. |
 | `npm run test:seam2` | **Spends money.** Drives a real `claude -p`. |
 
 ### Seam 2 spends Shared Window quota
@@ -43,10 +46,57 @@ architecture rests on goes unchecked.
 ## Running it
 
 `npm start` is roma over Google Chat: it reads the environment, proves the credential with
-the startup self-check, and only then subscribes. There is no build step — `tsx` runs the
-TypeScript directly, from a normal `npm install`. How roma is packaged and shipped is a
-deployment question, and deployment is out of scope for the spec, so `tsx` stays a dev
-dependency and `npm ci --omit=dev` is not something this repo claims to support yet.
+the startup self-check, and only then subscribes. In development that runs the TypeScript
+directly through `tsx`, from a normal `npm install`.
+
+What ships is compiled. `npm run build` emits `src` alone to `dist/` — the tests are not
+in it — and the image runs `node dist/channels/google-chat/main.js` under `npm ci
+--omit=dev`, so `tsx` is a development dependency in fact and not only in the manifest.
+
+### The image
+
+```bash
+docker run --rm \
+  -e CLAUDE_CODE_OAUTH_TOKEN -e ROMA_PUBSUB_PROJECT_ID -e ROMA_PUBSUB_SUBSCRIPTION \
+  -e ROMA_AUDIT_ROOT=/var/lib/roma/audit \
+  -v roma-audit:/var/lib/roma/audit \
+  ghcr.io/jackey8616/roma:0.1.0
+```
+
+It carries **its own Claude Code, pinned to v2.1.220** — the version every measurement in
+`docs/` was taken against. Moving that pin is a re-verification event that costs Shared
+Window money, not a dependency bump, and nothing automated will ever move it for you.
+ADR-0006 is why, and `src/packaging.test.ts` is what keeps it.
+
+There is **no `latest` tag, and no `0.1` or `0`**. A tag that moves is a deployment whose
+Claude Code changes underneath it, which is the whole thing the pin exists to prevent, so
+`docker run` without a tag fails rather than guessing.
+
+`ROMA_WORK_ROOT` and `ROMA_CLAUDE_CONFIG_DIR` are defaulted in the image, because losing
+either is by design. **`ROMA_AUDIT_ROOT` is not**, because losing that one is data loss and
+where it goes is not the image's to decide — run it with no volume and it refuses to start,
+naming it. Mount something durable there.
+
+roma runs as `node`, uid 1000. A **named volume** at `/var/lib/roma/audit` inherits that
+ownership, because the image makes the directory even though it points nothing at it. A
+**bind mount** brings the host's own ownership instead, so `chown 1000:1000` the host
+directory first — otherwise roma starts, clears the refusal, and then loses the first Audit
+Record to a permission error, which is the same data gone by a longer route.
+
+The image is `node:22-slim`, `linux/amd64`, non-root, with `git` and `ca-certificates` and
+nothing else. roma's agent runs arbitrary shell commands, so that list is a decision rather
+than an accident.
+
+### CI
+
+Every pull request runs `typecheck`, `test`, `build` and a `docker build` that pushes
+nothing. Pushing a tag equal to `package.json`'s `version` publishes that one image tag to
+GHCR and no other; a tag that disagrees fails before anything is built.
+
+**Seam 2 never runs in CI** and no workflow is given a Shared Window token — roma is never
+booted there. What the image is checked against instead is `claude --version` inside it, and
+its refusal on an empty environment. `scripts/verify-image.sh` is both, and
+`src/packaging.test.ts` fails if a workflow ever reaches for the money.
 
 **roma provisions nothing.** The Pub/Sub topic, the subscription, the service account and
 the grant that lets Chat publish all exist before roma starts; the variables below name
@@ -83,10 +133,11 @@ a whole deployment because a shell profile mentioned it.
 
 ### What running it against a real Workspace means today
 
-There is no container, no VM, no firewall and **no egress allowlist** — which ADR-0003
-describes as the only protection still doing real work under `bypassPermissions`. This
-repo does not change that. An agent reachable from Chat by any Workspace member, with
-unrestricted network access, is what you get until that protection exists.
+There is a container now. There is still **no egress allowlist** — which ADR-0003 describes
+as the only protection still doing real work under `bypassPermissions` — and no firewall.
+A pullable image makes it *easier* to stand that agent up, not safer: an image reads like
+"deployment is done" and it is not. An agent reachable from Chat by any Workspace member,
+with unrestricted network access, is what you get until that protection exists.
 
 ## Where the Channel-specific code goes
 

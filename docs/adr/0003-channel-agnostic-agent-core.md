@@ -567,8 +567,12 @@ a rare one.
   capability. Per-channel authorisation is not specified.
 
 **Follow-on work not yet specified:** rate-limit backoff, per-channel API quota
-handling for progress updates, container image build and update process,
-per-channel authorisation.
+handling for progress updates, per-channel authorisation.
+
+The container image's build and update process was on that list and is now
+ADR-0006, which also carries the consequence this ADR asks for: the pinned Claude
+Code version lives in the image, so moving it is a re-verification event rather
+than a dependency bump.
 
 ## Alternatives considered
 
