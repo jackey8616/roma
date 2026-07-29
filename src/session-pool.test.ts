@@ -10,7 +10,7 @@ import {
 } from './session-pool.js'
 import type { Turn } from './claude-session.js'
 import { FakeClaude, flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
-import { feed, recordedStream, withTotalCostUsd } from '../test/support/recorded-stream.js'
+import { apiRetries, feed, recordedStream, withTotalCostUsd } from '../test/support/recorded-stream.js'
 import type { ClaudeEvent } from './stream-events.js'
 
 const MINUTE = 60_000
@@ -61,9 +61,7 @@ const OK = stream.turn(1)
  * The ten real `api_retry` events a bad credential produced — the ones the
  * retry-storm cap exists for, 401 `authentication_failed` and all.
  */
-const RETRIES = recordedStream('auth-failure').events.filter(
-  (event) => event.type === 'system' && event['subtype'] === 'api_retry',
-)
+const RETRIES = apiRetries('auth-failure')
 
 beforeEach(() => {
   // setImmediate stays real so `flush` can still drain the microtask queue while
@@ -554,7 +552,7 @@ describe('giving up on a retry storm', () => {
   // the case it would not reach — a backoff already stretched to ~35s between
   // attempts, where waiting for a count is waiting for minutes.
   it('gives up on the wall-clock when the retries are too slow to reach the count', async () => {
-    const { pool, processFor } = newPool({
+    const { pool, processFor, log } = newPool({
       retryBudget: { maxApiRetries: 100, windowMs: 30_000 },
     })
     const turn = pool.send(A, 'hello')
@@ -566,6 +564,57 @@ describe('giving up on a retry storm', () => {
 
     await expect(turn).rejects.toBeInstanceOf(RetryStormError)
     expect(processFor(A).signals).toEqual(['SIGTERM'])
+    expect(log).toContainEqual(expect.objectContaining({ event: 'retry-storm', limit: 'window' }))
+  })
+
+  // The budget is configuration, and these are the numbers roma runs on when
+  // nobody configures it. Every other test here injects its own, so without
+  // this the shipped defaults are the one thing untested.
+  it('gives up after five retries when nobody has configured a budget', async () => {
+    const { pool, processFor } = newPool()
+    const turn = pool.send(A, 'hello')
+    turn.catch(() => {})
+    await flush()
+
+    feed(processFor(A), RETRIES.slice(0, 4))
+    expect(pool.residents).toEqual([A])
+
+    feed(processFor(A), RETRIES.slice(4, 5))
+    await expect(turn).rejects.toMatchObject({ retries: 5 })
+  })
+
+  it('gives up after sixty seconds of retrying when nobody has configured a budget', async () => {
+    const { pool, processFor } = newPool()
+    const turn = pool.send(A, 'hello')
+    turn.catch(() => {})
+    await flush()
+    feed(processFor(A), RETRIES.slice(0, 1))
+
+    await vi.advanceTimersByTimeAsync(59_000)
+    expect(pool.residents).toEqual([A])
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await expect(turn).rejects.toBeInstanceOf(RetryStormError)
+  })
+
+  // The race between the two: a Turn can finish in the gap between roma
+  // deciding to stop waiting and the process actually going. An answer that
+  // arrived is an answer, and throwing it away to report a storm would fail a
+  // Task that had just succeeded.
+  it('delivers a Turn that completes while it is being abandoned', async () => {
+    const { pool, processFor } = newPool({ retryBudget: budget })
+    const turn = pool.send(A, 'hello')
+    await flush()
+    const proc = processFor(A)
+    // SIGTERM is recorded but the process does not go, so the terminal result
+    // still reaches the stream.
+    proc.ignore('SIGTERM')
+
+    feed(proc, RETRIES.slice(0, 3))
+    feed(proc, OK)
+
+    expect((await turn).text).toBe('ok')
+    expect(proc.signals).toContain('SIGTERM')
   })
 
   it('measures the wall-clock from the first retry, not from the Turn', async () => {

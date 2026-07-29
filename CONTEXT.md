@@ -64,8 +64,9 @@ _Avoid_: warm session, active session, hot session
 
 **Session Pool**:
 What decides which Sessions are resident, and for how long. It owns spawning,
-Eviction, and Reaping, and it is the only thing that knows whether a Session is
-being created or reached again.
+Eviction, Reaping, and abandoning a Turn that has spent its retry budget, and it
+is the only thing that knows whether a Session is being created or reached
+again.
 _Avoid_: process pool, session manager, cache
 
 **Eviction**:

@@ -9,12 +9,19 @@ export interface TaskQueueOptions {
 }
 
 /**
- * Told to a caller that has to wait, once, with the number of Tasks that were
- * ahead of it — 1 meaning nothing was.
+ * Told to a caller that has to wait, once, with how many Tasks are waiting —
+ * this one included, so 1 means it is the only one.
  *
- * Awaited, and a rejection abandons the Task rather than running it anyway: a
- * caller who was never told it was waiting is a caller who believes nothing was
- * received, and that is the state the acknowledgement exists to prevent.
+ * A measure of the backlog rather than a place in a running order. Admission
+ * steps over a Task whose Session is busy, so a Task told it is one of one can
+ * still be overtaken by a Task that arrives later and is free to run. Nothing
+ * schedules on this number; it exists so that waiting is not silent.
+ *
+ * Awaited, and a rejection abandons the Task rather than leaving it in a queue
+ * it can never be admitted from. Whether failing to tell a caller is worth
+ * abandoning its Task over is the caller's judgement, not the queue's — roma's
+ * Core absorbs it and runs the Task regardless, on the grounds that a Channel
+ * too broken to carry this is too broken to carry the failure either.
  */
 export type WaitNotice = (position: number) => void | Promise<void>
 
@@ -24,8 +31,8 @@ interface Waiting {
    * Called once the slot has already been claimed on this Task's behalf, or
    * null while its caller is still being told it is waiting.
    *
-   * A Task holds its place in the queue from the moment it arrives, so that the
-   * position it is told is the position it has. Until the notice is delivered
+   * A Task joins the queue the moment it arrives, so that the count it is told
+   * includes everything already waiting. Until the notice has been delivered
    * there is nothing to admit it *into*, so admission steps over it — which is
    * why this is nullable rather than assigned late and hoped about.
    */
@@ -80,7 +87,7 @@ export class TaskQueue {
    * rejects with whatever `task` did, and releases the slot either way: a Task
    * that failed is a Task that is over.
    *
-   * `notice` is called only if the Task has to wait, before it joins the queue.
+   * `notice` is called only if the Task has to wait, and only once.
    */
   async run<T>(key: string, task: () => Promise<T>, notice?: WaitNotice): Promise<T> {
     if (!this.#claim(key)) {

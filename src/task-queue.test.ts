@@ -248,6 +248,61 @@ describe('telling a waiting caller where it is', () => {
     await behindTask
   })
 
+  // The number says how much is ahead, not when this Task will run. Admission
+  // steps over a Task whose Session is busy, so the one told it was first can
+  // be started second — which is why nothing may schedule on this number, and
+  // why an Adapter must not render it as a running order.
+  it('is telling a caller the backlog, not a place in a running order', async () => {
+    const queue = new TaskQueue({ maxConcurrent: 2 })
+    const positions = new Map<string, number>()
+    const order: string[] = []
+    const running = { a: pending(), b: pending() }
+    const held = pending()
+    const free = pending()
+
+    /** Run under `name`, recording the order it started in and where it queued. */
+    const named = (name: string, key: string, task: () => Promise<string>): Promise<string> =>
+      queue.run(
+        key,
+        () => {
+          order.push(name)
+          return task()
+        },
+        (position) => void positions.set(name, position),
+      )
+
+    const first = queue.run(A, running.a.run)
+    const second = queue.run(B, running.b.run)
+    // Waits on its own Session, which is busy with `first`.
+    const behindA = named('behind-a', A, held.run)
+    // Waits only on the cap, and its own Session is free.
+    const onC = named('on-c', C, free.run)
+    await flush()
+
+    expect(positions).toEqual(
+      new Map([
+        ['behind-a', 1],
+        ['on-c', 2],
+      ]),
+    )
+
+    // A slot frees, but the Session `behind-a` needs is still busy.
+    running.b.finish()
+    await second
+    await flush()
+
+    expect(order).toEqual(['on-c'])
+
+    running.a.finish()
+    await first
+    await flush()
+    held.finish()
+    free.finish()
+    await Promise.all([behindA, onC])
+
+    expect(order).toEqual(['on-c', 'behind-a'])
+  })
+
   it('says nothing to a Task that starts straight away', async () => {
     const queue = new TaskQueue()
     const task = pending()
@@ -263,9 +318,11 @@ describe('telling a waiting caller where it is', () => {
     await running
   })
 
-  // A Task whose caller believes nothing was received is the failure the
-  // acknowledgement exists to prevent, so it is not one to run anyway.
-  it('does not run a Task whose caller could not be told it was waiting', async () => {
+  // The queue's own answer, not a policy about Channels: a notice that threw
+  // never armed the Task for admission, so leaving it in would be leaving an
+  // entry that can never start and never leaves. Whether the Task deserves to
+  // run regardless is the caller's call — roma's Core decides it does.
+  it('drops a Task whose notice threw rather than stranding it in the queue', async () => {
     const queue = new TaskQueue({ maxConcurrent: 1 })
     const running = pending()
     const never = pending()

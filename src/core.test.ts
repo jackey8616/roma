@@ -12,16 +12,14 @@ import type { ClaudeEvent } from './stream-events.js'
 import { TaskQueue } from './task-queue.js'
 import { FakeClaude, flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
-import { feed, recordedStream } from '../test/support/recorded-stream.js'
+import { apiRetries, feed, recordedStream } from '../test/support/recorded-stream.js'
 
 const stream = recordedStream('three-turns-one-process')
 /** One complete Turn of a real recorded stream. Its text is "ok". */
 const OK = stream.turn(1)
 const FAILED = recordedStream('auth-failure').turn(1)
 /** The real `api_retry` events a bad credential produced, 401 and all. */
-const RETRIES = recordedStream('auth-failure').events.filter(
-  (event) => event.type === 'system' && event['subtype'] === 'api_retry',
-)
+const RETRIES = apiRetries('auth-failure')
 
 const KEY = 'conversation-one'
 const OTHER_KEY = 'conversation-two'
@@ -32,7 +30,7 @@ let workRoots: string[] = []
 function newCore({
   workRoot = mkdtempSync(join(tmpdir(), 'roma-core-')),
   ...options
-}: { workRoot?: string; maxConcurrent?: number; retryBudget?: RetryBudget } = {}) {
+}: { workRoot?: string; retryBudget?: RetryBudget } = {}) {
   const claude = new FakeClaude({ exitOnKill: true })
   workRoots.push(workRoot)
   const pool = new SessionPool({
@@ -44,9 +42,8 @@ function newCore({
   })
   pools.push(pool)
 
-  const queue = new TaskQueue({
-    ...(options.maxConcurrent === undefined ? {} : { maxConcurrent: options.maxConcurrent }),
-  })
+  // The real cap, so what the tests below see is what roma does.
+  const queue = new TaskQueue()
   const adapter = new RecordingAdapter()
   const core = new Core({ channel: adapter, pool, queue })
 
@@ -322,10 +319,11 @@ describe('running only so much at once', () => {
     expect(adapter.instructions.map((instruction) => instruction.kind)).toEqual(['result'])
   })
 
-  // Someone who believes their message was never received is exactly what the
-  // notice exists to prevent, so a Task whose notice never landed is not one to
-  // run in the background either.
-  it('does not run a Task whose caller could not be told it was waiting', async () => {
+  // The queue notice is the one instruction roma will go without. A Channel too
+  // broken to carry it is too broken to carry the failure that abandoning the
+  // Task would produce, so dropping the work buys no less silence — it only
+  // adds losing the work to it.
+  it('still runs a Task whose caller could not be told it was waiting', async () => {
     const { claude, pool, queue, workRoot, core: first } = newCore()
     const delivered: OutboundInstruction[] = []
     const core = new Core({
@@ -343,18 +341,47 @@ describe('running only so much at once', () => {
 
     const running = first.runTask(ingress('first'))
     await flush()
-    await core.runTask(ingress('second'))
+    const behind = core.runTask(ingress('second'))
 
-    // Told it is over, which is true, rather than left to run unannounced.
-    expect(delivered).toEqual([
-      { kind: 'failure', conversationKey: KEY, reason: 'roma could not run this Task.' },
-    ])
-
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    const proc = claude.processFor(join(workRoot, sessionIdFor(KEY)))
+    feed(proc, OK)
     await running
     await flush()
+    feed(proc, stream.turn(3))
+    await behind
 
-    expect(claude.processFor(join(workRoot, sessionIdFor(KEY))).sent).toHaveLength(1)
+    expect(delivered).toEqual([{ kind: 'result', conversationKey: KEY, text: '47' }])
+  })
+
+  // The result is not the courtesy: an instruction that never reached the
+  // Channel looks, from the Conversation, exactly like a message that was never
+  // received, so whoever handed it in still has to hear about it.
+  it('does not extend that to the result of a Task that waited', async () => {
+    const { claude, pool, queue, workRoot, core: first } = newCore()
+    const core = new Core({
+      channel: {
+        capabilities: { messageMutation: true, stableConversationKey: true },
+        toIngress: (event: IngressMessage) => event,
+        deliver: () => {
+          throw new Error('the Channel is down')
+        },
+      },
+      pool,
+      queue,
+    })
+
+    const running = first.runTask(ingress('first'))
+    await flush()
+    const behind = core.runTask(ingress('second'))
+    behind.catch(() => {})
+
+    const proc = claude.processFor(join(workRoot, sessionIdFor(KEY)))
+    feed(proc, OK)
+    await running
+    await flush()
+    feed(proc, stream.turn(3))
+
+    await expect(behind).rejects.toThrow('the Channel is down')
   })
 })
 
@@ -380,16 +407,28 @@ describe('giving up on a Task that is only retrying', () => {
   })
 
   // The state ADR-0003 lists under accepted risks, reached with no Task hanging
-  // at all: three misconfigured credentials and roma answers nobody.
-  it('still takes new work after three Tasks have all hit a bad credential', async () => {
-    const { adapter, claude, core, say } = newCore({ retryBudget })
+  // at all: three misconfigured credentials and roma answers nobody. The fourth
+  // message is sent while all three slots are still wedged, because "roma
+  // recovers once they finish" is not what the risk is about.
+  it('takes new work while three Tasks are all stuck on a bad credential', async () => {
+    const { adapter, claude, core, workRoot } = newCore({ retryBudget })
 
     const stormed = ['one', 'two', 'three'].map((key) => core.runTask(ingress('hello', key)))
     await flush()
+    const fourth = core.runTask(ingress('is anyone there?', 'four'))
+    await flush()
+
+    // Nothing is free, so it waits — but it is told so, and it is not refused.
+    expect(claude.processes).toHaveLength(3)
+    expect(adapter.instructions).toEqual([
+      { kind: 'queued', conversationKey: 'four', position: 1 },
+    ])
+
     for (const proc of claude.processes) feed(proc, RETRIES.slice(0, 3))
     await Promise.all(stormed)
-
-    await say('is anyone there?', { key: 'four' })
+    await flush()
+    feed(claude.processFor(join(workRoot, sessionIdFor('four'))), OK)
+    await fourth
 
     expect(adapter.instructions.at(-1)).toEqual({
       kind: 'result',

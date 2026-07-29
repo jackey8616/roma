@@ -87,13 +87,20 @@ export class Core {
       const turn = await this.#queue.run(
         sessionId,
         () => this.#pool.send(sessionId, message.text),
-        // A notice that could not be delivered abandons the Task, which is then
-        // reported as one that failed. Someone who believes their message was
-        // never received is the state this notice exists to prevent, and
-        // running anyway leaves them watching for a reply to something they are
-        // about to send again — so "roma could not run this Task" is both the
-        // truth and the more useful of the two answers.
-        (position) => this.#channel.deliver({ kind: 'queued', conversationKey, position }),
+        // Best-effort, and the only instruction that is. A Channel too broken
+        // to carry this one is too broken to carry the failure that abandoning
+        // the Task would produce, so refusing to run it buys no less silence —
+        // it only adds losing the work to it. The result is the promise; this
+        // is the courtesy. `async` so that an Adapter that throws where it
+        // could have rejected is absorbed here too.
+        async (position) => {
+          try {
+            await this.#channel.deliver({ kind: 'queued', conversationKey, position })
+          } catch {
+            // Nothing to do with it: there is no second Channel to tell, and a
+            // Task that is going to run anyway has no failure to report yet.
+          }
+        },
       )
       instruction = { kind: 'result', conversationKey, text: turn.text }
     } catch (error) {

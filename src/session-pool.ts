@@ -323,7 +323,6 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   async #turn(resident: Resident, text: string): Promise<Turn> {
     resident.busy = true
     this.#cancelReap(resident)
-    this.#clearRetryWatch(resident)
     try {
       return await resident.session.send(text)
     } catch (error) {
@@ -495,25 +494,22 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   #onRetry(resident: Resident, retry: ApiRetry): void {
     if (!resident.busy || resident.storm !== null) return
 
-    const watch = resident.retry
+    let watch = resident.retry
     if (watch === null) {
-      const started: RetryWatch = { count: 1, startedAt: Date.now(), timer: null, last: retry }
+      watch = { count: 1, startedAt: Date.now(), timer: null, last: retry }
       // Armed on the first retry, so the window measures how long this Turn has
       // been retrying rather than how long it has been running. A Turn that
       // works for ten minutes and then hits a bad credential gets the same
       // minute as one that hits it immediately.
-      started.timer = setTimeout(
-        () => this.#abandon(resident, 'window'),
-        this.#retryBudget.windowMs,
-      )
-      started.timer.unref?.()
-      resident.retry = started
+      watch.timer = setTimeout(() => this.#abandon(resident, 'window'), this.#retryBudget.windowMs)
+      watch.timer.unref?.()
+      resident.retry = watch
     } else {
       watch.count += 1
       watch.last = retry
     }
 
-    if ((resident.retry?.count ?? 0) < this.#retryBudget.maxApiRetries) return
+    if (watch.count < this.#retryBudget.maxApiRetries) return
     this.#abandon(resident, 'retries')
   }
 
@@ -536,8 +532,9 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     this.#clearRetryWatch(resident)
     this.#cancelReap(resident)
     this.#forget(resident)
-    // The caller is told only that the Task is over; this record is the only
-    // place the credential behind it is named.
+    // The caller is told the status too, because a 401 is someone's to go and
+    // fix. This record is what an operator gets on top of that: which Session,
+    // how long it retried, and which of the two budgets ran out.
     this.#log({
       event: 'retry-storm',
       sessionId: resident.sessionId,
@@ -554,6 +551,13 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     void this.#terminate(resident).catch(() => {})
   }
 
+  /**
+   * End the retry watch, which is also what gives the next Turn a full budget.
+   *
+   * Called where a Turn ends, in `#turn`'s `finally` — a watch only ever starts
+   * inside a Turn, so that is the whole of its life. The `exit` listener clears
+   * it too, so that the window timer cannot outlive the process it was watching.
+   */
   #clearRetryWatch(resident: Resident): void {
     if (resident.retry?.timer != null) clearTimeout(resident.retry.timer)
     resident.retry = null

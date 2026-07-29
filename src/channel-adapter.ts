@@ -57,7 +57,15 @@ export type OutboundInstruction =
        */
       readonly kind: 'queued'
       readonly conversationKey: string
-      /** How many Tasks were waiting, this one included. 1 means it is next. */
+      /**
+       * How many Tasks were waiting, this one included — so 1 means it is the
+       * only one.
+       *
+       * How much is ahead of it, not when it will run. A Task waiting on its
+       * own Conversation is stepped over by one that is free to run, so this
+       * is not a promise about order and an Adapter should not render it as
+       * one.
+       */
       readonly position: number
     }
 
