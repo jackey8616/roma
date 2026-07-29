@@ -3,9 +3,10 @@ import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AuditLog } from './audit-log.js'
+import { AuditLog, monthOf } from './audit-log.js'
 import { Core } from './core.js'
 import type {
+  ChannelAdapter,
   ChannelCapabilities,
   IngressMessage,
   OutboundInstruction,
@@ -21,6 +22,7 @@ import { RecordingAdapter } from '../test/support/recording-adapter.js'
 import {
   apiRetries,
   feed,
+  kindOf,
   recordedStream,
   upToFirst,
   withApiKeySource,
@@ -31,6 +33,15 @@ const stream = recordedStream('three-turns-one-process')
 /** One complete Turn of a real recorded stream. Its text is "ok". */
 const OK = stream.turn(1)
 const FAILED = recordedStream('auth-failure').turn(1)
+/**
+ * The same 401 with its retry storm taken out, so the Turn fails on its own.
+ *
+ * The capture holds ten `api_retry` events before the error surfaces, which is
+ * more than the retry budget allows — fed whole, it is a Task roma abandons
+ * rather than one Claude Code failed, and those are different endings with
+ * different costs.
+ */
+const FAILED_OUTRIGHT = FAILED.filter((event) => kindOf(event) !== 'system/api_retry')
 /** The real `api_retry` events a bad credential produced, 401 and all. */
 const RETRIES = apiRetries('auth-failure')
 /** 72 seconds of generation with `--include-partial-messages` on: 194 `text_delta` events. */
@@ -55,7 +66,7 @@ const OTHER_KEY = 'conversation-two'
 
 /** The clock these tests run on, and therefore the month their records are filed in. */
 const NOW = 1_800_000_000_000
-const MONTH = new Date(NOW).toISOString().slice(0, 7)
+const MONTH = monthOf(new Date(NOW))
 
 let pools: SessionPool[] = []
 let workRoots: string[] = []
@@ -86,7 +97,7 @@ function newCore({
   const queue = new TaskQueue()
   const sessions = new SessionGenerations({ workRoot })
   const adapter = new RecordingAdapter(capabilities)
-  const audit = new AuditLog({ dir: auditDir })
+  const audit = new AuditLog({ auditRoot: auditDir })
   const core = new Core({
     channel: adapter,
     pool,
@@ -134,6 +145,35 @@ function newCore({
 /** Every Audit Record these tests have produced, in the order the Tasks ended. */
 function recordsIn(audit: AuditLog) {
   return audit.readMonth(MONTH)
+}
+
+/**
+ * A second Core on another Core's Channel-less half.
+ *
+ * One Core per Channel, over one pool, one queue, one generation record and one
+ * audit log — the Core's own contract says every one of those is roma-wide. So a
+ * test that wants a Channel of its own wants this rather than a second roma, and
+ * gathering it here is also what keeps the next option the Core gains from being
+ * pasted into six places.
+ */
+function coreOver(shared: ReturnType<typeof newCore>, channel: ChannelAdapter): Core {
+  return new Core({
+    channel,
+    pool: shared.pool,
+    queue: shared.queue,
+    sessions: shared.sessions,
+    audit: shared.audit,
+    credential: 'shared-window',
+  })
+}
+
+/** A Channel that can do everything and does one thing with what it is given. */
+function channelThat(deliver: ChannelAdapter['deliver']): ChannelAdapter<IngressMessage> {
+  return {
+    capabilities: { messageMutation: true, stableConversationKey: true },
+    toIngress: (event: IngressMessage) => event,
+    deliver,
+  }
 }
 
 function ingress(text: string, conversationKey = KEY): IngressMessage {
@@ -295,23 +335,16 @@ describe('what the Channel is asked to post', () => {
   // Channel looks, from the Conversation, exactly like a message that was never
   // received — so whoever handed it in has to hear about it.
   it('does not swallow an instruction the Channel never carried out', async () => {
-    const { audit, pool, queue, sessions, claude, workRoot } = newCore()
+    const shared = newCore()
+    const { claude, workRoot } = shared
     // A second Core over the same pool and queue: one Core per Channel is what
     // keeps the Core free of Channel identity, and both are shared between them.
-    const core = new Core({
-      channel: {
-        capabilities: { messageMutation: true, stableConversationKey: true },
-        toIngress: (event: IngressMessage) => event,
-        deliver: () => {
-          throw new Error('the Channel is down')
-        },
-      },
-      pool,
-      queue,
-      sessions,
-      audit,
-      credential: 'shared-window',
-    })
+    const core = coreOver(
+      shared,
+      channelThat(() => {
+        throw new Error('the Channel is down')
+      }),
+    )
 
     const task = core.handle(ingress('hello'))
     await flush()
@@ -439,23 +472,16 @@ describe('running only so much at once', () => {
   // would produce, so dropping the work buys no less silence — it only adds
   // losing the work to it.
   it('still runs a Task whose caller could not be told anything about it', async () => {
-    const { audit, claude, pool, queue, sessions, workRoot, core: first } = newCore()
+    const shared = newCore()
+    const { claude, workRoot, core: first } = shared
     const delivered: OutboundInstruction[] = []
-    const core = new Core({
-      channel: {
-        capabilities: { messageMutation: true, stableConversationKey: true },
-        toIngress: (event: IngressMessage) => event,
-        deliver: (instruction) => {
-          if (instruction.kind === 'progress') throw new Error('the Channel is down')
-          delivered.push(instruction)
-        },
-      },
-      pool,
-      queue,
-      sessions,
-      audit,
-      credential: 'shared-window',
-    })
+    const core = coreOver(
+      shared,
+      channelThat((instruction) => {
+        if (instruction.kind === 'progress') throw new Error('the Channel is down')
+        delivered.push(instruction)
+      }),
+    )
 
     const running = first.handle(ingress('first'))
     await flush()
@@ -475,21 +501,14 @@ describe('running only so much at once', () => {
   // Channel looks, from the Conversation, exactly like a message that was never
   // received, so whoever handed it in still has to hear about it.
   it('does not extend that to the result of a Task that waited', async () => {
-    const { audit, claude, pool, queue, sessions, workRoot, core: first } = newCore()
-    const core = new Core({
-      channel: {
-        capabilities: { messageMutation: true, stableConversationKey: true },
-        toIngress: (event: IngressMessage) => event,
-        deliver: () => {
-          throw new Error('the Channel is down')
-        },
-      },
-      pool,
-      queue,
-      sessions,
-      audit,
-      credential: 'shared-window',
-    })
+    const shared = newCore()
+    const { claude, workRoot, core: first } = shared
+    const core = coreOver(
+      shared,
+      channelThat(() => {
+        throw new Error('the Channel is down')
+      }),
+    )
 
     const running = first.handle(ingress('first'))
     await flush()
@@ -667,23 +686,16 @@ describe('telling a Conversation its Task is alive', () => {
   // update still gets the result. Waiting on it before posting would make the
   // unconditional message hostage to the best-effort one.
   it('posts the result even where the Channel never finishes taking an update', async () => {
-    const { audit, claude, pool, queue, sessions, workRoot } = newCore()
+    const shared = newCore()
+    const { claude, workRoot } = shared
     const delivered: OutboundInstruction[] = []
-    const core = new Core({
-      channel: {
-        capabilities: { messageMutation: true, stableConversationKey: true },
-        toIngress: (event: IngressMessage) => event,
-        deliver: (instruction) => {
-          if (instruction.kind === 'progress') return new Promise<void>(() => {})
-          delivered.push(instruction)
-        },
-      },
-      pool,
-      queue,
-      sessions,
-      audit,
-      credential: 'shared-window',
-    })
+    const core = coreOver(
+      shared,
+      channelThat((instruction) => {
+        if (instruction.kind === 'progress') return new Promise<void>(() => {})
+        delivered.push(instruction)
+      }),
+    )
 
     const task = core.handle(ingress('hello'))
     await flush()
@@ -1050,7 +1062,7 @@ describe('the record every Task leaves behind', () => {
         caller: 'someone',
         sessionId: sessionIdFor(KEY),
         outcome: 'result',
-        costUsd: 0.010312900000000002,
+        costUsd: expect.closeTo(0.0103129, 7),
         durationMs: 0,
         turnMs: 0,
         credential: 'shared-window',
@@ -1072,7 +1084,7 @@ describe('the record every Task leaves behind', () => {
       await say('hello', { events: withTotalCostUsd(OK, total) })
     }
 
-    const costs = recordsIn(audit).map((record) => Number(record.costUsd.toFixed(6)))
+    const costs = recordsIn(audit).map((record) => Number(record.costUsd?.toFixed(6)))
     expect(costs).toEqual([0.01, 0.01, 0.015, 0.015, 0.01])
     // The fifth Task is not the whole Session, and the five together are.
     expect(costs.reduce((sum, cost) => sum + cost, 0)).toBeCloseTo(0.06, 6)
@@ -1114,14 +1126,30 @@ describe('the record every Task leaves behind', () => {
     expect(new Set(recordsIn(audit).map((record) => record.taskId)).size).toBe(2)
   })
 
-  // A Turn that failed still spent money, and a Task nobody can account for is
-  // exactly the hole this exists to close.
-  it('records a Task that failed', async () => {
+  // A Turn that failed still reached a terminal event, so Claude Code priced it —
+  // at zero here, because a 401 buys nothing. A reported zero, not an assumed one.
+  it('records a Task that failed, at what the failed Turn was priced', async () => {
     const { audit, say } = newCore()
 
-    await say('hello', { events: FAILED })
+    await say('hello', { events: FAILED_OUTRIGHT })
 
     expect(recordsIn(audit)).toMatchObject([{ outcome: 'failure', costUsd: 0 }])
+  })
+
+  // The opposite case, and the reason cost is nullable: the process died with the
+  // Turn in flight, so whatever it had already spent is real and nothing will
+  // ever name it. Recording that as zero would report money as free — the same
+  // class of wrong as a cumulative total, pointing the other way.
+  it('records a Task whose process died mid-Turn as unpriced rather than free', async () => {
+    const { audit, claude, core } = newCore()
+
+    const task = core.handle(ingress('hello'))
+    await flush()
+    claude.process.emitExit({ code: 1, signal: null })
+    await task
+
+    expect(recordsIn(audit)).toMatchObject([{ outcome: 'failure', costUsd: null }])
+    expect(audit.totalFor(MONTH)).toMatchObject({ tasks: 1, costUsd: 0, unpriced: 1 })
   })
 
   it('records a Task somebody stopped, at what the interrupted Turn had spent', async () => {
@@ -1158,16 +1186,17 @@ describe('the record every Task leaves behind', () => {
   })
 
   // roma stopped waiting rather than Claude Code finishing, so no terminal event
-  // arrived and no cost was ever reported. Zero is the honest reading of that:
-  // the retries this abandoned were 401s, which buy nothing.
-  it('records a Task abandoned mid-retry-storm', async () => {
+  // arrived and nothing ever priced the Turn. Unpriced rather than free: the
+  // retries were probably 401s that bought nothing, but "probably" is not a
+  // number, and a cap is entitled to know its total is a floor.
+  it('records a Task abandoned mid-retry-storm as unpriced', async () => {
     const { audit, start } = newCore({ retryBudget: { maxApiRetries: 3, windowMs: 60_000 } })
 
     const { task, proc } = await start('hello')
     feed(proc, RETRIES.slice(0, 3))
     await task
 
-    expect(recordsIn(audit)).toMatchObject([{ outcome: 'failure', costUsd: 0, turnMs: null }])
+    expect(recordsIn(audit)).toMatchObject([{ outcome: 'failure', costUsd: null, turnMs: null }])
   })
 
   // A Command is not a Task: it drives no Turn, costs nothing, and is not queued
@@ -1187,21 +1216,14 @@ describe('the record every Task leaves behind', () => {
   // different obligations and only one of them can be met by trying again. A
   // Task whose result never reached anybody still spent the money.
   it('records a Task whose outcome the Channel never took', async () => {
-    const { audit, claude, pool, queue, sessions, workRoot } = newCore()
-    const core = new Core({
-      channel: {
-        capabilities: { messageMutation: true, stableConversationKey: true },
-        toIngress: (event: IngressMessage) => event,
-        deliver: () => {
-          throw new Error('the Channel is down')
-        },
-      },
-      pool,
-      queue,
-      sessions,
-      audit,
-      credential: 'shared-window',
-    })
+    const shared = newCore()
+    const { audit, claude, workRoot } = shared
+    const core = coreOver(
+      shared,
+      channelThat(() => {
+        throw new Error('the Channel is down')
+      }),
+    )
 
     const task = core.handle(ingress('hello'))
     task.catch(() => {})
@@ -1209,7 +1231,7 @@ describe('the record every Task leaves behind', () => {
     feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
     await expect(task).rejects.toThrow('the Channel is down')
 
-    expect(recordsIn(audit)).toMatchObject([{ outcome: 'result', costUsd: 0.010312900000000002 }])
+    expect(recordsIn(audit)).toMatchObject([{ outcome: 'result', costUsd: expect.closeTo(0.0103129, 7) }])
   })
 
   // Both halves, because they can disagree and the disagreement is the whole
@@ -1230,20 +1252,10 @@ describe('the record every Task leaves behind', () => {
 
 describe('knowing nothing about which Channel a message came from', () => {
   it('refuses a Channel that cannot supply a stable Conversation Key', () => {
-    const { audit, pool, queue, sessions } = newCore()
+    const shared = newCore()
     const adapter = new RecordingAdapter({ stableConversationKey: false })
 
-    expect(
-      () =>
-        new Core({
-          channel: adapter,
-          pool,
-          queue,
-          sessions,
-          audit,
-          credential: 'shared-window',
-        }),
-    ).toThrow(/stable/i)
+    expect(() => coreOver(shared, adapter)).toThrow(/stable/i)
   })
 
   // "Google Chat is the first road, not the destination" is a claim the code has

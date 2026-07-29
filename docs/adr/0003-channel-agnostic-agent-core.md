@@ -430,11 +430,17 @@ wrapper.
     it would catch is the one ADR-0002 fears most — a stray key moving every run
     onto metered billing. The alternative is discovering it from an invoice, by
     which point the month is spent.
-  - **A task that produced no turn is recorded at zero, not left out.** Stopped
-    while it was still queued, or abandoned mid-retry-storm: no terminal event
-    arrived, so no cost was ever reported. Omitting it would leave the log
-    disagreeing with the number of messages people actually sent, which is the
-    other thing an audit record is read for.
+  - **Cost has three values, because "free" and "unpriced" are different facts.**
+    A number where a turn was priced; **zero** only where no turn ever began, so
+    nothing can have been spent — a task stopped while it was still queued;
+    **null** where a turn began and no terminal event ever arrived, which is
+    where the cost is reported. A task abandoned mid-retry-storm or cut short by
+    a process that died had spent real tokens that nothing will now name, and
+    recording those as zero reports money as free — the same class of wrong as
+    the cumulative total above, pointing the other way. A monthly total therefore
+    carries a count of the unpriced tasks in it, and reads as a floor rather than
+    an answer. Neither kind is omitted: a log that disagreed with the number of
+    messages people sent would fail the other thing it is read for.
   - **Duration is two numbers**: the task's own wall clock, from arrival to the
     caller being told, and the turn's. The first is what a person endured and the
     only one a task stopped in the queue has; the difference between them is what

@@ -1,17 +1,25 @@
 import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync } from 'node:fs'
 import { join } from 'node:path'
-import type { CredentialKind } from './build-env.js'
+import { apiKeySourceFor, type CredentialKind } from './build-env.js'
 
 /** How a Task ended, in the three ways a Conversation is ever told about. */
 export type TaskOutcome = 'result' | 'failure' | 'stopped'
 
+/** The same three, for reading a record back off disk. */
+const OUTCOMES: readonly TaskOutcome[] = ['result', 'failure', 'stopped']
+
 /**
- * One Task, as the audit log is told about it.
- *
- * Everything except when it happened, which the log stamps itself so that the
- * stamp and the month it is filed under cannot disagree.
+ * Whether a written cost is one this can be read back: a finite number, or the
+ * null that says a Turn began and nothing ever priced it.
  */
-export interface AuditEntry {
+function isCost(value: unknown): boolean {
+  return value === null || (typeof value === 'number' && Number.isFinite(value))
+}
+
+/** One Task, written down. */
+export interface AuditRecord {
+  /** When the Task ended, ISO-8601 in UTC. */
+  readonly at: string
   readonly taskId: string
   /**
    * Whoever sent the message, named however the Channel names people.
@@ -31,12 +39,20 @@ export interface AuditEntry {
    * Task logged raw is recorded at the sum of Tasks one through five, and the
    * monthly Overflow cap built on it would refuse spending that never happened.
    *
-   * Zero where no Turn completed — a Task stopped before it started, or one
-   * abandoned mid-retry-storm. That is a genuine zero rather than a missing
-   * number in the second case too: the cost arrives on the terminal event, and a
-   * Turn roma stopped waiting for never produced one.
+   * Three values rather than two, because "free" and "unpriced" are different
+   * facts and only one of them can be added up:
+   *
+   * - a **number**, where a Turn ended and Claude Code priced it;
+   * - **zero**, where no Turn ever began — a Task stopped while it was still
+   *   queued spent nothing, and that is a fact rather than an absence;
+   * - **null**, where a Turn began and nothing ever priced it. The cost arrives
+   *   on the terminal event, so a Turn abandoned mid-retry-storm or cut short by
+   *   a process that died has none — and the tokens it had already spent are
+   *   real. Recording that as zero would report money as free, which is the same
+   *   class of wrong as the cumulative total this field exists to avoid, only
+   *   pointing the other way.
    */
-  readonly costUsd: number
+  readonly costUsd: number | null
   /**
    * How long the person waited: from the message arriving to being told how it
    * went, queueing and cold start included.
@@ -63,17 +79,37 @@ export interface AuditEntry {
   readonly apiKeySource: string | null
 }
 
-/** One Task's Audit Record, as it is written down. */
-export type AuditRecord = AuditEntry & {
-  /** When the Task ended, ISO-8601 in UTC. */
-  readonly at: string
-}
+/**
+ * An Audit Record before it has been stamped.
+ *
+ * The one field a caller does not supply, so that the stamp on a record and the
+ * month it is filed under are one decision rather than two that can disagree.
+ */
+export type UnstampedRecord = Omit<AuditRecord, 'at'>
 
-/** What a calendar month of Tasks came to. */
+/**
+ * What a calendar month of Tasks came to.
+ *
+ * `costUsd` is the number the Overflow cap is enforced on, and the three counts
+ * beside it are every way that number can be less than the truth. None of them
+ * is an error and none of them stops the total being returned — a cap that
+ * refuses to be computed is a cap that cannot be enforced — but a caller
+ * spending real money against this should read them before it does.
+ */
 export interface AuditTotal {
   readonly month: string
   readonly tasks: number
   readonly costUsd: number
+  /**
+   * Tasks in the total whose cost was never reported, and which are therefore in
+   * `tasks` but not in `costUsd`.
+   *
+   * A Turn that began and never reached a terminal event: abandoned mid-retry-
+   * storm, or cut short by a process that died. Whatever it had already spent is
+   * real and unrecoverable, so the honest reading of this total is "at least
+   * `costUsd`, over `tasks` Tasks, `unpriced` of which are not in the figure".
+   */
+  readonly unpriced: number
   /**
    * Records in this month that could not be read.
    *
@@ -82,6 +118,12 @@ export interface AuditTotal {
    * the cap unenforceable, and one that quietly skips a line under-reports spend
    * and lets the cap through. A caller that cares can refuse to spend while this
    * is above zero.
+   *
+   * Counted whatever credential was asked for, because a line that cannot be
+   * read cannot be said to belong to one credential rather than the other. That
+   * makes an Overflow-only total look tainted by a torn Shared Window record,
+   * which is the conservative way round: the alternative is a cap that quietly
+   * assumes the line it could not read was not spending.
    */
   readonly unreadable: number
   /**
@@ -96,25 +138,27 @@ export interface AuditTotal {
 }
 
 /**
- * What `system/init.apiKeySource` reports under each credential.
+ * Whether the credential roma ran a Task on is the one that paid for it.
  *
- * Both measured rather than assumed: `"none"` under the OAuth token, and
- * `"ANTHROPIC_API_KEY"` the moment a key is present — the same pair the startup
- * self-check asserts on, and the reason a stray key is detectable at all.
+ * Asked against `apiKeySourceFor` rather than a table of its own, so that this
+ * and the startup self-check cannot come to different conclusions about the same
+ * credential. True where nothing was observed: a Task with no Turn behind it has
+ * no `apiKeySource` and also spent nothing, so it is evidence of nothing.
  */
-const API_KEY_SOURCE: Record<CredentialKind, string> = {
-  'shared-window': 'none',
-  overflow: 'ANTHROPIC_API_KEY',
+function paidAsIntended({ credential, apiKeySource }: AuditRecord): boolean {
+  return apiKeySource === null || apiKeySource === apiKeySourceFor(credential)
 }
 
 /**
- * Whether the credential roma ran a Task on is the one that paid for it.
+ * The calendar month a moment falls in, as the records of it are filed.
  *
- * True where nothing was observed: a Task with no Turn behind it has no
- * `apiKeySource` and also spent nothing, so it is not evidence of anything.
+ * UTC, and exported because every caller of `totalFor` needs it: a month has to
+ * be a fixed set of records rather than one that depends on where the reader is
+ * standing, and that rule belongs in one place rather than in each caller's
+ * arithmetic.
  */
-export function paidAsIntended({ credential, apiKeySource }: AuditRecord): boolean {
-  return apiKeySource === null || apiKeySource === API_KEY_SOURCE[credential]
+export function monthOf(at: Date): string {
+  return at.toISOString().slice(0, 7)
 }
 
 export interface AuditLogOptions {
@@ -123,9 +167,9 @@ export interface AuditLogOptions {
    *
    * Deliberately not under the Session Pool's work root: that directory is
    * walked by a reclaim that deletes anything nothing has touched for seven
-   * days, and an audit log is exactly the thing that survives a quiet week.
+   * days, and these records are exactly what has to survive a quiet week.
    */
-  readonly dir: string
+  readonly auditRoot: string
   /**
    * Where a record goes when it cannot be written to disk. One JSON object per
    * line on stderr by default.
@@ -157,17 +201,17 @@ const reportToStderr = (record: AuditRecord, error: unknown): void => {
  *   anywhere else afterwards.
  */
 export class AuditLog {
-  readonly #dir: string
+  readonly #auditRoot: string
   readonly #onWriteFailed: (record: AuditRecord, error: unknown) => void
 
-  constructor({ dir, onWriteFailed = reportToStderr }: AuditLogOptions) {
-    this.#dir = dir
+  constructor({ auditRoot, onWriteFailed = reportToStderr }: AuditLogOptions) {
+    this.#auditRoot = auditRoot
     this.#onWriteFailed = onWriteFailed
     // Here rather than at the first Task, so that a roma pointed at a directory
     // it cannot write to says so while it is starting — the boot is the last
     // moment anybody is watching, and a Task that discovers it is the first Task
     // whose cost is already lost.
-    mkdirSync(dir, { recursive: true })
+    mkdirSync(auditRoot, { recursive: true })
   }
 
   /**
@@ -181,15 +225,16 @@ export class AuditLog {
    * log stream is not the audit log, but it is somewhere, and somewhere beats the
    * only copy being dropped on the floor.
    */
-  record(entry: AuditEntry): void {
+  record(task: UnstampedRecord): void {
     // Stamped here so that the time on the record and the month it is filed
     // under are one decision. A Task that started in July and ended in August is
     // an August record: the alternative is appending to a month that may already
     // have been totalled and acted on.
-    const record: AuditRecord = { at: new Date().toISOString(), ...entry }
+    const at = new Date()
+    const record: AuditRecord = { at: at.toISOString(), ...task }
     const line = `${JSON.stringify(record)}\n`
     try {
-      const file = this.#fileFor(monthOf(record.at))
+      const file = this.#fileFor(monthOf(at))
       // Start a new line first if the file was left mid-line. A machine that
       // loses power mid-append leaves a line with no newline on the end of it,
       // and appending straight onto that joins the next record to the wreckage —
@@ -228,6 +273,7 @@ export class AuditLog {
   totalFor(month: string, credential?: CredentialKind): AuditTotal {
     let tasks = 0
     let costUsd = 0
+    let unpriced = 0
     let unreadable = 0
     let mismatched = 0
 
@@ -239,11 +285,14 @@ export class AuditLog {
       }
       if (credential !== undefined && record.credential !== credential) continue
       tasks += 1
-      costUsd += record.costUsd
+      // Counted as a Task and left out of the money, which is the only honest
+      // pair of answers: it happened, and what it cost is not knowable.
+      if (record.costUsd === null) unpriced += 1
+      else costUsd += record.costUsd
       if (!paidAsIntended(record)) mismatched += 1
     }
 
-    return { month, tasks, costUsd, unreadable, mismatched }
+    return { month, tasks, costUsd, unpriced, unreadable, mismatched }
   }
 
   /** A month nothing was written in reads as a month with nothing in it. */
@@ -258,7 +307,7 @@ export class AuditLog {
   }
 
   #fileFor(month: string): string {
-    return join(this.#dir, `${month}.jsonl`)
+    return join(this.#auditRoot, `${month}.jsonl`)
   }
 }
 
@@ -285,19 +334,18 @@ function endsWhole(file: string): boolean {
   }
 }
 
-/** The calendar month an ISO-8601 UTC stamp falls in. */
-function monthOf(at: string): string {
-  return at.slice(0, 7)
-}
-
 /**
  * Read one line back, or null if it is not a record.
  *
- * Tight about the fields a total is computed from and incurious about the rest:
- * a line whose cost is missing or is not a number would otherwise be summed as
- * nothing and reported as a Task that was free. A half-written last line is the
- * case this is really for — a machine that lost power mid-append leaves one, and
- * it must cost the month one record rather than all of them.
+ * Checked against what a record is *for* rather than against what a total needs
+ * to arithmetic its way through. A line that lost `caller` still adds up
+ * perfectly and answers none of the questions this file exists to answer, so it
+ * is unreadable here rather than a record with a hole in it — the same reasoning
+ * as a missing cost, which would otherwise be summed as a Task that was free.
+ *
+ * A half-written last line is the case this is really for: a machine that lost
+ * power mid-append leaves one, and it must cost the month one record rather than
+ * all of them.
  */
 function readRecord(line: string): AuditRecord | null {
   let parsed: unknown
@@ -309,7 +357,9 @@ function readRecord(line: string): AuditRecord | null {
   if (typeof parsed !== 'object' || parsed === null) return null
   const record = parsed as Record<string, unknown>
   if (typeof record['at'] !== 'string' || typeof record['taskId'] !== 'string') return null
-  if (typeof record['costUsd'] !== 'number' || !Number.isFinite(record['costUsd'])) return null
+  if (typeof record['caller'] !== 'string') return null
+  if (!OUTCOMES.includes(record['outcome'] as TaskOutcome)) return null
+  if (!isCost(record['costUsd'])) return null
   if (record['credential'] !== 'shared-window' && record['credential'] !== 'overflow') return null
   return record as unknown as AuditRecord
 }

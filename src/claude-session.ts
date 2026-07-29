@@ -22,8 +22,17 @@ export interface Turn {
    * `total_cost_usd` on the terminal event is cumulative for the process, so
    * logging it raw records the fifth Task served by a process at the sum of
    * Tasks one through five.
+   *
+   * Null where the terminal event carried no total at all, which no capture we
+   * hold does — it is what a future version that stopped reporting cost would
+   * look like. Null rather than zero because the difference is the difference
+   * between a Turn that was free and a Turn nobody can price, and a version that
+   * quietly stopped reporting would otherwise record every Task in roma as free.
+   * The baseline does not move for one of these, so the next Turn that does
+   * report a total is billed from the last known one and covers both: the month
+   * still adds up, and only the split between two Tasks is lost.
    */
-  readonly costUsd: number
+  readonly costUsd: number | null
   /** Measured from `send` to the terminal event, as roma observed it. */
   readonly durationMs: number
   readonly isError: boolean
@@ -404,7 +413,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     if (pending === null) return
 
     const delta =
-      result.cumulativeCostUsd === null ? 0 : result.cumulativeCostUsd - previousTotalUsd
+      result.cumulativeCostUsd === null ? null : result.cumulativeCostUsd - previousTotalUsd
 
     const turn: Turn = {
       text: result.text ?? pending.assistantText.join(''),

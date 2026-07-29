@@ -19,6 +19,25 @@ export type Credential =
  */
 export type CredentialKind = Credential['kind']
 
+/**
+ * What `system/init.apiKeySource` reports for a process run on this credential.
+ *
+ * The other side of `buildEnv`: that decides which variable is set, and this is
+ * what Claude Code says about it once it has resolved one. Both values measured
+ * rather than assumed — `"none"` under the OAuth token, `"ANTHROPIC_API_KEY"`
+ * the moment a key is present (ADR-0002).
+ *
+ * One function rather than one per reader. Its two readers are the startup
+ * self-check and the audit record's mismatch count, and they exist to catch the
+ * same failure: a stray key silently moving every run onto metered billing. Two
+ * copies that drifted would leave the check passing while the count reported
+ * nothing wrong, so the one thing both were built to see would be invisible in
+ * both at once.
+ */
+export function apiKeySourceFor(credential: CredentialKind): string {
+  return credential === 'shared-window' ? 'none' : 'ANTHROPIC_API_KEY'
+}
+
 export interface BuildEnvOptions {
   readonly credential: Credential
   /**

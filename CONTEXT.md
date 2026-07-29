@@ -159,8 +159,12 @@ _Avoid_: fallback, API mode, paid mode, spillover
 The line roma writes when a Task ends: who asked, which Session ran it, how long
 they waited, what it cost, and which credential paid. One per Task — a failed or
 stopped one included — and the cost on it is the Turn's own delta, never the
-Session's running total. Everybody shares one token, so the provider knows only
+Session's running total. It can also be nothing at all: a Turn that began and
+never reached a terminal event spent real tokens nothing will ever name, and that
+is written down as unpriced rather than as free. Everybody shares one token, so the provider knows only
 that somebody spent it; this is the only place the question of who is answerable,
 and the only place a calendar month can be added up.
-_Avoid_: log (that is the operational stream the Session Pool writes), metric,
-usage record, telemetry
+_Avoid_: the bare word "log" for one of these — the Session Pool writes an
+operational one and the two are not the same thing, so the qualified "audit log"
+is the collection and an Audit Record is a line of it. Also: metric, usage
+record, telemetry

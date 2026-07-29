@@ -2,6 +2,7 @@ import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { monthOf } from './audit-log.js'
 import type { Credential } from './build-env.js'
 import { sessionIdFor } from './session-id.js'
 import { startRoma, type Roma } from './startup.js'
@@ -133,7 +134,7 @@ describe('starting roma', () => {
     feed(roma.claude.processFor(join(roma.workRoot, sessionIdFor(KEY))), HEALTHY)
     await handled
 
-    const month = new Date().toISOString().slice(0, 7)
+    const month = monthOf(new Date())
     expect(audit.readMonth(month)).toMatchObject([
       {
         caller: 'someone',
@@ -156,6 +157,6 @@ describe('starting roma', () => {
     await roma.answerProbe()
     const { audit } = await roma.starting
 
-    expect(audit.readMonth(new Date().toISOString().slice(0, 7))).toEqual([])
+    expect(audit.readMonth(monthOf(new Date()))).toEqual([])
   })
 })

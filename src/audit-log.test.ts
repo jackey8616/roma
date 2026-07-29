@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AuditLog, type AuditEntry } from './audit-log.js'
+import { AuditLog, type UnstampedRecord } from './audit-log.js'
 
 /** The month the clock below is in, as the file on disk names it. */
 const MONTH = '2026-07'
@@ -16,7 +16,7 @@ function newDir(): string {
 }
 
 /** One Task's worth of record, with the real cost of a real recorded Turn. */
-function entry(overrides: Partial<AuditEntry> = {}): AuditEntry {
+function entry(overrides: Partial<UnstampedRecord> = {}): UnstampedRecord {
   return {
     taskId: 'task-one',
     caller: 'someone',
@@ -49,13 +49,14 @@ describe('what a Task leaves behind', () => {
   it('is still there for a roma that has restarted', () => {
     const dir = newDir()
 
-    new AuditLog({ dir }).record(entry())
+    new AuditLog({ auditRoot: dir }).record(entry())
 
     // A second AuditLog over the same directory is what a restarted roma has.
-    expect(new AuditLog({ dir }).totalFor(MONTH)).toEqual({
+    expect(new AuditLog({ auditRoot: dir }).totalFor(MONTH)).toEqual({
       month: MONTH,
       tasks: 1,
       costUsd: 0.0103129,
+      unpriced: 0,
       unreadable: 0,
       mismatched: 0,
     })
@@ -65,7 +66,7 @@ describe('what a Task leaves behind', () => {
   // anything, the Turn produced nothing, and the Task still happened.
   it('records a Task that failed and one that was stopped, like any other', () => {
     const dir = newDir()
-    const log = new AuditLog({ dir })
+    const log = new AuditLog({ auditRoot: dir })
 
     log.record(entry({ taskId: 'failed', outcome: 'failure', costUsd: 0, turnMs: null }))
     log.record(entry({ taskId: 'stopped', outcome: 'stopped', costUsd: 0.000625 }))
@@ -78,7 +79,7 @@ describe('what a Task leaves behind', () => {
 
   it('carries who asked, which Session, how long it took, and what it cost', () => {
     const dir = newDir()
-    const log = new AuditLog({ dir })
+    const log = new AuditLog({ auditRoot: dir })
 
     log.record(entry())
 
@@ -105,7 +106,7 @@ describe('adding a calendar month up', () => {
   // totalled and acted on is never appended to afterwards.
   it('counts the month asked for and no other', () => {
     const dir = newDir()
-    const log = new AuditLog({ dir })
+    const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ costUsd: 0.01 }))
     vi.setSystemTime(new Date('2026-08-01T00:00:00.000Z'))
     log.record(entry({ costUsd: 0.02 }))
@@ -115,12 +116,13 @@ describe('adding a calendar month up', () => {
   })
 
   it('adds up to nothing for a month nothing ran in', () => {
-    const log = new AuditLog({ dir: newDir() })
+    const log = new AuditLog({ auditRoot: newDir() })
 
     expect(log.totalFor('2019-04')).toEqual({
       month: '2019-04',
       tasks: 0,
       costUsd: 0,
+      unpriced: 0,
       unreadable: 0,
       mismatched: 0,
     })
@@ -131,7 +133,7 @@ describe('adding a calendar month up', () => {
   // for spending that never reached an invoice.
   it('counts one credential where that is what was asked', () => {
     const dir = newDir()
-    const log = new AuditLog({ dir })
+    const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ credential: 'shared-window', apiKeySource: 'none', costUsd: 0.01 }))
     log.record(
       entry({ credential: 'overflow', apiKeySource: 'ANTHROPIC_API_KEY', costUsd: 0.9 }),
@@ -148,7 +150,7 @@ describe('adding a calendar month up', () => {
   // came out of somewhere else.
   it('says how many Tasks were not paid for by the credential roma ran them on', () => {
     const dir = newDir()
-    const log = new AuditLog({ dir })
+    const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ credential: 'shared-window', apiKeySource: 'ANTHROPIC_API_KEY' }))
     log.record(entry({ credential: 'shared-window', apiKeySource: 'none' }))
     // No Turn reached `system/init`, so nothing paid and nothing disagrees.
@@ -164,7 +166,7 @@ describe('reading records that a machine got half way through writing', () => {
   // silently would under-report spend and let the cap through.
   it('costs the month one record rather than all of them', () => {
     const dir = newDir()
-    const log = new AuditLog({ dir })
+    const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ costUsd: 0.01 }))
     appendFileSync(join(dir, `${MONTH}.jsonl`), '{"at":"2026-07-29T10:00:00.000Z","cos')
     log.record(entry({ costUsd: 0.02 }))
@@ -177,10 +179,49 @@ describe('reading records that a machine got half way through writing', () => {
   // was free — that is under-reporting wearing the shape of a valid record.
   it('does not read a line with no cost on it as a Task that cost nothing', () => {
     const dir = newDir()
-    const log = new AuditLog({ dir })
+    const log = new AuditLog({ auditRoot: dir })
     appendFileSync(join(dir, `${MONTH}.jsonl`), '{"at":"2026-07-29T10:00:00.000Z","taskId":"x"}\n')
 
     expect(log.totalFor(MONTH)).toMatchObject({ tasks: 0, unreadable: 1 })
+  })
+
+  // It would add up perfectly and answer none of the questions this file exists
+  // for, which makes it unreadable here rather than a record with a hole in it.
+  it('does not read a line that lost the caller as a record', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    const { caller, ...noCaller } = entry()
+    void caller
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ at: '2026-07-29T10:00:00.000Z', ...noCaller })}\n`,
+    )
+
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 0, unreadable: 1 })
+  })
+})
+
+describe('a Task nothing ever priced', () => {
+  // Its cost is not zero and not a number: the Turn began, tokens went out, and
+  // the terminal event that would have priced them never arrived. Counted as a
+  // Task and left out of the money, so a cap reading this knows the figure is a
+  // floor rather than the answer.
+  it('counts as a Task, stays out of the money, and says so', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ costUsd: 0.01 }))
+    log.record(entry({ costUsd: null, outcome: 'failure', turnMs: null }))
+
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 2, costUsd: 0.01, unpriced: 1 })
+  })
+
+  it('is still a record that reads back', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+
+    log.record(entry({ costUsd: null }))
+
+    expect(log.readMonth(MONTH)).toMatchObject([{ costUsd: null }])
   })
 })
 
@@ -192,7 +233,7 @@ describe('a record that cannot be written', () => {
   it('does not become the failure of the Task it was describing', () => {
     const dir = newDir()
     const lost: unknown[] = []
-    const log = new AuditLog({ dir, onWriteFailed: (record) => lost.push(record) })
+    const log = new AuditLog({ auditRoot: dir, onWriteFailed: (record) => lost.push(record) })
     rmSync(dir, { recursive: true, force: true })
 
     expect(() => log.record(entry())).not.toThrow()
@@ -204,7 +245,7 @@ describe('a record that cannot be written', () => {
   // a number nobody can reconstruct must not be dropped on the floor.
   it('goes to stderr when nobody said where else to put it', () => {
     const dir = newDir()
-    const log = new AuditLog({ dir })
+    const log = new AuditLog({ auditRoot: dir })
     const written: string[] = []
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
       written.push(String(chunk))

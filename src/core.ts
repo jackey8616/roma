@@ -90,6 +90,16 @@ interface RunningTask {
    * Task whose Turn never began.
    */
   apiKeySource: string | null
+  /**
+   * Whether Claude Code was ever given this Task's message.
+   *
+   * What separates a Task that spent nothing from one that spent something
+   * nobody can name. A Task stopped in the queue never sent a message and is
+   * free with certainty; one whose process died mid-Turn had already spent
+   * whatever it had spent, and the cost only ever arrives on a terminal event
+   * that is not coming.
+   */
+  turnBegan: boolean
 }
 
 /**
@@ -294,6 +304,7 @@ export class Core {
         sessionId,
         stopped: false,
         apiKeySource: null,
+        turnBegan: false,
       }
       running = task
       this.#running.add(task)
@@ -338,10 +349,7 @@ export class Core {
       // Read off the instruction rather than tracked alongside it, so the record
       // and the Conversation cannot end up telling different stories.
       outcome: outcomeOf(instruction),
-      // The per-Turn delta, and zero where no Turn completed: a Task stopped in
-      // the queue never started one, and one abandoned mid-retry-storm never got
-      // the terminal event a cost arrives on.
-      costUsd: turn?.costUsd ?? 0,
+      costUsd: costOf(turn, running),
       durationMs: Date.now() - startedAt,
       turnMs: turn?.durationMs ?? null,
       credential: this.#credential,
@@ -388,7 +396,11 @@ export class Core {
     // that seconds rather than an instant. The Turn beginning is the first
     // moment the request can land, so it is sent then.
     const onTurnStart = (id: string): void => {
-      if (id === sessionId && task.stopped) this.#pool.interrupt(sessionId)
+      if (id !== sessionId) return
+      // Also the moment this Task stops being free with certainty: from here it
+      // has spent whatever it has spent, whether or not anything ever reports it.
+      task.turnBegan = true
+      if (task.stopped) this.#pool.interrupt(sessionId)
     }
     this.#pool.on('event', onEvent)
     this.#pool.on('turn-start', onTurnStart)
@@ -436,6 +448,22 @@ class TaskStopped extends Error {
     super('Task stopped before its Turn began')
     this.name = 'TaskStopped'
   }
+}
+
+/**
+ * What a Task cost, or null where nothing ever priced it.
+ *
+ * Zero is a claim rather than a default, and it is only made where it is
+ * certain: a Task that never reached Claude Code sent no message and spent
+ * nothing. A Turn that began and produced no terminal event — a process that
+ * died, a retry storm roma stopped waiting for — spent real tokens that nothing
+ * will ever name, and recording those as zero would report money as free. That
+ * is the same class of wrong as the cumulative total this whole ticket exists to
+ * avoid, pointing the other way.
+ */
+function costOf(turn: Turn | null, task: RunningTask | null): number | null {
+  if (turn !== null) return turn.costUsd
+  return task?.turnBegan === true ? null : 0
 }
 
 /**

@@ -138,7 +138,7 @@ export async function startRoma({
     maxConcurrentTasks === undefined ? {} : { maxConcurrent: maxConcurrentTasks },
   )
   const sessions = new SessionGenerations({ workRoot })
-  const audit = new AuditLog({ dir: auditRoot })
+  const audit = new AuditLog({ auditRoot })
 
   return {
     // The credential is handed over as well as the environment built from it,
