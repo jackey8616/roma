@@ -86,8 +86,8 @@ audit root is refused rather than put somewhere under the working directories,
 which a weekly reclaim would delete". A Dockerfile that helpfully defaulted it
 would re-open exactly that hole from a new direction: unmounted, the records land
 in the container's writable layer and vanish with the container. ADR-0002 is
-explicit that per-user attribution does not exist at the provider, so that log is
-the only place it ever exists.
+explicit that per-user attribution does not exist at the provider, so the Audit
+Records are the only place it ever exists.
 
 So `docker run` with no volumes is refused, naming `ROMA_AUDIT_ROOT` — which
 makes the operator answer a question the image genuinely cannot.

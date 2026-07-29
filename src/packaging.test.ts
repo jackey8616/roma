@@ -31,7 +31,11 @@ const CLAUDE_CODE_VERSION = '2.1.220'
 
 describe('the image carries its own Claude Code, pinned exactly', () => {
   it('installs the version every measurement in this repo was taken against', () => {
-    expect(dockerfile()).toMatch(new RegExp(`^ARG CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}$`, 'm'))
+    // Interpolated into a pattern, so the version's dots have to stop being
+    // wildcards. Unescaped, an `ARG CLAUDE_CODE_VERSION=2X1X220` would satisfy
+    // this test — which is the one thing it exists to refuse.
+    const pinned = CLAUDE_CODE_VERSION.replaceAll('.', String.raw`\.`)
+    expect(dockerfile()).toMatch(new RegExp(`^ARG CLAUDE_CODE_VERSION=${pinned}$`, 'm'))
   })
 
   it('installs that version rather than whatever npm would resolve today', () => {

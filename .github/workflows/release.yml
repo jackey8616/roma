@@ -10,12 +10,17 @@ name: release
 # but for a system whose behaviour is version-specific, `docker run` without a tag
 # should fail rather than guess. ADR-0006 has the reasoning.
 #
-# Matched loosely rather than on a version shape, so that a tag which is *nearly*
-# right is refused by the assertion below — with a reason — instead of silently
-# not triggering anything.
+# Matched on the version shape, so a tag that is not a release — `v0.1.0`, a docs
+# tag, an rc — starts nothing rather than starting a run that can only go red.
+#
+# This is a GitHub filter pattern and not a regular expression: `+` means one or
+# more of the preceding character, and `.` is a literal dot. The cost of matching
+# this tightly is that a misspelled tag is silent, so the shape is the only thing
+# this line checks — a tag of the right shape carrying the wrong number is the
+# assertion below's job, and that one refuses out loud.
 on:
   push:
-    tags: ['*']
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
 
 permissions:
   contents: read

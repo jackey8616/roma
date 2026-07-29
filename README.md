@@ -83,9 +83,10 @@ ownership, because the image makes the directory even though it points nothing a
 directory first — otherwise roma starts, clears the refusal, and then loses the first Audit
 Record to a permission error, which is the same data gone by a longer route.
 
-The image is `node:22-slim`, `linux/amd64`, non-root, with `git` and `ca-certificates` and
-nothing else. roma's agent runs arbitrary shell commands, so that list is a decision rather
-than an accident.
+The image is `node:22-slim`, `linux/amd64`, non-root, with `git`, `ca-certificates` and
+`tini` and nothing else. roma's agent runs arbitrary shell commands, so that list is a
+decision rather than an accident — and `tini` is there because roma spawns `claude`
+children, which a PID 1 that does not reap would leave as zombies.
 
 ### CI
 

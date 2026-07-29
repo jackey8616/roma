@@ -78,7 +78,8 @@ COPY --from=builder /app/dist ./dist
 # cannot land somewhere a reclaim deletes; defaulting it here would re-open that
 # hole from a new direction, with the records in the container's writable layer,
 # gone with the container. ADR-0002 is explicit that per-user attribution does
-# not exist at the provider, so that log is the only place it ever exists.
+# not exist at the provider, so the Audit Records are the only place it ever
+# exists.
 # `docker run` with no volume is therefore refused, naming it — which makes the
 # operator answer a question this image genuinely cannot.
 #
