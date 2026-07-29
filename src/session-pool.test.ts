@@ -163,6 +163,113 @@ describe('naming a Session versus reaching it again', () => {
     expect(log.map((record) => record.event)).toContain('resume-lost')
   })
 
+  // The mirror of the gap above, and the one ADR-0003 left unmeasured. Nothing
+  // removes the Transcript, so a Conversation whose directory the reclaim took
+  // is spawned as new at an id Claude Code still has — and refused. Measured in
+  // docs/transcript-collision-verification.md: left alone that Conversation is
+  // poisoned for good, because every later message repeats the same spawn.
+  it('resumes a Session whose working directory was reclaimed', async () => {
+    const { claude, pool, processFor, log } = newPool()
+    // No directory made: an empty work root is what the reclaim leaves behind.
+
+    const turn = pool.send(A, 'back after a fortnight')
+    await flush()
+    const refused = processFor(A)
+    refused.emitStderr(`Error: Session ID ${A} is already in use.\n`)
+    refused.emitExit({ code: 1, signal: null })
+    await flush()
+    feed(processFor(A), OK)
+
+    expect((await turn).text).toBe('ok')
+    expect(claude.spawns[0]?.args).toContain('--session-id')
+    expect(claude.spawns[1]?.args).toContain('--resume')
+    expect(log.map((record) => record.event)).toContain('transcript-survived')
+  })
+
+  // The recovery is one attempt, not a loop. A retry that is refused in turn has
+  // nowhere left to go — reaching for --resume was the other option — so it has
+  // to surface rather than spawn forever at an id nothing will accept.
+  it('gives up rather than looping when the resume is refused too', async () => {
+    const { claude, pool, processFor } = newPool()
+
+    const turn = pool.send(A, 'back after a fortnight')
+    // Asserted before the failures are driven, not after. The Turn rejects two
+    // flushes from here, and a rejection with no handler attached *at the moment
+    // it rejects* is reported as unhandled even though the test goes on to
+    // assert it — noise that reads like a leak in the pool and is not.
+    const rejected = expect(turn).rejects.toThrow()
+    await flush()
+    for (const _ of [0, 1]) {
+      const refused = processFor(A)
+      refused.emitStderr(`Error: Session ID ${A} is already in use.\n`)
+      refused.emitExit({ code: 1, signal: null })
+      await flush()
+    }
+
+    await rejected
+    expect(claude.spawns).toHaveLength(2)
+  })
+
+  // The case that actually bites, and the one driving the same error twice
+  // cannot see. Each recovery flips the flag, so a CLI that refuses whichever
+  // flag it is given refuses them alternately — and a pool that corrects each
+  // refusal in turn walks `--session-id`, `--resume`, `--session-id` for as long
+  // as it is willing to. `#spawn` is serialised, so that loop starves every
+  // other Session's spawn as well as this one's.
+  it('gives up when each flag is refused in turn, rather than alternating forever', async () => {
+    const { claude, pool, processFor } = newPool()
+
+    const turn = pool.send(A, 'back after a fortnight')
+    const rejected = expect(turn).rejects.toThrow()
+    await flush()
+
+    // Refused as new, then refused as existing: the contradiction the pool
+    // cannot resolve, because reaching for the other flag was the whole remedy.
+    const refusals = [
+      `Error: Session ID ${A} is already in use.\n`,
+      `No conversation found with session ID: ${A}\n`,
+    ]
+    for (const stderr of refusals) {
+      const refused = processFor(A)
+      refused.emitStderr(stderr)
+      refused.emitExit({ code: 1, signal: null })
+      await flush()
+    }
+
+    await rejected
+    expect(claude.spawns).toHaveLength(2)
+    expect(claude.spawns[0]?.args).toContain('--session-id')
+    expect(claude.spawns[1]?.args).toContain('--resume')
+  })
+
+  // Both recoveries replace a resident mid-Turn, and the outer Turn's `finally`
+  // still runs afterwards on the resident it replaced. `#forget` checks identity
+  // before dropping one; `#markUsed` has to check it before re-inserting, or the
+  // dead resident goes back over the live one that supplanted it — leaving the
+  // working process orphaned, invisible to eviction, reaping and shutdown, and
+  // the next message recovering all over again.
+  it('leaves the recovered process resident, not the one it replaced', async () => {
+    const { claude, pool, workRoot, processFor } = newPool()
+    mkdirSync(join(workRoot, A), { recursive: true })
+
+    const turn = pool.send(A, 'hello')
+    await flush()
+    const resumed = processFor(A)
+    resumed.emitStderr(`No conversation found with session ID: ${A}\n`)
+    resumed.emitExit({ code: 1, signal: null })
+    await flush()
+    feed(processFor(A), OK)
+    await turn
+
+    // The Session is resident and alive, so this reuses it rather than spawning.
+    const second = pool.send(A, 'and again')
+    await flush()
+    feed(processFor(A), OK)
+    await second
+
+    expect(claude.spawns).toHaveLength(2)
+  })
+
   it('does not mistake a failing Turn for a lost transcript', async () => {
     const { claude, pool, workRoot, processFor } = newPool()
     mkdirSync(join(workRoot, A), { recursive: true })
