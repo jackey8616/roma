@@ -52,6 +52,23 @@ A Session whose Claude Code process is currently alive, so the next message
 skips cold start.
 _Avoid_: warm session, active session, hot session
 
+**Session Pool**:
+What decides which Sessions are resident, and for how long. It owns spawning,
+Eviction, and Reaping, and it is the only thing that knows whether a Session is
+being created or reached again.
+_Avoid_: process pool, session manager, cache
+
+**Eviction**:
+Ending a Resident Session's process to make room for another one. The Session
+survives it — the next message resumes from the transcript on disk — so nothing
+the person using it can observe changes.
+_Avoid_: killing a Session, closing a Session, expiring
+
+**Reaping**:
+Ending a Resident Session's process because it has gone unused, rather than to
+make room. Distinct from Eviction only in what prompted it.
+_Avoid_: timing out, garbage collection, idling out
+
 **Task**:
 One message from one person, from arrival to final result. The unit that is
 queued, counted against the concurrency cap, stopped, and audited.

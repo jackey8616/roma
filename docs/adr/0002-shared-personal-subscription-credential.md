@@ -144,11 +144,14 @@ carries it.
   or against moving fully to API billing. Without it that discussion is
   conducted on impressions.
 - **Amended — that figure must be computed from per-turn deltas.**
-  `total_cost_usd` is a cumulative session total, not a per-turn figure; on a
-  resident multi-turn process the fifth task in a session is otherwise recorded
-  at the sum of tasks one through five. Both the monthly overflow cap and the
-  eventual API-billing argument would be made on inflated numbers. ADR-0003
-  specifies the fix.
+  `total_cost_usd` is a cumulative **process** total, not a per-turn figure; on a
+  resident multi-turn process the fifth task is otherwise recorded at the sum of
+  tasks one through five. Both the monthly overflow cap and the eventual
+  API-billing argument would be made on inflated numbers. ADR-0003 specifies the
+  fix. The total belongs to the process rather than to the session — measured
+  when the session pool first evicted and resumed one, and recorded in ADR-0003's
+  observability section — so the baseline restarts with every process and nothing
+  has to be carried across an eviction.
 
 **Upstream direction.** The documented trajectory — `--bare` recommended for
 scripted use and slated to become the `-p` default, while never reading OAuth —

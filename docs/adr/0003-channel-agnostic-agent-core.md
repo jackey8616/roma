@@ -50,6 +50,14 @@ transcript: the **seam 2** tests in `src/claude-session.live.test.ts` drive a re
 run with `npm run test:seam2`. Where a decision below names one, a future reader
 re-runs it rather than re-deriving it.
 
+A third measurement came out of building the session pool, which is the first
+thing to evict a process and resume it as a matter of course rather than as an
+experiment. One more claim did not survive: `total_cost_usd` is a per-*process*
+total, not a per-session one. That correction is folded into the observability
+section below, and it is pinned the same way — `src/session-pool.live.test.ts`,
+with no findings document behind it, because seam 2 is now where the stream
+contract is kept honest.
+
 **Read the citations as the boundary of what is known.** Claims backed by the
 prototype quote the measurement inline. Claims without one have not been run —
 including some of the fixes below, which are corrections derived from a measured
@@ -198,6 +206,20 @@ that last line — and each has its own bullet below.
   `--resume`. At most 10 resident processes, evicted LRU. **Verified:** SIGTERM
   mid-turn exits **143** as documented, and a subsequent `--resume` recovered the
   session with context intact. Eviction-and-resume is sound.
+  - **Eviction escalates to SIGKILL after a 5s grace.** Not a measured need —
+    every SIGTERM observed has exited 143 — but the pool waits for a process to
+    go before letting the next session take its slot, so a process that ignored
+    SIGTERM would stall every later message rather than only its own session.
+    That is the "bot halted" state under accepted risks, reached without a single
+    task hanging.
+  - **A resume that finds no transcript re-creates the session.** The pool reads
+    the existence of the session's working directory as the record that the
+    session exists, which is what makes the `--session-id`-then-`--resume` rule
+    survive a restart of roma. The directory is created before the process is,
+    so a session whose first process died before Claude Code wrote a transcript
+    would otherwise be resumed forever at something that is not there — the CLI
+    answers `No conversation found with session ID: …` and exits. On that, and
+    only that, the pool spawns again with `--session-id`.
 
 ### Reading the event stream
 
@@ -318,6 +340,14 @@ roughly how much, never what.
 - One working directory per session: `/work/<session-uuid>/`, reclaimed after 7
   days idle. A shared working directory would let concurrent sessions corrupt
   each other's checkouts, with symptoms that are very hard to diagnose.
+  - **Reclaiming a working directory also forgets that the session exists**, and
+    that is a known hole rather than a design. The pool reads the directory as
+    the record of existence, but the transcript `--resume` needs belongs to
+    Claude Code and is not ours to delete — so a conversation that goes quiet for
+    more than 7 days and then comes back is spawned with `--session-id` at an id
+    that may still have a transcript. **What the CLI does with that is
+    unmeasured.** Accepted for now because the alternative is a second record of
+    which sessions exist, kept outside the directory it describes.
 - A local mirror of frequently used repositories, cloned from locally at session
   start — faster, and avoids repeated use of git credentials.
 - Egress allowlist: the Anthropic API, our git remote, and package registries
@@ -354,13 +384,30 @@ wrapper.
 - Per-task audit record: who, session, duration, cost, and which credential
   served it.
 - **The cost figure must be a per-turn delta.** `total_cost_usd` is a
-  **cumulative session total**, not a per-turn figure — across two turns
+  **cumulative process total**, not a per-turn figure — across two turns
   `modelUsage` summed: `inputTokens` 2 → 4, `outputTokens` 4 → 7, `cacheRead`
   23684 → 55867. Only the top-level `usage` object is per-turn. Logged raw on a
   resident multi-turn process, the fifth task in a session is recorded at the sum
   of tasks one through five. Take the difference between consecutive
-  `total_cost_usd` values within a session, or compute from per-turn `usage`.
+  `total_cost_usd` values within one process, or compute from per-turn `usage`.
   ADR-0002's monthly overflow cap is built on this number.
+  - **The total belongs to the process, not to the session**, which matters
+    because eviction makes resume routine. This bullet, and
+    `docs/headless-session-verification.md` Q4, previously called it a session
+    total; both were written from a run in which one process served the whole
+    session, where the two are indistinguishable. **Verified** through the
+    session pool: a session that had spent **$0.0822846** was evicted with
+    SIGTERM and resumed, and its first turn on the new process reported
+    **$0.0105342** — with context intact, so the resume genuinely reached the
+    same session. Reproduced on a second run ($0.0827067 then $0.0105543), so
+    this is not one anomalous reading. A resumed process starts its own
+    accounting from zero and has nothing to carry forward, so the delta baseline
+    never crosses an eviction.
+    Had it carried forward, the first turn after every eviction would have been
+    billed the whole session, which is the failure the delta exists to prevent
+    arriving exactly where eviction makes resume routine. Seam 2 asserts this
+    rather than only reporting it, because a version that changed it would
+    resurrect that failure silently.
 
 ### Commands
 

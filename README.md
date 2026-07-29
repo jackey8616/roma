@@ -47,5 +47,6 @@ which lives in this repo's GitHub issues (`gh issue view 1`).
 - **Seam 1** — the Core, ingress in and outbound out. The default run. Claude Code is
   replaced by a fake that replays the recorded streams in
   `test/fixtures/claude-stream/`, so the events are real but free.
-- **Seam 2** — `ClaudeSession` against a real `claude -p`. `*.live.test.ts`.
+- **Seam 2** — `ClaudeSession` and `SessionPool` against a real `claude -p`.
+  `*.live.test.ts`.
 - **Seam 3** — `GoogleChatAdapter` in isolation. Not built yet.

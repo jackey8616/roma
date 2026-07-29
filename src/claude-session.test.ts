@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ClaudeExitedError, ClaudeSession, TurnFailedError, type Turn } from './claude-session.js'
 import { FakeClaude } from '../test/support/fake-claude.js'
-import { feed, recordedStream } from '../test/support/recorded-stream.js'
+import { feed, recordedStream, withTotalCostUsd } from '../test/support/recorded-stream.js'
 
 const SESSION_ID = '11111111-2222-3333-4444-555555555555'
 
@@ -49,10 +49,9 @@ describe('how the process is invoked', () => {
     expect(args[args.indexOf('--model') + 1]).toBe('claude-sonnet-5')
   })
 
-  // ADR-0003's invocation block omits --verbose, which the CLI requires:
-  // "When using --print, --output-format=stream-json requires --verbose". The
-  // flag set pinned here is the ticket's, which has it; seam 2 checks that the
-  // requirement is still real.
+  // --verbose is in here because the CLI requires it: "When using --print,
+  // --output-format=stream-json requires --verbose". Pinned so it cannot be
+  // tidied away as noise; seam 2 checks that the requirement is still real.
   it('runs the invocation the spec pins', () => {
     const { claude, session } = newSession()
 
@@ -184,10 +183,10 @@ describe('reporting failure', () => {
 })
 
 describe('per-Turn cost', () => {
-  // total_cost_usd on the terminal event is cumulative for the Session:
+  // total_cost_usd on the terminal event is cumulative for the process:
   // 0.0103129 → 0.0103129 → 0.0123081 across these three Turns. Logged raw, the
   // third Turn would be recorded at the price of all three.
-  it('reports the delta rather than the Session total', async () => {
+  it('reports the delta rather than the running total', async () => {
     const { claude, session } = newSession()
     const stream = recordedStream('three-turns-one-process')
     const ended: Turn[] = []
@@ -206,6 +205,21 @@ describe('per-Turn cost', () => {
       expect.closeTo(0.0019952, 7),
     ])
     expect(session.cumulativeCostUsd).toBeCloseTo(0.0123081, 7)
+  })
+
+  // A resumed process counts its own spend from zero rather than continuing the
+  // Session's, which is what lets the baseline live here instead of in whatever
+  // outlives the process. Measured at seam 2; the figures are in ADR-0003's
+  // observability section.
+  it('starts a resumed process from zero rather than from what the Session spent', async () => {
+    const { claude, session } = newSession({ resume: true })
+    const stream = recordedStream('three-turns-one-process')
+    session.start()
+
+    const turn = session.send('carrying on after an eviction')
+    feed(claude.process, withTotalCostUsd(stream.turn(1), 0.0105342))
+
+    expect((await turn).costUsd).toBeCloseTo(0.0105342, 7)
   })
 
   // A Turn that failed still spent money, so the audit record still needs it.
@@ -341,7 +355,7 @@ describe('when the process misbehaves', () => {
     expect(stderr.join('')).toContain('requires --verbose')
   })
 
-  // A terminal result with nothing waiting for it still moved the Session total.
+  // A terminal result with nothing waiting for it still moved the running total.
   // Left out of the running total, its spend is folded into the next Turn — the
   // cumulative-total bug arriving by a different route.
   it('keeps the cost baseline current when a result arrives with no Turn in flight', async () => {

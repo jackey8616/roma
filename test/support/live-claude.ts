@@ -31,12 +31,32 @@ export function sharedWindowCredential(): Credential {
  * directory keeps the repo's own CLAUDE.md out of the Session.
  */
 export function liveSessionDirs(name: string): { configDir: string; cwd: string } {
-  const configDir = `${REPO_ROOT}.tmp/seam2/claude-home`
   const cwd = `${REPO_ROOT}.tmp/seam2/work/${name}`
-  mkdirSync(configDir, { recursive: true })
+  const configDir = liveConfigDir()
   rmSync(cwd, { recursive: true, force: true })
   mkdirSync(cwd, { recursive: true })
   return { configDir, cwd }
+}
+
+/**
+ * A throwaway work root for one live pool.
+ *
+ * Empty rather than pre-populated: creating the per-Session directory under it
+ * is the pool's job, and whether that directory exists is how the pool decides
+ * between `--session-id` and `--resume`.
+ */
+export function liveWorkRoot(name: string): { configDir: string; workRoot: string } {
+  const workRoot = `${REPO_ROOT}.tmp/seam2/pool/${name}`
+  const configDir = liveConfigDir()
+  rmSync(workRoot, { recursive: true, force: true })
+  mkdirSync(workRoot, { recursive: true })
+  return { configDir, workRoot }
+}
+
+function liveConfigDir(): string {
+  const configDir = `${REPO_ROOT}.tmp/seam2/claude-home`
+  mkdirSync(configDir, { recursive: true })
+  return configDir
 }
 
 function readDotEnv(): Record<string, string> {

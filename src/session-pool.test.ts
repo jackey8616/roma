@@ -1,0 +1,506 @@
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { SessionPool, type PoolLogRecord, type SessionPoolOptions } from './session-pool.js'
+import type { Turn } from './claude-session.js'
+import { FakeClaude, type FakeClaudeProcess } from '../test/support/fake-claude.js'
+import { feed, recordedStream, withTotalCostUsd } from '../test/support/recorded-stream.js'
+import type { ClaudeEvent } from './stream-events.js'
+
+const MINUTE = 60_000
+const DAY = 24 * 60 * MINUTE
+
+/** Session ids are uuids in production; only their distinctness matters here. */
+function sessionId(n: number): string {
+  return `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
+}
+
+const A = sessionId(1)
+const B = sessionId(2)
+
+/**
+ * Let everything the pool has queued run: spawning, eviction, and the Turn's own
+ * promise all settle on the microtask queue, and the fake process cannot be fed
+ * until the process it belongs to exists.
+ */
+function flush(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
+let pools: SessionPool[] = []
+let workRoots: string[] = []
+
+function newPool(options: Partial<SessionPoolOptions> = {}) {
+  const claude = new FakeClaude({ exitOnKill: true })
+  const workRoot = options.workRoot ?? mkdtempSync(join(tmpdir(), 'roma-pool-'))
+  workRoots.push(workRoot)
+  const log: PoolLogRecord[] = []
+  const pool = new SessionPool({
+    workRoot,
+    env: { PATH: '/usr/bin', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' },
+    spawn: claude.spawn,
+    log: (record) => log.push(record),
+    ...options,
+  })
+  pools.push(pool)
+
+  const processFor = (id: string): FakeClaudeProcess => claude.processFor(join(workRoot, id))
+
+  /** Send a message and serve the Turn it drives from a recorded stream. */
+  const send = async (id: string, text: string, events: readonly ClaudeEvent[]): Promise<Turn> => {
+    const turn = pool.send(id, text)
+    await flush()
+    feed(processFor(id), events)
+    return await turn
+  }
+
+  return { claude, pool, workRoot, log, processFor, send }
+}
+
+const stream = recordedStream('three-turns-one-process')
+/** One complete Turn of a real recorded stream. Its text is "ok". */
+const OK = stream.turn(1)
+
+beforeEach(() => {
+  // setImmediate stays real so `flush` can still drain the microtask queue while
+  // the reap and reclaim timers are under the test's control.
+  vi.useFakeTimers({
+    toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+    now: 1_800_000_000_000,
+  })
+})
+
+afterEach(async () => {
+  for (const pool of pools) await pool.shutdown()
+  pools = []
+  vi.useRealTimers()
+  for (const root of workRoots) rmSync(root, { recursive: true, force: true })
+  workRoots = []
+})
+
+describe('one working directory per Session', () => {
+  // A shared working directory would let concurrent Sessions corrupt each
+  // other's checkouts, with symptoms that are very hard to diagnose.
+  it('runs each Session in its own directory under the work root', async () => {
+    const { claude, workRoot, send } = newPool()
+
+    await send(A, 'hello', OK)
+    await send(B, 'hello', OK)
+
+    expect(claude.spawns.map((spawn) => spawn.cwd)).toEqual([join(workRoot, A), join(workRoot, B)])
+    expect(existsSync(join(workRoot, A))).toBe(true)
+    expect(existsSync(join(workRoot, B))).toBe(true)
+  })
+
+  it('gives every process the environment it was built with, and nothing else', async () => {
+    const { claude, send } = newPool()
+
+    await send(A, 'hello', OK)
+
+    expect(claude.lastSpawn.env).toEqual({
+      PATH: '/usr/bin',
+      CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token',
+    })
+  })
+})
+
+describe('naming a Session versus reaching it again', () => {
+  it('creates a Session with --session-id and reaches it again with --resume', async () => {
+    const { claude, pool, send } = newPool()
+
+    await send(A, 'first', OK)
+    await pool.evict(A)
+    await send(A, 'second', OK)
+
+    expect(claude.spawns[0]?.args).toContain('--session-id')
+    expect(claude.spawns[0]?.args).not.toContain('--resume')
+    expect(claude.spawns[1]?.args).toContain('--resume')
+    expect(claude.spawns[1]?.args).not.toContain('--session-id')
+  })
+
+  // The working directory is the Session's record that it exists, which is what
+  // makes the rule survive a restart of roma itself. An in-memory flag would
+  // send --session-id at an id that already has a transcript.
+  it('resumes a Session whose working directory outlived the pool', async () => {
+    const { workRoot } = newPool()
+    mkdirSync(join(workRoot, A), { recursive: true })
+    const { claude, send } = newPool({ workRoot })
+
+    await send(A, 'after a restart', OK)
+
+    expect(claude.lastSpawn.args).toContain('--resume')
+  })
+
+  // The gap in reading the directory as the record: it is created before the
+  // first spawn, so a Session that died before Claude Code wrote its transcript
+  // looks created and is not. Left alone, that Conversation is poisoned for good.
+  it('starts a fresh Session when the transcript the resume wanted is gone', async () => {
+    const { claude, pool, workRoot, processFor, log } = newPool()
+    mkdirSync(join(workRoot, A), { recursive: true })
+
+    const turn = pool.send(A, 'hello')
+    await flush()
+    const resumed = processFor(A)
+    resumed.emitStderr(`No conversation found with session ID: ${A}\n`)
+    resumed.emitExit({ code: 1, signal: null })
+    await flush()
+    feed(processFor(A), OK)
+
+    expect((await turn).text).toBe('ok')
+    expect(claude.spawns[0]?.args).toContain('--resume')
+    expect(claude.spawns[1]?.args).toContain('--session-id')
+    expect(log.map((record) => record.event)).toContain('resume-lost')
+  })
+
+  it('does not mistake a failing Turn for a lost transcript', async () => {
+    const { claude, pool, workRoot, processFor } = newPool()
+    mkdirSync(join(workRoot, A), { recursive: true })
+    const failing = recordedStream('auth-failure')
+
+    const turn = pool.send(A, 'hello')
+    await flush()
+    feed(processFor(A), failing.turn(1))
+
+    await expect(turn).rejects.toThrow()
+    expect(claude.spawns).toHaveLength(1)
+  })
+})
+
+describe('staying under the resident cap', () => {
+  it('keeps at most ten processes resident', async () => {
+    const { pool, send } = newPool()
+
+    for (let n = 1; n <= 11; n++) await send(sessionId(n), 'hello', OK)
+
+    expect(pool.residents).toHaveLength(10)
+    expect(pool.residents).not.toContain(sessionId(1))
+    expect(pool.residents).toContain(sessionId(11))
+  })
+
+  it('evicts the least recently used Session, not the least recently created', async () => {
+    const { pool, send } = newPool()
+    for (let n = 1; n <= 10; n++) await send(sessionId(n), 'hello', OK)
+
+    await send(sessionId(1), 'still here', OK)
+    await send(sessionId(11), 'and one more', OK)
+
+    expect(pool.residents).toContain(sessionId(1))
+    expect(pool.residents).not.toContain(sessionId(2))
+  })
+
+  // Two Tasks can be in flight at once, so two Sessions can want a slot at the
+  // same moment. Each seeing the pool one short of full and taking the last slot
+  // is how a cap of ten quietly becomes eleven.
+  it('holds the cap when two Sessions arrive at the same moment', async () => {
+    const { pool, processFor, send } = newPool({ maxResident: 2 })
+    await send(A, 'hello', OK)
+
+    const second = pool.send(sessionId(2), 'hello')
+    const third = pool.send(sessionId(3), 'hello')
+    await flush()
+    feed(processFor(sessionId(2)), OK)
+    feed(processFor(sessionId(3)), OK)
+    await Promise.all([second, third])
+
+    expect(pool.residents).toHaveLength(2)
+  })
+
+  it('evicts with SIGTERM, which is what makes a later --resume possible', async () => {
+    const { claude, workRoot, send } = newPool()
+
+    for (let n = 1; n <= 11; n++) await send(sessionId(n), 'hello', OK)
+
+    expect(claude.processFor(join(workRoot, sessionId(1))).signals).toEqual(['SIGTERM'])
+  })
+
+  // Eviction is awaited, so a process that never goes would stall every later
+  // message in the pool — one wedged Session halting roma without a single Task
+  // hanging. SIGTERM exiting 143 is measured; this is the guard for the day it
+  // stops holding.
+  it('escalates to SIGKILL when a process ignores SIGTERM', async () => {
+    const { pool, processFor, log, send } = newPool()
+    await send(A, 'hello', OK)
+    processFor(A).ignore('SIGTERM')
+
+    const evicted = pool.evict(A)
+    await vi.advanceTimersByTimeAsync(5_000)
+    await evicted
+
+    expect(processFor(A).signals).toEqual(['SIGTERM', 'SIGKILL'])
+    expect(log).toContainEqual(expect.objectContaining({ event: 'kill', sessionId: A }))
+  })
+
+  // A Task routinely runs for minutes and there is no wall-clock timeout, so the
+  // one Session that must never be evicted is the one doing work.
+  it('leaves a Session with a Turn in flight alone', async () => {
+    const { pool, workRoot, claude, processFor, send } = newPool()
+    for (let n = 1; n <= 10; n++) await send(sessionId(n), 'hello', OK)
+
+    const inFlight = pool.send(sessionId(1), 'this one takes minutes')
+    inFlight.catch(() => {})
+    await flush()
+    // Every other Session is used after it, so the busy one is the least
+    // recently used again — and still must not be the one that goes.
+    for (let n = 2; n <= 10; n++) await send(sessionId(n), 'hello again', OK)
+    await send(sessionId(11), 'and one more', OK)
+
+    expect(pool.residents).toContain(sessionId(1))
+    expect(processFor(sessionId(1)).signals).toEqual([])
+    expect(claude.processFor(join(workRoot, sessionId(2))).signals).toEqual(['SIGTERM'])
+  })
+})
+
+describe('surviving eviction', () => {
+  it('serves the next message from a resumed process, and the caller sees a Turn', async () => {
+    const { claude, pool, send } = newPool()
+
+    await send(A, 'first', OK)
+    await pool.evict(A)
+    const turn = await send(A, 'second', OK)
+
+    expect(turn.text).toBe('ok')
+    expect(claude.processes).toHaveLength(2)
+    expect(pool.residents).toEqual([A])
+  })
+
+  // The trap this ticket walks into first, and the shape it turned out to have.
+  // A resumed process counts its own spend from zero, so the Turn after an
+  // eviction is billed what that process reports and no cost baseline crosses
+  // the eviction. Measured at seam 2; the figures are in ADR-0003.
+  it('bills the Turn after a resume at what the resumed process reports', async () => {
+    const { pool, send } = newPool()
+
+    const first = await send(A, 'first', OK)
+    await pool.evict(A)
+    const second = await send(A, 'second', withTotalCostUsd(OK, 0.0105342))
+
+    expect(first.costUsd).toBeCloseTo(0.0103129, 7)
+    expect(second.costUsd).toBeCloseTo(0.0105342, 7)
+  })
+
+  it('resumes a Session whose process died on its own', async () => {
+    const { claude, pool, processFor, send } = newPool()
+    await send(A, 'first', OK)
+
+    processFor(A).emitExit({ code: 1, signal: null })
+    await flush()
+    await send(A, 'second', OK)
+
+    expect(pool.residents).toEqual([A])
+    expect(claude.spawns[1]?.args).toContain('--resume')
+  })
+})
+
+describe('reaping idle processes', () => {
+  it('reaps a process that has been idle for fifteen minutes', async () => {
+    const { pool, processFor, send } = newPool()
+    await send(A, 'hello', OK)
+
+    await vi.advanceTimersByTimeAsync(15 * MINUTE)
+
+    expect(pool.residents).toEqual([])
+    expect(processFor(A).signals).toEqual(['SIGTERM'])
+  })
+
+  it('resumes the reaped Session cold on the next message', async () => {
+    const { claude, send } = newPool()
+    await send(A, 'hello', OK)
+    await vi.advanceTimersByTimeAsync(15 * MINUTE)
+
+    const turn = await send(A, 'still there?', OK)
+
+    expect(turn.text).toBe('ok')
+    expect(claude.spawns[1]?.args).toContain('--resume')
+  })
+
+  it('counts idleness from the last message, not from the spawn', async () => {
+    const { pool, send } = newPool()
+    await send(A, 'hello', OK)
+
+    await vi.advanceTimersByTimeAsync(14 * MINUTE)
+    await send(A, 'still here', OK)
+    await vi.advanceTimersByTimeAsync(14 * MINUTE)
+
+    expect(pool.residents).toEqual([A])
+  })
+
+  // Tasks end when they finish or when a human stops them. A Turn running longer
+  // than the idle window is a slow Task, not an idle Session.
+  it('never reaps a Session in the middle of a Turn', async () => {
+    const { pool, processFor } = newPool()
+    const turn = pool.send(A, 'this one takes an hour')
+    turn.catch(() => {})
+    await flush()
+
+    await vi.advanceTimersByTimeAsync(60 * MINUTE)
+
+    expect(pool.residents).toEqual([A])
+    expect(processFor(A).signals).toEqual([])
+  })
+})
+
+describe('reclaiming working directories', () => {
+  it('removes a working directory idle for seven days', async () => {
+    const { pool, workRoot, send } = newPool()
+    await send(A, 'hello', OK)
+    await pool.evict(A)
+    ageWorkDir(join(workRoot, A), 8 * DAY)
+
+    expect(pool.reclaimIdleWorkDirs()).toEqual([A])
+    expect(existsSync(join(workRoot, A))).toBe(false)
+  })
+
+  it('leaves a working directory that is younger than that', async () => {
+    const { pool, workRoot, send } = newPool()
+    await send(A, 'hello', OK)
+    await pool.evict(A)
+    ageWorkDir(join(workRoot, A), 6 * DAY)
+
+    expect(pool.reclaimIdleWorkDirs()).toEqual([])
+    expect(existsSync(join(workRoot, A))).toBe(true)
+  })
+
+  it('leaves a resident Session alone however old its directory looks', async () => {
+    const { pool, workRoot, send } = newPool()
+    await send(A, 'hello', OK)
+    ageWorkDir(join(workRoot, A), 8 * DAY)
+
+    expect(pool.reclaimIdleWorkDirs()).toEqual([])
+    expect(existsSync(join(workRoot, A))).toBe(true)
+  })
+
+  // The directory is the Session's record that it exists, so reclaiming it is
+  // also what makes the next message create the Session rather than resume it.
+  it('makes the next message create the Session again', async () => {
+    const { claude, pool, workRoot, send } = newPool()
+    await send(A, 'hello', OK)
+    await pool.evict(A)
+    ageWorkDir(join(workRoot, A), 8 * DAY)
+    pool.reclaimIdleWorkDirs()
+
+    await send(A, 'much later', OK)
+
+    expect(claude.spawns[1]?.args).toContain('--session-id')
+  })
+
+  it('runs on its own rather than waiting to be asked', async () => {
+    const { pool, workRoot, send } = newPool({ reclaimIntervalMs: 60 * MINUTE })
+    await send(A, 'hello', OK)
+    await pool.evict(A)
+    ageWorkDir(join(workRoot, A), 8 * DAY)
+
+    await vi.advanceTimersByTimeAsync(60 * MINUTE)
+
+    expect(existsSync(join(workRoot, A))).toBe(false)
+  })
+})
+
+describe('what an operator can see', () => {
+  it('records an eviction, so a slow Turn has an explanation', async () => {
+    const { log, send } = newPool()
+
+    for (let n = 1; n <= 11; n++) await send(sessionId(n), 'hello', OK)
+
+    expect(log).toContainEqual(
+      expect.objectContaining({ event: 'evict', sessionId: sessionId(1), residents: 9 }),
+    )
+  })
+
+  it('records a reap and how long the Session had been idle', async () => {
+    const { log, send } = newPool()
+    await send(A, 'hello', OK)
+
+    await vi.advanceTimersByTimeAsync(15 * MINUTE)
+
+    expect(log).toContainEqual(
+      expect.objectContaining({ event: 'reap', sessionId: A, idleMs: 15 * MINUTE }),
+    )
+  })
+
+  // The cold start an evicted Session pays on its next message — around 2.3s,
+  // and the other half of the explanation for a slow Turn.
+  it('records that a spawn was a resume rather than a new Session', async () => {
+    const { pool, log, send } = newPool()
+
+    await send(A, 'first', OK)
+    await pool.evict(A)
+    await send(A, 'second', OK)
+
+    const spawns = log.filter((record) => record.event === 'spawn' && record.sessionId === A)
+    expect(spawns).toEqual([
+      expect.objectContaining({ resume: false }),
+      expect.objectContaining({ resume: true }),
+    ])
+  })
+
+  it('records a reclaimed working directory', async () => {
+    const { pool, log, workRoot, send } = newPool()
+    await send(A, 'hello', OK)
+    await pool.evict(A)
+    ageWorkDir(join(workRoot, A), 8 * DAY)
+
+    pool.reclaimIdleWorkDirs()
+
+    expect(log).toContainEqual(expect.objectContaining({ event: 'reclaim', sessionId: A }))
+  })
+})
+
+describe('driving a resident Session', () => {
+  it('serves a second message from the same process', async () => {
+    const { claude, pool, send } = newPool()
+
+    await send(A, 'first', OK)
+    await send(A, 'second', stream.turn(3))
+
+    expect(claude.processes).toHaveLength(1)
+    expect(pool.residents).toEqual([A])
+  })
+
+  it('routes an interrupt to the Session it names', async () => {
+    const { pool, processFor, send } = newPool()
+    await send(A, 'hello', OK)
+    await send(B, 'hello', OK)
+
+    pool.interrupt(A)
+
+    expect(processFor(A).sent.at(-1)).toMatchObject({
+      type: 'control_request',
+      request: { subtype: 'interrupt' },
+    })
+    expect(processFor(B).sent).toHaveLength(1)
+  })
+
+  // Progress reporting reads the stream, and with more than one Session resident
+  // it has to know which Session each event belongs to.
+  it('re-emits stream events tagged with the Session they came from', async () => {
+    const { pool, send } = newPool()
+    const seen: string[] = []
+    pool.on('event', (id, event) => {
+      if (event.type === 'result') seen.push(id)
+    })
+
+    await send(A, 'hello', OK)
+    await send(B, 'hello', OK)
+
+    expect(seen).toEqual([A, B])
+  })
+
+  it('ends every resident process on shutdown', async () => {
+    const { pool, processFor, send } = newPool()
+    await send(A, 'hello', OK)
+    await send(B, 'hello', OK)
+
+    await pool.shutdown()
+
+    expect(pool.residents).toEqual([])
+    expect(processFor(A).signals).toEqual(['SIGTERM'])
+    expect(processFor(B).signals).toEqual(['SIGTERM'])
+  })
+})
+
+/** Make a working directory look as though nothing has touched it for `ageMs`. */
+function ageWorkDir(path: string, ageMs: number): void {
+  const seconds = (Date.now() - ageMs) / 1000
+  utimesSync(path, seconds, seconds)
+}

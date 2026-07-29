@@ -17,11 +17,11 @@ export interface Turn {
   /** What the assistant said, complete. */
   readonly text: string
   /**
-   * What this Turn cost — the delta, not the Session total.
+   * What this Turn cost — the delta, not the running total.
    *
-   * `total_cost_usd` on the terminal event is cumulative for the whole Session,
-   * so logging it raw records the fifth Task in a Session at the sum of Tasks
-   * one through five.
+   * `total_cost_usd` on the terminal event is cumulative for the process, so
+   * logging it raw records the fifth Task served by a process at the sum of
+   * Tasks one through five.
    */
   readonly costUsd: number
   /** Measured from `send` to the terminal event, as roma observed it. */
@@ -131,10 +131,11 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
    * The last `total_cost_usd` seen. Turn cost is the difference between
    * consecutive values.
    *
-   * Starts at zero, which is right for a Session this process created. Whether a
-   * `--resume`d process reports cost carried forward from the transcript or
-   * starts again from zero is **unmeasured** — it belongs to whichever ticket
-   * builds the pool, since that is where resume happens.
+   * Starts at zero for every process, including a resumed one. Seam 2 measured
+   * that on Claude Code v2.1.220: a Session that had spent $0.0822846 reported
+   * $0.0105342 on its first Turn after being evicted and resumed, so the total
+   * is cumulative for the *process* rather than for the Session. A resumed
+   * process therefore has nothing to carry forward.
    */
   #cumulativeCostUsd = 0
 
@@ -156,7 +157,12 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     return this.#process?.pid
   }
 
-  /** Everything this Session has spent, as Claude Code last reported it. */
+  /**
+   * Everything *this process* has spent, as Claude Code last reported it.
+   *
+   * Not the Session's lifetime spend: a resumed process starts counting again
+   * from zero, so a Session that has been evicted has spent more than this.
+   */
   get cumulativeCostUsd(): number {
     return this.#cumulativeCostUsd
   }
@@ -303,9 +309,9 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     if (result === null) return
 
     // Rebase the running total on every terminal event, whether or not a Turn was
-    // waiting for it. A `result` nobody asked for still moved the Session total,
-    // and a baseline left behind folds that spend into the next Turn's delta —
-    // which is the cumulative-total bug wearing a different hat.
+    // waiting for it. A `result` nobody asked for still moved the total, and a
+    // baseline left behind folds that spend into the next Turn's delta — which
+    // is the cumulative-total bug wearing a different hat.
     const previousTotalUsd = this.#cumulativeCostUsd
     if (result.cumulativeCostUsd !== null) this.#cumulativeCostUsd = result.cumulativeCostUsd
     if (pending === null) return
