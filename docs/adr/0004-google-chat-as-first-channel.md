@@ -71,7 +71,13 @@ event actually carries. The reference documents the *resources*, not the event
 payload, so the adapter reads only fields whose absence it can survive — it asks
 whether the space is a DM by two names, and takes the thread from the message
 rather than the threading state from the space. The first real event is what
-closes this, and it belongs with the ingress subscriber (#13).
+closes this.
+
+The ingress subscriber has since landed (#13) and it does **not** close it. The
+subscriber decodes the envelope — Chat publishes the event as JSON in the Pub/Sub
+message body — and hands the result to the adapter unread, so it verifies nothing
+about the fields inside. What closes this is running against a real Workspace and
+looking at one.
 
 ### Declared adapter capabilities
 

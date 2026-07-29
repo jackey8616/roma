@@ -19,6 +19,23 @@ transport, Google Chat is the Channel, and more than one Channel can share a
 transport.
 _Avoid_: using this word for a Channel
 
+**Delivery**:
+One event handed over by the Transport, together with the means to say roma is
+finished with it. It carries the Transport's own id for that event — the same on
+every redelivery, because a queue that promises to lose nothing delivers some
+things twice.
+_Avoid_: message (that is the Channel's word and an Ingress Message's),
+event (that is what a Delivery carries, not what it is)
+
+**Settling**:
+Saying roma is finished with a Delivery, one of two ways: it is done with, or it
+is handed back to be delivered again. Deliberately **not** called acknowledging,
+though one of the two is a Pub/Sub `ack` — an Acknowledgement is the message roma
+posts into a Conversation, and the two words in one paragraph would be
+indistinguishable. What is settled is the Delivery; what is acknowledged is the
+person.
+_Avoid_: acknowledging (see above), committing, completing
+
 **Channel Adapter**:
 The per-Channel component that translates that Channel's events into ingress
 messages and roma's output back into Channel messages. The only place
