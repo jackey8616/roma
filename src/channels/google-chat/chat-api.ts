@@ -67,10 +67,12 @@ export interface ChatMessage {
  * like the Chat API rather than like roma's use of it would be most of a client
  * library, and the double a test needs would be most of a Chat server.
  *
- * Implementations live outside this file. The one that speaks HTTP arrives with
- * the Pub/Sub ingress and the credential handling it shares (#13); until then
- * this is the whole of the boundary, and seam 3 asserts against a recording
- * double on the other side of it.
+ * Implementations live outside this file. `HttpChatApi` is the one that speaks
+ * HTTP, and it arrived with the Pub/Sub ingress because it shares that ticket's
+ * credential handling — both are the Chat app authenticating as itself. Seam 3
+ * asserts against a recording double on the other side of this boundary, and
+ * against the request Google would have received on the other side of
+ * `HttpChatApi`'s own.
  */
 export interface ChatApi {
   /**

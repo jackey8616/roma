@@ -191,6 +191,18 @@ carries it.
   observability section — so the baseline restarts with every process and nothing
   has to be carried across an eviction.
 
+**Amended — "off by default" is a variable roma names for itself.** The ingress
+subscriber (#13) is where a deployment first has to say whether overflow exists,
+and it reads the metered key from `ROMA_OVERFLOW_API_KEY` rather than from
+`ANTHROPIC_API_KEY`. The obvious name is the wrong one: it is set on developer
+machines and in CI images for reasons that have nothing to do with roma, so
+reading it would turn metered billing on for a whole deployment because somebody's
+shell profile mentioned it — this decision's default reversed by an environment
+nobody looked at. It is the same stray-key failure the startup self-check exists
+to catch, arriving through roma's own front door instead of Claude Code's. The
+monthly cap is required whenever the key is set and vice versa, so neither half
+can be configured alone.
+
 **Upstream direction.** The documented trajectory — `--bare` recommended for
 scripted use and slated to become the `-p` default, while never reading OAuth —
 points toward API keys as the expected path for programmatic callers. This

@@ -22,3 +22,14 @@ export type OperatorLog<Entry> = (entry: Entry) => void
 export function writeToStderr(entry: unknown): void {
   process.stderr.write(`${JSON.stringify(entry)}\n`)
 }
+
+/**
+ * What went wrong, as a line an operator can read.
+ *
+ * Here rather than beside each of its callers because a record is only as
+ * readable as this is, and four private copies would drift the moment one of
+ * them learned to unwrap a `cause` and the others did not.
+ */
+export function reasonOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
