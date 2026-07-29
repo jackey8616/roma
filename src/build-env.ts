@@ -42,10 +42,16 @@ export interface BuildEnvOptions {
   readonly credential: Credential
   /**
    * CLAUDE_CONFIG_DIR and CLAUDE_SECURESTORAGE_CONFIG_DIR, both pointed here.
-   * Omitted, the process resolves credentials against whatever the host has —
-   * including a keychain login that does not exist inside a container.
+   *
+   * Required, and required here rather than only at the caller that reads the
+   * environment: without it a process resolves credentials against whatever the
+   * host has — including a keychain login that does not exist inside a container
+   * — and writes its Transcript under the `HOME` this file passes through. Both
+   * are unconditional promises elsewhere (ADR-0002's isolation, ADR-0005's
+   * Transcript), and an option here is a way to break them that the type would
+   * not mention.
    */
-  readonly configDir?: string
+  readonly configDir: string
   /** The host environment to draw passthrough variables from. */
   readonly inherit?: Readonly<Record<string, string | undefined>>
 }
@@ -76,10 +82,8 @@ export function buildEnv({
     if (value !== undefined) env[name] = value
   }
 
-  if (configDir !== undefined) {
-    env['CLAUDE_CONFIG_DIR'] = configDir
-    env['CLAUDE_SECURESTORAGE_CONFIG_DIR'] = configDir
-  }
+  env['CLAUDE_CONFIG_DIR'] = configDir
+  env['CLAUDE_SECURESTORAGE_CONFIG_DIR'] = configDir
 
   if (credential.kind === 'shared-window') env['CLAUDE_CODE_OAUTH_TOKEN'] = credential.oauthToken
   else env['ANTHROPIC_API_KEY'] = credential.apiKey

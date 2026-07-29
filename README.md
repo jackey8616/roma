@@ -65,12 +65,12 @@ Terraform cannot do, in the order they have to happen.
 | `CLAUDE_CODE_OAUTH_TOKEN` | **Required.** The Shared Window token everybody's Turns run on (`claude setup-token`). |
 | `ROMA_WORK_ROOT` | **Required.** Where Sessions get their working directories. Reclaimed after a week untouched. |
 | `ROMA_AUDIT_ROOT` | **Required.** Where Audit Records go, one file per calendar month. Deliberately not under `ROMA_WORK_ROOT`, which is reclaimed. |
+| `ROMA_CLAUDE_CONFIG_DIR` | **Required**, and it decides two separate things. `CLAUDE_SECURESTORAGE_CONFIG_DIR` is what keeps a host keychain login out of a Claude Code process; `CLAUDE_CONFIG_DIR` is where that process writes the Transcript — the only account there is of what an agent did (ADR-0005). Were it unset, every Session's Transcript would land in the host user's own `~/.claude/projects/`, in a directory roma never reclaims. |
 | `ROMA_PUBSUB_PROJECT_ID` | **Required.** The project the subscription lives in. |
 | `ROMA_PUBSUB_SUBSCRIPTION` | **Required.** The subscription's name. Read, never created. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Google's own, not roma's: a service account key file, or nothing at all on a Google host with a metadata server. |
 | `ROMA_OVERFLOW_API_KEY` | Metered billing. Absent, roma has no Overflow and never offers it. |
 | `ROMA_OVERFLOW_MONTHLY_CAP_USD` | Required **whenever** the line above is set, and vice versa. There is no default: how much of your money roma may spend is not roma's to decide. |
-| `ROMA_CLAUDE_CONFIG_DIR` | `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR` for every Claude Code process, which is what keeps a host keychain login out of them. |
 | `ROMA_MODEL` | Overrides the pinned model. The self-check asserts on whatever this resolves to. |
 | `ROMA_MAX_CONCURRENT_TASKS` | Tasks that may run at once across every Session. Three by default. |
 | `ROMA_PUBSUB_MAX_MESSAGES` | Messages roma holds a lease on at once. Twenty by default — see `src/channels/google-chat/env-config.ts` for why it is not near the concurrency cap. |

@@ -26,7 +26,8 @@ function boot() {
   const claude = new FakeClaude({ exitOnKill: true })
   const workRoot = mkdtempSync(join(tmpdir(), 'roma-startup-'))
   const auditRoot = mkdtempSync(join(tmpdir(), 'roma-startup-audit-'))
-  workRoots.push(workRoot, auditRoot)
+  const configDir = mkdtempSync(join(tmpdir(), 'roma-startup-claude-'))
+  workRoots.push(workRoot, auditRoot, configDir)
   const channel = new RecordingAdapter()
 
   let resolved = false
@@ -35,6 +36,7 @@ function boot() {
     channel,
     workRoot,
     auditRoot,
+    configDir,
     spawn: claude.spawn,
     log: () => {},
     selfCheckTimeoutMs: 1_000,
