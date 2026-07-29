@@ -60,7 +60,7 @@ jobs:
       # Claude Code version lives — `scripts/verify-image.sh` can only ask
       # whether the image contains what it declares, which is true of an image
       # whose pin was moved as well as one whose pin was not.
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
