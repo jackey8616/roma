@@ -17,6 +17,15 @@ import { OVERFLOW_BUTTON, outcomeMessages, progressText } from './render.js'
 /** Chat's own name for the option that makes a reply establish a thread. */
 const REPLY_OR_START_THREAD = 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD'
 
+/**
+ * The instructions after which a Task has no acknowledgement left to keep.
+ *
+ * Named as a set rather than asked as "not progress", because that is no longer
+ * the same question: a blocked Task has been told something and is still
+ * running, and its acknowledgement is still the message it will keep editing.
+ */
+const ENDS_THE_TASK = new Set(['result', 'failure', 'stopped', 'command-outcome'])
+
 /** Whether a path segment names something, rather than being absent or empty. */
 function named(segment: string | undefined): segment is string {
   return segment !== undefined && segment !== ''
@@ -116,10 +125,13 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
       return
     }
 
-    // The Task is over, so its acknowledgement is finished with — before the
-    // messages are posted rather than after, so that a post that throws still
-    // leaves nothing behind.
-    this.#acknowledgements.delete(taskId)
+    // Only where the Task is actually over. `blocked` and `overflow-refused`
+    // are messages about a Task that is still going: forgetting its
+    // acknowledgement there would strand the one the person is watching on
+    // "Working…" for as long as the window takes, and post a second one when the
+    // Task started again. Dropped before the messages are posted rather than
+    // after, so that a post that throws still leaves nothing behind.
+    if (ENDS_THE_TASK.has(instruction.kind)) this.#acknowledgements.delete(taskId)
     // Only the message that reports a block can carry one, and only when the
     // valve is on offer — ADR-0002 puts it at the moment of blocking rather than
     // in a setting somebody turns on in advance.

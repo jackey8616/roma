@@ -1499,6 +1499,138 @@ describe('offering Overflow, and taking it', () => {
   })
 })
 
+describe('a Task that is blocked more than once', () => {
+  /** Run a parked Task again, whichever wait it is on. */
+  async function letTheWindowReset(waitMs = UNTIL_RESET) {
+    await vi.advanceTimersByTimeAsync(waitMs)
+    await flush()
+  }
+
+  // The reading has to be this attempt's own. Kept from an earlier one, its
+  // `resetsAt` has already passed — so a later failure carrying no reading of
+  // its own would park against a moment in the past, rerun instantly, fail, and
+  // spin as fast as Claude Code can start, announcing itself every pass.
+  it('does not park again on a failure the window had nothing to do with', async () => {
+    const { adapter, claude, workRoot, start } = newCore()
+
+    const { task, proc } = await start('hello')
+    feed(proc, BLOCKED)
+    await flush()
+    await letTheWindowReset()
+    // The rerun fails saying nothing at all about the window.
+    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), FAILED_OUTRIGHT)
+    await task
+
+    expect(adapter.instructions.filter(({ kind }) => kind === 'blocked')).toHaveLength(1)
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      kind: 'failure',
+      reason: expect.stringContaining('401'),
+    })
+  })
+
+  // A parked Task holds no slot, so this is not the halted-bot risk — it is that
+  // a third "still blocked" message lands on a Conversation that stopped
+  // watching hours ago, and that a Task which never ends is one nobody can be
+  // told anything about.
+  it('answers the Task rather than holding it through a third window', async () => {
+    const { adapter, claude, workRoot, start } = newCore()
+
+    const { task, proc } = await start('hello')
+    feed(proc, BLOCKED)
+    await flush()
+    await letTheWindowReset()
+    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), BLOCKED)
+    await flush()
+    // The reset time has passed by now, so this park is the floor rather than
+    // the window's own time.
+    await letTheWindowReset(60_000)
+    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), BLOCKED)
+    await task
+
+    expect(adapter.instructions.filter(({ kind }) => kind === 'blocked')).toHaveLength(2)
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'failure' })
+  })
+})
+
+describe('what Overflow is taken for', () => {
+  /** The blocked attempt, priced — a window that ran out with work already done. */
+  const BLOCKED_HAVING_SPENT = withTotalCostUsd(BLOCKED_WITH_OVERAGE, 0.02)
+
+  // The attempt, not the Task. Left on the metered credential, a Task that took
+  // Overflow and then failed would go on spending metered money with nobody
+  // asked and no cap consulted.
+  it('goes back to the Shared Window for the next attempt of the same Task', async () => {
+    const { adapter, claude, workRoot, core, start } = newCore()
+
+    const { task, proc } = await start('hello')
+    feed(proc, BLOCKED_WITH_OVERAGE)
+    await flush()
+    await core.takeOverflow(taskIdOf(adapter))
+    await flush()
+    // The metered attempt is blocked too, so the Task parks a second time.
+    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), BLOCKED_WITH_OVERAGE)
+    await flush()
+    expect(claude.lastSpawn.env).toMatchObject({ ANTHROPIC_API_KEY: 'metered-key' })
+
+    // No time has passed, so this park is still waiting on the window's own
+    // reset rather than on the floor.
+    await vi.advanceTimersByTimeAsync(UNTIL_RESET)
+    await flush()
+    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    await task
+
+    expect(claude.lastSpawn.env).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' })
+  })
+
+  // The money the window refused is the subscription's, and it is charged to the
+  // subscription. Summed into the Overflow figure it would refuse other people's
+  // work over money nobody spent on a card — and would be shown to the person
+  // who asked as what their decision cost them.
+  it('bills the blocked attempt to the credential that was actually paying', async () => {
+    const { adapter, audit, claude, workRoot, core, start } = newCore()
+
+    const { task, proc } = await start('hello')
+    feed(proc, BLOCKED_HAVING_SPENT)
+    await flush()
+    await core.takeOverflow(taskIdOf(adapter))
+    await flush()
+    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    await task
+
+    expect(audit.totalFor(MONTH, 'overflow')).toMatchObject({
+      tasks: 1,
+      costUsd: expect.closeTo(0.0103129, 7),
+    })
+    expect(audit.totalFor(MONTH, 'shared-window')).toMatchObject({
+      tasks: 1,
+      costUsd: expect.closeTo(0.02, 7),
+    })
+    // And the reply prices the decision somebody made, not the whole Task.
+    expect(adapter.instructions.at(-1)).toMatchObject({
+      kind: 'result',
+      overflowCostUsd: expect.closeTo(0.0103129, 7),
+    })
+  })
+
+  // Both records name the same Task, because it is one Task. What differs is
+  // which bill each part of it landed on.
+  it('files the two halves under one Task id', async () => {
+    const { adapter, audit, claude, workRoot, core, start } = newCore()
+
+    const { task, proc } = await start('hello')
+    feed(proc, BLOCKED_HAVING_SPENT)
+    await flush()
+    await core.takeOverflow(taskIdOf(adapter))
+    await flush()
+    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    await task
+
+    const records = recordsIn(audit)
+    expect(records.map((record) => record.credential)).toEqual(['overflow', 'shared-window'])
+    expect(new Set(records.map((record) => record.taskId)).size).toBe(1)
+  })
+})
+
 describe('the monthly Overflow cap', () => {
   /** Records enough Overflow spend into the month to sit at `usd`. */
   function alreadySpent(audit: AuditLog, usd: number) {

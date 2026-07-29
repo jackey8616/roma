@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { readQuota, spentUntil, overflowOffer } from './quota.js'
+import { overflowOffer, spentUntil } from './shared-window.js'
+import { readSharedWindow } from './stream-events.js'
 import { quotaEvent } from '../test/support/recorded-stream.js'
 
 /** The real event every capture carries, and it is always allowed. */
@@ -10,7 +11,7 @@ const spent = (fields: Record<string, unknown>) => quotaEvent({ status: 'blocked
 
 describe('reading what the stream says about the Shared Window', () => {
   it('reads the event every Turn carries', () => {
-    expect(readQuota(ALLOWED)).toEqual({
+    expect(readSharedWindow(ALLOWED)).toEqual({
       status: 'allowed',
       resetsAt: 1785271200,
       rateLimitType: 'five_hour',
@@ -20,7 +21,7 @@ describe('reading what the stream says about the Shared Window', () => {
   })
 
   it('is not interested in any other event', () => {
-    expect(readQuota({ type: 'system', subtype: 'init' })).toBeNull()
+    expect(readSharedWindow({ type: 'system', subtype: 'init' })).toBeNull()
   })
 })
 
@@ -28,18 +29,18 @@ describe('deciding the Shared Window is spent', () => {
   // Every capture roma holds says "allowed", so this is the one reading in the
   // system that has never been checked against a real event.
   it('says a Turn on an allowed window is not blocked', () => {
-    expect(spentUntil(readQuota(ALLOWED)!)).toBeNull()
+    expect(spentUntil(readSharedWindow(ALLOWED)!)).toBeNull()
   })
 
   it('reads any other status as spent, and quotes the reset time from the event', () => {
-    expect(spentUntil(readQuota(spent({}))!)).toBe(1785271200)
+    expect(spentUntil(readSharedWindow(spent({}))!)).toBe(1785271200)
   })
 
   // A window roma is told is spent and not told when it comes back is one it
   // cannot park a Task against: the Task would wait for a moment that never
   // arrives, and nothing would ever come and look at it again.
   it('refuses to call it spent when the event says nothing about the reset', () => {
-    expect(spentUntil(readQuota(spent({ resetsAt: null }))!)).toBeNull()
+    expect(spentUntil(readSharedWindow(spent({ resetsAt: null }))!)).toBeNull()
   })
 })
 
@@ -48,11 +49,11 @@ describe('deciding whether Overflow can even be offered', () => {
   // the provider will refuse — which would spend somebody's attention on a
   // button and then fail.
   it('is not offered where the event rejects overage', () => {
-    expect(overflowOffer(readQuota(spent({}))!)).toBe(false)
+    expect(overflowOffer(readSharedWindow(spent({}))!)).toBe(false)
   })
 
   it('is offered where the event allows it', () => {
-    expect(overflowOffer(readQuota(spent({ overageStatus: 'allowed' }))!)).toBe(
+    expect(overflowOffer(readSharedWindow(spent({ overageStatus: 'allowed' }))!)).toBe(
       true,
     )
   })
@@ -62,7 +63,7 @@ describe('deciding whether Overflow can even be offered', () => {
   it('is not offered to a Turn already running on overage', () => {
     expect(
       overflowOffer(
-        readQuota(spent({ overageStatus: 'allowed', isUsingOverage: true }))!,
+        readSharedWindow(spent({ overageStatus: 'allowed', isUsingOverage: true }))!,
       ),
     ).toBe(false)
   })

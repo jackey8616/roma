@@ -410,7 +410,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       // old one is in the way, but because two processes on one transcript
       // corrupt it, and "alive but idle" is not a state anybody has measured as
       // safe. The Session itself survives, as it does through any eviction.
-      await this.#retire(resident, { to: credential })
+      await this.#swap(resident, credential)
     } else if (resident !== undefined) {
       this.#forget(resident)
     }
@@ -524,37 +524,38 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     }
   }
 
-  /**
-   * End a resident's process and say what prompted it.
-   *
-   * `{ to }` is a credential swap rather than a reason of the same kind as the
-   * other two: eviction and reaping are roma managing processes, and that is
-   * money moving between two bills.
-   */
-  async #retire(
-    resident: Resident,
-    reason: 'evict' | 'reap' | { readonly to: CredentialKind },
-  ): Promise<void> {
-    this.#cancelReap(resident)
-    this.#forget(resident)
+  /** End a resident's process because roma wants its slot or its idleness back. */
+  async #retire(resident: Resident, event: 'evict' | 'reap'): Promise<void> {
+    this.#leave(resident)
     // Logged before the signal rather than after: this is the moment an operator
     // is looking for, and a termination that hangs must not swallow it.
-    this.#log(
-      typeof reason === 'string'
-        ? {
-            event: reason,
-            sessionId: resident.sessionId,
-            idleMs: Date.now() - resident.lastUsedAt,
-            residents: this.#residents.size,
-          }
-        : {
-            event: 'swap',
-            sessionId: resident.sessionId,
-            from: resident.credential,
-            to: reason.to,
-          },
-    )
+    this.#log({
+      event,
+      sessionId: resident.sessionId,
+      idleMs: Date.now() - resident.lastUsedAt,
+      residents: this.#residents.size,
+    })
     await this.#terminate(resident)
+  }
+
+  /**
+   * End a resident's process because the next Turn is to be paid for by the
+   * other credential.
+   *
+   * Its own path rather than a third kind of eviction: an eviction is roma
+   * managing processes and this is money moving between two bills, and the two
+   * are read by different people looking for different things.
+   */
+  async #swap(resident: Resident, to: CredentialKind): Promise<void> {
+    this.#leave(resident)
+    this.#log({ event: 'swap', sessionId: resident.sessionId, from: resident.credential, to })
+    await this.#terminate(resident)
+  }
+
+  /** Take a resident out of the pool, ahead of ending its process. */
+  #leave(resident: Resident): void {
+    this.#cancelReap(resident)
+    this.#forget(resident)
   }
 
   /**

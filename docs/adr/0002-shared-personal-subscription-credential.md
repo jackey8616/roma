@@ -151,6 +151,16 @@ again. Correct it there, and nowhere else, once somebody has seen one.
     would close overflow for the rest of the month over one power loss; both
     counts go into the refusal an operator reads, so the softness is visible
     where the decision is.
+  - **Overflow is taken for one attempt, not for one task.** A task that takes
+    it and then fails again is back on the subscription and has to be offered it
+    afresh — which is what puts the cap in front of every metered attempt rather
+    than only the first. The per-task rule above is the floor, not the ceiling.
+  - **Known bound: the cap is checked against finished tasks only.** Two blocked
+    tasks taking overflow at the same moment both read the same total and both
+    pass a cap their sum would exceed. The overshoot is bounded by the
+    concurrency cap — at most three tasks in flight — so it is a cap that can be
+    exceeded by three tasks' worth and not by more. Reserving spend before it is
+    made would close it and is not built.
   - **The owner is notified through the operator log**, not through a channel.
     The person who asked is told they were refused; a month that has spent its
     budget is not theirs to act on, and a notification the core posted into some
