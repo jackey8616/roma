@@ -7,7 +7,7 @@
 # roma itself cannot be booted here and deliberately is not: starting it needs a
 # Shared Window token and Google credentials in a public repository's secrets,
 # and the startup self-check drives a paid Turn on every run. What is checked
-# instead is everything short of that — see ADR-0006.
+# instead is everything short of that — see ADR-0007.
 #
 #   usage: scripts/verify-image.sh <image ref>
 
