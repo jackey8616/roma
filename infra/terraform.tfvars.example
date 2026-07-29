@@ -1,0 +1,17 @@
+# Copy to `terraform.tfvars` — which is git-ignored — or pass with `-var`.
+#
+# Only `project_id` has no default. Everything else is here so that the names are
+# visible in one place; delete any line to take the default from `variables.tf`.
+
+project_id = "your-project-id"
+
+# topic_name             = "roma-chat-events"
+# subscription_name      = "roma-chat-events-sub"
+# service_account_id     = "roma-agent"
+# dead_letter_topic_name = "roma-chat-events-dead-letter"
+
+# The three numbers worth understanding before changing — `variables.tf` says why
+# each is what it is.
+# ack_deadline_seconds              = 60
+# message_retention_duration        = "604800s"
+# dead_letter_max_delivery_attempts = 100

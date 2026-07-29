@@ -32,3 +32,13 @@ coverage/
 
 # Local test scratch (seam 2 working dirs, isolated claude config)
 .tmp/
+
+# Terraform. `.terraform.lock.hcl` is deliberately not here — it pins the
+# provider and belongs in the repo. State is ignored because it is a local
+# record of one deployment, not part of the template.
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars

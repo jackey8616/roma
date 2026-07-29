@@ -55,6 +55,7 @@ Optional, but use one when the change sits in a recognisable area:
 | `claude`  | `CLAUDE.md`                                      |
 | `core`    | `src/` — the Channel-independent part of roma    |
 | `chat`    | `src/channels/google-chat/` — the Chat Adapter    |
+| `infra`   | `infra/` — the Terraform somebody runs by hand    |
 
 Invent a new scope when a change genuinely introduces a new area, and add it here in the
 same commit. Don't stretch an existing scope to cover something it doesn't describe, and

@@ -50,7 +50,13 @@ dependency and `npm ci --omit=dev` is not something this repo claims to support 
 
 **roma provisions nothing.** The Pub/Sub topic, the subscription, the service account and
 the grant that lets Chat publish all exist before roma starts; the variables below name
-them. Creating them is not roma's job and it has no code that could.
+them. Creating them is not roma's job and it has no code that could —
+`src/channels/google-chat/provisioning.test.ts` reads the sources and fails if it ever does.
+
+Making them is `infra/`: Terraform somebody runs by hand, whose outputs are named for the
+two required variables in the table below, so standing roma up is `terraform apply` and
+then exporting what it printed. `infra/README.md` also carries the Chat-side steps
+Terraform cannot do, in the order they have to happen.
 
 ### The environment
 

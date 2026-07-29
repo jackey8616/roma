@@ -1,7 +1,6 @@
-import { readdirSync, readFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuditLog, monthOf } from './audit-log.js'
 import { Core, type CoreLogRecord } from './core.js'
@@ -29,6 +28,7 @@ import {
   withApiKeySource,
   withTotalCostUsd,
 } from '../test/support/recorded-stream.js'
+import { sources, type Source } from '../test/support/sources.js'
 
 const stream = recordedStream('three-turns-one-process')
 /** One complete Turn of a real recorded stream. Its text is "ok". */
@@ -1767,10 +1767,6 @@ const CHANNEL_SPECIFIC = [
  * `src/channels/<channel>/` is where a Channel Adapter goes, and it is the only
  * place in the tree allowed to know which product a message came from.
  */
-function coreSources(): { file: string; source: string }[] {
-  const src = fileURLToPath(new URL('.', import.meta.url))
-  return readdirSync(src, { recursive: true, encoding: 'utf8' })
-    .filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'))
-    .filter((file) => !file.split(sep).includes('channels'))
-    .map((file) => ({ file, source: readFileSync(join(src, file), 'utf8') }))
+function coreSources(): Source[] {
+  return sources().filter(({ file }) => !file.split(sep).includes('channels'))
 }
