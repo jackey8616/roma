@@ -120,6 +120,18 @@ rather than as a setting to be enabled in advance — people are poor at
 predicting which work will turn out to be interruptible, and are well placed to
 judge it once blocked.
 
+**Amended again — what a spent window looks like is still unmeasured, and the
+implementation says so.** Every capture in `test/fixtures/claude-stream/` reports
+`status: "allowed"`, including the one quoted above; measuring the other case
+means deliberately draining the window the whole team shares, which blocks
+everybody until it resets. So `spentUntil` in `src/quota.ts` reads *anything that
+is not `allowed`* as spent, and that one function is the whole of the guess —
+deliberately shaped to survive being wrong, since a status roma has never seen
+parks a Task and says so rather than running it into a wall. It also refuses to
+call the window spent when the event carries no `resetsAt`: a Task parked against
+a moment that never arrives waits for ever, and nothing would come and look at it
+again. Correct it there, and nowhere else, once somebody has seen one.
+
 - Anyone may press it. Restricting it to an admin turns a person into an
   approval queue and leaves urgent work stuck whenever they are offline.
 - It applies to **that task only**. A persistent per-thread toggle gets enabled
@@ -127,6 +139,32 @@ judge it once blocked.
 - Spend is shown in the reply, and a **monthly overflow cap** is enforced;
   beyond it, overflow is refused outright and the owner is notified. Without a
   cap, "off by default" would be ceremony rather than protection.
+  - **The cap is a required part of configuring overflow at all**, not a setting
+    with a default: a default would be roma deciding how much of somebody's money
+    to spend on their behalf. A metered key and a cap are configured as one
+    thing, so a deployment cannot end up with half of it.
+  - The cap is enforced against the audit log's per-turn totals for the calendar
+    month, which is the number ADR-0003's observability section exists to make
+    correct. The comparison is against a figure that log is explicit is a *floor*
+    — tasks nothing priced are not in it, and neither are records that could not
+    be read — so it errs towards allowing. A cap that refused on every torn line
+    would close overflow for the rest of the month over one power loss; both
+    counts go into the refusal an operator reads, so the softness is visible
+    where the decision is.
+  - **Overflow is taken for one attempt, not for one task.** A task that takes
+    it and then fails again is back on the subscription and has to be offered it
+    afresh — which is what puts the cap in front of every metered attempt rather
+    than only the first. The per-task rule above is the floor, not the ceiling.
+  - **Known bound: the cap is checked against finished tasks only.** Two blocked
+    tasks taking overflow at the same moment both read the same total and both
+    pass a cap their sum would exceed. The overshoot is bounded by the
+    concurrency cap — at most three tasks in flight — so it is a cap that can be
+    exceeded by three tasks' worth and not by more. Reserving spend before it is
+    made would close it and is not built.
+  - **The owner is notified through the operator log**, not through a channel.
+    The person who asked is told they were refused; a month that has spent its
+    budget is not theirs to act on, and a notification the core posted into some
+    configured conversation would be the core knowing about a channel.
 
 ## Consequences
 

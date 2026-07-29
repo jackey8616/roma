@@ -212,6 +212,18 @@ that last line — and each has its own bullet below.
     SIGTERM would stall every later message rather than only its own session.
     That is the "bot halted" state under accepted risks, reached without a single
     task hanging.
+  - **Which credential a turn is paid for by is a property of the process, so
+    the pool owns it.** Overflow (ADR-0002) reruns one blocked task on the
+    metered key, and the environment map is fixed at spawn — so the session's
+    resident process is ended and resumed on the other map, and ends up back on
+    the subscription for the conversation's next message. The pool takes one
+    environment per credential and picks per turn.
+    - It has to be the pool rather than a second pool with the other map: a
+      session's transcript is one file, and two live processes on it is the
+      corruption the whole serialisation rule exists to prevent. Two pools would
+      make "at most one of you holds this session" an invariant neither of them
+      owned. Eviction-and-resume is already routine here and already verified, so
+      this is the existing mechanism with one more reason to fire.
   - **A resume that finds no transcript re-creates the session.** The pool reads
     the existence of the session's working directory as the record that the
     session exists, which is what makes the `--session-id`-then-`--resume` rule

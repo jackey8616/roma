@@ -93,6 +93,45 @@ export function readApiRetry(event: ClaudeEvent): ApiRetry | null {
   }
 }
 
+/**
+ * What the stream says about the Shared Window, off `rate_limit_event`.
+ *
+ * The field names are Claude Code's own, kept rather than translated, because a
+ * reader comparing this to a capture should not have to. What any of it *means*
+ * is `src/shared-window.ts`, which is the only place that judgement is made.
+ */
+export interface SharedWindow {
+  /** `"allowed"` in every capture roma holds. What else it can say is unmeasured. */
+  readonly status: string | null
+  /** When the window comes back, in unix seconds. The real source for what users are told. */
+  readonly resetsAt: number | null
+  /** `"five_hour"` in every capture — the rolling window ADR-0002 turns on. */
+  readonly rateLimitType: string | null
+  /** Whether the provider would let this account spend past the window at all. */
+  readonly overageStatus: string | null
+  /** Whether it already is. */
+  readonly isUsingOverage: boolean | null
+}
+
+/**
+ * Read a `rate_limit_event`, or null if this is not one.
+ *
+ * One arrives on every Turn, so this is how roma learns where the Shared Window
+ * stands without asking anybody.
+ */
+export function readSharedWindow(event: ClaudeEvent): SharedWindow | null {
+  if (event.type !== 'rate_limit_event') return null
+  const info = event['rate_limit_info']
+  const fields = (typeof info === 'object' && info !== null ? info : {}) as Record<string, unknown>
+  return {
+    status: asString(fields['status']),
+    resetsAt: asNumber(fields['resetsAt']),
+    rateLimitType: asString(fields['rateLimitType']),
+    overageStatus: asString(fields['overageStatus']),
+    isUsingOverage: typeof fields['isUsingOverage'] === 'boolean' ? fields['isUsingOverage'] : null,
+  }
+}
+
 export function parseEvent(line: string): ClaudeEvent | null {
   let parsed: unknown
   try {

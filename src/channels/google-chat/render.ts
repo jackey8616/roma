@@ -12,6 +12,16 @@ import type { Command } from '../../commands.js'
 export const MAX_TEXT = 4096
 
 /**
+ * What the button that takes Overflow says.
+ *
+ * It says that it costs money, because that is the whole of the decision being
+ * asked for: ADR-0002 has the valve off by default precisely so that spending is
+ * something somebody chooses, and a button labelled "Run anyway" would be that
+ * choice made by somebody who did not know they were making it.
+ */
+export const OVERFLOW_BUTTON = 'Run it on metered billing'
+
+/**
  * Everything the Core can say about a Task except that it is still going.
  *
  * Its own type because the two are answered differently in Chat — an outcome is
@@ -35,11 +45,20 @@ export type TaskOutcome = NotProgress<OutboundInstruction>
  */
 export function outcomeMessages(instruction: TaskOutcome): string[] {
   switch (instruction.kind) {
-    case 'result':
+    case 'result': {
       // Its own message or messages, never the acknowledgement edited one last
       // time — the rule ADR-0003 makes unconditional, because the result is what
       // people search for and quote months later.
-      return split(instruction.text)
+      const messages = split(instruction.text)
+      // ADR-0002 requires the spend shown in the reply, and only where somebody
+      // chose to spend it. Its own message rather than appended to the answer:
+      // the answer is what gets quoted later, and a price tag inside it would be
+      // quoted along with it.
+      if (instruction.overflowCostUsd !== undefined) {
+        messages.push(overflowSpentText(instruction.overflowCostUsd))
+      }
+      return messages
+    }
     case 'failure':
       // Split like a result, because it is one: a failed Turn's reason is the
       // Turn's own text, and that has no more of a length limit than an answer
@@ -50,7 +69,45 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
       return ['Stopped.']
     case 'command-outcome':
       return [commandText(instruction.command, instruction.carriedOut)]
+    case 'blocked':
+      return [blockedText(instruction.resetsAt)]
+    case 'overflow-refused':
+      // What they can still do is the point of the sentence: the Task is not
+      // over, and telling them only that they were refused would read as one
+      // that is.
+      return [
+        `Overflow is capped at $${money(instruction.capUsd)} a month and this month has ` +
+          `spent $${money(instruction.spentUsd)}, so it is off until the month turns. ` +
+          `Your task is still waiting for the shared quota to reset.`,
+      ]
   }
+}
+
+/**
+ * What a blocked Task's message says.
+ *
+ * Plainly that quota is spent, and when it comes back — from the event's own
+ * `resetsAt` rather than an estimate, which is the only reason a time is worth
+ * quoting. That the Task is kept is said too: told only that quota is spent,
+ * people send the message again, which is the behaviour the whole
+ * acknowledgement design exists to prevent.
+ */
+function blockedText(resetsAt: number): string {
+  const at = new Date(resetsAt * 1000).toISOString().replace('T', ' ').slice(0, 16)
+  return `The shared Claude quota is spent. It comes back at ${at} UTC — I have kept your task and will run it then.`
+}
+
+/** What an Overflow Turn spent, to the cent it was billed in. */
+function overflowSpentText(costUsd: number | null): string {
+  // Null is a Turn nothing priced, and saying "$0.00" would report money as free
+  // — the same claim the Audit Record refuses to make.
+  if (costUsd === null) return 'Ran on metered billing. What it cost was never reported.'
+  return `Ran on metered billing: $${money(costUsd)}.`
+}
+
+/** Money as people read it, which is two decimal places and no more. */
+function money(usd: number): string {
+  return usd.toFixed(2)
 }
 
 /**

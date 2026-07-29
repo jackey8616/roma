@@ -8,6 +8,7 @@ import {
   type PoolLogRecord,
   type SessionPoolOptions,
 } from './session-pool.js'
+import type { CredentialKind } from './build-env.js'
 import type { Turn } from './claude-session.js'
 import { FakeClaude, flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
 import { apiRetries, feed, recordedStream, withTotalCostUsd } from '../test/support/recorded-stream.js'
@@ -34,7 +35,10 @@ function newPool(options: Partial<SessionPoolOptions> = {}) {
   const log: PoolLogRecord[] = []
   const pool = new SessionPool({
     workRoot,
-    env: { PATH: '/usr/bin', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' },
+    envs: {
+      'shared-window': { PATH: '/usr/bin', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' },
+      overflow: { PATH: '/usr/bin', ANTHROPIC_API_KEY: 'metered-key' },
+    },
     spawn: claude.spawn,
     log: (record) => log.push(record),
     ...options,
@@ -44,8 +48,13 @@ function newPool(options: Partial<SessionPoolOptions> = {}) {
   const processFor = (id: string): FakeClaudeProcess => claude.processFor(join(workRoot, id))
 
   /** Send a message and serve the Turn it drives from a recorded stream. */
-  const send = async (id: string, text: string, events: readonly ClaudeEvent[]): Promise<Turn> => {
-    const turn = pool.send(id, text)
+  const send = async (
+    id: string,
+    text: string,
+    events: readonly ClaudeEvent[],
+    credential?: CredentialKind,
+  ): Promise<Turn> => {
+    const turn = credential === undefined ? pool.send(id, text) : pool.send(id, text, credential)
     await flush()
     feed(processFor(id), events)
     return await turn
@@ -732,3 +741,96 @@ function ageWorkDir(path: string, ageMs: number): void {
   const seconds = (Date.now() - ageMs) / 1000
   utimesSync(path, seconds, seconds)
 }
+
+describe('running a Turn on the other credential', () => {
+  // Overflow is not a mode the pool is put into: ADR-0002 makes it a different
+  // environment map and nothing else, so it is a property of the process serving
+  // one Turn rather than of the pool or of the Session.
+  it('spawns the Session on the environment the Turn asked for', async () => {
+    const { claude, send } = newPool()
+
+    await send(A, 'hello', OK, 'overflow')
+
+    expect(claude.lastSpawn.env).toEqual({ PATH: '/usr/bin', ANTHROPIC_API_KEY: 'metered-key' })
+  })
+
+  // The rule two processes on one Session file would break, and the reason this
+  // could not simply be a second pool: the Session's transcript is one file, and
+  // the process on the wrong credential has to be gone before the next one
+  // starts rather than merely unused.
+  it('ends the process on the old credential before starting the new one', async () => {
+    const { claude, processFor, send } = newPool()
+    await send(A, 'first', OK)
+    const first = processFor(A)
+
+    await send(A, 'and again', OK, 'overflow')
+
+    expect(first.signals).toContain('SIGTERM')
+    expect(claude.processes).toHaveLength(2)
+  })
+
+  // The Session survives the swap, which is what makes Overflow worth taking at
+  // all: the rerun answers the message that was blocked, in the Conversation it
+  // was asked in, with everything said before it still there.
+  it('resumes the Session rather than starting it over', async () => {
+    const { claude, send } = newPool()
+    await send(A, 'first', OK)
+
+    await send(A, 'and again', OK, 'overflow')
+
+    expect(claude.lastSpawn.args).toContain('--resume')
+    expect(claude.lastSpawn.args).toContain(A)
+  })
+
+  // Overflow applies to one Task and not to the Conversation it was taken in.
+  // A pool that stayed on the metered credential would be the persistent
+  // per-Conversation toggle ADR-0002 refuses, arrived at by accident.
+  it('goes back to the Shared Window for the next ordinary Turn', async () => {
+    const { claude, send } = newPool()
+    await send(A, 'first', OK, 'overflow')
+
+    await send(A, 'and again', OK)
+
+    expect(claude.lastSpawn.env).toEqual({
+      PATH: '/usr/bin',
+      CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token',
+    })
+  })
+
+  it('leaves a Session alone when the next Turn wants the credential it is on', async () => {
+    const { claude, send } = newPool()
+    await send(A, 'first', OK, 'overflow')
+
+    await send(A, 'and again', stream.turn(3), 'overflow')
+
+    expect(claude.processes).toHaveLength(1)
+  })
+
+  // Refused rather than run on whatever is configured. A deployment with no
+  // Overflow key that somehow reached this would otherwise quietly serve the
+  // Turn on the Shared Window and report it as metered — which is the audit
+  // record lying about which credential paid.
+  it('refuses a credential it has no environment for', async () => {
+    const { pool } = newPool({
+      envs: { 'shared-window': { PATH: '/usr/bin', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' } },
+    })
+
+    await expect(pool.send(A, 'hello', 'overflow')).rejects.toThrow(/overflow/i)
+  })
+
+  // Where money moved, and the only place it is written down as a process event
+  // rather than as a Task's cost.
+  it('writes the swap down for an operator', async () => {
+    const { log, send } = newPool()
+    await send(A, 'first', OK)
+
+    await send(A, 'and again', OK, 'overflow')
+
+    expect(log).toContainEqual({
+      event: 'swap',
+      sessionId: A,
+      from: 'shared-window',
+      to: 'overflow',
+    })
+  })
+})

@@ -3,18 +3,38 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AuditLog } from './audit-log.js'
 import { buildEnv, type Credential } from './build-env.js'
+import type { CredentialEnvs } from './session-pool.js'
 import type { ChannelAdapter } from './channel-adapter.js'
 import type { SpawnClaudeProcess } from './claude-process.js'
 import type { RetryBudget } from './config.js'
-import { Core } from './core.js'
+import { Core, type CoreLogRecord } from './core.js'
 import { SessionGenerations } from './session-generation.js'
-import { SessionPool, type PoolLog } from './session-pool.js'
+import type { OperatorLog } from './operator-log.js'
+import { SessionPool, type PoolLogRecord } from './session-pool.js'
 import { startupSelfCheck, type StartupSelfCheckReport } from './startup-self-check.js'
 import { TaskQueue } from './task-queue.js'
 
 export interface StartRomaOptions {
   /** The credential every Session runs on, and the one the self-check verifies. */
   readonly credential: Credential
+  /**
+   * Metered billing, and the ceiling on it. Omitted, roma has no Overflow: a
+   * blocked Task waits for the window and is never offered a way past it.
+   *
+   * The credential and the cap together, because neither is any use without the
+   * other. A key with no cap makes ADR-0002's "off by default" ceremony rather
+   * than protection; a cap with no key caps nothing. Requiring them as one
+   * object is how a deployment cannot configure half of it.
+   *
+   * **The self-check does not verify this credential.** It drives a real Turn,
+   * which on a metered key costs metered money at every boot — so the first
+   * thing to find out whether the key works is the first Task somebody takes
+   * Overflow on. Worth knowing when one fails.
+   */
+  readonly overflow?: {
+    readonly credential: Credential
+    readonly monthlyCapUsd: number
+  }
   /**
    * The Channel roma answers on.
    *
@@ -49,7 +69,15 @@ export interface StartRomaOptions {
   readonly maxConcurrentTasks?: number
   readonly retryBudget?: RetryBudget
   readonly spawn?: SpawnClaudeProcess
-  readonly log?: PoolLog
+  /**
+   * Where everything roma does that is an operator's business goes — the pool's
+   * and the Core's alike.
+   *
+   * One log rather than one per component: they describe the same running
+   * system, and an operator reading a credential swap wants the refusal that
+   * prompted it on the same lines.
+   */
+  readonly log?: OperatorLog<PoolLogRecord | CoreLogRecord>
   /**
    * Where the self-check's probe Session runs. A throwaway directory by default,
    * removed once the check is done.
@@ -93,6 +121,7 @@ export interface Roma {
  */
 export async function startRoma({
   credential,
+  overflow,
   channel,
   workRoot,
   auditRoot,
@@ -126,9 +155,24 @@ export async function startRoma({
     if (selfCheckCwd === undefined) rmSync(probeCwd, { recursive: true, force: true })
   }
 
+  // One environment per credential a Turn can be paid for by. Overflow is not a
+  // mode roma is put into — ADR-0002 makes it exactly this, a different map —
+  // and the pool picks between them per Turn.
+  const envs: CredentialEnvs = {
+    [credential.kind]: env,
+    ...(overflow === undefined
+      ? {}
+      : {
+          overflow: buildEnv({
+            credential: overflow.credential,
+            ...(configDir === undefined ? {} : { configDir }),
+          }),
+        }),
+  }
+
   const pool = new SessionPool({
     workRoot,
-    env,
+    envs,
     ...(model === undefined ? {} : { model }),
     ...(retryBudget === undefined ? {} : { retryBudget }),
     ...(spawn === undefined ? {} : { spawn }),
@@ -144,7 +188,16 @@ export async function startRoma({
     // The credential is handed over as well as the environment built from it,
     // because the record has to say which of the two bills a Task landed on and
     // the environment is a map of secrets rather than an answer to that.
-    core: new Core({ channel, pool, queue, sessions, audit, credential: credential.kind }),
+    core: new Core({
+      channel,
+      pool,
+      queue,
+      sessions,
+      audit,
+      credential: credential.kind,
+      ...(overflow === undefined ? {} : { overflow: { monthlyCapUsd: overflow.monthlyCapUsd } }),
+      ...(log === undefined ? {} : { log }),
+    }),
     pool,
     queue,
     sessions,

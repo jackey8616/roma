@@ -8,7 +8,9 @@ import {
   TERMINATE_GRACE_MS,
   type Turn,
 } from './claude-session.js'
+import type { CredentialKind } from './build-env.js'
 import { defaultConfig, type RetryBudget } from './config.js'
+import { writeToStderr, type OperatorLog } from './operator-log.js'
 import { readApiRetry, type ApiRetry, type ClaudeEvent } from './stream-events.js'
 
 /** ADR-0003: at most ten resident processes, evicted least-recently-used. */
@@ -39,7 +41,24 @@ export type PoolLogRecord =
       readonly sessionId: string
       readonly resume: boolean
       readonly cwd: string
+      /** Which of the two bills this process's Turns land on. */
+      readonly credential: CredentialKind
       readonly residents: number
+    }
+  | {
+      /**
+       * A process ended because the next Turn is to be paid for by the other
+       * credential.
+       *
+       * Its own record rather than an eviction, because an eviction is roma
+       * making room and this is money moving. It is the only place the move
+       * appears as something that happened to a process; what it cost appears
+       * on the Task's Audit Record.
+       */
+      readonly event: 'swap'
+      readonly sessionId: string
+      readonly from: CredentialKind
+      readonly to: CredentialKind
     }
   | {
       /** Both end a process the same way; they differ in what prompted it. */
@@ -77,12 +96,10 @@ export type PoolLogRecord =
       readonly idleMs: number
     }
 
-export type PoolLog = (record: PoolLogRecord) => void
+export type PoolLog = OperatorLog<PoolLogRecord>
 
 /** The default log: one JSON object per line on stderr. */
-export const logToStderr: PoolLog = (record) => {
-  process.stderr.write(`${JSON.stringify(record)}\n`)
-}
+export const logToStderr: PoolLog = writeToStderr
 
 /**
  * A Turn abandoned because it was retrying more than the budget allows.
@@ -116,11 +133,24 @@ export class RetryStormError extends Error {
   }
 }
 
+/**
+ * The environment to spawn with for each credential a Turn can be paid for by,
+ * each one built by `buildEnv`.
+ *
+ * Partial, because Overflow is configuration a deployment may not have: no
+ * metered key, no entry, and a Turn that asks for one is refused rather than
+ * quietly served on the subscription. ADR-0002's point exactly — Overflow is not
+ * a mode, it is the other environment map.
+ */
+export type CredentialEnvs = Readonly<
+  Partial<Record<CredentialKind, Readonly<Record<string, string>>>>
+>
+
 export interface SessionPoolOptions {
   /** Working directories live directly under here, one per Session. */
   readonly workRoot: string
-  /** Built by `buildEnv`, and the same for every Session in this pool. */
-  readonly env: Readonly<Record<string, string>>
+  /** One environment per credential a Turn may run on. */
+  readonly envs: CredentialEnvs
   readonly model?: string
   readonly maxResident?: number
   readonly reclaimIntervalMs?: number
@@ -154,6 +184,16 @@ interface RetryWatch {
 interface Resident {
   readonly sessionId: string
   readonly cwd: string
+  /**
+   * Which credential this process was spawned on, and therefore which one its
+   * Turns are billed to.
+   *
+   * Kept because it is the process that carries a credential, not the Session:
+   * a Session's next Turn can be paid for by the other one, and the only way to
+   * serve it is a different process — two on one transcript is the corruption
+   * the whole serialisation rule exists to prevent.
+   */
+  readonly credential: CredentialKind
   readonly session: ClaudeSession
   /** Whether this process was started with `--resume`. */
   readonly resumed: boolean
@@ -193,7 +233,7 @@ interface Resident {
  */
 export class SessionPool extends EventEmitter<SessionPoolEvents> {
   readonly #workRoot: string
-  readonly #env: Readonly<Record<string, string>>
+  readonly #envs: CredentialEnvs
   readonly #model: string | undefined
   readonly #maxResident: number
   readonly #retryBudget: RetryBudget
@@ -216,7 +256,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   constructor(options: SessionPoolOptions) {
     super()
     this.#workRoot = options.workRoot
-    this.#env = options.env
+    this.#envs = options.envs
     this.#model = options.model
     this.#maxResident = options.maxResident ?? MAX_RESIDENT
     this.#retryBudget = options.retryBudget ?? defaultConfig.retryBudget
@@ -246,8 +286,12 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * Rejects with `RetryStormError` if the Turn spends its retry budget, which
    * is the one way a Turn ends that nobody asked for.
    */
-  async send(sessionId: string, text: string): Promise<Turn> {
-    return await this.#turn(await this.#acquire(sessionId), text)
+  async send(
+    sessionId: string,
+    text: string,
+    credential: CredentialKind = 'shared-window',
+  ): Promise<Turn> {
+    return await this.#turn(await this.#acquire(sessionId, credential), text)
   }
 
   /**
@@ -338,7 +382,10 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       // Create it instead of leaving this Conversation permanently broken.
       this.#log({ event: 'resume-lost', sessionId: resident.sessionId, stderr: resident.stderr })
       this.#forget(resident)
-      return await this.#turn(await this.#spawn(resident.sessionId, false), text)
+      return await this.#turn(
+        await this.#spawn(resident.sessionId, resident.credential, false),
+        text,
+      )
     } finally {
       resident.busy = false
       this.#clearRetryWatch(resident)
@@ -351,25 +398,49 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     }
   }
 
-  async #acquire(sessionId: string): Promise<Resident> {
+  async #acquire(sessionId: string, credential: CredentialKind): Promise<Resident> {
     const resident = this.#residents.get(sessionId)
     if (resident !== undefined && resident.session.alive) {
-      this.#markUsed(resident)
-      return resident
+      if (resident.credential === credential) {
+        this.#markUsed(resident)
+        return resident
+      }
+      // The Session is resident on the credential this Turn is not to be paid
+      // for by. The process goes before the next one starts — not because the
+      // old one is in the way, but because two processes on one transcript
+      // corrupt it, and "alive but idle" is not a state anybody has measured as
+      // safe. The Session itself survives, as it does through any eviction.
+      await this.#swap(resident, credential)
+    } else if (resident !== undefined) {
+      this.#forget(resident)
     }
-    if (resident !== undefined) this.#forget(resident)
-    return await this.#spawn(sessionId)
+    return await this.#spawn(sessionId, credential)
   }
 
-  async #spawn(sessionId: string, resume?: boolean): Promise<Resident> {
-    const spawned = this.#spawning.then(() => this.#spawnNow(sessionId, resume))
+  async #spawn(
+    sessionId: string,
+    credential: CredentialKind,
+    resume?: boolean,
+  ): Promise<Resident> {
+    const spawned = this.#spawning.then(() => this.#spawnNow(sessionId, credential, resume))
     // The queue itself never carries a rejection onward: a Session that failed
     // to start is that caller's problem, not the next one's.
     this.#spawning = spawned.catch(() => undefined)
     return await spawned
   }
 
-  async #spawnNow(sessionId: string, resume?: boolean): Promise<Resident> {
+  async #spawnNow(
+    sessionId: string,
+    credential: CredentialKind,
+    resume?: boolean,
+  ): Promise<Resident> {
+    const env = this.#envs[credential]
+    // Refused rather than served on whichever environment does exist. A Turn run
+    // on the other credential and recorded as this one is the audit record lying
+    // about who paid, which is the one thing it exists not to do.
+    if (env === undefined) {
+      throw new Error(`no environment is configured for the ${credential} credential`)
+    }
     await this.#makeRoom()
 
     const cwd = join(this.#workRoot, sessionId)
@@ -383,7 +454,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     const session = new ClaudeSession({
       sessionId,
       cwd,
-      env: this.#env,
+      env,
       resume: resuming,
       spawn: this.#spawnProcess,
       ...(this.#model === undefined ? {} : { model: this.#model }),
@@ -391,6 +462,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     const resident: Resident = {
       sessionId,
       cwd,
+      credential,
       session,
       resumed: resuming,
       stderr: '',
@@ -429,6 +501,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       sessionId,
       resume: resuming,
       cwd,
+      credential,
       residents: this.#residents.size,
     })
     this.#scheduleReap(resident)
@@ -451,9 +524,9 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     }
   }
 
+  /** End a resident's process because roma wants its slot or its idleness back. */
   async #retire(resident: Resident, event: 'evict' | 'reap'): Promise<void> {
-    this.#cancelReap(resident)
-    this.#forget(resident)
+    this.#leave(resident)
     // Logged before the signal rather than after: this is the moment an operator
     // is looking for, and a termination that hangs must not swallow it.
     this.#log({
@@ -463,6 +536,26 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       residents: this.#residents.size,
     })
     await this.#terminate(resident)
+  }
+
+  /**
+   * End a resident's process because the next Turn is to be paid for by the
+   * other credential.
+   *
+   * Its own path rather than a third kind of eviction: an eviction is roma
+   * managing processes and this is money moving between two bills, and the two
+   * are read by different people looking for different things.
+   */
+  async #swap(resident: Resident, to: CredentialKind): Promise<void> {
+    this.#leave(resident)
+    this.#log({ event: 'swap', sessionId: resident.sessionId, from: resident.credential, to })
+    await this.#terminate(resident)
+  }
+
+  /** Take a resident out of the pool, ahead of ending its process. */
+  #leave(resident: Resident): void {
+    this.#cancelReap(resident)
+    this.#forget(resident)
   }
 
   /**

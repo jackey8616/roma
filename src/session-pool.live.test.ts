@@ -26,11 +26,13 @@ describe('a Session that outlives its process', () => {
     const dirs = liveWorkRoot('outlives-its-process')
     pool = new SessionPool({
       workRoot: dirs.workRoot,
-      env: buildEnv({
-        credential: sharedWindowCredential(),
-        configDir: dirs.configDir,
-        inherit: process.env,
-      }),
+      envs: {
+        'shared-window': buildEnv({
+          credential: sharedWindowCredential(),
+          configDir: dirs.configDir,
+          inherit: process.env,
+        }),
+      },
       log: (record) => log.push(record),
     })
 

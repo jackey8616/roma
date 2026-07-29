@@ -1,6 +1,7 @@
 import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync } from 'node:fs'
 import { join } from 'node:path'
 import { apiKeySourceFor, type CredentialKind } from './build-env.js'
+import { writeToStderr } from './operator-log.js'
 
 /** How a Task ended, in the three ways a Conversation is ever told about. */
 export type TaskOutcome = 'result' | 'failure' | 'stopped'
@@ -180,7 +181,7 @@ export interface AuditLogOptions {
 /** The fallback: at least get the record into the process's log stream. */
 const reportToStderr = (record: AuditRecord, error: unknown): void => {
   const reason = error instanceof Error ? error.message : String(error)
-  process.stderr.write(`${JSON.stringify({ event: 'audit-write-failed', reason, record })}\n`)
+  writeToStderr({ event: 'audit-write-failed', reason, record })
 }
 
 /**

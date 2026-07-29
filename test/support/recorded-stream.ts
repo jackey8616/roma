@@ -133,6 +133,25 @@ export function withApiKeySource(
 }
 
 /**
+ * A real `rate_limit_event`, with whichever fields a test needs changed.
+ *
+ * For the one case no capture can hold: a spent Shared Window. Every recording
+ * here says `status: "allowed"`, and recording the other case means deliberately
+ * draining the window the whole team shares, which blocks everybody — the
+ * token's owner included — until it resets.
+ *
+ * So the event is real, its `resetsAt` is the real one, and the field under test
+ * is the only thing changed. That keeps the guess in one place: `spentUntil` in
+ * `src/quota.ts` is where roma says what it believes a spent window looks like,
+ * and this is where a test says the same thing.
+ */
+export function quotaEvent(info: Record<string, unknown> = {}): ClaudeEvent {
+  const [event] = ofKind(recordedStream('three-turns-one-process').events, 'rate_limit_event')
+  if (event === undefined) throw new Error('that capture has no rate_limit_event')
+  return { ...event, rate_limit_info: { ...(event['rate_limit_info'] as object), ...info } }
+}
+
+/**
  * Push events at a fake process as NDJSON bytes.
  *
  * `chunkSize` decides where the chunk boundaries fall. The default sends each

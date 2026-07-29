@@ -152,8 +152,17 @@ _Avoid_: rate limit, quota, budget
 
 **Overflow**:
 Running one blocked Task on metered API billing instead of the Shared Window.
-Off by default and offered per-Task at the moment of blocking.
+Off by default and offered per-Task at the moment of blocking. Mechanically it is
+not a mode: it is the other environment map, chosen per Turn, and it moves back
+on its own for the Conversation's next message.
 _Avoid_: fallback, API mode, paid mode, spillover
+
+**Parked**:
+What a Task is between the Shared Window being spent and it coming back: kept,
+said out loud, holding no concurrency slot and no process, and stoppable
+throughout. Distinct from queued — the Task Queue decides what may run now, and a
+parked Task is waiting on the provider rather than on roma.
+_Avoid_: paused, retrying, backing off, queued (that word is the Task Queue's)
 
 **Audit Record**:
 The line roma writes when a Task ends: who asked, which Session ran it, how long
