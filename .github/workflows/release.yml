@@ -74,7 +74,7 @@ jobs:
       # Loaded rather than pushed, because it is verified before anybody can pull
       # it. `linux/amd64` alone, which is what makes a single-platform `load`
       # possible at all.
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
