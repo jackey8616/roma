@@ -75,13 +75,18 @@ Story 34 is dropped from #1 rather than left unmet. Both new terms are in
 `CONTEXT.md`, because a decision whose whole content is "which artefact answers
 which question" cannot be written down while two of the three are unnamed.
 
-**`ROMA_CLAUDE_CONFIG_DIR` becomes required** — #34, and not yet built: the
-variable is still optional in `env-config.ts` as this is written. The decision
+**`ROMA_CLAUDE_CONFIG_DIR` becomes required** — #34, built in #37. The decision
 above leans on the Transcript being somewhere known, and that cannot rest on a
 variable a deployment may omit. Making it required also turns ADR-0002's isolation
 from a promise conditional on configuration into an unconditional one: there is no
 longer a way to start roma whose Claude Code processes resolve credentials against
 the host's keychain.
+
+Required all the way down rather than only in `env-config.ts`, which is the one
+judgement call #34 left open. `buildEnv` is driven directly by tests as well as
+by `startRoma`, so an optional parameter there would have kept a way to break
+both promises that the type did not mention — at the cost of a few test call
+sites naming a directory, which they should have been doing anyway.
 
 ## Consequences
 
