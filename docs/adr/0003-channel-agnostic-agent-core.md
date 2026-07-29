@@ -6,6 +6,13 @@ Date: 2026-07-29
 
 Accepted. With ADR-0004, supersedes ADR-0001.
 
+**Amended 2026-07-29** after prototype verification
+(`docs/transcript-collision-verification.md`, Claude Code v2.1.220), in the way
+ADR-0002 was: the decisions are unchanged, and what the amendments correct is the
+evidence beneath two of them. Both concern the transcript this ADR calls "not
+ours to delete" — a clause ADR-0006 has since upheld deliberately. Amendments are
+marked inline.
+
 ## Context
 
 roma is one central Claude Code agent that team members reach from any messaging
@@ -371,6 +378,15 @@ roughly how much, never what.
     that may still have a transcript. **What the CLI does with that is
     unmeasured.** Accepted for now because the alternative is a second record of
     which sessions exist, kept outside the directory it describes.
+    - **Amended — measured, and it is a defect rather than an uncertainty.** The
+      CLI refuses outright: `exit 1`, `Error: Session ID … is already in use.`,
+      before any stream event. Nothing removes the transcript, so the id stays
+      poisoned and that conversation is **permanently unservable** — every later
+      message repeats the same spawn. "Accepted for now" was accepting more than
+      it knew. Filed as #40, whose fix is to reach the session with `--resume`
+      instead; measured to recover it having forgotten nothing. **The clause
+      "not ours to delete" stands** — ADR-0006 upheld it deliberately rather
+      than by inheritance.
 - A local mirror of frequently used repositories, cloned from locally at session
   start — faster, and avoids repeated use of git credentials.
 - Egress allowlist: the Anthropic API, our git remote, and package registries
@@ -549,6 +565,15 @@ disk, and what the CLI does with `--session-id` at an id it already has a
 transcript for has never been run. It is the same gap the seven-day working-
 directory reclaim already carries; `/new` would make it a routine path rather than
 a rare one.
+
+**Amended — the rejection stands, but not for this reason.** The behaviour has
+been run: `--session-id` at an id that still has a transcript is refused outright,
+so in-place reset does not silently resume — it fails to start at all. Deleting
+the transcript first *does* make the id reusable, measured. So the objection is no
+longer that the behaviour is unknown; it is that the step which would make in-place
+reset work is deleting the only account there is of what an agent did. ADR-0006
+declined to take that step, which leaves this rejected on firmer ground than it
+was written on.
 
 ## Consequences
 

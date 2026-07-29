@@ -87,8 +87,11 @@ _Avoid_: context, history, conversation
 **Transcript**:
 Claude Code's own record of a Session, holding every event of every Turn it has
 served. Not roma's: roma names the directory it lives in, reads nothing out of
-it, and writes no second copy — so this is the only account there is of what an
-agent actually did.
+it, deletes nothing from it, and writes no second copy — so this is the only
+account there is of what an agent actually did. It therefore outlives the
+Session's working directory, which ADR-0003 reclaims after seven idle days —
+deliberately, and ADR-0006 is where that asymmetry was decided rather than
+inherited.
 _Avoid_: history, session file, event log, and the bare word "log" (that reads
 as the Operator Log, which is roma's and says something else entirely)
 
