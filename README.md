@@ -42,13 +42,21 @@ architecture rests on goes unchecked.
 ## Where the Channel-specific code goes
 
 Everything in `src/` is the Core, and none of it may name a Channel — not Google Chat,
-not Pub/Sub, not any other. A Channel Adapter goes in `src/channels/<channel>/`, which will
-be the only place that knowledge is allowed to exist. No Adapter has been built yet, so
-that directory does not exist either.
+not Pub/Sub, not any other. A Channel Adapter goes in `src/channels/<channel>/`, which is
+the only place in `src/` that knowledge is allowed to exist — plus that Channel's own test
+doubles under `test/support/`. `src/channels/google-chat/` is the first and so far the
+only one.
+
+Nearly all of roma's user-facing wording lives there too, because how a fact reads to a
+person is the Channel's business. The exception is the sentence a failed Task carries: the
+Core writes that one, since it says the same thing on every Channel, and the Adapter passes
+it through unchanged.
 
 `src/core.test.ts` enforces this by reading the sources, because "Google Chat is the first
 road, not the destination" is a claim that would otherwise stop being true without anyone
-noticing until a second Channel turned out to be a rewrite.
+noticing until a second Channel turned out to be a rewrite. It is a denylist of product
+names over `src/`, minus `src/channels/` and minus the tests — so it catches a Channel
+being *named* in the Core, not Channel knowledge that arrives without one.
 
 ## Where the tests are
 
@@ -60,4 +68,7 @@ which lives in this repo's GitHub issues (`gh issue view 1`).
   `test/fixtures/claude-stream/`, so the events are real but free.
 - **Seam 2** — `ClaudeSession` and `SessionPool` against a real `claude -p`.
   `*.live.test.ts`.
-- **Seam 3** — `GoogleChatAdapter` in isolation. Not built yet.
+- **Seam 3** — `GoogleChatAdapter` in isolation: a Chat event in and an ingress message
+  out, an outbound instruction in and a recorded Chat API call out. No Workspace, no
+  credential, no quota. Its Chat events are written from Google's documented shape rather
+  than captured, which the test file says out loud — nothing here can capture one.
