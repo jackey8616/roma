@@ -31,7 +31,7 @@ jobs:
     name: build, verify, publish
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # First, and before anything is built or pushed. A tag that disagrees with
       # the manifest publishes an image whose own `org.opencontainers.image.version`
