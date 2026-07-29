@@ -6,6 +6,13 @@ Date: 2026-07-29
 
 Accepted. Upholds ADR-0003's sentence rather than overturning it, and closes #35.
 
+**Amended 2026-07-29**, in the way ADR-0002 and ADR-0003 were: the decision is
+unchanged and what the amendment corrects is the evidence beneath one of its
+consequences. The growth figure quoted from ADR-0005 measured a recorded stdout
+stream rather than a Transcript, and the consequence itself turned out not to be
+true of any deployment yet — the image was discarding the directory this ADR
+declines to delete from. Amendments are marked inline.
+
 Supersedes nothing. ADR-0005's consequence "that hole may now be closeable" is
 answered here: it is closed, but by #40 rather than by reclamation.
 
@@ -89,6 +96,17 @@ are right, and a rule that flagged them would be switched off within a week.
   Tasks a day, and that figure is now a commitment rather than an observation.
   Filed as #41 rather than left implicit — an operator needs to know the
   directory they name in `ROMA_CLAUDE_CONFIG_DIR` only ever gets larger.
+
+  **Amended — smaller than 4 GB, and not yet happening at all.** ADR-0005's
+  figure extrapolated a recorded stdout stream rather than a Transcript; the
+  corrected order of magnitude is nearer 1.5 GB a year, and the artefact that
+  matters has still never been measured. More to the point, no deployment has
+  paid this cost yet: the image defaulted `ROMA_CLAUDE_CONFIG_DIR` into the
+  container's writable layer, so the documented `docker run` discarded the
+  Transcript on every container replacement instead of accumulating it. This ADR
+  decided roma deletes nothing and the packaging deleted everything, which is
+  #54. The commitment above is what #54 makes real; until it lands the cost
+  described here is one nobody is actually carrying.
 - **Ownership stayed where ADR-0003 put it, and the reason improved.** ADR-0003
   said "not ours" and rested on it being Claude Code's file. That is still true,
   but the sharper reason is now available: the Transcript is the only account

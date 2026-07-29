@@ -6,6 +6,12 @@ Date: 2026-07-29
 
 Accepted. Narrows the spec in #1 and closes #33 without building it.
 
+**Amended 2026-07-29**, in the way ADR-0002 and ADR-0003 were: the decision is
+unchanged and what the amendment corrects is the evidence beneath it. The size
+figure measured a recorded stdout stream and called it a Transcript. Correcting
+it makes the argument that rested on it stronger rather than weaker, which is
+why nothing else here moves. Amendments are marked inline.
+
 ## Context
 
 #1 carries thirty-eight user stories. An audit of all of them against the code
@@ -33,6 +39,20 @@ Two facts sized the choice, both measured rather than assumed:
   is 112,874 bytes for 209 events — one 72-second Turn producing 17,706 characters.
   At a hundred Tasks a day that is about 4 GB a year. The ticket had listed
   unbounded growth as a reason for caution and it was wrong.
+
+  **Amended — the figure is smaller than that, because it measured the wrong
+  file.** That fixture is a recorded *stdout stream*, and 202 of its 209 events
+  are `stream_event`: the per-token deltas `--include-partial-messages` writes to
+  stdout. The Transcript is a different file, under
+  `$CLAUDE_CONFIG_DIR/projects/`, and nothing establishes that the deltas reach
+  it — `docs/transcript-collision-verification.md` measured a real one at 14,089
+  bytes over **seven lines** for a trivial Turn, where the same Turn's stdout
+  would run to dozens. It is written per message, not per delta. The nearest
+  honest analogue in the fixtures is `generation-no-partial-messages.jsonl` at
+  40,761 bytes, or about 1.5 GB a year at the same hundred Tasks — still a stream
+  and not a Transcript, so an order of magnitude and nothing finer. The decision
+  is untouched: this is the argument's own direction, only further along. Nobody
+  has yet measured the artefact that actually matters, which is #41.
 - **`ROMA_CLAUDE_CONFIG_DIR` was optional.** Unset, `CLAUDE_CONFIG_DIR` is not set
   at all and `HOME` is on `buildEnv`'s passthrough list, so the Transcripts of
   every Session land in the host user's `~/.claude/projects/`, interleaved with
