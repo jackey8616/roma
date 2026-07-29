@@ -8,6 +8,37 @@ Accepted. Closes the "container image build and update process" item ADR-0003
 left as follow-on work, and reverses what `README.md` said about there being no
 build step.
 
+**Renumbered from 0006 to 0007, 2026-07-29.** This was published 41 minutes after
+ADR-0006 and took the same number, so for as long as both existed no citation
+could say which one it meant.
+
+**Amended 2026-07-29**, in the way ADR-0002 and ADR-0003 were — amendments are
+marked inline — but not for the reason they were. Theirs corrected the evidence
+beneath a decision that stood. This one corrects a decision: the storage table
+below recorded `ROMA_CLAUDE_CONFIG_DIR` as "per-container by design", which is
+the opposite of what ADR-0006 had decided three quarters of an hour earlier.
+
+That is stated rather than tidied away, because the mechanism matters more than
+the mistake. For the length of the overlap this repository held two contradictory
+positions at once, both accepted, both live: the image treated the Transcript's
+home as disposable while `README.md` told the operator to give it durable storage
+that only grows. Nothing surfaced the conflict, and nothing could have — a
+reference reading "ADR-0006" resolved to either document, so the two positions had
+nowhere to meet. It was found by reading #41, not by any check. `src/adr-numbering.test.ts`
+now fails on a repeated number, which is the narrow thing that was actually
+missing.
+
+The row was never argued. The other two rows carry a paragraph of reasoning each;
+this one carried four words and an inherited assumption. What is corrected below
+is therefore an oversight rather than an overturned decision, which is why this is
+an amendment and not a superseding ADR — the trade-off was made in ADR-0006 and is
+not reopened here.
+
+**The image does not yet implement it.** `ROMA_CLAUDE_CONFIG_DIR` still carries a
+default in the `Dockerfile` as this is written, and `src/packaging.test.ts` still
+asserts that it does. That is #54, recorded here in the idiom ADR-0005 used for
+#34 rather than left for a reader to discover by building the image.
+
 ## Context
 
 The container is not a new decision. ADR-0003 already fixed the runtime as *"a
@@ -73,13 +104,28 @@ before anything is built, because an image published under a registry tag that
 contradicts its own `org.opencontainers.image.version` cannot be taken back off
 GHCR afterwards.
 
-### The image declares the paths whose loss is by design, and stays silent on the one that is data
+### The image declares the one path whose loss is by design, and stays silent on the two that are data
 
 | Variable | Image default | Why |
 | --- | --- | --- |
 | `ROMA_WORK_ROOT` | `/var/lib/roma/work` | Reclaimed weekly by design; losing it is expected |
-| `ROMA_CLAUDE_CONFIG_DIR` | `/var/lib/roma/claude` | Per-container by design |
+| `ROMA_CLAUDE_CONFIG_DIR` | **none** | Losing it is data loss, and where it goes is not the image's to decide |
 | `ROMA_AUDIT_ROOT` | **none** | Losing it is data loss, and where it goes is not the image's to decide |
+
+**Amended — the middle row said `/var/lib/roma/claude`, "per-container by design",
+and that was wrong.** The two rows either side of it were argued; this one was
+not. ADR-0006 had decided forty-one minutes earlier that the Transcript is the
+only account there is of what an agent did and that roma deletes nothing from it,
+and `README.md`'s environment table already told the operator to give the
+directory durable storage that only grows. The image contradicted both, in a
+default nobody had to type — so the documented `docker run`, which mounts one
+volume, put the Transcript in the container's writable layer and discarded it on
+every replacement. roma was doing the deleting after all, on a schedule nobody
+chose, by a route the decision not to delete never looked down.
+
+The paragraph below is the argument that already existed for the audit root. It
+is true of the Transcript word for word, which is the point: nothing new had to be
+reasoned out, only applied to a third row.
 
 `readRomaEnv` refuses to start without an audit root *deliberately* — "a missing
 audit root is refused rather than put somewhere under the working directories,
@@ -89,16 +135,20 @@ in the container's writable layer and vanish with the container. ADR-0002 is
 explicit that per-user attribution does not exist at the provider, so the Audit
 Records are the only place it ever exists.
 
-So `docker run` with no volumes is refused, naming `ROMA_AUDIT_ROOT` — which
-makes the operator answer a question the image genuinely cannot.
+So `docker run` with no volumes is refused, naming `ROMA_AUDIT_ROOT` and
+`ROMA_CLAUDE_CONFIG_DIR` — which makes the operator answer two questions the image
+genuinely cannot. *(Amended: the second name is what #54 adds. Today the refusal
+names only the first, because the image answers the second for them.)*
 
-The image does make and own `/var/lib/roma/audit`, which is a different act from
-pointing at it. Docker materialises an empty named volume mounted over a path the
-image never created as `root:root`, and roma runs as `node`; without the
-directory, mounting a volume would clear the refusal and then lose the first
-Audit Record to a permission error — the same data gone by a longer route, and
-gone at the point where the refusal has stopped protecting anything. A bind mount
-carries the host's ownership regardless, so the README says to `chown` it.
+The image does make and own `/var/lib/roma/audit` and `/var/lib/roma/claude`,
+which is a different act from pointing at either. Docker materialises an empty
+named volume mounted over a path the image never created as `root:root`, and roma
+runs as `node`; without the directory, mounting a volume would clear the refusal
+and then lose the first Audit Record to a permission error — the same data gone by
+a longer route, and gone at the point where the refusal has stopped protecting
+anything. A bind mount carries the host's ownership regardless, so the README says
+to `chown` it. Both directories are already made and owned, so this half needs
+nothing from #54.
 
 ### The image is verified against two questions, and roma is not booted in CI
 
