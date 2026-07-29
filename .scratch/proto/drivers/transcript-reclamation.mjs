@@ -62,6 +62,11 @@ const args = process.argv.slice(2)
 const DRY_RUN = args.includes('--dry-run')
 const ALLOW_SHARED = args.includes('--allow-shared-window')
 
+// --only=P5 runs one probe. P5 is self-contained — its own session id, its own
+// setup — so it can be run without paying for P0-P4 a second time.
+const ONLY = args.find((a) => a.startsWith('--only='))?.split('=')[1]?.toUpperCase() ?? null
+const want = (probe) => ONLY === null || ONLY === probe
+
 function dotEnv() {
   try {
     const values = {}
@@ -259,8 +264,8 @@ async function main() {
 
   // ---- P0: establish a Session with something in it, so later probes can
   // tell "resumed" from "started fresh" by asking for the word back.
-  console.log('\n=== P0 — establish a Session and its Transcript ===')
-  {
+  if (want('P0')) {
+console.log('\n=== P0 — establish a Session and its Transcript ===')
     const spawned = await observeSpawn({ sessionId, cwd, env, resume: false, label: 'p0-establish' })
     const turn = await oneTurn(spawned.session, REMEMBER, 'P0 establish')
     spawned.session.kill()
@@ -274,8 +279,8 @@ async function main() {
   // ---- P1: THE HOLE. Same id, Transcript still present, cwd still present.
   // Spawned with --session-id (not --resume), which is what roma does when the
   // working directory is gone but it has forgotten the Session exists.
-  console.log('\n=== P1 — --session-id at an id that already has a Transcript ===')
-  {
+  if (want('P1')) {
+console.log('\n=== P1 — --session-id at an id that already has a Transcript ===')
     const spawned = await observeSpawn({ sessionId, cwd, env, resume: false, label: 'p1-collide' })
     console.log(`  exited: ${JSON.stringify(spawned.exited)}`)
     console.log(`  stderr: ${JSON.stringify(spawned.stderr)}`)
@@ -296,8 +301,8 @@ async function main() {
   // ---- P2: roma's actual reclaim, simulated — working directory deleted and
   // recreated empty, Transcript untouched. This is the state a Conversation
   // that went quiet for eight days comes back to today.
-  console.log('\n=== P2 — working directory reclaimed, Transcript left behind ===')
-  {
+  if (want('P2')) {
+console.log('\n=== P2 — working directory reclaimed, Transcript left behind ===')
     rmSync(cwd, { recursive: true, force: true })
     mkdirSync(cwd, { recursive: true })
     console.log('  cwd deleted and recreated empty; transcript untouched')
@@ -321,8 +326,8 @@ async function main() {
   // ---- P3: --resume with the Transcript deleted. Expected to fail at spawn,
   // costing nothing. This is what #35's reclamation would do to a Session that
   // is still resident somewhere.
-  console.log('\n=== P3 — --resume with the Transcript deleted ===')
-  {
+  if (want('P3')) {
+console.log('\n=== P3 — --resume with the Transcript deleted ===')
     for (const { path } of describeTranscripts(configDir, sessionId)) {
       rmSync(join(REPO, path), { force: true })
       console.log(`  deleted ${path}`)
@@ -339,8 +344,8 @@ async function main() {
   // ---- P4: the in-place reset ADR-0003 rejected as "unmeasured". If #35 makes
   // roma delete the Transcript, `/new` could reuse the id instead of carrying a
   // generation record — which would let session-generation.ts go entirely.
-  console.log('\n=== P4 — in-place reset: same id, Transcript AND cwd gone ===')
-  {
+  if (want('P4')) {
+console.log('\n=== P4 — in-place reset: same id, Transcript AND cwd gone ===')
     rmSync(cwd, { recursive: true, force: true })
     mkdirSync(cwd, { recursive: true })
     const spawned = await observeSpawn({ sessionId, cwd, env, resume: false, label: 'p4-in-place-reset' })
@@ -356,6 +361,48 @@ async function main() {
     }
     spawned.session.kill()
     findings.push({ probe: 'P4', question: 'can an id be reused once its Transcript is gone?', argv: spawned.argv, exited: spawned.exited, stderr: spawned.stderr, turn })
+  }
+
+  // ---- P5: THE FIX #40 RESTS ON. Everything above measured what breaks; this
+  // measures whether the proposed repair actually works. Working directory
+  // reclaimed and recreated empty, Transcript still present, spawned with
+  // --resume instead of --session-id.
+  //
+  // The Transcript is keyed by a slug of the ABSOLUTE cwd, and the recreated
+  // directory sits at the same path — so it ought to resolve. "Ought to" is the
+  // word the whole hole came from, hence this probe.
+  if (want('P5')) {
+    console.log('\n=== P5 — --resume onto a reclaimed working directory ===')
+    const id5 = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff'
+    const cwd5 = join(ROOT, 'work/conversation-five')
+    mkdirSync(cwd5, { recursive: true })
+
+    // Establish it, exactly as P0 did.
+    const first = await observeSpawn({ sessionId: id5, cwd: cwd5, env, resume: false, label: 'p5a-establish' })
+    const established = await oneTurn(first.session, REMEMBER, 'P5 establish')
+    first.session.kill()
+    await sleep(1_000)
+    console.log(`  established, reply: ${reply(established)}`)
+    console.log(`  transcript: ${JSON.stringify(describeTranscripts(configDir, id5))}`)
+
+    // The reclaim: directory gone and recreated empty, Transcript untouched.
+    rmSync(cwd5, { recursive: true, force: true })
+    mkdirSync(cwd5, { recursive: true })
+    console.log('  cwd deleted and recreated empty; transcript untouched')
+
+    const retry = await observeSpawn({ sessionId: id5, cwd: cwd5, env, resume: true, label: 'p5b-resume-after-reclaim' })
+    console.log(`  exited: ${JSON.stringify(retry.exited)}`)
+    console.log(`  stderr: ${JSON.stringify(retry.stderr)}`)
+
+    let recall = null
+    if (retry.exited === null) {
+      recall = await oneTurn(retry.session, RECALL, 'P5 context-survived check')
+      console.log(`  reply: ${reply(recall)}   <-- ${WORD} means #40's fix WORKS and context survived`)
+    } else {
+      console.log("  died at spawn — #40's approach is wrong; the fix has to go through #35")
+    }
+    retry.session.kill()
+    findings.push({ probe: 'P5', question: "does --resume reach a Session whose working directory was reclaimed?", argv: retry.argv, exited: retry.exited, stderr: retry.stderr, established, recall })
   }
 
   // ---------------------------------------------------------------- summary

@@ -17,9 +17,12 @@ Method: a throwaway driver (`prototype/transcript-reclamation` branch,
 `.scratch/proto/drivers/transcript-reclamation.mjs`) spawning real `claude -p`
 processes with an explicitly constructed environment — `CLAUDE_CONFIG_DIR` and
 `CLAUDE_SECURESTORAGE_CONFIG_DIR` pointed at a scratch directory so no keychain
-login was reachable. Run on the Shared Window token. **Two Turns total**, against
-a hard cap of eight: three of the five probes resolved at spawn, before a Turn
-could be started.
+login was reachable. Run on the Shared Window token.
+
+**Four Turns total** across two runs, against a hard cap of eight — three of the
+first run's five probes resolved at spawn, before a Turn could be started. Q6 was
+added afterwards and run on its own (`--only=P5`), on its own session id, so it
+inherits no state from the rest.
 
 ## Q1 — Where the Transcript lands
 
@@ -102,6 +105,31 @@ This retires the reason ADR-0003 gave for rejecting in-place session reset:
 The behaviour is now measured and it works. Whether `/new` *should* rotate in
 place — and whether `session-generation.ts` can therefore go — is #35's to
 decide; this only removes the objection that it was unknowable.
+
+## Q6 — `--resume` reaches a Session whose working directory was reclaimed
+
+The repair #40 proposes, measured rather than assumed. Working directory deleted
+and recreated empty, Transcript untouched, spawned with `--resume` instead of
+`--session-id`:
+
+```
+exited: null        (came up and waited)
+stderr: []
+reply to "what word did I ask you to remember": HALIBUT
+```
+
+**The context survives the reclaim entirely.** The Transcript is keyed by a slug
+of the absolute cwd, and a directory recreated at the same path resolves to the
+same Transcript — so nothing about the reclaim damages the Session, only roma's
+reading of whether it exists.
+
+This is the load-bearing measurement for #40: the fix is to reach for `--resume`
+where the pool currently reaches for `--session-id`, and a Conversation recovered
+that way comes back **with its history**, not as a blank Session wearing the same
+id.
+
+Measured on a second session id, in its own run, so it does not inherit state
+from Q1–Q5.
 
 ## What this does not answer
 
