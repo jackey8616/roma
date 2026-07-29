@@ -26,6 +26,36 @@ export interface TerminalResult {
   readonly terminalReason: string | null
 }
 
+/**
+ * One `api_retry` event, reduced to what it can tell roma about the failure.
+ *
+ * The attempt number Claude Code puts on these is deliberately not read: roma
+ * counts the retries it has seen itself, so its budget stays its own rather
+ * than a reflection of the CLI's `max_retries`.
+ */
+export interface ApiRetry {
+  /** The HTTP status the attempt failed on — 401 for a bad credential. */
+  readonly errorStatus: number | null
+  /** Claude Code's own name for it, such as `authentication_failed`. */
+  readonly error: string | null
+}
+
+/**
+ * Read an `api_retry` event, or null if this is not one.
+ *
+ * These are the only warning roma gets that a Turn is going nowhere. A bad
+ * credential does not fail fast — the prototype saw ten of these across 182
+ * seconds before the 401 itself surfaced — so a Task that waits for the error
+ * proper holds a concurrency slot for over three minutes.
+ */
+export function readApiRetry(event: ClaudeEvent): ApiRetry | null {
+  if (event.type !== 'system' || event['subtype'] !== 'api_retry') return null
+  return {
+    errorStatus: asNumber(event['error_status']),
+    error: asString(event['error']),
+  }
+}
+
 export function parseEvent(line: string): ClaudeEvent | null {
   let parsed: unknown
   try {

@@ -84,11 +84,26 @@ One message from one person, from arrival to final result. The unit that is
 queued, counted against the concurrency cap, stopped, and audited.
 _Avoid_: job, request, run
 
+**Task Queue**:
+What decides which Tasks may run right now: Tasks of one Session are serialised,
+and three Tasks run at once across all of them. One queue for the whole of roma,
+shared by every Core the way the Session Pool is.
+_Avoid_: the ingress queue (that is the Transport, and a different queue
+entirely), scheduler, worker pool, throttle
+
 **Turn**:
 Claude Code's own unit — one message in, one completed response out. One Task
 drives one Turn.
 _Avoid_: using this interchangeably with Task; they coincide today but belong to
 different systems
+
+**Retry Storm**:
+A Turn going nowhere but still retrying — a bad credential produces ten retries
+across three minutes before the error itself surfaces. roma abandons the Task
+once the retry budget is spent, so the slot goes back rather than being held for
+a Turn that is not going to arrive.
+_Avoid_: backoff, rate limiting, timeout (there is no wall-clock timeout on a
+Task; this bounds retrying, not working)
 
 ### Paying for it
 

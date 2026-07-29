@@ -2,7 +2,12 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { SessionPool, type PoolLogRecord, type SessionPoolOptions } from './session-pool.js'
+import {
+  RetryStormError,
+  SessionPool,
+  type PoolLogRecord,
+  type SessionPoolOptions,
+} from './session-pool.js'
 import type { Turn } from './claude-session.js'
 import { FakeClaude, flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
 import { feed, recordedStream, withTotalCostUsd } from '../test/support/recorded-stream.js'
@@ -52,6 +57,13 @@ function newPool(options: Partial<SessionPoolOptions> = {}) {
 const stream = recordedStream('three-turns-one-process')
 /** One complete Turn of a real recorded stream. Its text is "ok". */
 const OK = stream.turn(1)
+/**
+ * The ten real `api_retry` events a bad credential produced — the ones the
+ * retry-storm cap exists for, 401 `authentication_failed` and all.
+ */
+const RETRIES = recordedStream('auth-failure').events.filter(
+  (event) => event.type === 'system' && event['subtype'] === 'api_retry',
+)
 
 beforeEach(() => {
   // setImmediate stays real so `flush` can still drain the microtask queue while
@@ -489,6 +501,164 @@ describe('driving a resident Session', () => {
     expect(processFor(B).signals).toEqual(['SIGTERM'])
   })
 })
+
+describe('giving up on a retry storm', () => {
+  const budget = { maxApiRetries: 3, windowMs: 60_000 }
+
+  it('abandons a Turn that has retried more than its budget allows', async () => {
+    const { pool, processFor } = newPool({ retryBudget: budget })
+    const turn = pool.send(A, 'hello')
+    await flush()
+
+    feed(processFor(A), RETRIES.slice(0, 3))
+
+    await expect(turn).rejects.toBeInstanceOf(RetryStormError)
+  })
+
+  // The whole point: the slot goes back, so a misconfigured credential cannot
+  // hold one for the 182 seconds the prototype measured. Three of those halt
+  // roma entirely, without a single Task hanging.
+  it('releases the Session, so roma can still take new work', async () => {
+    const { pool, processFor } = newPool({ retryBudget: budget })
+    const turn = pool.send(A, 'hello')
+    turn.catch(() => {})
+    await flush()
+    const stormed = processFor(A)
+
+    feed(stormed, RETRIES.slice(0, 3))
+    await turn.catch(() => {})
+
+    expect(stormed.signals).toEqual(['SIGTERM'])
+    expect(pool.residents).toEqual([])
+    expect((await newTurnOn(pool, processFor, A)).text).toBe('ok')
+  })
+
+  // What the caller is eventually told rests on this. The 401 itself never
+  // arrives — it surfaces only after all ten retries, which is the wait being
+  // cut short — so the retry events are the only place the cause exists.
+  it('carries the error the retries were failing on', async () => {
+    const { pool, processFor } = newPool({ retryBudget: budget })
+    const turn = pool.send(A, 'hello')
+    await flush()
+
+    feed(processFor(A), RETRIES.slice(0, 3))
+
+    const error = await turn.catch((thrown: unknown) => thrown)
+    expect(error).toMatchObject({
+      retries: 3,
+      lastRetry: { errorStatus: 401, error: 'authentication_failed' },
+    })
+  })
+
+  // The count is what fires under the observed backoff. The wall-clock is for
+  // the case it would not reach — a backoff already stretched to ~35s between
+  // attempts, where waiting for a count is waiting for minutes.
+  it('gives up on the wall-clock when the retries are too slow to reach the count', async () => {
+    const { pool, processFor } = newPool({
+      retryBudget: { maxApiRetries: 100, windowMs: 30_000 },
+    })
+    const turn = pool.send(A, 'hello')
+    turn.catch(() => {})
+    await flush()
+    feed(processFor(A), RETRIES.slice(0, 1))
+
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    await expect(turn).rejects.toBeInstanceOf(RetryStormError)
+    expect(processFor(A).signals).toEqual(['SIGTERM'])
+  })
+
+  it('measures the wall-clock from the first retry, not from the Turn', async () => {
+    const { pool, processFor } = newPool({
+      retryBudget: { maxApiRetries: 100, windowMs: 30_000 },
+    })
+    const turn = pool.send(A, 'a long Turn that starts retrying late')
+    turn.catch(() => {})
+    await flush()
+
+    await vi.advanceTimersByTimeAsync(5 * MINUTE)
+    feed(processFor(A), RETRIES.slice(0, 1))
+    await vi.advanceTimersByTimeAsync(29_000)
+
+    expect(pool.residents).toEqual([A])
+    await vi.advanceTimersByTimeAsync(1_000)
+    await expect(turn).rejects.toBeInstanceOf(RetryStormError)
+  })
+
+  it('leaves a Turn that retries within its budget alone', async () => {
+    const { pool, processFor } = newPool({ retryBudget: budget })
+    const turn = pool.send(A, 'hello')
+    await flush()
+
+    feed(processFor(A), [...RETRIES.slice(0, 2), ...OK])
+
+    expect((await turn).text).toBe('ok')
+    expect(pool.residents).toEqual([A])
+  })
+
+  // A retry budget spent across a Session rather than a Turn would abandon a
+  // healthy Conversation for a rough patch it had already recovered from.
+  it('gives every Turn its budget back', async () => {
+    const { pool, processFor } = newPool({ retryBudget: budget })
+
+    const first = pool.send(A, 'first')
+    await flush()
+    feed(processFor(A), [...RETRIES.slice(0, 2), ...OK])
+    await first
+
+    const second = pool.send(A, 'second')
+    await flush()
+    feed(processFor(A), [...RETRIES.slice(2, 4), ...stream.turn(3)])
+
+    await expect(second).resolves.toMatchObject({ isError: false })
+    expect(pool.residents).toEqual([A])
+  })
+
+  // Retries a Turn is no longer waiting on are not that Turn's problem, and
+  // there is no Turn for them to be the next one's either.
+  it('ignores retries arriving with no Turn in flight', async () => {
+    const { pool, processFor, send } = newPool({ retryBudget: budget })
+    await send(A, 'hello', OK)
+
+    feed(processFor(A), RETRIES.slice(0, 3))
+
+    expect(pool.residents).toEqual([A])
+    expect(processFor(A).signals).toEqual([])
+  })
+
+  it('records the storm, so an operator can see which credential caused it', async () => {
+    const { pool, processFor, log } = newPool({ retryBudget: budget })
+    const turn = pool.send(A, 'hello')
+    turn.catch(() => {})
+    await flush()
+
+    feed(processFor(A), RETRIES.slice(0, 3))
+    await turn.catch(() => {})
+
+    expect(log).toContainEqual(
+      expect.objectContaining({
+        event: 'retry-storm',
+        sessionId: A,
+        retries: 3,
+        limit: 'retries',
+        status: 401,
+        error: 'authentication_failed',
+      }),
+    )
+  })
+})
+
+/** Drive one more Turn on a Session, to show the pool still serves it. */
+async function newTurnOn(
+  pool: SessionPool,
+  processFor: (id: string) => FakeClaudeProcess,
+  id: string,
+): Promise<Turn> {
+  const turn = pool.send(id, 'and now something that works')
+  await flush()
+  feed(processFor(id), OK)
+  return await turn
+}
 
 /** Make a working directory look as though nothing has touched it for `ageMs`. */
 function ageWorkDir(path: string, ageMs: number): void {

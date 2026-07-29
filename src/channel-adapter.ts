@@ -47,6 +47,19 @@ export type OutboundInstruction =
       readonly conversationKey: string
       readonly reason: string
     }
+  | {
+      /**
+       * Say that a Task is waiting its turn, and how much is ahead of it.
+       *
+       * Sent once, when the Task joins the queue, and only to a Task that has
+       * to wait at all. Waiting in silence is what makes people send the
+       * message again, and every resend lengthens the queue that caused it.
+       */
+      readonly kind: 'queued'
+      readonly conversationKey: string
+      /** How many Tasks were waiting, this one included. 1 means it is next. */
+      readonly position: number
+    }
 
 /**
  * The two things about a Channel that the Core bends around.
