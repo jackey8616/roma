@@ -26,10 +26,9 @@ are computed from it.
 | `generation-no-partial-messages.jsonl` | `q5-B-gen-flag-off-06bce022.jsonl` | `q5.mjs` | The control for the above, same prompt with the flag off: 6 events, the whole answer after 66747ms of dead stream. |
 | `tool-use-partial-messages.jsonl` | `q5-C-tool-flag-on-c2ac815b.jsonl` | `q5.mjs` | A tool-using Turn with the flag on — 25339ms of silence while the tool ran, against a largest generating gap of 208ms. |
 
-`tool-use-turn.jsonl`, `generation-no-partial-messages.jsonl` and
-`tool-use-partial-messages.jsonl` are not exercised by any test yet. They are
-here because progress reporting will need exactly this data — what a silence
-during tool execution looks like, and what the flag is worth — and because
+`tool-use-turn.jsonl` and `generation-no-partial-messages.jsonl` are not
+exercised by any test. They are the flag-off world, which roma does not run in —
+kept as the control the flag-on captures are read against, and because
 regenerating them means spending the Shared Window again.
 
 Behaviour is version-specific. A capture is evidence about v2.1.220 and nothing

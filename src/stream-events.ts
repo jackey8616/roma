@@ -97,18 +97,93 @@ export function readTerminalResult(event: ClaudeEvent): TerminalResult | null {
  * arrives as `stream_event` deltas; reading both would double it.
  */
 export function readAssistantText(event: ClaudeEvent): string {
-  if (event.type !== 'assistant') return ''
-  const message = event['message']
-  if (typeof message !== 'object' || message === null) return ''
-  const content = (message as Record<string, unknown>)['content']
-  if (!Array.isArray(content)) return ''
-  return content
-    .map((block: unknown) => {
-      if (typeof block !== 'object' || block === null) return ''
-      const { type, text } = block as Record<string, unknown>
-      return type === 'text' && typeof text === 'string' ? text : ''
-    })
+  return contentBlocks(event)
+    .map((block) => (block['type'] === 'text' ? (asString(block['text']) ?? '') : ''))
     .join('')
+}
+
+/**
+ * The prose one event carries as it is being written, or `''` if it carries none.
+ *
+ * `stream_event.event.delta.text`, on a `content_block_delta` whose delta is a
+ * `text_delta`. The only field in the stream that shows prose before the message
+ * carrying it is finished, and therefore the only thing a progress message can
+ * be made of. Seam 2 measured 194 of these across a 72-second generating Turn,
+ * the longest gap between any two events 2641ms — so an update on a 5-second
+ * throttle always has something new to show.
+ */
+export function readTextDelta(event: ClaudeEvent): string {
+  const delta = streamDelta(event)
+  if (delta === null || delta['type'] !== 'text_delta') return ''
+  return asString(delta['text']) ?? ''
+}
+
+/**
+ * How much thinking has happened so far, in Claude Code's own estimate, or null.
+ *
+ * Tokens, and only tokens. `thinking_delta` arrives with `"thinking": ""`, so
+ * the content is not in the stream to be read: progress can say that thinking
+ * is happening and roughly how much, never what it is about.
+ */
+export function readThinkingTokens(event: ClaudeEvent): number | null {
+  if (event.type !== 'system' || event['subtype'] !== 'thinking_tokens') return null
+  return asNumber(event['estimated_tokens'])
+}
+
+/**
+ * What Claude Code says it has just started running, or null.
+ *
+ * The one thing that makes a tool window bearable. The stream marks a tool
+ * starting and then says nothing whatsoever until it finishes — 25339ms in the
+ * capture, against a largest generating gap of 208ms in the same Turn — and
+ * `description` is the running command itself.
+ */
+export function readToolStarted(event: ClaudeEvent): string | null {
+  if (event.type !== 'system' || event['subtype'] !== 'task_started') return null
+  return asString(event['description'])
+}
+
+/** Whether this event closes a tool window `readToolStarted` opened. */
+export function readToolFinished(event: ClaudeEvent): boolean {
+  return event.type === 'system' && event['subtype'] === 'task_notification'
+}
+
+/**
+ * The tools an `assistant` event is asking to run, in the order it named them.
+ *
+ * The other end of a tool window, and the end that is always there: only some
+ * tools produce a `system/task_started`, but every tool call arrives as a
+ * `tool_use` block on an `assistant` message first.
+ */
+export function readToolNames(event: ClaudeEvent): string[] {
+  return contentBlocks(event)
+    .filter((block) => block['type'] === 'tool_use')
+    .map((block) => asString(block['name']))
+    .filter((name): name is string => name !== null)
+}
+
+/** The content blocks of an `assistant` event's message, or `[]` if it has none. */
+function contentBlocks(event: ClaudeEvent): Record<string, unknown>[] {
+  if (event.type !== 'assistant') return []
+  const message = event['message']
+  if (typeof message !== 'object' || message === null) return []
+  const content = (message as Record<string, unknown>)['content']
+  if (!Array.isArray(content)) return []
+  return content.filter(
+    (block: unknown): block is Record<string, unknown> =>
+      typeof block === 'object' && block !== null,
+  )
+}
+
+/** The `delta` of a `content_block_delta` stream event, or null if it is not one. */
+function streamDelta(event: ClaudeEvent): Record<string, unknown> | null {
+  if (event.type !== 'stream_event') return null
+  const inner = event['event']
+  if (typeof inner !== 'object' || inner === null) return null
+  const { type, delta } = inner as Record<string, unknown>
+  if (type !== 'content_block_delta') return null
+  if (typeof delta !== 'object' || delta === null) return null
+  return delta as Record<string, unknown>
 }
 
 function asString(value: unknown): string | null {
