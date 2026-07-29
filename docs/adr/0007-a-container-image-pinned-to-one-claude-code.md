@@ -34,11 +34,6 @@ is therefore an oversight rather than an overturned decision, which is why this 
 an amendment and not a superseding ADR — the trade-off was made in ADR-0006 and is
 not reopened here.
 
-**The image does not yet implement it.** `ROMA_CLAUDE_CONFIG_DIR` still carries a
-default in the `Dockerfile` as this is written, and `src/packaging.test.ts` still
-asserts that it does. That is #54, recorded here in the idiom ADR-0005 used for
-#34 rather than left for a reader to discover by building the image.
-
 ## Context
 
 The container is not a new decision. ADR-0003 already fixed the runtime as *"a
@@ -118,10 +113,11 @@ not. ADR-0006 had decided forty-one minutes earlier that the Transcript is the
 only account there is of what an agent did and that roma deletes nothing from it,
 and `README.md`'s environment table already told the operator to give the
 directory durable storage that only grows. The image contradicted both, in a
-default nobody had to type — so the documented `docker run`, which mounts one
+default nobody had to type — so the documented `docker run`, which mounted one
 volume, put the Transcript in the container's writable layer and discarded it on
 every replacement. roma was doing the deleting after all, on a schedule nobody
-chose, by a route the decision not to delete never looked down.
+chose, by a route the decision not to delete never looked down. #54 took the
+default out and gave the documented run a second volume.
 
 The paragraph below is the argument that already existed for the audit root. It
 is true of the Transcript word for word, which is the point: nothing new had to be
@@ -137,18 +133,16 @@ Records are the only place it ever exists.
 
 So `docker run` with no volumes is refused, naming `ROMA_AUDIT_ROOT` and
 `ROMA_CLAUDE_CONFIG_DIR` — which makes the operator answer two questions the image
-genuinely cannot. *(Amended: the second name is what #54 adds. Today the refusal
-names only the first, because the image answers the second for them.)*
+genuinely cannot.
 
 The image does make and own `/var/lib/roma/audit` and `/var/lib/roma/claude`,
 which is a different act from pointing at either. Docker materialises an empty
 named volume mounted over a path the image never created as `root:root`, and roma
 runs as `node`; without the directory, mounting a volume would clear the refusal
-and then lose the first Audit Record to a permission error — the same data gone by
-a longer route, and gone at the point where the refusal has stopped protecting
-anything. A bind mount carries the host's ownership regardless, so the README says
-to `chown` it. Both directories are already made and owned, so this half needs
-nothing from #54.
+and then lose the first Audit Record, or the first Transcript, to a permission
+error — the same data gone by a longer route, and gone at the point where the
+refusal has stopped protecting anything. A bind mount carries the host's
+ownership regardless, so the README says to `chown` both.
 
 ### The image is verified against two questions, and roma is not booted in CI
 
@@ -165,7 +159,8 @@ release from the same file so the release cannot drift into checking less:
 1. **`claude --version` inside the image equals the version the image declares.**
    The only check that catches the install layer breaking or the pin drifting.
 2. **The entrypoint, on an empty environment, exits 1 and prints roma's own
-   refusal**, with `ROMA_AUDIT_ROOT` among the problems named.
+   refusal**, with `ROMA_AUDIT_ROOT` and `ROMA_CLAUDE_CONFIG_DIR` among the
+   problems named.
 
 The second proves more than it looks: node runs, `dist/` is complete, ESM
 resolution works, both runtime dependencies import — they are top-level static
@@ -250,10 +245,18 @@ copies out of a README and the tag a `docker run` falls back to, and either way 
 lands a deployment on a Claude Code nobody chose. `0.1` and `0` are worse, because
 they *look* pinned.
 
-**Default `ROMA_AUDIT_ROOT` to a path under `/var/lib/roma`.** Rejected. It makes
-`docker run` with no arguments appear to work, which is exactly the situation in
-which the Audit Records are being written to a layer that will be discarded. The
-refusal is the feature.
+**Default `ROMA_AUDIT_ROOT` or `ROMA_CLAUDE_CONFIG_DIR` to a path under
+`/var/lib/roma`.** Rejected. It makes `docker run` with no arguments appear to
+work, which is exactly the situation in which the Audit Records, or the
+Transcript, are being written to a layer that will be discarded. The refusal is
+the feature. *(The second name is what the amendment above adds. The image did
+default it, and #54 took the default out.)*
+
+**`VOLUME /var/lib/roma/claude` instead of the refusal.** Rejected. It declares
+an *anonymous* volume, and `docker run --rm` — which is what `README.md`'s
+example uses — removes anonymous volumes on exit. It would read as protection in
+the Dockerfile and lose the Transcript anyway, which is worse than no protection:
+the operator stops looking.
 
 **Boot roma in CI to prove the image works.** Rejected. It needs a Shared Window
 token and Google credentials in a public repository's secrets, and the startup

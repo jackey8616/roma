@@ -59,7 +59,9 @@ in it — and the image runs `node dist/channels/google-chat/main.js` under `npm
 docker run --rm \
   -e CLAUDE_CODE_OAUTH_TOKEN -e ROMA_PUBSUB_PROJECT_ID -e ROMA_PUBSUB_SUBSCRIPTION \
   -e ROMA_AUDIT_ROOT=/var/lib/roma/audit \
+  -e ROMA_CLAUDE_CONFIG_DIR=/var/lib/roma/claude \
   -v roma-audit:/var/lib/roma/audit \
+  -v roma-claude:/var/lib/roma/claude \
   ghcr.io/jackey8616/roma:0.1.0
 ```
 
@@ -72,16 +74,20 @@ There is **no `latest` tag, and no `0.1` or `0`**. A tag that moves is a deploym
 Claude Code changes underneath it, which is the whole thing the pin exists to prevent, so
 `docker run` without a tag fails rather than guessing.
 
-`ROMA_WORK_ROOT` and `ROMA_CLAUDE_CONFIG_DIR` are defaulted in the image, because losing
-either is by design. **`ROMA_AUDIT_ROOT` is not**, because losing that one is data loss and
-where it goes is not the image's to decide — run it with no volume and it refuses to start,
-naming it. Mount something durable there.
+`ROMA_WORK_ROOT` is defaulted in the image, because losing it is by design — a week
+untouched and it is reclaimed anyway. **`ROMA_AUDIT_ROOT` and `ROMA_CLAUDE_CONFIG_DIR` are
+not**, because losing either is data loss and where they go is not the image's to decide —
+run it with no volumes and it refuses to start, naming both. Mount something durable at
+each: the Audit Records are the only place per-user attribution exists (ADR-0002), and the
+Transcript is the only account there is of what an agent did (ADR-0005), which roma deletes
+nothing from (ADR-0006).
 
-roma runs as `node`, uid 1000. A **named volume** at `/var/lib/roma/audit` inherits that
-ownership, because the image makes the directory even though it points nothing at it. A
-**bind mount** brings the host's own ownership instead, so `chown 1000:1000` the host
-directory first — otherwise roma starts, clears the refusal, and then loses the first Audit
-Record to a permission error, which is the same data gone by a longer route.
+roma runs as `node`, uid 1000. **Named volumes** at `/var/lib/roma/audit` and
+`/var/lib/roma/claude` inherit that ownership, because the image makes both directories
+even though it points nothing at either. A **bind mount** brings the host's own ownership
+instead, so `chown 1000:1000` each host directory first — otherwise roma starts, clears the
+refusal, and then loses the first Audit Record or the first Transcript to a permission
+error, which is the same data gone by a longer route.
 
 The image is `node:22-slim`, `linux/amd64`, non-root, with `git`, `ca-certificates` and
 `tini` and nothing else. roma's agent runs arbitrary shell commands, so that list is a

@@ -97,16 +97,16 @@ are right, and a rule that flagged them would be switched off within a week.
   Filed as #41 rather than left implicit — an operator needs to know the
   directory they name in `ROMA_CLAUDE_CONFIG_DIR` only ever gets larger.
 
-  **Amended — smaller than 4 GB, and not yet happening at all.** ADR-0005's
-  figure extrapolated a recorded stdout stream rather than a Transcript; the
-  corrected order of magnitude is nearer 1.5 GB a year, and the artefact that
-  matters has still never been measured. More to the point, no deployment has
-  paid this cost yet: the image defaulted `ROMA_CLAUDE_CONFIG_DIR` into the
-  container's writable layer, so the documented `docker run` discarded the
-  Transcript on every container replacement instead of accumulating it. This ADR
-  decided roma deletes nothing and the packaging deleted everything, which is
-  #54. The commitment above is what #54 makes real; until it lands the cost
-  described here is one nobody is actually carrying.
+  **Amended — smaller than 4 GB, and nobody was paying it.** ADR-0005's figure
+  extrapolated a recorded stdout stream rather than a Transcript; the corrected
+  order of magnitude is nearer 1.5 GB a year, and the artefact that matters has
+  still never been measured. More to the point, no deployment had paid this cost
+  at all: the image defaulted `ROMA_CLAUDE_CONFIG_DIR` into the container's
+  writable layer, so the documented `docker run` discarded the Transcript on
+  every container replacement instead of accumulating it. This ADR decided roma
+  deletes nothing and the packaging deleted everything, which was #54. The image
+  now sets no default and the documented run mounts a durable volume, so the
+  commitment above is one a deployment actually carries.
 - **Ownership stayed where ADR-0003 put it, and the reason improved.** ADR-0003
   said "not ours" and rested on it being Claude Code's file. That is still true,
   but the sharper reason is now available: the Transcript is the only account

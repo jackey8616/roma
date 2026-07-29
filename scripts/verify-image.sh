@@ -44,7 +44,7 @@ fi
 echo "claude --version is ${installed}, as declared"
 
 # ---------------------------------------------------------------------------
-# 2. An empty environment is refused, out loud, naming the audit root.
+# 2. An empty environment is refused, out loud, naming both durable paths.
 #
 # This proves more than it looks. Node runs; `dist/` is complete; ESM resolution
 # works; both runtime dependencies import, since they are top-level static
@@ -54,9 +54,11 @@ echo "claude --version is ${installed}, as declared"
 # for a missing module too — an image with a broken `dist/` or a missing
 # dependency passes an exit-code-only check perfectly.
 #
-# No `--env` and no volumes, which is the point: `ROMA_AUDIT_ROOT` is the one
-# path the image refuses to guess at, so this is also the check that it is still
-# refusing.
+# No `--env` and no volumes, which is the point: `ROMA_AUDIT_ROOT` and
+# `ROMA_CLAUDE_CONFIG_DIR` are the two paths the image refuses to guess at, so
+# this is also the check that it is still refusing. `src/packaging.test.ts` reads
+# the Dockerfile for the absent defaults; only this can ask a built image whether
+# the refusal actually fires.
 # ---------------------------------------------------------------------------
 status=0
 refusal="$(docker run --rm "${image}" 2>&1)" || status=$?
@@ -69,7 +71,8 @@ fi
 
 for expected in \
   'roma refused to start — its configuration is incomplete.' \
-  'ROMA_AUDIT_ROOT is not set.'
+  'ROMA_AUDIT_ROOT is not set.' \
+  'ROMA_CLAUDE_CONFIG_DIR is not set.'
 do
   if ! printf '%s\n' "${refusal}" | grep -qF -- "${expected}"; then
     echo "the refusal did not contain: ${expected}" >&2
@@ -77,4 +80,4 @@ do
     exit 1
   fi
 done
-echo "an empty environment is refused, naming ROMA_AUDIT_ROOT"
+echo "an empty environment is refused, naming ROMA_AUDIT_ROOT and ROMA_CLAUDE_CONFIG_DIR"
