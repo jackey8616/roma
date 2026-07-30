@@ -18,7 +18,22 @@ export type RomaEnv = Pick<
   | 'configDir'
   | 'model'
   | 'maxConcurrentTasks'
->
+> & {
+  /**
+   * roma's own directory: the Credential Shim socket, and the gitconfig every
+   * Session runs under.
+   *
+   * Named for the Shims rather than for the socket, because it holds both and a
+   * name that mentioned one of them would go on being read as the whole of what
+   * is in there. `ROMA_SHIM_DIR` is the variable, and the two agree.
+   *
+   * Not part of the `Pick` above because `startRoma` takes it inside `minting`,
+   * alongside the two things only the composition root can supply — a Minter,
+   * and the text of that gitconfig. This is the half of it an environment can
+   * name.
+   */
+  readonly shimDir: string
+}
 
 /**
  * The environment did not say enough, or said something roma cannot use.
@@ -46,24 +61,31 @@ export class ConfigurationMissing extends Error {
 export type Environment = Readonly<Record<string, string | undefined>>
 
 /**
- * Read the Core's settings and a Channel's, and refuse once with what is wrong
- * with either.
+ * Read the Core's settings, a Channel's and the Minter's, and refuse once with
+ * what is wrong with any of them.
  *
- * One refusal rather than two, because they are one configuration: somebody
+ * One refusal rather than three, because they are one configuration: somebody
  * standing roma up sets all of it in one go, and being told about the missing
  * subscription only after fixing the missing audit root turns that into a
- * sequence of boots. The Channel's reader is passed in rather than named,
- * because which Channel roma has is not something the Core is allowed to know.
+ * sequence of boots. Both other readers are passed in rather than named, and for
+ * the same reason in each case — which Channel roma has, and which forge it
+ * mints against, are not things the Core is allowed to know.
  */
-export function readConfiguration<ChannelEnv>(
+export function readConfiguration<ChannelEnv, MinterConfig>(
   env: Environment,
   readChannelEnv: (env: Environment) => ChannelEnv,
-): { roma: RomaEnv; channelEnv: ChannelEnv } {
+  readMinterEnv: (env: Environment) => MinterConfig,
+): { roma: RomaEnv; channelEnv: ChannelEnv; minterEnv: MinterConfig } {
   const problems: string[] = []
   const roma = attempted(() => readRomaEnv(env), problems)
   const channelEnv = attempted(() => readChannelEnv(env), problems)
+  const minterEnv = attempted(() => readMinterEnv(env), problems)
   if (problems.length > 0) throw new ConfigurationMissing(problems)
-  return { roma: certain(roma), channelEnv: certain(channelEnv) }
+  return {
+    roma: certain(roma),
+    channelEnv: certain(channelEnv),
+    minterEnv: certain(minterEnv),
+  }
 }
 
 /**
@@ -120,6 +142,14 @@ export function readRomaEnv(env: Environment): RomaEnv {
   const workRoot = required(env, 'ROMA_WORK_ROOT', problems)
   const auditRoot = required(env, 'ROMA_AUDIT_ROOT', problems)
   const configDir = required(env, 'ROMA_CLAUDE_CONFIG_DIR', problems)
+  // Required here and defaulted in the image, which is the work root's shape
+  // rather than the audit root's — and on the rule the image already states:
+  // default what is lost by design, refuse what cannot be lost. A socket holds
+  // nothing and is recreated every boot. It is a variable at all rather than a
+  // constant because running roma from source on a developer's machine is a
+  // stated consequence of ADR-0008, and a fixed system path is not writable
+  // there.
+  const shimDir = required(env, 'ROMA_SHIM_DIR', problems)
 
   const overflow = readOverflow(env, problems)
   const model = envValue(env, 'ROMA_MODEL')
@@ -136,6 +166,7 @@ export function readRomaEnv(env: Environment): RomaEnv {
     workRoot: certain(workRoot),
     auditRoot: certain(auditRoot),
     configDir: certain(configDir),
+    shimDir: certain(shimDir),
     ...(overflow === null ? {} : { overflow }),
     ...(model === null ? {} : { model }),
     ...(maxConcurrentTasks === null ? {} : { maxConcurrentTasks }),

@@ -4,10 +4,17 @@ Date: 2026-07-30
 
 ## Status
 
-Accepted, and **unimplemented**. Nothing in `src/` does any of this yet; this
-records a design settled in one sitting so that the code that follows has
-something to disagree with. The first thing built against it will find something
-wrong with it, and that is what an amendment is for.
+Accepted, and **built** — the first slice of it, in #60. This was written as an
+unimplemented design settled in one sitting, so that the code that followed had
+something to disagree with; what the code disagreed with is noted inline below
+and in the paragraph after next.
+
+Everything in *Decision* now exists in `src/` except the `Requested-by:` trailer
+and the Audit Record gaining the repositories a Task minted for, both of which
+were deliberately left out of the first slice and have tickets of their own.
+What is still true of the whole of it is the last Consequence: almost none of it
+has been measured against a real App. `docs/github-app-verification.md` is the
+list, and it is honest about being unrun.
 
 **Amended 2026-07-30**, before any code, which is earlier than that sentence
 expected. Two things did not need code to disagree with them: a statement of
@@ -124,6 +131,14 @@ agent's reach would turn a one-hour exposure into a permanent, indefinitely
 renewable one, which is worse than the personal access token this whole
 arrangement exists to avoid. This is the one line here with no trade-off behind
 it.
+
+**Amended by #60 — this sentence is false as built, and the code did not make it
+true.** roma spawns Claude Code as a child process, so roma and the agent are the
+same container and the same uid by construction; the key is a mounted file a
+shell can read. Nothing in the first slice could have changed that, and nothing
+short of running the agent somewhere else can. What is left doing the work is the
+one-hour expiry, which bounds a token that escapes and is unaffected by the key.
+`docs/github-app-verification.md` records the gap; it is not treated as met.
 
 It must also be said plainly, because a credential helper is easily sold as
 security it is not: **this is not a boundary against the agent.** The agent has a
@@ -313,6 +328,15 @@ spared.
   landing — is a documented behaviour that this repository has not observed. The
   house standard is measurement (ADR-0002, ADR-0003, the transcript collision
   work), and this ADR does not meet it yet.
+
+  **Updated by #60**, and only partly. The helper protocol *is* measured now, and
+  continuously: `src/github/git-credential-shim.test.ts` drives a real `git`
+  against the real Shim in the default run, with no network and no credential, and
+  asserts that the answer is accepted and that the request carries the repository
+  path. Everything else on the list is still unobserved, including the two that
+  decide whether large parts of this were worth building — whether `gh`
+  authenticates with an Installation Token at all, and how many times `git` asks
+  for a credential during a *successful* clone.
 
 ## Alternatives considered
 

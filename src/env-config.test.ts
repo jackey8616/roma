@@ -7,6 +7,7 @@ const MINIMAL = {
   ROMA_WORK_ROOT: '/srv/roma/sessions',
   ROMA_AUDIT_ROOT: '/var/lib/roma/audit',
   ROMA_CLAUDE_CONFIG_DIR: '/srv/roma/claude',
+  ROMA_SHIM_DIR: '/run/roma',
 }
 
 describe('reading roma out of the environment', () => {
@@ -16,6 +17,7 @@ describe('reading roma out of the environment', () => {
       workRoot: '/srv/roma/sessions',
       auditRoot: '/var/lib/roma/audit',
       configDir: '/srv/roma/claude',
+      shimDir: '/run/roma',
     })
   })
 
@@ -32,6 +34,7 @@ describe('reading roma out of the environment', () => {
       expect((error as ConfigurationMissing).message).toContain('ROMA_WORK_ROOT')
       expect((error as ConfigurationMissing).message).toContain('ROMA_AUDIT_ROOT')
       expect((error as ConfigurationMissing).message).toContain('ROMA_CLAUDE_CONFIG_DIR')
+      expect((error as ConfigurationMissing).message).toContain('ROMA_SHIM_DIR')
     }
   })
 
@@ -141,6 +144,7 @@ describe('reading roma out of the environment', () => {
         'auditRoot',
         'configDir',
         'credential',
+        'shimDir',
         'workRoot',
       ])
     })
@@ -155,25 +159,35 @@ describe('reading roma out of the environment', () => {
   })
 })
 
-describe('the Core and its Channel, read as one configuration', () => {
+describe('the Core, its Channel and its Minter, read as one configuration', () => {
   const readChannel = (env: Parameters<typeof readRomaEnv>[0]) => {
     if (env['CHANNEL_THING'] === undefined) throw new ConfigurationMissing(['CHANNEL_THING is not set.'])
     return { thing: env['CHANNEL_THING'] }
   }
 
-  it('hands back both halves', () => {
-    const { roma, channelEnv } = readConfiguration({ ...MINIMAL, CHANNEL_THING: 'yes' }, readChannel)
+  const readMinter = (env: Parameters<typeof readRomaEnv>[0]) => {
+    if (env['MINTER_THING'] === undefined) throw new ConfigurationMissing(['MINTER_THING is not set.'])
+    return { thing: env['MINTER_THING'] }
+  }
+
+  it('hands back all three parts', () => {
+    const { roma, channelEnv, minterEnv } = readConfiguration(
+      { ...MINIMAL, CHANNEL_THING: 'yes', MINTER_THING: 'also yes' },
+      readChannel,
+      readMinter,
+    )
 
     expect(roma.workRoot).toBe('/srv/roma/sessions')
     expect(channelEnv).toEqual({ thing: 'yes' })
+    expect(minterEnv).toEqual({ thing: 'also yes' })
   })
 
   // Somebody standing roma up sets all of it in one go. Told about the Channel's
   // missing variable only after fixing the Core's, they boot twice to learn two
   // things they could have been told at once.
-  it('refuses once, with what is wrong with either', () => {
+  it('refuses once, with what is wrong with any of them', () => {
     try {
-      readConfiguration({}, readChannel)
+      readConfiguration({}, readChannel, readMinter)
       expect.unreachable('should have refused')
     } catch (error) {
       expect((error as ConfigurationMissing).problems).toEqual([
@@ -181,7 +195,9 @@ describe('the Core and its Channel, read as one configuration', () => {
         'ROMA_WORK_ROOT is not set.',
         'ROMA_AUDIT_ROOT is not set.',
         'ROMA_CLAUDE_CONFIG_DIR is not set.',
+        'ROMA_SHIM_DIR is not set.',
         'CHANNEL_THING is not set.',
+        'MINTER_THING is not set.',
       ])
     }
   })
@@ -191,9 +207,13 @@ describe('the Core and its Channel, read as one configuration', () => {
   // was never the problem.
   it('lets anything that is not a configuration problem through', () => {
     expect(() =>
-      readConfiguration(MINIMAL, () => {
-        throw new TypeError('the reader is broken')
-      }),
+      readConfiguration(
+        MINIMAL,
+        () => {
+          throw new TypeError('the reader is broken')
+        },
+        readMinter,
+      ),
     ).toThrow(TypeError)
   })
 })

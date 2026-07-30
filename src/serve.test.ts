@@ -3,6 +3,7 @@ import type { Credential } from './build-env.js'
 import { serve, type Serving } from './serve.js'
 import { StartupSelfCheckFailed } from './startup-self-check.js'
 import { flush } from '../test/support/fake-claude.js'
+import { fakeMinting } from '../test/support/fake-minter.js'
 import { FakeTransport } from '../test/support/fake-transport.js'
 import { RecordingAdapter, UNREADABLE } from '../test/support/recording-adapter.js'
 import { romaFixture, teardownRoma, type RomaFixture } from '../test/support/roma-fixture.js'
@@ -40,8 +41,11 @@ function boot({ overflow = true }: { overflow?: boolean } = {}) {
   const transport = new FakeTransport()
 
   let resolved = false
+  const minting = fakeMinting()
+  fixture.alsoRemove(minting.shimDir)
   const serving = serve({
     credential: OAUTH,
+    minting,
     ...(overflow ? { overflow: { credential: METERED, monthlyCapUsd: 100 } } : {}),
     channel,
     transport,

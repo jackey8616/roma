@@ -23,8 +23,16 @@ export interface RomaFixture {
    * which is cheaper than a fixture that has to be told which shape it is.
    */
   readonly dirs: RomaDirectories
-  /** The same three, as the teardown wants them. */
+  /** Everything this roma owns on disk, as the teardown wants it. */
   readonly roots: readonly string[]
+  /**
+   * Hand the teardown a directory this roma owns that the fixture did not make.
+   *
+   * For the parts a test assembles for itself. `fakeMinting`'s socket directory
+   * is the one there is: a throwaway of its own, made where the test decides
+   * what minting is, and gone when the rest of the roma goes.
+   */
+  alsoRemove(root: string): void
   /**
    * The process serving one Conversation's Session.
    *
@@ -73,11 +81,15 @@ export function romaFixture(
   const auditRoot = mkdtempSync(join(tmpdir(), `roma-${name}-audit-`))
   const configDir = mkdtempSync(join(tmpdir(), `roma-${name}-claude-`))
   const procIn = (sessionId: string) => claude.processFor(join(workRoot, sessionId))
+  const roots = [workRoot, auditRoot, configDir]
 
   return {
     claude,
     dirs: { workRoot, auditRoot, configDir },
-    roots: [workRoot, auditRoot, configDir],
+    roots,
+    alsoRemove: (root) => {
+      roots.push(root)
+    },
     procIn,
     procFor: (conversationKey) => procIn(sessionIdFor(conversationKey)),
     answerProbe: async (events = OK) => {

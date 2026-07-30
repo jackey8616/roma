@@ -153,17 +153,25 @@ export class RetryStormError extends Error {
 }
 
 /**
- * The environment to spawn with for each credential a Turn can be paid for by,
- * each one built by `buildEnv`.
+ * One Session's environment, built by `buildEnv`.
+ *
+ * A function of the Session rather than one map reused for every process,
+ * because two of the variables in it are the Session's own — the id a Credential
+ * Shim reports a request under, and nothing else that differs. Everything
+ * expensive or secret is closed over once at startup; this only fills in who is
+ * asking.
+ */
+export type BuildSessionEnv = (sessionId: string) => Readonly<Record<string, string>>
+
+/**
+ * The environment to spawn with for each credential a Turn can be paid for by.
  *
  * Partial, because Overflow is configuration a deployment may not have: no
  * metered key, no entry, and a Turn that asks for one is refused rather than
  * quietly served on the subscription. ADR-0002's point exactly — Overflow is not
  * a mode, it is the other environment map.
  */
-export type CredentialEnvs = Readonly<
-  Partial<Record<CredentialKind, Readonly<Record<string, string>>>>
->
+export type CredentialEnvs = Readonly<Partial<Record<CredentialKind, BuildSessionEnv>>>
 
 export interface SessionPoolOptions {
   /** Working directories live directly under here, one per Session. */
@@ -171,6 +179,14 @@ export interface SessionPoolOptions {
   /** One environment per credential a Turn may run on. */
   readonly envs: CredentialEnvs
   readonly model?: string
+  /**
+   * What every Session is told about itself on top of Claude Code's own prompt.
+   *
+   * The pool's rather than the Core's because the pool is what spawns, and it is
+   * the same text for every Session: what it says is what roma can reach, which
+   * is a property of the deployment and not of any Conversation.
+   */
+  readonly appendSystemPrompt?: string
   readonly maxResident?: number
   readonly reclaimIntervalMs?: number
   /** How much retrying a Turn may do before it is abandoned. */
@@ -254,6 +270,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   readonly #workRoot: string
   readonly #envs: CredentialEnvs
   readonly #model: string | undefined
+  readonly #appendSystemPrompt: string | undefined
   readonly #maxResident: number
   readonly #retryBudget: RetryBudget
   readonly #spawnProcess: SpawnClaudeProcess
@@ -277,6 +294,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     this.#workRoot = options.workRoot
     this.#envs = options.envs
     this.#model = options.model
+    this.#appendSystemPrompt = options.appendSystemPrompt
     this.#maxResident = options.maxResident ?? MAX_RESIDENT
     this.#retryBudget = options.retryBudget ?? defaultConfig.retryBudget
     this.#spawnProcess = options.spawn ?? spawnClaudeProcess
@@ -477,11 +495,11 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     credential: CredentialKind,
     resume?: boolean,
   ): Promise<Resident> {
-    const env = this.#envs[credential]
+    const buildEnvFor = this.#envs[credential]
     // Refused rather than served on whichever environment does exist. A Turn run
     // on the other credential and recorded as this one is the audit record lying
     // about who paid, which is the one thing it exists not to do.
-    if (env === undefined) {
+    if (buildEnvFor === undefined) {
       throw new Error(`no environment is configured for the ${credential} credential`)
     }
     await this.#makeRoom()
@@ -497,10 +515,13 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     const session = new ClaudeSession({
       sessionId,
       cwd,
-      env,
+      env: buildEnvFor(sessionId),
       resume: resuming,
       spawn: this.#spawnProcess,
       ...(this.#model === undefined ? {} : { model: this.#model }),
+      ...(this.#appendSystemPrompt === undefined
+        ? {}
+        : { appendSystemPrompt: this.#appendSystemPrompt }),
     })
     const resident: Resident = {
       sessionId,

@@ -25,8 +25,30 @@ export interface TaskQueueOptions {
  */
 export type WaitNotice = (position: number) => void | Promise<void>
 
+/**
+ * What a caller can tell the queue about a Task beyond how to run it.
+ *
+ * Neither is needed to schedule anything, which is why they are together and
+ * apart from the two arguments that are: `notice` is how the caller is told it
+ * is waiting, and `taskId` is what `taskFor` answers with while it runs.
+ */
+export interface About {
+  /** Called only if the Task has to wait, and only once. */
+  readonly notice?: WaitNotice
+  /**
+   * Which Task this is, for `taskFor`.
+   *
+   * Optional because nothing about admission reads it. It is here so that
+   * something outside the queue can ask whose work a Session is doing, which is
+   * a question only the queue can answer honestly.
+   */
+  readonly taskId?: string
+}
+
 interface Waiting {
   readonly key: string
+  /** What to record as running under this key once it is admitted. */
+  readonly taskId: string | null
   /**
    * Called once the slot has already been claimed on this Task's behalf, or
    * null while its caller is still being told it is waiting.
@@ -58,10 +80,16 @@ interface Waiting {
 export class TaskQueue {
   readonly #maxConcurrent: number
   /**
-   * The keys with a Task running. Its size is the number of running Tasks,
-   * because a key never holds more than one.
+   * The keys with a Task running, and which Task each one is running. Its size
+   * is the number of running Tasks, because a key never holds more than one.
+   *
+   * The value is what makes `taskFor` possible, and it is null wherever a caller
+   * did not name a Task. Kept here rather than anywhere else because this is the
+   * only thing in roma that already knows a key has exactly one Task at a time —
+   * that is the serialisation rule, and asking any other component would mean
+   * building a second answer that could disagree with this one.
    */
-  readonly #busy = new Set<string>()
+  readonly #busy = new Map<string, string | null>()
   /** In arrival order, which is the order admission considers them in. */
   readonly #waiting: Waiting[] = []
 
@@ -81,20 +109,37 @@ export class TaskQueue {
   }
 
   /**
+   * Which Task is running under this key right now, or null.
+   *
+   * Null covers two different things on purpose, because the answer is the same
+   * either way and inventing a distinction would invite somebody to act on it: a
+   * key with nothing running, and a Task whose caller named none. What it must
+   * never do is guess — a credential request that belongs to no running Task is
+   * recorded as belonging to no Task rather than to the nearest one, which is the
+   * same rule the Audit Record applies when it writes a Turn down as unpriced.
+   */
+  taskFor(key: string): string | null {
+    return this.#busy.get(key) ?? null
+  }
+
+  /**
    * Run one Task when its Session is free and a slot is available.
    *
    * `key` is what is serialised against — the Session id, in roma. Resolves or
    * rejects with whatever `task` did, and releases the slot either way: a Task
    * that failed is a Task that is over.
    *
-   * `notice` is called only if the Task has to wait, and only once.
+   * Everything else is optional and goes in `about`, one object rather than a
+   * row of positional maybes — a caller that wants only the second of them
+   * should not have to write `undefined` for the first.
    */
-  async run<T>(key: string, task: () => Promise<T>, notice?: WaitNotice): Promise<T> {
-    if (!this.#claim(key)) {
+  async run<T>(key: string, task: () => Promise<T>, about: About = {}): Promise<T> {
+    const { notice, taskId = null } = about
+    if (!this.#claim(key, taskId)) {
       // The place in the queue is taken first and the caller told second. The
       // other way round, two Tasks arriving together would each be told they
       // were first, because neither is in the queue yet for the other to count.
-      const entry: Waiting = { key, admit: null }
+      const entry: Waiting = { key, taskId, admit: null }
       this.#waiting.push(entry)
       try {
         await notice?.(this.#waiting.length)
@@ -120,10 +165,10 @@ export class TaskQueue {
   }
 
   /** Take a slot for `key`, or report that there is not one to take. */
-  #claim(key: string): boolean {
+  #claim(key: string, taskId: string | null): boolean {
     if (this.#busy.size >= this.#maxConcurrent) return false
     if (this.#busy.has(key)) return false
-    this.#busy.add(key)
+    this.#busy.set(key, taskId)
     return true
   }
 
@@ -140,7 +185,7 @@ export class TaskQueue {
   #pump(): void {
     for (let i = 0; i < this.#waiting.length && this.#busy.size < this.#maxConcurrent; ) {
       const next = this.#waiting[i]
-      if (next?.admit == null || !this.#claim(next.key)) {
+      if (next?.admit == null || !this.#claim(next.key, next.taskId)) {
         i += 1
         continue
       }

@@ -13,6 +13,11 @@
 .env
 .env.local
 .env.*.local
+# A GitHub App private key, which ADR-0008 has roma read from a path rather than
+# from a variable — so unlike every other secret here it arrives as a *file*, and
+# a file in the repo root is one `git add -A` away from being permanent. Ignored
+# by extension rather than by name because the name is the operator's choice.
+*.pem
 
 # Logs
 *.log

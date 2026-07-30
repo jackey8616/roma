@@ -11,7 +11,9 @@ import { feed, recordedStream, withTotalCostUsd } from '../test/support/recorded
 
 const SESSION_ID = '11111111-2222-3333-4444-555555555555'
 
-function newSession(options: { resume?: boolean; model?: string } = {}) {
+function newSession(
+  options: { resume?: boolean; model?: string; appendSystemPrompt?: string } = {},
+) {
   const claude = new FakeClaude()
   const session = new ClaudeSession({
     sessionId: SESSION_ID,
@@ -44,6 +46,29 @@ describe('how the process is invoked', () => {
 
     expect(claude.lastSpawn.args).toContain('--resume')
     expect(claude.lastSpawn.args).not.toContain('--session-id')
+  })
+
+  // A capability nobody knows about is a capability nobody has: an agent in an
+  // empty directory has no reason to believe it can clone anything, and will
+  // explain that it has no access rather than trying. `--append-system-prompt`
+  // rather than a file in the working directory, because the agent runs
+  // `git add -A` in there and anything roma left behind would eventually be
+  // committed into somebody's repository (ADR-0008).
+  it('tells the Session what it can reach, where it has been given something to say', () => {
+    const { claude, session } = newSession({ appendSystemPrompt: 'you can reach a-team/roma' })
+
+    session.start()
+
+    const args = claude.lastSpawn.args
+    expect(args[args.indexOf('--append-system-prompt') + 1]).toBe('you can reach a-team/roma')
+  })
+
+  it('says nothing extra where there is nothing to say', () => {
+    const { claude, session } = newSession()
+
+    session.start()
+
+    expect(claude.lastSpawn.args).not.toContain('--append-system-prompt')
   })
 
   it('pins the model, because it follows the credential rather than the config', () => {

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 /**
- * The three claims ADR-0007 makes about the image that nothing else keeps.
+ * The claims ADR-0007 and ADR-0008 make about the image that nothing else keeps.
  *
  * Written in the idiom `src/channels/google-chat/provisioning.test.ts` uses —
  * read the file, fail on what must not be in it — because all three are claims
@@ -28,6 +28,21 @@ import { describe, expect, it } from 'vitest'
  * red and this file is where the reason is written down.
  */
 const CLAUDE_CODE_VERSION = '2.1.220'
+
+/**
+ * The `gh` the image carries.
+ *
+ * A second copy for the same mechanical reason as the one above — editing the
+ * Dockerfile alone turns the run red — and for a *different* reason of its own,
+ * which is worth writing down because the two pins look identical and are not.
+ * Claude Code is pinned because every capture in this repository is evidence
+ * about one build of it, so moving that number is a re-verification event that
+ * costs Shared Window money. `gh`'s version invalidates no measurement. It is
+ * pinned so that a rebuild cannot move it with nobody deciding to, and that is
+ * the whole of it — which is also why it gets no drift notification and Claude
+ * Code does.
+ */
+const GH_VERSION = '2.96.0'
 
 describe('the image carries its own Claude Code, pinned exactly', () => {
   it('installs the version every measurement in this repo was taken against', () => {
@@ -55,9 +70,60 @@ describe('the image carries its own Claude Code, pinned exactly', () => {
   })
 })
 
+describe('the image carries its own gh, pinned exactly', () => {
+  it('installs the version the image says it does', () => {
+    const pinned = GH_VERSION.replaceAll('.', String.raw`\.`)
+    expect(dockerfile()).toMatch(new RegExp(`^ARG GH_VERSION=${pinned}$`, 'm'))
+  })
+
+  // A checksum that is a literal in the file, rather than one fetched alongside
+  // the tarball — which would only detect corruption, since whoever could
+  // replace the download could replace the checksum next to it.
+  it('checks the tarball against a checksum of its own', () => {
+    expect(dockerfile()).toMatch(/^ARG GH_SHA256=[0-9a-f]{64}$/m)
+    expect(dockerfile()).toMatch(/sha256sum --check/)
+  })
+
+  // Not a third-party apt source, which floats the version across rebuilds with
+  // nobody deciding to. The release tarball is the only form of `gh` whose
+  // contents a checksum can pin.
+  it('takes it from the pinned release rather than from a package feed', () => {
+    expect(dockerfile()).toMatch(
+      /releases\/download\/v\$\{GH_VERSION\}\/gh_\$\{GH_VERSION\}_linux_amd64\.tar\.gz/,
+    )
+    expect(dockerfile()).not.toMatch(/apt-get install[^\n]*\bgh\b/)
+  })
+
+  // The Credential Shim is what an agent reaches when it types `gh`, and the
+  // real binary is somewhere PATH does not go. Otherwise the tool that cannot
+  // take a credential helper would run with whatever token happened to be in the
+  // environment, which is the arrangement ADR-0008 exists to avoid.
+  it('puts the Shim under the name gh, and the real binary off PATH', () => {
+    expect(dockerfile()).toMatch(/gh-shim\.js[^\n]*> \/usr\/local\/bin\/gh/)
+    expect(dockerfile()).toMatch(/--directory \/usr\/local\/lib\/roma/)
+  })
+})
+
 describe('the image defaults the one path whose loss is by design', () => {
   it('names a work root, the one a weekly reclaim deletes on purpose', () => {
     expect(dockerfile()).toMatch(/^\s*ROMA_WORK_ROOT=\S+/m)
+  })
+
+  // The same rule as the work root, and for the same reason: what lives there is
+  // a socket and a gitconfig, both recreated every boot and neither anybody's
+  // data. Default what is lost by design; refuse what cannot be lost.
+  it('names a Shim directory, which holds nothing that outlives a boot', () => {
+    expect(dockerfile()).toMatch(/^\s*ROMA_SHIM_DIR=\S+/m)
+  })
+
+  // Not under the work root, which a weekly reclaim empties. A reclaimed socket
+  // is every credential request in roma failing at once, with no explanation.
+  it('keeps that directory out of the tree the reclaim walks', () => {
+    const shimDir = /^\s*ROMA_SHIM_DIR=(\S+)/m.exec(dockerfile())?.[1] ?? ''
+    const workRoot = /^\s*ROMA_WORK_ROOT=(\S+)/m.exec(dockerfile())?.[1] ?? ''
+
+    expect(shimDir).not.toBe('')
+    expect(shimDir.startsWith(workRoot)).toBe(false)
   })
 
   it('sets no audit root and no Claude config dir — losing either is data loss', () => {
