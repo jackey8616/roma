@@ -1,9 +1,9 @@
 # Verification: what only a real GitHub App can settle
 
 Date: 2026-07-30
-Status: **run, mostly.** Five of the seven questions are answered, against a real
-GitHub App on a real organisation. Two are still open and are marked so, and one
-of them needs a running roma rather than a script.
+Status: **run.** Six of the seven questions are answered against a real GitHub App
+on a real organisation, including every one that anything was riding on. The
+seventh needs a running roma rather than a script and is marked so.
 
 Measured on: macOS, `git` **2.41.0**, `gh` **2.93.0**, Node **22.22.3**, roma at
 `cd3ca2c` plus the fix this run produced. The Installation was one organisation
@@ -53,8 +53,8 @@ Shim with the real `gitConfig()` — `git` asked, the Shim answered
 asked at all is the proof the repository was private: git only consults a helper
 after a 401.
 
-**Push: not yet run.** It writes to somebody's repository, so it is not something
-to do on the way past. The read half is the half the design rests on.
+**Push: YES.** A branch and an empty commit, pushed over HTTPS on the same
+credential, on `contents: write`. Both were deleted afterwards.
 
 ### 2. Does `gh` authenticate with an Installation Token?
 
@@ -76,7 +76,10 @@ identifies itself as the App. The issues-and-pull-requests half of ADR-0008
 stands, and the `gh` Shim is worth having. Had this failed, that half needed a
 different mechanism entirely.
 
-`gh issue create` is **not yet run** — it writes to somebody's repository.
+`gh issue create` also succeeds, on `issues: write`, and so does `gh api -X DELETE`
+against a ref — which is how the verification branch was cleaned up, since
+`git push --delete` insists on being inside a repository even when the remote is
+spelled out in full.
 
 One thing worth naming, because the output demonstrated it: `gh auth status`
 prints the token it is using, partially masked. The token is itself a JWT whose
@@ -89,17 +92,28 @@ one is exactly the leak ADR-0008 expects and accepts.
 
 Read back the issue, the pull request and the comment from question 2.
 
-**Not yet run** — it needs an issue, and an issue is a write.
+**YES.** The issue `gh` opened, read back with `--json author`:
 
-Strongly indicated all the same: `gh auth status` in question 2 reports the
-account as `<app-name>[bot]`, which is the identity anything `gh` creates will be
-attributed to. What is unconfirmed is only that the artifact carries it too.
+```json
+{ "author": { "is_bot": true, "login": "app/<app-name>" } }
+```
+
+`is_bot` is true and the login is namespaced under `app/`, so nobody has to guess
+whether a human wrote it. Story 11 is met, by GitHub's behaviour rather than by
+anything roma does.
+
+Worth noting the shape, because it is not what this document guessed: `gh --json
+author` reports `app/<app-name>`, while `gh auth status` says `<app-name>[bot]`.
+Two spellings of one identity, and code that matched on either string alone would
+be reading a presentation detail. `is_bot` is the field that means it.
 
 ### 4. How many times does `git` call a Shim during a successful clone, fetch and
 push?
 
-**Once per operation. One call for a clone, one for a fetch.** Counted by the
-`ShimServer` itself, which logs every request.
+**Once per operation. One for a clone, one for a fetch, one for a push.** Counted
+by the `ShimServer` itself, which logs every request. `gh` asked once per
+invocation — three invocations, three requests, every one of them with no
+repository path.
 
 That is the low end of the range this question was worried about, and it is worth
 being straight about what it means: **the caching is doing less than feared.**
@@ -131,18 +145,24 @@ back 15 repositories through an Installation Token. So the boot check works and
 `InstallationAmbiguous` would have a real name to print.
 
 **The more-than-one case is still unrun**, and it needs a second installation of
-the same App rather than a second App. Worth doing eventually; the refusal's
-wording is what rides on it.
+the same App rather than a second App. It is the smallest gap left here: what
+rides on it is the wording of a refusal, not whether anything works.
 
 ### 6. Does `--append-system-prompt` actually change what the agent believes it
 can do?
 
-Two Sessions in an empty working directory, one with the announcement and one
+**Still open, and it is the one that needs a running roma** rather than a script:
+two Sessions in an empty working directory, one with the announcement and one
 without, both asked to look at a repository by name.
 
 **Expected:** the one with it clones; the one without explains that it has no
 access. If that is not the difference, the announcement is decoration and story 3
-is unmet by the thing built for it.
+is unmet by the thing built for it — and the fix would be the text, not the
+mechanism.
+
+Everything the announcement *claims* is now true, which is what this run
+established. What is unmeasured is whether saying so changes what the agent
+attempts.
 
 ### 7. Does the JWT arithmetic hold against GitHub's clock?
 

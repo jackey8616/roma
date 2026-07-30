@@ -48,10 +48,22 @@ export interface InstallationTokensOptions {
  *
  * Between the Minter and the Credential Shims, and it exists because the two
  * ends want different things. A Shim asks at the moment a tool needs a
- * credential, which is often — `git` asks on every operation, and `gh` asks once
- * per invocation. Minting is a JWT signature and two network round trips, and
- * the App has a rate limit. So roma mints rarely and answers immediately, which
- * is only safe because of the three rules here.
+ * credential; minting is a JWT signature and two network round trips, and the App
+ * has a rate limit. So roma mints rarely and answers immediately, which is only
+ * safe because of the three rules here.
+ *
+ * **How much this is actually saving is now measured, and it is less than this
+ * class was built expecting.** `git` asks once per operation — one request for a
+ * clone, one for a fetch, one for a push — not once per object
+ * (`docs/github-app-verification.md`). So the cache saves one round trip per git
+ * operation rather than rescuing roma from a rate limit.
+ *
+ * It still earns its place, on the reasons that survive the number: `gh` asks
+ * once per *invocation* and an agent runs many; three Tasks run at once by
+ * design, so the single-flight below is about concurrent Sessions rather than
+ * about one clone; and a token that expired mid-operation would be a failure
+ * nobody could reproduce. What would be an overstatement is calling it
+ * load-bearing.
  *
  * **One token for everybody.** No down-scoping, so there is nothing to key a
  * cache on: every Session and both Shims are served by the same string. ADR-0008
