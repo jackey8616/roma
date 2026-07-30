@@ -97,9 +97,22 @@ export type TaskProgress =
       readonly tool: string
     }
   | {
-      /** Writing the answer, with everything written so far. */
+      /**
+       * Writing the answer, with how much of it exists so far.
+       *
+       * How much, never what. The prose is in the stream — `--include-partial-messages`
+       * puts it there — and an Acknowledgement that showed it would be saying
+       * what the Result is about to say, in the same Conversation, seconds
+       * apart. ADR-0010 is where that was decided and what it cost.
+       *
+       * A number rather than nothing, and that is load-bearing: this is what
+       * tells a Reporter that one moment of writing differs from the last, and
+       * a phase carrying no number at all would compare equal to itself every
+       * time and leave the Acknowledgement frozen for the whole of a
+       * generating Turn — which is what a dead Task looks like.
+       */
       readonly phase: 'writing'
-      readonly text: string
+      readonly characters: number
     }
 
 /**

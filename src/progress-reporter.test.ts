@@ -104,7 +104,7 @@ describe('throttling what a burst of events produces', () => {
     await vi.advanceTimersByTimeAsync(INTERVAL)
 
     const written = TEXT_DELTAS.slice(0, 2).map(textOf).join('')
-    expect(sent.at(-1)).toEqual({ phase: 'writing', text: written })
+    expect(sent.at(-1)).toEqual({ phase: 'writing', characters: written.length })
   })
 
   // The 25339ms tool window: nothing arrives, so there is nothing new to say,
@@ -133,7 +133,10 @@ describe('throttling what a burst of events produces', () => {
 })
 
 describe('what an update says the Task is doing', () => {
-  it('carries the prose as it is written, and everything written so far', async () => {
+  // How much, never what. The prose itself is deliberately not carried — an
+  // Acknowledgement showing it would say what the Result is about to say, which
+  // is the duplicate ADR-0010 is about.
+  it('carries how much has been written, summed across the deltas', async () => {
     const { reporter, sent } = newReporter()
 
     await acknowledgeAnd(reporter, TEXT_DELTAS.slice(0, 3))
@@ -141,7 +144,7 @@ describe('what an update says the Task is doing', () => {
 
     expect(sent.at(-1)).toEqual({
       phase: 'writing',
-      text: TEXT_DELTAS.slice(0, 3).map(textOf).join(''),
+      characters: TEXT_DELTAS.slice(0, 3).map(textOf).join('').length,
     })
   })
 
@@ -204,7 +207,7 @@ describe('what an update says the Task is doing', () => {
 
     expect(sent.at(-1)).toEqual({
       phase: 'writing',
-      text: TEXT_DELTAS.slice(0, 2).map(textOf).join(''),
+      characters: TEXT_DELTAS.slice(0, 2).map(textOf).join('').length,
     })
   })
 
@@ -218,7 +221,7 @@ describe('what an update says the Task is doing', () => {
     await vi.advanceTimersByTimeAsync(INTERVAL)
 
     const written = TEXT_DELTAS.map(textOf).join('')
-    expect(sent.at(-1)).toEqual({ phase: 'writing', text: written })
+    expect(sent.at(-1)).toEqual({ phase: 'writing', characters: written.length })
   })
 })
 
@@ -265,7 +268,7 @@ describe('a Task that is over', () => {
     })
 
     reporter.update({ phase: 'working' })
-    reporter.update({ phase: 'writing', text: 'half an answer' })
+    reporter.update({ phase: 'writing', characters: 14 })
     await vi.advanceTimersByTimeAsync(INTERVAL)
     // Two on the chain, and only the first has been handed over: the second is
     // waiting on the Channel to finish taking it.

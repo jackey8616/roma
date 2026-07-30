@@ -91,11 +91,14 @@ _Avoid_: response, reply, command (a command is `/new` or `/stop`)
 
 **Acknowledgement**:
 The one message roma posts as soon as a Task arrives and then keeps editing
-while it runs — that it is waiting, that a tool is running, the answer as it is
-written. One per Task, throttled, and never the final result: that is always a
-separate message. Where a Channel cannot edit, the acknowledgement is posted
-once and nothing follows it.
-_Avoid_: status message, progress bar, typing indicator
+while it runs — that it is waiting, that a tool is running, how much of the
+answer has been written. One per Task, throttled, and never the answer itself:
+the Result is always a separate message, and an Acknowledgement that showed the
+prose would be saying the same thing twice in one Conversation (ADR-0010). Where
+a Channel cannot edit, the acknowledgement is posted once and nothing follows
+it.
+_Avoid_: status message, progress bar, typing indicator, and describing this as
+showing the answer — it says that an answer is being written, not what it says
 
 ### Running work
 

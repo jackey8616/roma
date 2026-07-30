@@ -323,12 +323,12 @@ describe('the acknowledgement', () => {
       to(THREAD, { kind: 'progress', progress: { phase: 'tool', tool: 'awk' } }),
     )
     await adapter.deliver(
-      to(THREAD, { kind: 'progress', progress: { phase: 'writing', text: 'half an answer' } }),
+      to(THREAD, { kind: 'progress', progress: { phase: 'writing', characters: 14 } }),
     )
 
     expect(api.calls).toEqual(['post', 'edit', 'edit'])
     expect(api.messages).toHaveLength(1)
-    expect(api.messages[0]?.text).toBe(`${TO}half an answer`)
+    expect(api.messages[0]?.text).toBe(`${TO}Writing… (14 chars)`)
   })
 
   // Two messages in one Conversation can be in flight at once, each with an

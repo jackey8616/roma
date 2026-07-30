@@ -146,19 +146,24 @@ function money(usd: number): string {
  * keeping is in the result.
  */
 export function progressText(caller: string, progress: TaskProgress): string {
-  const to = addressedTo(caller)
-  return to + phrase(progress, MAX_TEXT - to.length)
+  return addressedTo(caller) + phrase(progress)
 }
 
 /**
- * The acknowledgement without its mention, inside what is left of the limit.
+ * The acknowledgement without its mention.
  *
- * The budget is passed in rather than read off `MAX_TEXT` because the mention is
- * already spent out of it: a partial answer cut to the full limit and then
- * prefixed is a message Chat refuses, and the acknowledgement is the message
- * whose whole job is to keep arriving.
+ * Nothing here is cut to fit any more, and nothing here needs to be: every
+ * phrase is a fixed sentence around a small number. The one that was not — the
+ * partial answer, which had to be trimmed to what the mention left of Chat's
+ * limit — is gone with ADR-0010.
+ *
+ * The exception is a tool named by Claude Code's own description of it, which is
+ * the command itself and has no length roma controls. It was never trimmed
+ * either, so nothing about that changed here; it is written down because the
+ * budget disappearing is the kind of thing that later reads as the guard having
+ * been removed.
  */
-function phrase(progress: TaskProgress, budget: number): string {
+function phrase(progress: TaskProgress): string {
   switch (progress.phase) {
     case 'queued':
       // The count includes this Task, so 1 means nothing is ahead of it. Said as
@@ -176,7 +181,12 @@ function phrase(progress: TaskProgress, budget: number): string {
       // capture this was designed against.
       return `Running ${progress.tool}…`
     case 'writing':
-      return tail(progress.text, budget)
+      // Deliberately not the prose. Shown here it would say what the Result is
+      // about to say, seconds later and one message further down — the
+      // duplicate ADR-0010 is about. What is left is the one thing this message
+      // is for: a number that keeps moving, so a Turn that is writing does not
+      // read as a Turn that has died.
+      return `Writing… (${progress.characters} chars)`
   }
 }
 
@@ -186,18 +196,6 @@ function commandText(command: Command, carriedOut: boolean): string {
   // the person who typed it, and the Task's own "Stopped." lands on the
   // acknowledgement they had been watching.
   return carriedOut ? 'Stopping…' : 'Nothing to stop.'
-}
-
-/**
- * The end of a partial answer, cut to fit.
- *
- * The end rather than the beginning, because this is the message that says the
- * Task is alive. Frozen at the first 4096 characters it would stop moving
- * halfway through a long answer, which is exactly what a dead Task looks like.
- */
-function tail(text: string, budget: number): string {
-  if (text.length <= budget) return text
-  return `…${text.slice(-(budget - 1))}`
 }
 
 /**
