@@ -30,6 +30,23 @@ export interface AuditRecord {
    * second place to go and look it up afterwards.
    */
   readonly caller: string
+  /**
+   * The same person as a human reads them, in three states that mean three
+   * different things:
+   *
+   * - a **name**, where the Channel had one;
+   * - **null**, where it did not — an anonymous Chat user, or a delivery that
+   *   carried no `displayName`;
+   * - **absent**, where the record was written before ADR-0009 added the field.
+   *
+   * Optional for that last one, and it is not a formality. `readRecord` drops a
+   * line it cannot read, and a dropped line drops out of the month's total —
+   * which is the figure the Overflow cap is enforced against. Requiring this
+   * would make every record roma wrote before the change unreadable at once,
+   * silently resetting the month and letting the cap through. `caller` stays a
+   * bare string for the same reason: it is what the old records have.
+   */
+  readonly callerName?: string | null
   /** Null for a Task that failed before roma could work out which Session it was for. */
   readonly sessionId: string | null
   readonly outcome: TaskOutcome

@@ -36,7 +36,7 @@ const DM = 'DM'
  * answer it.
  *
  * This is where a Channel stops existing: a thread, a space, a sender and an
- * @-mention go in, and what comes out is a key, an identity and some text.
+ * @-mention go in, and what comes out is a key, a Caller and some text.
  *
  * Null covers everything roma is delivered and does not answer: the app being
  * added to or removed from a space, a card click, and — the one that matters —
@@ -51,6 +51,11 @@ export function readIngressMessage(event: ChatEvent): IngressMessage | null {
   const sender = asRecord(message['sender'])
   const caller = asString(sender?.['name'])
   if (caller === null || asString(sender?.['type']) === 'BOT') return null
+  // The readable half of the same person, and null where Chat did not send one.
+  // It is not on every delivery, and Chat's own User resource has `isAnonymous`
+  // for somebody who has no name to give — so this is read the way every other
+  // field here is read, and roma answers the message either way.
+  const callerName = asString(sender?.['displayName'])
 
   // The event carries the space, and so does the message inside it. Either will
   // do and neither is always present, so both are tried before giving up.
@@ -84,7 +89,12 @@ export function readIngressMessage(event: ChatEvent): IngressMessage | null {
   // lets this Adapter store nothing: `spaces/{space}/threads/{thread}` is a
   // thread, `spaces/{space}` on its own is a DM, and `GoogleChatAdapter` reads
   // the difference back out of the key months later.
-  return { conversationKey: direct || thread === null ? spaceName : thread, caller, text }
+  return {
+    conversationKey: direct || thread === null ? spaceName : thread,
+    caller,
+    callerName,
+    text,
+  }
 }
 
 /**

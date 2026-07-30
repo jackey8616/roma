@@ -53,15 +53,40 @@ is derived from it — and from the Session Generation, which is the only thing
 `/new` can move — which is why roma needs no database.
 _Avoid_: thread id, chat id, room id
 
+**Caller**:
+Whoever sent one message, in two halves: the Channel's own name for them, which
+is stable and unique, and the readable name beside it, which is neither and can
+be missing. A Conversation has no one Caller — a thread is many people sharing
+one Session, so the Caller is a property of a message and never of a Session.
+It goes three places and no others (ADR-0009): above every message Claude Code is
+given, out on every Outbound Instruction so a reply can be addressed, and onto
+the Audit Record — which is still the only place *spending* can be attributed to
+a person, because the provider attributes none of it (ADR-0002). The Core prints
+it and never interprets it: nothing compares one, parses one, or decides anything
+by one.
+_Avoid_: sender (that is Chat's name for the field an Adapter reads, not roma's
+name for the person), user (that is Claude Code's word for the other end of a
+Turn), author, requester, owner (a Task has no owner — it has somebody who asked)
+
+**Caller Marker**:
+The line roma writes above every message Claude Code is given, naming that
+message's Caller. Two rules and no others: it is never absent — a message without
+one reads as the same person again, which is the misattribution it exists to
+prevent — and only the first line is roma's, because the rest is what somebody
+typed and anybody can type something that looks like this.
+_Avoid_: prefix, header, tag, and using this for the @-mention in a reply — that
+one is the Channel's way of addressing a person and is not this
+
 **Ingress Message**:
-What an Adapter hands the Core: a Conversation Key, a caller identity, and the
-text. Everything else the Channel knew is gone by this point.
+What an Adapter hands the Core: a Conversation Key, a Caller, and the text.
+Everything else the Channel knew is gone by this point.
 _Avoid_: event, payload, request
 
 **Outbound Instruction**:
 What the Core hands back to an Adapter — the result of a Task, why there isn't
-one, or what the Task is doing meanwhile. It says what happened, never how it
-should look.
+one, or what the Task is doing meanwhile. It says what happened and whose it is,
+never how either should look: how a failure reads and how a person is addressed
+are the Channel's.
 _Avoid_: response, reply, command (a command is `/new` or `/stop`)
 
 **Acknowledgement**:
@@ -152,7 +177,8 @@ instruction (that is an Outbound Instruction)
 
 **Task**:
 One message from one person, from arrival to final result. The unit that is
-queued, counted against the concurrency cap, stopped, and audited.
+queued, counted against the concurrency cap, stopped, and audited — and the unit
+a Caller belongs to, since one Conversation's two Tasks can belong to two people.
 _Avoid_: job, request, run
 
 **Task Queue**:
@@ -266,7 +292,7 @@ parked Task is waiting on the provider rather than on roma.
 _Avoid_: paused, retrying, backing off, queued (that word is the Task Queue's)
 
 **Audit Record**:
-The line roma writes when a Task ends: who asked, which Session ran it, how long
+The line roma writes when a Task ends: the Caller, which Session ran it, how long
 they waited, what it cost, which credential paid, and which repositories it
 minted an Installation Token for. That last one is what roma can honestly know:
 git names the repository every time it asks for a credential, so what a Task

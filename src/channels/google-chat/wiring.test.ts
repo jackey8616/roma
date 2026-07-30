@@ -34,6 +34,8 @@ import { BLOCKED_WITH_OVERAGE, feed, OK } from '../../../test/support/recorded-s
 const SPACE = 'spaces/AAAA'
 const THREAD = `${SPACE}/threads/thread-1`
 const SENDER = 'users/17'
+/** The mention roma puts in front of every message it posts about a Task. */
+const TO = `<${SENDER}> `
 
 const INSTALLATION = { account: 'a-team', repositories: ['a-team/roma', 'a-team/infra'] }
 
@@ -140,7 +142,7 @@ describe('a Chat message, all the way through and back', () => {
       url: expect.stringContaining(
         `${SPACE}/messages?messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD`,
       ),
-      body: { text: 'ok', thread: { name: THREAD } },
+      body: { text: `${TO}ok`, thread: { name: THREAD } },
     })
     expect(message.settlements).toEqual(['ack'])
   })
@@ -173,8 +175,8 @@ describe('a Chat message, all the way through and back', () => {
 
     const texts = roma.texts()
     expect(texts).toHaveLength(2)
-    expect(texts.at(-1)).toBe('ok')
-    expect(texts.at(0)).not.toBe('ok')
+    expect(texts.at(-1)).toBe(`${TO}ok`)
+    expect(texts.at(0)).not.toBe(`${TO}ok`)
   })
 
   it('never answers another app', async () => {
@@ -279,7 +281,7 @@ describe('a message that is not one', () => {
     await until(() => message.settlements.length > 0)
 
     expect(rubbish.settlements).toEqual(['ack'])
-    expect(roma.texts()).toContain('ok')
+    expect(roma.texts()).toContain(`${TO}ok`)
   })
 })
 

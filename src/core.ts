@@ -2,7 +2,13 @@ import { randomUUID } from 'node:crypto'
 import { Attempts, waitMsUntil } from './attempts.js'
 import { monthOf, type AuditLog, type TaskOutcome } from './audit-log.js'
 import type { CredentialKind } from './build-env.js'
-import type { ChannelAdapter, IngressMessage, OutboundInstruction } from './channel-adapter.js'
+import { attributed } from './attribution.js'
+import type {
+  ChannelAdapter,
+  IngressMessage,
+  OutboundInstruction,
+  TaskAddress,
+} from './channel-adapter.js'
 import { TurnFailedError, wasInterrupted, type Turn } from './claude-session.js'
 import { readCommand, type Command } from './commands.js'
 import { ProgressReporter } from './progress-reporter.js'
@@ -128,8 +134,7 @@ type Resumption = 'reset' | 'overflow' | 'stopped'
  * work I asked for" rather than "whatever is running in the Session I am on
  * now".
  */
-interface RunningTask {
-  readonly conversationKey: string
+interface RunningTask extends TaskAddress {
   /**
    * The Session it is on, which is not always the one its Conversation is on: a
    * `/new` in between moves the Conversation and leaves the Task where it
@@ -138,8 +143,6 @@ interface RunningTask {
   readonly sessionId: string
   /** Set by `/stop`, and read at each point the Task can still be stopped. */
   stopped: boolean
-  /** Its own id, so an offer taken later can name the Task it belongs to. */
-  readonly taskId: string
   /**
    * Every try this Task has made, and what may be tried next.
    *
@@ -269,21 +272,24 @@ export class Core {
    * to acknowledge: it is over by the time the Conversation could be told it had
    * begun.
    */
-  async #runCommand(command: Command, { conversationKey }: IngressMessage): Promise<void> {
-    // Not a Task, and it still gets an id — see `TaskAddress` for why.
-    const taskId = randomUUID()
+  async #runCommand(command: Command, message: IngressMessage): Promise<void> {
+    const { conversationKey } = message
+    // Not a Task, and it still gets an id — see `TaskAddress` for why. It is
+    // addressed for the same reason: `/stop` is something one person typed, and
+    // the answer to it is theirs rather than the Conversation's.
+    const address = addressOf({ ...message, taskId: randomUUID() })
 
     let instruction: OutboundInstruction
     try {
       const carriedOut = this.#carryOut(command, conversationKey)
-      instruction = { kind: 'command-outcome', taskId, conversationKey, command, carriedOut }
+      instruction = { kind: 'command-outcome', ...address, command, carriedOut }
     } catch {
       // Silence is not an outcome here either. Nothing routine reaches this —
       // it takes a generation record roma cannot read, or a Conversation Key an
       // Adapter emptied — and either way the person is owed the difference
       // between a Command that did nothing because there was nothing to do and
       // one that did nothing because roma is broken.
-      instruction = { kind: 'failure', taskId, conversationKey, reason: ROMA_FAILED_COMMAND }
+      instruction = { kind: 'failure', ...address, reason: ROMA_FAILED_COMMAND }
     }
 
     await this.#channel.deliver(instruction)
@@ -351,8 +357,10 @@ export class Core {
     // Minted here rather than derived, because it names this Task and not the
     // Conversation: two messages in one Conversation can be in flight at once,
     // each with an acknowledgement of its own for the Adapter to keep up to
-    // date.
-    const taskId = randomUUID()
+    // date. Which is also why the Caller travels with it — one Conversation's
+    // two Tasks can belong to two different people.
+    const address = addressOf({ ...message, taskId: randomUUID() })
+    const { taskId } = address
     // From arrival rather than from admission: queueing and cold start are time
     // the person spent waiting, and a Task stopped before it started has no
     // other duration at all.
@@ -363,8 +371,7 @@ export class Core {
       // answer. Where it cannot, the acknowledgement is sent once and nothing
       // follows it.
       updates: this.#channel.capabilities.messageMutation,
-      deliver: (progress) =>
-        this.#channel.deliver({ kind: 'progress', taskId, conversationKey, progress }),
+      deliver: (progress) => this.#channel.deliver({ kind: 'progress', ...address, progress }),
     })
 
     let instruction: OutboundInstruction
@@ -385,22 +392,21 @@ export class Core {
       const sessionId = this.#sessions.sessionFor(conversationKey)
       // Known from here on rather than from the first token, so that `/stop`
       // reaches a Task that is queued or still starting its process.
-      const task: RunningTask = {
-        taskId,
-        conversationKey,
-        sessionId,
-        stopped: false,
-        attempts,
-        parked: null,
-      }
+      const task: RunningTask = { ...address, sessionId, stopped: false, attempts, parked: null }
       running = task
       this.#running.add(task)
 
-      instruction = await this.#drive(task, message.text, reporter)
+      // Named above what they said rather than handed over beside it, because
+      // the line written to stdin is the only per-Turn channel there is — see
+      // `attributed`. Composed here rather than in an Adapter because an Adapter
+      // that prefixed the text would turn `/stop` into something `readCommand`
+      // no longer recognises, and CONTEXT.md has Commands read in the Core and
+      // nowhere else.
+      instruction = await this.#drive(task, attributed(message), reporter)
     } catch (error) {
       // Reached only where roma could not work out which Session the Conversation
       // is on, since everything after that is an ending `#drive` describes.
-      instruction = { kind: 'failure', taskId, conversationKey, reason: reasonFor(error) }
+      instruction = { kind: 'failure', ...address, reason: reasonFor(error) }
     } finally {
       if (running !== null) this.#running.delete(running)
     }
@@ -428,6 +434,10 @@ export class Core {
       this.#audit.record({
         taskId,
         caller: message.caller,
+        // Both halves, because they answer the question at different removes: a
+        // display name is what makes the record readable months later, and the
+        // id is what still identifies somebody after they have changed it.
+        callerName: message.callerName,
         // Null only where the Task failed before roma could work out which
         // Session it belonged to — the one failure that happens before it has one.
         sessionId: running?.sessionId ?? null,
@@ -468,7 +478,8 @@ export class Core {
     text: string,
     reporter: ProgressReporter,
   ): Promise<OutboundInstruction> {
-    const { taskId, conversationKey, attempts } = task
+    const { taskId, attempts } = task
+    const address = addressOf(task)
 
     for (;;) {
       // Starting the Attempt is what fixes the credential paying for it and
@@ -517,8 +528,7 @@ export class Core {
       if (error === null && turn !== null) {
         return {
           kind: 'result',
-          taskId,
-          conversationKey,
+          ...address,
           text: turn.text,
           // Only where somebody chose to spend money, and only what was spent
           // on that choice.
@@ -537,8 +547,8 @@ export class Core {
       // to it — reported as a failure, that reads as roma breaking rather than
       // as the thing somebody just asked for.
       return task.stopped || wasStopped(error)
-        ? { kind: 'stopped', taskId, conversationKey }
-        : { kind: 'failure', taskId, conversationKey, reason: reasonFor(error) }
+        ? { kind: 'stopped', ...address }
+        : { kind: 'failure', ...address, reason: reasonFor(error) }
     }
   }
 
@@ -575,8 +585,7 @@ export class Core {
     const offered = this.#overflow !== null && park.overageAllowed
     await this.#tell({
       kind: 'blocked',
-      taskId: task.taskId,
-      conversationKey: task.conversationKey,
+      ...addressOf(task),
       resetsAt: park.resetsAt,
       overflowOffered: offered,
     })
@@ -642,8 +651,7 @@ export class Core {
       // back, and this is still the Task that was blocked.
       await this.#tell({
         kind: 'overflow-refused',
-        taskId,
-        conversationKey: task.conversationKey,
+        ...addressOf(task),
         capUsd: overflow.monthlyCapUsd,
         spentUsd: spent.costUsd,
       })
@@ -783,6 +791,23 @@ class TaskStopped extends Error {
     super('Task stopped before its Turn began')
     this.name = 'TaskStopped'
   }
+}
+
+/**
+ * Which Task an instruction is about and whose it is, in one place.
+ *
+ * A function rather than four fields spread by hand at each of the nine places
+ * an instruction is built. The failure it forecloses is a quiet one: an
+ * instruction that forgot the Caller would still typecheck as long as some other
+ * variable of the right name were in scope, and what an Adapter would do with it
+ * is address somebody else's answer to whoever asked last.
+ *
+ * It takes anything that is already an address — a `RunningTask`, or an ingress
+ * message with a freshly minted Task id spread onto it — and keeps only the four
+ * fields an instruction carries.
+ */
+function addressOf({ taskId, conversationKey, caller, callerName }: TaskAddress): TaskAddress {
+  return { taskId, conversationKey, caller, callerName }
 }
 
 /**

@@ -105,7 +105,7 @@ describe('starting roma', () => {
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
+    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello' })
     await flush()
     feed(roma.procFor(KEY), OK)
     await handled
@@ -124,7 +124,7 @@ describe('starting roma', () => {
     await roma.answerProbe()
     const { core, audit } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
+    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello' })
     await flush()
     feed(roma.procFor(KEY), OK)
     await handled
@@ -132,7 +132,7 @@ describe('starting roma', () => {
     const month = monthOf(new Date())
     expect(audit.readMonth(month)).toMatchObject([
       {
-        caller: 'someone',
+        caller: 'someone', callerName: 'Someone',
         sessionId: sessionIdFor(KEY),
         outcome: 'result',
         credential: 'shared-window',
@@ -196,7 +196,7 @@ describe('putting a credential in front of a Session’s tools', () => {
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
+    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello' })
     await flush()
     const spawn = roma.claude.lastSpawn
     feed(roma.procFor(KEY), OK)
@@ -211,7 +211,7 @@ describe('putting a credential in front of a Session’s tools', () => {
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
+    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello' })
     await flush()
     const { env } = roma.claude.lastSpawn
     feed(roma.procFor(KEY), OK)
@@ -246,7 +246,7 @@ describe('putting a credential in front of a Session’s tools', () => {
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
+    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello' })
     await flush()
     const { env } = roma.claude.lastSpawn
     feed(roma.procFor(KEY), OK)

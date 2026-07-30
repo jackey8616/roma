@@ -90,7 +90,7 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
    *
    * Which events those are is `readIngressMessage`'s business. What matters here
    * is that the Core never sees an event: by this point a thread, a space, a
-   * sender and an @-mention have become a key, an identity and some text.
+   * sender and an @-mention have become a key, a Caller and some text.
    */
   toIngress(event: ChatEvent): IngressMessage | null {
     return readIngressMessage(event)
@@ -121,7 +121,13 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
     const { taskId, conversationKey } = instruction
 
     if (instruction.kind === 'progress') {
-      await this.#acknowledge(taskId, conversationKey, progressText(instruction.progress))
+      // Mentioned on the acknowledgement as well as on the result, because a
+      // thread can have two of these mutating side by side — one running, one
+      // queued behind it — and the person waiting is who most needs to know
+      // which is theirs. Chat notifies on the post and not on the edits, so this
+      // is one notification per Task rather than one per update.
+      const text = progressText(instruction.caller, instruction.progress)
+      await this.#acknowledge(taskId, conversationKey, text)
       return
     }
 

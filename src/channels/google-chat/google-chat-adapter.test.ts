@@ -33,6 +33,14 @@ const SPACE = 'spaces/AAAA'
 const THREAD = `${SPACE}/threads/thread-1`
 const DM = 'spaces/DM-BBBB'
 const SENDER = 'users/17'
+/**
+ * How the mention reads in front of every message roma posts about a Task.
+ *
+ * Written out here rather than folded into a helper that strips it, so that the
+ * tests below say what Chat is actually asked to post. What it is *for* is
+ * asserted on its own, under "addressing the person who asked".
+ */
+const TO = `<${SENDER}> `
 
 /** A message in a space, addressed to roma with an @-mention. */
 function inSpace(text = 'summarise this', overrides: Record<string, unknown> = {}): ChatEvent {
@@ -84,15 +92,19 @@ function newAdapter() {
  * a `result` with no text is a type error here rather than a passing test of
  * something the Core cannot send.
  */
-type Outcome<T> = T extends unknown ? Omit<T, 'taskId' | 'conversationKey'> : never
+type Outcome<T> = T extends unknown
+  ? Omit<T, 'taskId' | 'conversationKey' | 'caller' | 'callerName'>
+  : never
 
 /** An instruction addressed to one Conversation, as the Core would send it. */
 function to(
   conversationKey: string,
   outcome: Outcome<OutboundInstruction>,
   taskId = 'task-1',
+  caller = SENDER,
+  callerName: string | null = 'Ada',
 ): OutboundInstruction {
-  return { ...outcome, taskId, conversationKey }
+  return { ...outcome, taskId, conversationKey, caller, callerName }
 }
 
 describe('which Conversation a Chat message belongs to', () => {
@@ -174,6 +186,26 @@ describe('which Conversation a Chat message belongs to', () => {
     expect(adapter.toIngress(inSpace())?.caller).toBe(SENDER)
   })
 
+  // Both halves, because they are wanted for different things: the resource name
+  // is what a reply is addressed with and what tells two people of the same name
+  // apart, and the display name is the half a person reads (ADR-0009).
+  it('passes the sender’s display name through beside it', () => {
+    const { adapter } = newAdapter()
+
+    expect(adapter.toIngress(inSpace())?.callerName).toBe('Ada')
+  })
+
+  // Not on every delivery, and Chat has `isAnonymous` for people who have no
+  // name to give. Null rather than absent, so that the Core is told there is no
+  // name rather than left to notice.
+  it('says so when Chat gave no display name', () => {
+    const { adapter } = newAdapter()
+
+    const nameless = inSpace('hello', { sender: { name: SENDER, type: 'HUMAN' } })
+
+    expect(adapter.toIngress(nameless)?.callerName).toBeNull()
+  })
+
   // What Claude Code is asked is what the person asked, not how Chat addressed
   // roma. `argumentText` is Chat's own copy with the mention removed.
   it('hands over what was said, without the @-mention', () => {
@@ -228,7 +260,7 @@ describe('replying in Chat', () => {
     expect(api.messages[0]?.posted).toEqual({
       space: SPACE,
       thread: THREAD,
-      text: 'the answer',
+      text: `${TO}the answer`,
       replyOption: 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD',
     })
   })
@@ -240,7 +272,7 @@ describe('replying in Chat', () => {
 
     await adapter.deliver(to(DM, { kind: 'result', text: 'the answer' }))
 
-    expect(api.messages[0]?.posted).toEqual({ space: DM, thread: null, text: 'the answer' })
+    expect(api.messages[0]?.posted).toEqual({ space: DM, thread: null, text: `${TO}the answer` })
   })
 
   // No map, no lookup, nothing to have gone stale: a Conversation Key is a Chat
@@ -296,7 +328,7 @@ describe('the acknowledgement', () => {
 
     expect(api.calls).toEqual(['post', 'edit', 'edit'])
     expect(api.messages).toHaveLength(1)
-    expect(api.messages[0]?.text).toBe('half an answer')
+    expect(api.messages[0]?.text).toBe(`${TO}half an answer`)
   })
 
   // Two messages in one Conversation can be in flight at once, each with an
@@ -311,7 +343,7 @@ describe('the acknowledgement', () => {
     )
 
     expect(api.calls).toEqual(['post', 'post'])
-    expect(api.texts).toEqual(['Working…', 'Queued — 2 waiting.'])
+    expect(api.texts).toEqual([`${TO}Working…`, `${TO}Queued — 2 waiting.`])
   })
 
   // The rule ADR-0003 makes unconditional. The result is what people search for,
@@ -324,7 +356,7 @@ describe('the acknowledgement', () => {
     await adapter.deliver(to(THREAD, { kind: 'result', text: 'the answer' }))
 
     expect(api.calls).toEqual(['post', 'post'])
-    expect(api.texts).toEqual(['Working…', 'the answer'])
+    expect(api.texts).toEqual([`${TO}Working…`, `${TO}the answer`])
   })
 
   // A post that failed left no message to edit. Remembered anyway, every later
@@ -343,7 +375,7 @@ describe('the acknowledgement', () => {
     )
 
     expect(api.calls).toEqual(['post', 'post'])
-    expect(api.texts).toEqual(['Running awk…'])
+    expect(api.texts).toEqual([`${TO}Running awk…`])
   })
 
   // A second Task in the same Conversation must not inherit the first one's
@@ -372,10 +404,10 @@ describe('what a Conversation is told', () => {
     await adapter.deliver(to(THREAD, { kind: 'failure', reason: 'roma could not run this Task.' }))
 
     expect(api.texts).toEqual([
-      'Stopped.',
-      'Nothing to stop.',
+      `${TO}Stopped.`,
+      `${TO}Nothing to stop.`,
       expect.stringContaining('fresh session'),
-      'roma could not run this Task.',
+      `${TO}roma could not run this Task.`,
     ])
   })
 
@@ -392,8 +424,11 @@ describe('what a Conversation is told', () => {
 
     expect(api.messages.length).toBeGreaterThan(1)
     for (const message of api.messages) expect(message.text.length).toBeLessThanOrEqual(MAX_TEXT)
-    // Nothing dropped and nothing duplicated: the words arrive in order, whole.
-    expect(api.texts.join('\n\n').replace(/\s+/g, ' ')).toBe(long.replace(/\s+/g, ' '))
+    // Nothing dropped and nothing duplicated: the words arrive in order, whole,
+    // under the mention the first message carries. The mention is counted
+    // against the limit rather than added after the split, which is what keeps
+    // that first message inside what Chat will take.
+    expect(api.texts.join('\n\n').replace(/\s+/g, ' ')).toBe(`${TO}${long}`.replace(/\s+/g, ' '))
   })
 
   // A failed Turn's reason is the Turn's own text, which has no more of a length
@@ -430,7 +465,7 @@ describe('a Task the Shared Window has blocked', () => {
     await adapter.deliver(to(THREAD, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: false }))
 
     expect(api.texts).toEqual([
-      'The shared Claude quota is spent. It comes back at 2026-07-28 20:40 UTC — I have kept your task and will run it then.',
+      `${TO}The shared Claude quota is spent. It comes back at 2026-07-28 20:40 UTC — I have kept your task and will run it then.`,
     ])
   })
 
@@ -516,7 +551,7 @@ describe('a Task the Shared Window has blocked', () => {
     await adapter.deliver(to(THREAD, { kind: 'overflow-refused', capUsd: 20, spentUsd: 21.5 }))
 
     expect(api.texts).toEqual([
-      'Overflow is capped at $20.00 a month and this month has spent $21.50, so it is off ' +
+      `${TO}Overflow is capped at $20.00 a month and this month has spent $21.50, so it is off ` +
         'until the month turns. Your task is still waiting for the shared quota to reset.',
     ])
   })
@@ -531,7 +566,7 @@ describe('showing what an Overflow Task spent', () => {
 
     await adapter.deliver(to(THREAD, { kind: 'result', text: 'done', overflowCostUsd: 0.42 }))
 
-    expect(api.texts).toEqual(['done', 'Ran on metered billing: $0.42.'])
+    expect(api.texts).toEqual([`${TO}done`, 'Ran on metered billing: $0.42.'])
   })
 
   it('says nothing about money for an ordinary Task', async () => {
@@ -539,7 +574,7 @@ describe('showing what an Overflow Task spent', () => {
 
     await adapter.deliver(to(THREAD, { kind: 'result', text: 'done' }))
 
-    expect(api.texts).toEqual(['done'])
+    expect(api.texts).toEqual([`${TO}done`])
   })
 
   // "$0.00" would report money as free, which is the one claim the Audit Record
@@ -549,6 +584,65 @@ describe('showing what an Overflow Task spent', () => {
 
     await adapter.deliver(to(THREAD, { kind: 'result', text: 'done', overflowCostUsd: null }))
 
-    expect(api.texts).toEqual(['done', 'Ran on metered billing. What it cost was never reported.'])
+    expect(api.texts).toEqual([
+      `${TO}done`,
+      'Ran on metered billing. What it cost was never reported.',
+    ])
+  })
+})
+
+/**
+ * ADR-0009. A thread is many people sharing one Conversation, so an unaddressed
+ * reply is one the thread has to work out the owner of by reading it.
+ */
+describe('addressing the person who asked', () => {
+  // `<users/{user}>` is Google's documented syntax, and a caller is already a
+  // Chat user resource name — so the mention is the identity roma was given, in
+  // angle brackets, with nothing looked up.
+  // https://developers.google.com/workspace/chat/identify-reference-users
+  it('mentions the Caller on the acknowledgement and on the result', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, { kind: 'progress', progress: { phase: 'working' } }))
+    await adapter.deliver(to(THREAD, { kind: 'result', text: 'the answer' }))
+
+    for (const text of api.texts) expect(text.startsWith(`<${SENDER}> `)).toBe(true)
+  })
+
+  // Two acknowledgements can sit in one thread mutating at once — one running,
+  // one queued behind it — and this is what tells them apart while they do.
+  it('addresses each of a thread’s two Tasks to its own Caller', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, { kind: 'progress', progress: { phase: 'working' } }))
+    await adapter.deliver(
+      to(THREAD, { kind: 'progress', progress: { phase: 'queued', position: 2 } }, 'task-2', 'users/99', 'Bob'),
+    )
+
+    expect(api.texts).toEqual([`<${SENDER}> Working…`, '<users/99> Queued — 2 waiting.'])
+  })
+
+  // One notification per Task, not one per 4096 characters of the answer. The
+  // price of an Overflow Turn is a separate message for the same reason.
+  it('mentions on the first message of an answer and no other', async () => {
+    const { adapter, api } = newAdapter()
+    const long = 'word '.repeat(2000)
+
+    await adapter.deliver(to(THREAD, { kind: 'result', text: long, overflowCostUsd: 0.42 }))
+
+    expect(api.texts.length).toBeGreaterThan(2)
+    expect(api.texts.filter((text) => text.includes(`<${SENDER}>`))).toHaveLength(1)
+  })
+
+  // A DM has one other person in it and the Adapter could tell from the
+  // Conversation Key. It deliberately does not: a rule with an exception in it
+  // is a rule somebody has to remember, and ADR-0009 accepts the redundancy on
+  // the same terms the marker does.
+  it('mentions the Caller in a DM too, rather than carrying an exception', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(DM, { kind: 'result', text: 'the answer' }))
+
+    expect(api.texts).toEqual([`<${SENDER}> the answer`])
   })
 })
