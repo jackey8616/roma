@@ -1,8 +1,9 @@
 {
   // What ships. `tsconfig.json` is what an editor and `npm run typecheck` read,
-  // and its `include` covers `test` and the Vitest configs on purpose — a naive
-  // emit from it would compile the tests, the fakes and the recorded streams into
-  // `dist/` and put roma's test doubles inside the image.
+  // and its `include` covers `test`, `scripts` and the Vitest configs on purpose —
+  // a naive emit from it would compile the tests, the fakes and the recorded
+  // streams into `dist/` and put roma's test doubles inside the image, along with
+  // the drift check and the image verification, which run in CI and never in it.
   //
   // Emit needs no source changes: every relative import in `src/` already carries
   // its `.js` extension, because `nodenext` requires it of the TypeScript too.
