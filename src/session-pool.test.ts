@@ -36,8 +36,19 @@ function newPool(options: Partial<SessionPoolOptions> = {}) {
   const pool = new SessionPool({
     workRoot,
     envs: {
-      'shared-window': { PATH: '/usr/bin', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' },
-      overflow: { PATH: '/usr/bin', ANTHROPIC_API_KEY: 'metered-key' },
+      // A function of the Session, because two of the variables a real one
+      // carries are the Session's own. Nothing here needs them, so the Session
+      // id is written down and otherwise ignored.
+      'shared-window': (sessionId) => ({
+        PATH: '/usr/bin',
+        CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token',
+        ROMA_SESSION_ID: sessionId,
+      }),
+      overflow: (sessionId) => ({
+        PATH: '/usr/bin',
+        ANTHROPIC_API_KEY: 'metered-key',
+        ROMA_SESSION_ID: sessionId,
+      }),
     },
     spawn: claude.spawn,
     log: (record) => log.push(record),
@@ -111,7 +122,22 @@ describe('one working directory per Session', () => {
     expect(claude.lastSpawn.env).toEqual({
       PATH: '/usr/bin',
       CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token',
+      ROMA_SESSION_ID: A,
     })
+  })
+
+  // Which Session a process is serving is the one thing its environment cannot
+  // be built once and shared for. A Credential Shim reports it, and roma
+  // resolves it to a Task through the Task Queue — so a pool that handed every
+  // process the same map would attribute every credential request in roma to
+  // whichever Session happened to be named in it.
+  it('tells each process which Session it is', async () => {
+    const { claude, send } = newPool()
+
+    await send(A, 'hello', OK)
+    await send(B, 'hello', OK)
+
+    expect(claude.spawns.map(({ env }) => env['ROMA_SESSION_ID'])).toEqual([A, B])
   })
 })
 
@@ -875,7 +901,11 @@ describe('running a Turn on the other credential', () => {
 
     await send(A, 'hello', OK, 'overflow')
 
-    expect(claude.lastSpawn.env).toEqual({ PATH: '/usr/bin', ANTHROPIC_API_KEY: 'metered-key' })
+    expect(claude.lastSpawn.env).toEqual({
+      PATH: '/usr/bin',
+      ANTHROPIC_API_KEY: 'metered-key',
+      ROMA_SESSION_ID: A,
+    })
   })
 
   // The rule two processes on one Session file would break, and the reason this
@@ -918,6 +948,7 @@ describe('running a Turn on the other credential', () => {
     expect(claude.lastSpawn.env).toEqual({
       PATH: '/usr/bin',
       CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token',
+      ROMA_SESSION_ID: A,
     })
   })
 
@@ -936,7 +967,7 @@ describe('running a Turn on the other credential', () => {
   // record lying about which credential paid.
   it('refuses a credential it has no environment for', async () => {
     const { pool } = newPool({
-      envs: { 'shared-window': { PATH: '/usr/bin', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' } },
+      envs: { 'shared-window': () => ({ PATH: '/usr/bin', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' }) },
     })
 
     await expect(pool.send(A, 'hello', 'overflow')).rejects.toThrow(/overflow/i)

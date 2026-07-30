@@ -369,3 +369,61 @@ describe('telling a waiting caller where it is', () => {
     await waitingTask
   })
 })
+
+describe('which Task a Session is running', () => {
+  // The queue is the only thing in roma that already knows a key has exactly one
+  // Task at a time — that is the serialisation rule — so asking anything else
+  // would mean building a second answer that could disagree with this one.
+  it('is the running one, while it runs', async () => {
+    const queue = new TaskQueue()
+    const task = pending()
+    const running = queue.run(A, task.run, undefined, 'task-1')
+    await flush()
+
+    expect(queue.taskFor(A)).toBe('task-1')
+
+    task.finish()
+    await running
+    expect(queue.taskFor(A)).toBeNull()
+  })
+
+  it('is nobody’s where the Session has nothing running', () => {
+    expect(new TaskQueue().taskFor(A)).toBeNull()
+  })
+
+  // A Task waiting for a slot is not running, and a credential request arriving
+  // from its Session belongs to whatever *is* — or to nothing.
+  it('follows the Task into the queue rather than answering early', async () => {
+    const queue = new TaskQueue({ maxConcurrent: 1 })
+    const first = pending()
+    const second = pending()
+    const running = queue.run(A, first.run, undefined, 'task-1')
+    const queued = queue.run(B, second.run, undefined, 'task-2')
+    await flush()
+
+    expect(queue.taskFor(B)).toBeNull()
+
+    first.finish()
+    await running
+    await flush()
+    expect(queue.taskFor(B)).toBe('task-2')
+
+    second.finish()
+    await queued
+  })
+
+  // Null covers a key with nothing running and a caller who named no Task, and
+  // it must never guess: attributing a credential request to the nearest Task
+  // would put somebody else's name on it.
+  it('says nothing rather than guessing when no Task was named', async () => {
+    const queue = new TaskQueue()
+    const task = pending()
+    const running = queue.run(A, task.run)
+    await flush()
+
+    expect(queue.taskFor(A)).toBeNull()
+
+    task.finish()
+    await running
+  })
+})

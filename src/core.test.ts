@@ -115,8 +115,19 @@ function newCore({
   const pool = new SessionPool({
     workRoot,
     envs: {
-      'shared-window': { PATH: '/usr/bin', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' },
-      overflow: { PATH: '/usr/bin', ANTHROPIC_API_KEY: 'metered-key' },
+      // A function of the Session, because two of the variables a real one
+      // carries are the Session's own. Nothing here needs them, so the Session
+      // id is written down and otherwise ignored.
+      'shared-window': (sessionId) => ({
+        PATH: '/usr/bin',
+        CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token',
+        ROMA_SESSION_ID: sessionId,
+      }),
+      overflow: (sessionId) => ({
+        PATH: '/usr/bin',
+        ANTHROPIC_API_KEY: 'metered-key',
+        ROMA_SESSION_ID: sessionId,
+      }),
     },
     spawn: claude.spawn,
     log: () => {},

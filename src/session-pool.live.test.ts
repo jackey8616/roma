@@ -27,11 +27,12 @@ describe('a Session that outlives its process', () => {
     pool = new SessionPool({
       workRoot: dirs.workRoot,
       envs: {
-        'shared-window': buildEnv({
-          credential: sharedWindowCredential(),
-          configDir: dirs.configDir,
-          inherit: process.env,
-        }),
+        'shared-window': () =>
+          buildEnv({
+            credential: sharedWindowCredential(),
+            configDir: dirs.configDir,
+            inherit: process.env,
+          }),
       },
       log: (record) => log.push(record),
     })

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AuditLog } from './audit-log.js'
@@ -8,11 +8,56 @@ import type { ChannelAdapter } from './channel-adapter.js'
 import type { SpawnClaudeProcess } from './claude-process.js'
 import type { RetryBudget } from './config.js'
 import { Core, type CoreLogRecord } from './core.js'
+import { InstallationTokens } from './installation-tokens.js'
+import type { Installation, Minter } from './minter.js'
 import { SessionGenerations } from './session-generation.js'
 import type { OperatorLog } from './operator-log.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
+import { socketPathIn } from './shim-protocol.js'
+import { ShimServer, type ShimLogRecord } from './shim-server.js'
 import { startupSelfCheck, type StartupSelfCheckReport } from './startup-self-check.js'
 import { TaskQueue } from './task-queue.js'
+
+/**
+ * Everything roma needs to put a credential in front of a Session's tools.
+ *
+ * One option rather than four loose ones, because they are one decision: a roma
+ * with a Minter and no socket to answer on, or a socket and no gitconfig
+ * pointing at it, is a roma whose agent cannot reach a line of anybody's code —
+ * and required means required (ADR-0008). Nothing in here names a forge; what
+ * does lives under `src/github/` and reaches this as values.
+ */
+export interface MintingOptions {
+  /** The only thing that holds the App's private key. */
+  readonly minter: Minter
+  /**
+   * roma's own directory: the Credential Shim socket, and the gitconfig every
+   * Session runs under.
+   *
+   * Deliberately not under `workRoot`. That tree is reclaimed after seven idle
+   * days, and a reclaimed socket would present as every credential request in
+   * roma failing at once with no explanation. Not inside a Working Directory
+   * either — the agent runs `git add -A` in there.
+   */
+  readonly socketDir: string
+  /**
+   * The gitconfig `GIT_CONFIG_GLOBAL` points every Session at, as text.
+   *
+   * Written here rather than composed here: what it has to say — which helper,
+   * and that the helper is told the repository path — is knowledge about `git`
+   * and about a forge, and roma's job is to put the file somewhere that is not
+   * a Working Directory and to name it in the environment.
+   */
+  readonly gitConfig: string
+  /**
+   * What every Session is told it can reach, given what roma found at boot.
+   *
+   * A function rather than a string, because the answer is not known until the
+   * Installation has been fetched — and fetching it is the boot check, which has
+   * to happen inside this function for the same reason the self-check does.
+   */
+  readonly announce: (installation: Installation) => string
+}
 
 export interface StartRomaOptions {
   /** The credential every Session runs on, and the one the self-check verifies. */
@@ -72,6 +117,8 @@ export interface StartRomaOptions {
    * what an agent did, on the strength of it living somewhere roma named.
    */
   readonly configDir: string
+  /** How a Session's tools get a credential, and what it reaches. */
+  readonly minting: MintingOptions
   /** The pinned model. Defaults to the one every Session runs on. */
   readonly model?: string
   readonly maxConcurrentTasks?: number
@@ -85,7 +132,7 @@ export interface StartRomaOptions {
    * system, and an operator reading a credential swap wants the refusal that
    * prompted it on the same lines.
    */
-  readonly log?: OperatorLog<PoolLogRecord | CoreLogRecord>
+  readonly log?: OperatorLog<PoolLogRecord | CoreLogRecord | ShimLogRecord>
   /**
    * Where the self-check's probe Session runs. A throwaway directory by default,
    * removed once the check is done.
@@ -107,6 +154,8 @@ export interface Roma {
   readonly audit: AuditLog
   /** What the self-check found, for the boot log. */
   readonly selfCheck: StartupSelfCheckReport
+  /** What roma proved at boot that it can reach, and told every Session about. */
+  readonly installation: Installation
   /** End every resident process. Sessions keep their context on disk. */
   shutdown(): Promise<void>
 }
@@ -134,6 +183,7 @@ export async function startRoma({
   workRoot,
   auditRoot,
   configDir,
+  minting,
   model,
   maxConcurrentTasks,
   retryBudget,
@@ -142,9 +192,19 @@ export async function startRoma({
   selfCheckCwd,
   selfCheckTimeoutMs,
 }: StartRomaOptions): Promise<Roma> {
+  // First, because it is free and the other check is not. A bad private key or
+  // an App installed twice is found before a single paid Turn has been driven,
+  // and a deployment that is wrong in both ways is told about the cheap one
+  // first. It blocks the boot for the reason the self-check does: a failure that
+  // surfaced instead as an inexplicable `git clone` inside somebody's Turn would
+  // read as "roma is broken" with no diagnosis attached.
+  const installation = await minting.minter.installation()
+
   // Built once and handed to both the check and the pool, so that what was
   // verified is the environment roma actually runs on rather than one built the
-  // same way and hoped to be identical.
+  // same way and hoped to be identical. The probe's own environment carries no
+  // Shim variables: it is not a Session roma serves, it has no Session id, and
+  // it is not there to clone anything.
   const env = buildEnv({ credential, configDir })
 
   const probeCwd = selfCheckCwd ?? mkdtempSync(join(tmpdir(), 'roma-self-check-'))
@@ -163,27 +223,51 @@ export async function startRoma({
     if (selfCheckCwd === undefined) rmSync(probeCwd, { recursive: true, force: true })
   }
 
+  // roma's own directory, made before anything points at it. The gitconfig goes
+  // in beside the socket rather than in a Working Directory, for the reason
+  // `MintingOptions` gives: the agent runs `git add -A` in one of those.
+  mkdirSync(minting.socketDir, { recursive: true, mode: 0o700 })
+  const gitConfigPath = join(minting.socketDir, 'gitconfig')
+  writeFileSync(gitConfigPath, minting.gitConfig, { mode: 0o600 })
+  const socketPath = socketPathIn(minting.socketDir)
+
+  const queue = new TaskQueue(
+    maxConcurrentTasks === undefined ? {} : { maxConcurrent: maxConcurrentTasks },
+  )
+  const shims = await ShimServer.listen({
+    socketPath,
+    tokens: new InstallationTokens({ minter: minting.minter }),
+    // Attribution is by Session, resolved to a Task through the queue — which
+    // serialises the Tasks of a Session already, so the answer is unambiguous.
+    taskFor: (sessionId) => queue.taskFor(sessionId),
+    ...(log === undefined ? {} : { log }),
+  })
+
   // One environment per credential a Turn can be paid for by. Overflow is not a
   // mode roma is put into — ADR-0002 makes it exactly this, a different map —
-  // and the pool picks between them per Turn.
+  // and the pool picks between them per Turn. Both reach the same socket: a
+  // credential for reaching the code has nothing to do with which bill a Turn
+  // lands on.
+  const sessionEnv = (from: Credential) => (sessionId: string) =>
+    buildEnv({
+      credential: from,
+      configDir,
+      shims: { sessionId, socketPath, gitConfigPath },
+    })
   const envs: CredentialEnvs = {
-    [credential.kind]: env,
-    ...(overflow === undefined
-      ? {}
-      : { overflow: buildEnv({ credential: overflow.credential, configDir }) }),
+    [credential.kind]: sessionEnv(credential),
+    ...(overflow === undefined ? {} : { overflow: sessionEnv(overflow.credential) }),
   }
 
   const pool = new SessionPool({
     workRoot,
     envs,
+    appendSystemPrompt: minting.announce(installation),
     ...(model === undefined ? {} : { model }),
     ...(retryBudget === undefined ? {} : { retryBudget }),
     ...(spawn === undefined ? {} : { spawn }),
     ...(log === undefined ? {} : { log }),
   })
-  const queue = new TaskQueue(
-    maxConcurrentTasks === undefined ? {} : { maxConcurrent: maxConcurrentTasks },
-  )
   const sessions = new SessionGenerations({ workRoot })
   const audit = new AuditLog({ auditRoot })
 
@@ -206,6 +290,14 @@ export async function startRoma({
     sessions,
     audit,
     selfCheck,
-    shutdown: () => pool.shutdown(),
+    installation,
+    // The socket goes after the processes, not before: a Session being killed can
+    // still have a `git` mid-operation, and taking the credential away first
+    // turns a clean shutdown into a handful of authentication failures in
+    // somebody's Transcript.
+    shutdown: async () => {
+      await pool.shutdown()
+      await shims.close()
+    },
   }
 }

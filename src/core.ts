@@ -488,6 +488,11 @@ export class Core {
           // refusing to run it buys no less silence — it only adds losing the
           // work to it.
           (position) => reporter.update({ phase: 'queued', position }),
+          // So that the queue can say whose work this Session is doing while it
+          // is doing it. Nothing about admission reads it — it is what lets a
+          // credential request arriving from this Session be attributed to this
+          // Task rather than to a guess.
+          taskId,
         )
       } catch (thrown) {
         error = thrown

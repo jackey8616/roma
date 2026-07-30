@@ -5,7 +5,11 @@ import { readConfiguration, type Environment } from '../../env-config.js'
 import { writeToStderr, type OperatorLog } from '../../operator-log.js'
 import { serve, type IngressLogRecord, type Serving } from '../../serve.js'
 import type { CoreLogRecord } from '../../core.js'
+import { readMinterEnv } from '../../github/env-config.js'
+import { GitHubMinter } from '../../github/github-minter.js'
+import { announce, gitConfig } from '../../github/shims.js'
 import type { PoolLogRecord } from '../../session-pool.js'
+import type { ShimLogRecord } from '../../shim-server.js'
 import type { StartupSelfCheckReport } from '../../startup-self-check.js'
 import { readChatEnv } from './env-config.js'
 import { GoogleChatAdapter } from './google-chat-adapter.js'
@@ -48,7 +52,12 @@ type ProcessLogRecord =
  * refusal that prompted it on the same lines.
  */
 type RomaLog = OperatorLog<
-  PoolLogRecord | CoreLogRecord | IngressLogRecord | PubSubLogRecord | ProcessLogRecord
+  | PoolLogRecord
+  | CoreLogRecord
+  | IngressLogRecord
+  | ShimLogRecord
+  | PubSubLogRecord
+  | ProcessLogRecord
 >
 
 /**
@@ -63,7 +72,8 @@ export async function startGoogleChatRoma(
   env: Environment = process.env,
   log: RomaLog = writeToStderr,
 ): Promise<Serving> {
-  const { roma, channelEnv: chat } = readConfiguration(env, readChatEnv)
+  const { roma, channelEnv: chat, minterEnv } = readConfiguration(env, readChatEnv, readMinterEnv)
+  const { socketDir, ...core } = roma
 
   // Application Default Credentials: a key file named by
   // GOOGLE_APPLICATION_CREDENTIALS, or the metadata server on a Google host.
@@ -88,8 +98,18 @@ export async function startGoogleChatRoma(
     maxExtensionTime: Duration.from({ minutes: chat.maxLeaseMinutes }),
   })
 
+  // The one place a forge is named, for the reason a Channel is named here and
+  // nowhere else: assembling roma means saying what it is assembled out of, and
+  // `src/` proper is not allowed to know either answer. `src/github-containment.test.ts`
+  // is what holds the rest of the tree to that.
   return await serve({
-    ...roma,
+    ...core,
+    minting: {
+      minter: new GitHubMinter(minterEnv),
+      socketDir,
+      gitConfig: gitConfig(),
+      announce,
+    },
     channel: new GoogleChatAdapter({ api: new HttpChatApi({ send }) }),
     transport: new PubSubTransport({ subscription, log }),
     log,

@@ -93,4 +93,52 @@ describe('buildEnv', () => {
     expect(env['CLAUDE_CONFIG_DIR']).toBe(CONFIG_DIR)
     expect(env['CLAUDE_SECURESTORAGE_CONFIG_DIR']).toBe(CONFIG_DIR)
   })
+
+  // Three variables, widening an allowlist that exists to admit almost nothing.
+  // They are admissible for exactly the reasons an Installation Token is not:
+  // none is a secret, and none expires — so none of them goes stale in an
+  // environment that is fixed at spawn while the process outlives an hour.
+  describe('with Credential Shims in front of a Session’s tools', () => {
+    const SHIMS = {
+      sessionId: 'a-session',
+      socketPath: '/run/roma/minter.sock',
+      gitConfigPath: '/run/roma/gitconfig',
+    }
+    const env = buildEnv({
+      credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
+      inherit: HOST,
+      configDir: CONFIG_DIR,
+      shims: SHIMS,
+    })
+
+    it('says which Session is asking, and where to ask', () => {
+      expect(env['ROMA_SESSION_ID']).toBe('a-session')
+      expect(env['ROMA_MINTER_SOCKET']).toBe('/run/roma/minter.sock')
+    })
+
+    it('points git at the config that puts a Shim in front of it', () => {
+      expect(env['GIT_CONFIG_GLOBAL']).toBe('/run/roma/gitconfig')
+    })
+
+    // The one thing that must never be here. An environment is fixed at spawn
+    // and would be stale within the hour — and `env` in a Turn writes it into a
+    // Transcript roma has promised never to delete (ADR-0006).
+    it('carries no credential for the forge at all', () => {
+      expect(JSON.stringify(env)).not.toMatch(/gh[su]_|x-access-token/)
+    })
+  })
+
+  // The startup self-check's probe is not a Session roma serves: it has no
+  // Session id to report and nothing to clone.
+  it('leaves the Shim variables out where there is no Session', () => {
+    const env = buildEnv({
+      credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
+      inherit: HOST,
+      configDir: CONFIG_DIR,
+    })
+
+    expect('ROMA_SESSION_ID' in env).toBe(false)
+    expect('ROMA_MINTER_SOCKET' in env).toBe(false)
+    expect('GIT_CONFIG_GLOBAL' in env).toBe(false)
+  })
 })

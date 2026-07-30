@@ -18,6 +18,24 @@
 # to match this file and matches a different decision now.
 ARG CLAUDE_CODE_VERSION=2.1.220
 
+# The GitHub CLI the image carries, and the checksum of the tarball it comes in.
+#
+# Pinned with the same ceremony as Claude Code above — `src/packaging.test.ts`
+# carries the second copy, so editing this alone turns the run red — and
+# deliberately *without* the drift notification that one gets. The asymmetry is
+# the point: Claude Code is pinned because every measurement in this repository
+# is evidence about one build of it, and `gh`'s version invalidates no
+# measurement. It is pinned so that nobody moves it without deciding to, not
+# because moving it costs a re-verification.
+#
+# A release tarball with a hardcoded sha256 rather than a third-party apt source,
+# which would float the version across rebuilds with nobody deciding to — and
+# rather than a checksum fetched from the same place as the tarball, which only
+# detects corruption. One architecture is built here, so one checksum is the
+# whole maintenance cost.
+ARG GH_VERSION=2.96.0
+ARG GH_SHA256=83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60
+
 # ---------------------------------------------------------------------------
 # Builder: everything installed, `dist/` out.
 # ---------------------------------------------------------------------------
@@ -47,9 +65,36 @@ FROM node:22-slim AS runtime
 # `claude` processes and a Node.js process running as PID 1 reaps nothing, so
 # without it a stopped Turn leaves a zombie behind for the life of the container.
 # Widening this list is a separate decision with its own evidence.
+#
+# `curl` is here for the line below and for nothing else: `gh` arrives as a
+# release tarball rather than a package, so something has to fetch it.
 RUN apt-get update \
-  && apt-get install --no-install-recommends --yes ca-certificates git tini \
+  && apt-get install --no-install-recommends --yes ca-certificates curl git tini \
   && rm -rf /var/lib/apt/lists/*
+
+# `gh`, and the evidence for widening the list above: issues and pull requests
+# are a good part of what roma is for — this repository's own issue tracker *is*
+# GitHub Issues — and `gh` is the only tool that can be handed a freshly minted
+# Installation Token on every invocation (ADR-0008, as amended). The GitHub MCP
+# server cannot: its token is an environment variable read once at launch, and an
+# MCP server starts once per Session and stays.
+#
+# The binary goes somewhere that is **not on PATH**, and the Credential Shim is
+# installed under the name `gh` instead. So the only `gh` an agent can reach is
+# the one that mints per invocation. That is not a boundary against the agent —
+# it has a shell and the real binary is right there — it is what makes the
+# ordinary path the correct one.
+ARG GH_VERSION
+ARG GH_SHA256
+RUN curl --fail --silent --show-error --location \
+      "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
+      --output /tmp/gh.tar.gz \
+  && echo "${GH_SHA256}  /tmp/gh.tar.gz" | sha256sum --check --strict - \
+  && mkdir -p /usr/local/lib/roma \
+  && tar --extract --gzip --file /tmp/gh.tar.gz --strip-components=2 --directory /usr/local/lib/roma \
+       "gh_${GH_VERSION}_linux_amd64/bin/gh" \
+  && rm /tmp/gh.tar.gz \
+  && /usr/local/lib/roma/gh --version
 
 WORKDIR /app
 
@@ -67,6 +112,12 @@ ARG CLAUDE_CODE_VERSION
 RUN npm install --global @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 COPY --from=builder /app/dist ./dist
+
+# The `gh` Credential Shim, under the name the agent will type. Three lines of
+# shell rather than a symlink, because what has to run is `node` with the Shim's
+# path — and the Shim is a module in `dist/`, not an executable.
+RUN printf '#!/bin/sh\nexec node /app/dist/github/gh-shim.js "$@"\n' > /usr/local/bin/gh \
+  && chmod 0755 /usr/local/bin/gh
 
 # The asymmetry here is the decision, not an oversight.
 #
@@ -95,8 +146,19 @@ COPY --from=builder /app/dist ./dist
 # `buildEnv` passes it through to every Claude Code process and a Claude Code
 # process without one has nowhere to put the things it keeps outside
 # CLAUDE_CONFIG_DIR.
+#
+# ROMA_SHIM_DIR follows the work root rather than the audit root, on the same
+# rule: default what is lost by design, refuse what cannot be lost. What lives
+# there is a Unix domain socket and a gitconfig, both recreated every boot, and
+# neither is anybody's data. It is deliberately **not** under ROMA_WORK_ROOT —
+# that tree is reclaimed after seven idle days, and a reclaimed socket would
+# present as every credential request in roma failing at once with no
+# explanation. It is a variable at all, rather than a constant in the code,
+# because running roma from source on a developer's machine is a stated
+# consequence of ADR-0008 and `/run` is not writable there.
 ENV HOME=/home/node \
-    ROMA_WORK_ROOT=/var/lib/roma/work
+    ROMA_WORK_ROOT=/var/lib/roma/work \
+    ROMA_SHIM_DIR=/run/roma
 
 # `audit` and `claude` are made and owned here even though nothing points at
 # either. Setting the variable and making the directory are different acts: an
@@ -106,8 +168,13 @@ ENV HOME=/home/node \
 # Transcript, to EACCES, which is the same data gone by a longer route. A bind
 # mount brings the host's own ownership and needs to be writable by uid 1000;
 # the README says so.
-RUN mkdir -p /var/lib/roma/work /var/lib/roma/claude /var/lib/roma/audit \
-  && chown -R node:node /var/lib/roma
+#
+# `/run/roma` is made here for a different reason again: roma creates it at boot
+# if it is missing, and it cannot, because `/run` belongs to root and roma is
+# `node`.
+RUN mkdir -p /var/lib/roma/work /var/lib/roma/claude /var/lib/roma/audit /run/roma \
+  && chown -R node:node /var/lib/roma /run/roma \
+  && chmod 0700 /run/roma
 
 # Not root. The agent's blast radius is already "anything a member of a connected
 # channel asks for" (ADR-0003); it does not also need to be root inside the
