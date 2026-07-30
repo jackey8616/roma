@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { Attempts, waitMsUntil } from './attempts.js'
 import { monthOf, type AuditLog, type TaskOutcome } from './audit-log.js'
 import type { CredentialKind } from './build-env.js'
 import type { ChannelAdapter, IngressMessage, OutboundInstruction } from './channel-adapter.js'
@@ -7,14 +8,8 @@ import { readCommand, type Command } from './commands.js'
 import { ProgressReporter } from './progress-reporter.js'
 import type { SessionGenerations } from './session-generation.js'
 import { writeToStderr, type OperatorLog } from './operator-log.js'
-import { overflowOffer, spentUntil } from './shared-window.js'
 import { RetryStormError, type SessionPool } from './session-pool.js'
-import {
-  readSharedWindow,
-  readSystemInit,
-  type ClaudeEvent,
-  type SharedWindow,
-} from './stream-events.js'
+import { readSharedWindow, readSystemInit, type ClaudeEvent } from './stream-events.js'
 import type { TaskQueue } from './task-queue.js'
 
 /**
@@ -143,43 +138,17 @@ interface RunningTask {
   readonly sessionId: string
   /** Set by `/stop`, and read at each point the Task can still be stopped. */
   stopped: boolean
-  /**
-   * What Claude Code said its credential resolved to while serving this Task,
-   * off the `system/init` its Turn began with. Null until one arrives, and for a
-   * Task whose Turn never began.
-   */
-  apiKeySource: string | null
-  /**
-   * Whether Claude Code was ever given this Task's message.
-   *
-   * What separates a Task that spent nothing from one that spent something
-   * nobody can name. A Task stopped in the queue never sent a message and is
-   * free with certainty; one whose process died mid-Turn had already spent
-   * whatever it had spent, and the cost only ever arrives on a terminal event
-   * that is not coming.
-   */
-  turnBegan: boolean
   /** Its own id, so an offer taken later can name the Task it belongs to. */
   readonly taskId: string
   /**
-   * Which credential the next attempt is to be paid for by.
+   * Every try this Task has made, and what may be tried next.
    *
-   * On the Task rather than on the Core because Overflow is a decision made
-   * about one Task while it is already running — and it moves back for the
-   * Conversation's next message, which is the persistent toggle ADR-0002
-   * refuses not being arrived at by accident.
+   * Which credential is paying, what each try spent, what the stream said about
+   * the Shared Window, and whether another wait is owed all live behind one
+   * interface rather than as fields anything holding the Task can write to. The
+   * Core asks it; it is not something the Core keeps in step.
    */
-  credential: CredentialKind
-  /**
-   * What the stream said about the Shared Window during the attempt running now.
-   *
-   * Cleared at the start of every attempt, which is not tidiness: a reading left
-   * behind from an earlier attempt has a `resetsAt` that has already passed, so
-   * a later failure carrying no reading of its own — a process that died, a
-   * retry storm — would park against a moment in the past and rerun instantly,
-   * for ever, reporting each pass as the window being spent.
-   */
-  window: SharedWindow | null
+  readonly attempts: Attempts
   /**
    * Where this Task is waiting out the window, or null when it is not waiting.
    *
@@ -187,12 +156,13 @@ interface RunningTask {
    * being parked, the way to wake it, and whether an offer is outstanding are
    * the same fact, and the invariant is that they arrive and leave together.
    *
+   * The handle rather than the decision: whether a wait is owed at all, and on
+   * what terms, is `Attempts.takePark`. This is the timer it is being served on.
+   *
    * The Task is doing nothing at all while this is set — no concurrency slot, no
    * process — which is what makes waiting hours for a reset affordable.
    */
   parked: Parked | null
-  /** How many times it has waited out a window. Bounded; see `#park`. */
-  parks: number
 }
 
 /** A Task waiting for the Shared Window to come back. */
@@ -201,118 +171,6 @@ interface Parked {
   readonly timer: NodeJS.Timeout
   /** Whether an offer of Overflow is outstanding, and so whether one can be taken. */
   readonly offered: boolean
-}
-
-/**
- * How long a Task may be held waiting for the Shared Window before roma answers
- * it instead.
- *
- * Two, and the reason is neither the concurrency cap nor patience: a parked Task
- * holds no slot, so it cannot halt roma. It is that a third "still blocked"
- * message lands on a Conversation that stopped watching hours ago, and that a
- * Task which never ends is one nobody can be told anything about. Answered and
- * re-sendable beats held for ever.
- */
-const MAX_PARKS = 2
-
-/**
- * The shortest a park can be.
- *
- * A backstop against a reset time that has already passed — a provider reporting
- * a stale one, a clock that disagrees with theirs. Without it such a Task reruns
- * instantly, fails, parks again, and spins as fast as Claude Code can start,
- * announcing itself on every pass.
- */
-const MIN_PARK_MS = 60_000
-
-/**
- * What one attempt spent, on the credential that was paying for it.
- *
- * `costUsd` is the sum of the attempts anything priced, and null only where
- * nothing priced any of them — a floor rather than a claim, which is the same
- * promise the Audit Record makes about it. `turnMs` is the most recent attempt
- * that produced a Turn, because it answers "how long was Claude Code working"
- * and an attempt that produced none did none of that work.
- */
-interface Spend {
-  readonly costUsd: number | null
-  readonly turnMs: number | null
-}
-
-/** A Task that spent nothing yet, or spent nothing at all. */
-const NOTHING_SPENT: Spend = { costUsd: null, turnMs: null }
-
-/**
- * What a Task spent, kept apart by which credential paid for it.
- *
- * Apart rather than summed, because the two are different money and only one of
- * them is capped. A Task blocked on the Shared Window and rerun on Overflow made
- * two attempts on two bills; added together and filed under the credential it
- * ended on, the subscription's share would be charged to the metered cap — which
- * would refuse other people's work over money nobody spent on a card, and would
- * be shown to the person who asked as what their Overflow decision cost them.
- */
-class Ledger {
-  readonly #byCredential = new Map<CredentialKind, Spend>()
-  #answeredOn: CredentialKind | null = null
-
-  /** What one credential paid for. */
-  on(credential: CredentialKind): Spend {
-    return this.#byCredential.get(credential) ?? NOTHING_SPENT
-  }
-
-  /** Every credential that paid for part of this Task. */
-  get credentials(): CredentialKind[] {
-    return [...this.#byCredential.keys()]
-  }
-
-  /**
-   * The credential the attempt that ended this Task was paid for by, or null
-   * before there has been one.
-   *
-   * Kept as the attempts go by rather than read off `credentials`, because that
-   * is a `Map`'s key order — the order each credential *first* paid — and
-   * setting an existing key does not move it. A Task blocked on the Shared
-   * Window, rerun on Overflow, blocked again, and finally answered by the window
-   * coming back would name Overflow: the one credential that produced nothing.
-   *
-   * `#drive` adds exactly one attempt per pass before it returns or parks, so
-   * the last one added is always the attempt the Task ended on — the answer
-   * where there is one, and the last thing tried where there is not.
-   */
-  get answeredOn(): CredentialKind | null {
-    return this.#answeredOn
-  }
-
-  /**
-   * Add one attempt to what its credential has paid.
-   *
-   * Zero is a claim rather than a default, and it is only made where it is
-   * certain: a Task that never reached Claude Code sent no message and spent
-   * nothing. A Turn that began and produced no terminal event — a process that
-   * died, a retry storm roma stopped waiting for — spent real tokens that
-   * nothing will ever name, and recording those as zero would report money as
-   * free. That is the same class of wrong as the cumulative total this whole
-   * ticket exists to avoid, pointing the other way.
-   */
-  add(credential: CredentialKind, turn: Turn | null, task: RunningTask): void {
-    this.#answeredOn = credential
-    const spend = this.on(credential)
-    const turnMs = turn?.durationMs ?? spend.turnMs
-    if (turn?.costUsd != null) {
-      this.#byCredential.set(credential, {
-        costUsd: (spend.costUsd ?? 0) + turn.costUsd,
-        turnMs,
-      })
-      return
-    }
-    // Nothing priced this attempt. What earlier ones were priced at stands, and
-    // is now known to be less than the whole.
-    this.#byCredential.set(credential, {
-      costUsd: spend.costUsd ?? (task.turnBegan ? null : 0),
-      turnMs,
-    })
-  }
 }
 
 /**
@@ -511,7 +369,10 @@ export class Core {
 
     let instruction: OutboundInstruction
     let running: RunningTask | null = null
-    let spend = new Ledger()
+    // Born before the Task it belongs to, because the Task is built inside the
+    // try and a Conversation whose Session cannot be worked out fails before
+    // there is one — and that failure is still audited.
+    const attempts = new Attempts(this.#credential)
     try {
       // No lookup and nothing to have gone stale: the Conversation Key is the
       // Session id, one hash apart. The one thing read is which generation of it
@@ -529,19 +390,13 @@ export class Core {
         conversationKey,
         sessionId,
         stopped: false,
-        apiKeySource: null,
-        turnBegan: false,
-        credential: this.#credential,
-        window: null,
+        attempts,
         parked: null,
-        parks: 0,
       }
       running = task
       this.#running.add(task)
 
-      const driven = await this.#drive(task, message.text, reporter)
-      instruction = driven.instruction
-      spend = driven.spend
+      instruction = await this.#drive(task, message.text, reporter)
     } catch (error) {
       // Reached only where roma could not work out which Session the Conversation
       // is on, since everything after that is an ending `#drive` describes.
@@ -558,14 +413,14 @@ export class Core {
     // cannot throw — see `AuditLog.record` — so it also cannot silence a Task.
     // The credential the answer came from, which is the one this Task is filed
     // under. Almost always the only one it used.
-    const answeredOn = spend.answeredOn ?? this.#credential
+    const answeredOn = attempts.answeredOn() ?? this.#credential
     const durationMs = Date.now() - startedAt
     const outcome = outcomeOf(instruction)
-    for (const credential of [answeredOn, ...spend.credentials.filter((c) => c !== answeredOn)]) {
-      const paid = spend.on(credential)
+    for (const credential of [answeredOn, ...attempts.credentials().filter((c) => c !== answeredOn)]) {
+      const paid = attempts.spentOn(credential)
       // The Task's own record is written whatever it spent, including nothing.
       // A second one exists only where a second credential really paid for part
-      // of it — a Shared Window attempt the window cut short before roma reran
+      // of it — a Shared Window Attempt the window cut short before roma reran
       // it on Overflow. Folded into one record it would be money filed under a
       // credential that did not spend it; left out it would be money nobody can
       // account for. Both records name the same Task.
@@ -583,7 +438,7 @@ export class Core {
         durationMs,
         turnMs: paid.turnMs,
         credential,
-        apiKeySource: running?.apiKeySource ?? null,
+        apiKeySource: attempts.apiKeySource(),
       })
     }
 
@@ -595,38 +450,38 @@ export class Core {
   }
 
   /**
-   * Take a Task as far as an ending, however many attempts that takes.
+   * Take a Task as far as an ending, however many Attempts that takes.
    *
    * More than one only when the Shared Window is spent. A blocked Task is not
    * over: ADR-0002 has roma say so, quote the reset time, and keep the Task — so
    * it waits, holding no concurrency slot and no process, and runs again when
    * the window comes back or when somebody takes Overflow.
    *
-   * Every attempt is its own decision about which credential pays. Overflow is
-   * taken for one attempt rather than for the Task, so a Task that takes it and
+   * Every Attempt is its own decision about which credential pays. Overflow is
+   * taken for one Attempt rather than for the Task, so a Task that takes it and
    * then fails again is back on the Shared Window and has to be offered it
    * afresh — which is also what keeps the monthly cap in front of every metered
-   * attempt rather than only the first.
+   * Attempt rather than only the first.
    */
   async #drive(
     task: RunningTask,
     text: string,
     reporter: ProgressReporter,
-  ): Promise<{ instruction: OutboundInstruction; spend: Ledger }> {
-    const { taskId, conversationKey } = task
-    const spend = new Ledger()
+  ): Promise<OutboundInstruction> {
+    const { taskId, conversationKey, attempts } = task
 
     for (;;) {
-      // Read before the attempt and used after it: `task.credential` is where
-      // the *next* attempt's credential is decided, and taking Overflow moves it
-      // while an attempt is in flight.
-      const paidBy = task.credential
+      // Starting the Attempt is what fixes the credential paying for it and
+      // clears the last one's reading of the window. Taking Overflow moves the
+      // *next* Attempt's credential, so it cannot move this one out from under
+      // the bill.
+      const paidBy = attempts.begins()
       let turn: Turn | null = null
       let error: unknown = null
       try {
         turn = await this.#queue.run(
           task.sessionId,
-          () => this.#runTurn(task, text, reporter),
+          () => this.#runTurn(task, paidBy, text, reporter),
           // The one thing roma will go without, and it is the reporter that
           // absorbs the failure: a Channel too broken to carry this is too broken
           // to carry the failure that abandoning the Task would produce, so
@@ -641,29 +496,28 @@ export class Core {
         if (thrown instanceof TurnFailedError) turn = thrown.turn
       }
 
-      // Billed to whoever was paying for *that* attempt. Summed across
-      // credentials instead, a Shared Window attempt the window refused would be
+      // Billed to whoever was paying for *that* Attempt. Summed across
+      // credentials instead, a Shared Window Attempt the window refused would be
       // charged to the metered bill the Task later ran on — money the cap would
       // then refuse other people's work over, and a figure the reply would show
       // as having been spent on a card.
-      spend.add(paidBy, turn, task)
+      attempts.ended(turn)
       // Back to the Shared Window for whatever comes next. Overflow applies to
-      // one attempt: left set, a Task that took it and failed would go on
+      // one Attempt: left set, a Task that took it and failed would go on
       // spending metered money with nobody asked and no cap consulted.
-      task.credential = this.#credential
+      attempts.payWith(this.#credential)
 
       if (error === null && turn !== null) {
         return {
-          instruction: {
-            kind: 'result',
-            taskId,
-            conversationKey,
-            text: turn.text,
-            // Only where somebody chose to spend money, and only what was spent
-            // on that choice.
-            ...(paidBy === 'overflow' ? { overflowCostUsd: spend.on('overflow').costUsd } : {}),
-          },
-          spend,
+          kind: 'result',
+          taskId,
+          conversationKey,
+          text: turn.text,
+          // Only where somebody chose to spend money, and only what was spent
+          // on that choice.
+          ...(paidBy === 'overflow'
+            ? { overflowCostUsd: attempts.spentOn('overflow').costUsd }
+            : {}),
         }
       }
 
@@ -671,25 +525,21 @@ export class Core {
       // has said to stop waiting.
       if (!task.stopped && (await this.#park(task))) continue
 
-      return {
-        // `task.stopped` as well as the Turn's own ending, because a Task
-        // stopped while it was parked has a Turn that failed for whatever the
-        // window did to it — reported as a failure, that reads as roma breaking
-        // rather than as the thing somebody just asked for.
-        instruction:
-          task.stopped || wasStopped(error)
-            ? { kind: 'stopped', taskId, conversationKey }
-            : { kind: 'failure', taskId, conversationKey, reason: reasonFor(error) },
-        spend,
-      }
+      // `task.stopped` as well as the Turn's own ending, because a Task stopped
+      // while it was parked has a Turn that failed for whatever the window did
+      // to it — reported as a failure, that reads as roma breaking rather than
+      // as the thing somebody just asked for.
+      return task.stopped || wasStopped(error)
+        ? { kind: 'stopped', taskId, conversationKey }
+        : { kind: 'failure', taskId, conversationKey, reason: reasonFor(error) }
     }
   }
 
   /**
    * Hold a Task the Shared Window has blocked, and say whether to run it again.
    *
-   * False where the attempt failed for any other reason — the reading is this
-   * attempt's own, cleared before it started, so a failure carrying none is a
+   * False where the Attempt failed for any other reason — the reading is that
+   * Attempt's own, cleared before it started, so a failure carrying none is a
    * failure the window had nothing to do with. False too where the event will
    * not say when the window comes back: a Task parked against a moment that
    * never arrives waits for ever, and nothing else in roma would come and look
@@ -707,37 +557,37 @@ export class Core {
    * silence for a moment and much better than losing the work.
    */
   async #park(task: RunningTask): Promise<boolean> {
-    const window = task.window
-    const resetsAt = window === null ? null : spentUntil(window)
-    if (window === null || resetsAt === null || task.parks >= MAX_PARKS) return false
+    // Whether a wait is owed at all, and on what terms.
+    const park = task.attempts.takePark()
+    if (park === null) return false
 
-    task.parks += 1
     // Offered on what the provider says, not on what roma would like: a valve
     // the account cannot use is a button that spends somebody's attention and
-    // then fails, at the moment they are already waiting.
-    const offered = this.#overflow !== null && overflowOffer(window)
+    // then fails, at the moment they are already waiting. Whether roma has an
+    // Overflow credential at all is the Core's half of it.
+    const offered = this.#overflow !== null && park.overageAllowed
     await this.#tell({
       kind: 'blocked',
       taskId: task.taskId,
       conversationKey: task.conversationKey,
-      resetsAt,
+      resetsAt: park.resetsAt,
       overflowOffered: offered,
     })
 
     const resumption = await new Promise<Resumption>((wake) => {
-      // Never sooner than `MIN_PARK_MS`, because a reset time already in the
-      // past — a provider reporting a stale one, a clock that disagrees — would
-      // otherwise rerun instantly and, on failing again, park again: a Task
-      // spinning as fast as Claude Code can start, announcing itself each time.
-      const waitMs = Math.max(MIN_PARK_MS, resetsAt * 1000 - Date.now())
-      const timer = setTimeout(() => this.#wake(task, 'reset'), waitMs)
+      // Measured here rather than above, so that however long the Channel took
+      // to accept the message is not added to the wait.
+      const timer = setTimeout(
+        () => this.#wake(task, 'reset'),
+        waitMsUntil(park.resetsAt, Date.now()),
+      )
       timer.unref?.()
       task.parked = { wake, timer, offered }
     })
     this.#unpark(task)
 
     // Stopped while it waited. The acknowledgement goes back to saying the Task
-    // is running on the next attempt, which `#runTurn` does for itself.
+    // is running on the next Attempt, which `#runTurn` does for itself.
     return resumption !== 'stopped'
   }
 
@@ -793,7 +643,7 @@ export class Core {
       return true
     }
 
-    task.credential = 'overflow'
+    task.attempts.payWith('overflow')
     this.#wake(task, 'overflow')
     return true
   }
@@ -841,18 +691,17 @@ export class Core {
    * Task, one subscription each, dropped in the `finally` whichever way the Turn
    * ended.
    */
-  async #runTurn(task: RunningTask, text: string, reporter: ProgressReporter): Promise<Turn> {
+  async #runTurn(
+    task: RunningTask,
+    paidBy: CredentialKind,
+    text: string,
+    reporter: ProgressReporter,
+  ): Promise<Turn> {
     // Stopped while it waited its turn. Starting it now would spend a Turn on
     // work somebody has already said they do not want, and then interrupt it.
     if (task.stopped) throw new TaskStopped()
 
-    const { sessionId } = task
-    // Whatever the last attempt was told about the Shared Window is not evidence
-    // about this one. Left in place, its `resetsAt` has already passed, so a
-    // failure here that says nothing about the window would park against a
-    // moment in the past and rerun instantly — for ever, announcing itself every
-    // pass, and reporting a dead process as quota being spent.
-    task.window = null
+    const { sessionId, attempts } = task
     reporter.update({ phase: 'working' })
     const onEvent = (id: string, event: ClaudeEvent): void => {
       if (id !== sessionId) return
@@ -860,12 +709,12 @@ export class Core {
       // is paying, rather than which one roma believes it handed over. One
       // arrives at the start of every Turn, so this is this Turn's own answer.
       const init = readSystemInit(event)
-      if (init !== null) task.apiKeySource = init.apiKeySource
+      if (init !== null) attempts.reported(init.apiKeySource)
       // One of these arrives on every Turn. Kept rather than acted on here: what
-      // it means for a Turn that then failed is `#park`'s judgement, and reading
-      // it in two places is how the two would come to disagree.
+      // it means for a Turn that then failed is `Attempts.takePark`'s judgement,
+      // and reading it in two places is how the two would come to disagree.
       const window = readSharedWindow(event)
-      if (window !== null) task.window = window
+      if (window !== null) attempts.saw(window)
       reporter.observe(event)
     }
     // The window a `/stop` cannot act on by itself: from here until Claude Code
@@ -876,13 +725,15 @@ export class Core {
       if (id !== sessionId) return
       // Also the moment this Task stops being free with certainty: from here it
       // has spent whatever it has spent, whether or not anything ever reports it.
-      task.turnBegan = true
+      attempts.sent()
       if (task.stopped) this.#pool.interrupt(sessionId)
     }
     this.#pool.on('event', onEvent)
     this.#pool.on('turn-start', onTurnStart)
     try {
-      return await this.#pool.send(sessionId, text, task.credential)
+      // The credential this Attempt is billed to, handed down rather than read
+      // again: one Attempt, one bill, and no second place for the two to differ.
+      return await this.#pool.send(sessionId, text, paidBy)
     } finally {
       this.#pool.off('event', onEvent)
       this.#pool.off('turn-start', onTurnStart)

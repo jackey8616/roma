@@ -149,10 +149,23 @@ _Avoid_: the ingress queue (that is the Transport, and a different queue
 entirely), scheduler, worker pool, throttle
 
 **Turn**:
-Claude Code's own unit — one message in, one completed response out. One Task
-drives one Turn.
-_Avoid_: using this interchangeably with Task; they coincide today but belong to
-different systems
+Claude Code's own unit — one message in, one completed response out. An Attempt
+that reaches Claude Code drives one, so a Task drives as many Turns as it made
+Attempts that got that far — and an Attempt stopped before the message went
+drives none at all.
+_Avoid_: using this interchangeably with Task; a Task the Shared Window blocked
+and roma ran again drove more than one, and the two belong to different systems
+regardless
+
+**Attempt**:
+One try at serving a Task, paid for by one credential. The layer between a Task
+and a Turn, and it exists because a Task is not one try: the Shared Window can
+block it, Overflow can be taken on it, and the window can come back — so a Task
+makes between one and three, each with its own credential, its own reading of the
+window, and its own share of the bill. Which credential answered is which one the
+last Attempt was on, and that is what the Task's Audit Record is filed under.
+_Avoid_: retry (that is the Retry Storm's unit, and Claude Code's rather than
+roma's), pass, go
 
 **Retry Storm**:
 A Turn going nowhere but still retrying — a bad credential produces ten retries
