@@ -297,6 +297,23 @@ export interface ChannelAdapter<Event = unknown> {
    * it can only ever answer an offer roma actually made.
    */
   toOverflowTaken?(event: Event): string | null
-  /** Carry out one instruction. Rejecting means it reached nobody. */
+  /**
+   * Carry out one instruction. Rejecting means it reached nobody.
+   *
+   * **A Task's last instruction is its last.** Four kinds end a Task — `result`,
+   * `failure`, `stopped` and `command-outcome` — and no `progress` for that Task
+   * follows one of them, however slow this Channel is about taking what it was
+   * given. So an Adapter keeping an acknowledgement may drop it on one of those
+   * four and does not have to defend against an update arriving afterwards.
+   *
+   * A guarantee rather than an obligation, and the Core is what keeps it:
+   * `ProgressReporter.stop` drops whatever was still queued. Left to the
+   * Adapters it would be a rule every Channel had to be told, and the first one
+   * was written without knowing it — a late update finds no acknowledgement to
+   * edit and posts a second message, underneath the answer.
+   *
+   * `blocked` and `overflow-refused` are **not** endings: they are messages
+   * about a Task that is still going, and updates follow them.
+   */
   deliver(instruction: OutboundInstruction): void | Promise<void>
 }

@@ -119,9 +119,19 @@ export class ProgressReporter {
    * Deliberately waits on nothing. An update the Channel has not finished
    * taking would otherwise hold the result back, and a `deliver` that never
    * settles would hold it back forever — which would turn the one instruction
-   * roma will go without into the one that can silence a Task. Order inside the
-   * acknowledgement is the chain's job either way, and the result is a
-   * different message, so an update landing after it costs nothing.
+   * roma will go without into the one that can silence a Task.
+   *
+   * But not waiting is not the same as letting go. An update already queued
+   * behind one the Channel is still taking is dropped here rather than handed
+   * over late: the acknowledgement is finished with the moment the result is
+   * posted, and an Adapter is entitled to act on that — the one roma has drops
+   * the message it was editing, so a late update has nothing to edit and posts
+   * a new one. A stale "Working…" underneath the answer, on the Channel that is
+   * slow enough to have caused it.
+   *
+   * This is where that has to be decided. Left to the Adapters it is a rule
+   * every Channel has to be told, and the first one was written without knowing
+   * it: `channel-adapter.ts` states the guarantee this keeps.
    */
   stop(): void {
     this.#stopped = true
@@ -194,6 +204,10 @@ export class ProgressReporter {
     this.#sent = progress
     this.#sentAt = Date.now()
     this.#sending = this.#sending.then(async () => {
+      // Queued while the Channel was taking the one before it, and the Task has
+      // ended since. `update` turns new callers away once stopped; this is the
+      // same rule for the ones that were already on the chain.
+      if (this.#stopped) return
       try {
         await this.#deliver(progress)
       } catch {

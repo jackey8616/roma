@@ -697,6 +697,34 @@ describe('telling a Conversation its Task is alive', () => {
     await task
   })
 
+  // The acknowledgement is finished with the moment the answer is posted, and an
+  // Adapter is entitled to act on that: the one roma has drops the message it was
+  // editing, so an update arriving afterwards has nothing to edit and posts a new
+  // message — a stale "Working…" underneath the answer it is reporting on.
+  //
+  // Reachable only against a slow Channel, which is why the Adapter is held here:
+  // an update roma queued behind one still in flight is handed over after the
+  // Turn has ended, and the throttle is 5s against a Turn that can end 85ms after
+  // its last token.
+  it('sends no update after the answer, however slow the Channel is', async () => {
+    const { adapter, start } = newCore()
+    const release = adapter.hold('progress')
+
+    const { task, proc } = await start('hello')
+    // A second update, queued behind the acknowledgement the Channel is still
+    // taking rather than sent.
+    feed(proc, GENERATING.slice(0, -1))
+    await vi.advanceTimersByTimeAsync(THROTTLE)
+    feed(proc, GENERATING.slice(-1))
+    await task
+
+    release()
+    await flush()
+
+    const kinds = adapter.instructions.map((instruction) => instruction.kind)
+    expect(kinds.slice(kinds.indexOf('result'))).toEqual(['result'])
+  })
+
   // The stream marks a tool starting and then says nothing until it finishes.
   // Naming what is running is the only thing that keeps the acknowledgement from
   // going stale for as long as the tool takes.

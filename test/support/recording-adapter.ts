@@ -41,6 +41,8 @@ export class RecordingAdapter implements ChannelAdapter<unknown> {
   readonly capabilities: ChannelCapabilities
   /** Instruction kinds this Channel is currently refusing, and with what. */
   readonly #refusing = new Map<OutboundInstruction['kind'], Error>()
+  /** Instruction kinds this Channel is holding, and what will let each delivery go. */
+  readonly #holding = new Map<OutboundInstruction['kind'], (() => void)[]>()
 
   constructor(capabilities: Partial<ChannelCapabilities> = {}) {
     this.capabilities = {
@@ -53,6 +55,29 @@ export class RecordingAdapter implements ChannelAdapter<unknown> {
   /** Make every delivery of one kind reject, the way an unreachable Channel does. */
   refuse(kind: OutboundInstruction['kind'], error: Error): void {
     this.#refusing.set(kind, error)
+  }
+
+  /**
+   * Make deliveries of one kind hang until the returned function is called.
+   *
+   * A slow Channel, which is the only condition under which the order of
+   * instructions is observable at all: deliveries this Adapter takes
+   * instantly can never queue behind one another, so a test cannot otherwise
+   * reach the state where roma has something to send and the Channel is still
+   * taking the last thing.
+   *
+   * A held instruction is still recorded on arrival, the same as an unheld
+   * one. What matters about a late update is that roma handed it over at all —
+   * a real Adapter acts on it the moment it arrives, and by then the
+   * acknowledgement it meant to edit may be finished with.
+   */
+  hold(kind: OutboundInstruction['kind']): () => void {
+    const held: (() => void)[] = []
+    this.#holding.set(kind, held)
+    return () => {
+      this.#holding.delete(kind)
+      for (const release of held.splice(0)) release()
+    }
   }
 
   toIngress(event: unknown): IngressMessage | null {
@@ -68,7 +93,9 @@ export class RecordingAdapter implements ChannelAdapter<unknown> {
   deliver(instruction: OutboundInstruction): void | Promise<void> {
     const refusal = this.#refusing.get(instruction.kind)
     if (refusal !== undefined) return Promise.reject(refusal)
+    const held = this.#holding.get(instruction.kind)
     this.instructions.push(instruction)
+    if (held !== undefined) return new Promise<void>((release) => held.push(release))
   }
 }
 

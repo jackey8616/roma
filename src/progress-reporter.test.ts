@@ -249,6 +249,37 @@ describe('a Task that is over', () => {
     expect(sent).toEqual([{ phase: 'working' }])
   })
 
+  // Not waiting on an update is not the same as handing it over late. An
+  // acknowledgement is finished with once the result is posted, so an update
+  // that reaches the Channel afterwards has nothing left to edit — the Adapter
+  // roma has posts a new message, underneath the answer.
+  it('drops an update that was queued behind one the Channel was still taking', async () => {
+    const taking: (() => void)[] = []
+    // What the Channel was handed, recorded on the way in. Whether the delivery
+    // then completes is the Channel's business; being handed a late update at all
+    // is what costs the Conversation a second message.
+    const handedOver: TaskProgress[] = []
+    const { reporter } = newReporter({
+      deliver: (progress) => {
+        handedOver.push(progress)
+        return new Promise<void>((release) => taking.push(release))
+      },
+    })
+
+    reporter.update({ phase: 'working' })
+    reporter.update({ phase: 'writing', text: 'half an answer' })
+    await vi.advanceTimersByTimeAsync(INTERVAL)
+    // Two on the chain, and only the first has been handed over: the second is
+    // waiting on the Channel to finish taking it.
+    expect(handedOver).toEqual([{ phase: 'working' }])
+
+    reporter.stop()
+    for (const release of taking.splice(0)) release()
+    await flush()
+
+    expect(handedOver).toEqual([{ phase: 'working' }])
+  })
+
   // Stopping waits on nothing: a Channel that has not finished taking an update
   // must not be able to hold back the result, which is the one message roma
   // owes unconditionally.
