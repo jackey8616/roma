@@ -66,18 +66,44 @@ Sources, both read on 2026-07-29:
 [spaces.messages](https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces.messages)
 and [spaces](https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces).
 
-**Still unverified, and it needs a Workspace:** which fields a Chat interaction
-event actually carries. The reference documents the *resources*, not the event
-payload, so the adapter reads only fields whose absence it can survive — it asks
-whether the space is a DM by two names, and takes the thread from the message
-rather than the threading state from the space. The first real event is what
-closes this.
+**Which fields a Chat interaction event actually carries** was open here, because
+the reference documents the *resources* and not the event payload. The adapter
+therefore reads only fields whose absence it can survive — it asks whether the
+space is a DM by two names, and takes the thread from the message rather than the
+threading state from the space.
 
-The ingress subscriber has since landed (#13) and it does **not** close it. The
-subscriber decodes the envelope — Chat publishes the event as JSON in the Pub/Sub
-message body — and hands the result to the adapter unread, so it verifies nothing
-about the fields inside. What closes this is running against a real Workspace and
-looking at one.
+The ingress subscriber landing (#13) did **not** close it. The subscriber decodes
+the envelope — Chat publishes the event as JSON in the Pub/Sub message body — and
+hands the result to the adapter unread, so it verifies nothing about the fields
+inside.
+
+#### Closed for spaces 2026-07-30, by 0.2.0 running against a real Workspace
+
+Not by anybody reading a payload, which is why it is worth writing down how: the
+space path cannot fail here quietly, so **using it is the observation**.
+
+roma has served @-mentions in a real space, replying in threads. Both readings
+this section makes are load-bearing on that working, and each fails loudly:
+
+- `message.thread.name` **is present and parses.** A space message that yields no
+  thread is dropped outright — `!direct && thread === null` returns no ingress
+  message — so roma would have answered nothing at all.
+- `spaceType` / `type` **evaluate to not-a-DM in a space.** Read the other way the
+  key would be `spaces/{space}` rather than `spaces/{space}/threads/{thread}`, and
+  a key with no `threads/` segment goes out with neither `thread` nor
+  `messageReplyOption` — the reply would arrive at the top of the space instead of
+  in the thread.
+
+So the dangerous direction — a space read as a DM, one session for a whole space
+with everybody's context in everybody else's replies — is **disproved in
+production**. It could not have happened without the thread replies failing first.
+
+**Still unobserved: the DM direction.** No DM has run against a real Workspace, so
+`spaceType == "DIRECT_MESSAGE"` / `type == "DM"` evaluating *true* is still read
+from documentation alone. That one fails in the harmless direction: a DM read as a
+space keys on the per-message thread, so every message becomes its own session —
+context resets visibly on the second message, and nothing leaks between people.
+Tracked separately rather than here.
 
 ### Declared adapter capabilities
 
