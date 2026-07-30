@@ -14,11 +14,31 @@ export interface IngressMessage {
    */
   readonly conversationKey: string
   /**
-   * Whoever sent it, named however the Channel names people. Opaque to the
-   * Core, which never interprets it — it exists so the audit record can say who
-   * asked, since the provider offers no attribution of its own.
+   * Whoever sent it, named however the Channel names people.
+   *
+   * The Core does read it: it goes on the Audit Record, which is the only place
+   * per-user attribution exists at all (ADR-0002), it is named above the message
+   * Claude Code is given, and it comes back to the Adapter on every instruction
+   * so a reply can be addressed. ADR-0009 is why it stopped being opaque —
+   * everyone in a Chat thread shares one Session, so a Session that cannot tell
+   * its Callers apart is one long message from nobody in particular.
+   *
+   * Still not *interpreted*: nothing in the Core parses it, compares it, or
+   * decides anything by it. A Channel that names people by email and one that
+   * names them by opaque id both work, because everything here does with it is
+   * carry it and print it.
    */
   readonly caller: string
+  /**
+   * The same person as a human would read them, or null where the Channel had no
+   * name to give.
+   *
+   * Beside `caller` rather than instead of it: the id is what a reply is
+   * addressed with and what tells two people of the same name apart, and the
+   * name is the half worth reading. Required rather than optional, so that a
+   * Channel with no name for somebody says so instead of forgetting to.
+   */
+  readonly callerName: string | null
   readonly text: string
 }
 
@@ -91,7 +111,7 @@ export type TaskProgress =
  * of its own to keep up to date, so the Conversation alone does not identify a
  * message to edit.
  */
-interface TaskAddress {
+export interface TaskAddress {
   /**
    * Unique to one Task, and the same on every instruction that Task produces.
    *
@@ -102,14 +122,32 @@ interface TaskAddress {
    */
   readonly taskId: string
   readonly conversationKey: string
+  /**
+   * Whose Task this is, exactly as the ingress message named them.
+   *
+   * Here because an Adapter cannot work it out for itself. The Task id is minted
+   * in the Core, after `toIngress` has returned, so an Adapter holds no link
+   * between the event it read and the instruction it is later handed; and the
+   * Conversation Key is not that link either, since one Conversation can have
+   * two Tasks in flight — and where a Channel lets several people share one, the
+   * two belong to two different people.
+   *
+   * On every instruction rather than only the ones that end a Task, so that an
+   * Adapter never has to ask what kind of thing it is looking at before it knows
+   * who it is for. That is the same reason `taskId` is here.
+   */
+  readonly caller: string
+  /** The readable half of the same person, or null. See `IngressMessage`. */
+  readonly callerName: string | null
 }
 
 /**
  * One thing the Core asks a Channel to do.
  *
- * Deliberately short. It says what happened, not how it should look: an Adapter
- * decides how a failure is rendered on its Channel, and the Core never writes
- * prose it cannot see the result of.
+ * Deliberately short. It says what happened and who it is for, never how either
+ * should look: an Adapter decides how a failure is rendered on its Channel and
+ * how a person is addressed on it, and the Core never writes prose it cannot see
+ * the result of.
  */
 export type OutboundInstruction = TaskAddress &
   (

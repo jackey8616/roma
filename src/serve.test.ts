@@ -28,7 +28,7 @@ const KEY = 'conversation-one'
 
 /** One ingress message, as the recording Channel's events already are. */
 function said(text: string, conversationKey = KEY) {
-  return { conversationKey, caller: 'ada', text }
+  return { conversationKey, caller: 'ada', callerName: 'Ada', text }
 }
 
 let running: Serving[] = []

@@ -20,6 +20,7 @@ function entry(overrides: Partial<UnstampedRecord> = {}): UnstampedRecord {
   return {
     taskId: 'task-one',
     caller: 'someone',
+    callerName: 'Someone',
     sessionId: 'session-one',
     outcome: 'result',
     costUsd: 0.0103129,
@@ -88,6 +89,7 @@ describe('what a Task leaves behind', () => {
         at: '2026-07-29T10:00:00.000Z',
         taskId: 'task-one',
         caller: 'someone',
+        callerName: 'Someone',
         sessionId: 'session-one',
         outcome: 'result',
         costUsd: 0.0103129,
@@ -198,6 +200,25 @@ describe('reading records that a machine got half way through writing', () => {
     )
 
     expect(log.totalFor(MONTH)).toMatchObject({ tasks: 0, unreadable: 1 })
+  })
+
+  // Every record roma wrote before ADR-0009 has no `callerName` on it, and the
+  // month's total is the figure the Overflow cap is enforced against. Reading
+  // those as unreadable would reset the month to whatever has been written since
+  // and let the cap through — which is exactly why `callerName` went beside
+  // `caller` rather than inside it.
+  it('reads a record written before the caller had a name on it', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    const { callerName, ...beforeTheField } = entry()
+    void callerName
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ at: '2026-07-29T10:00:00.000Z', ...beforeTheField })}\n`,
+    )
+
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, costUsd: 0.0103129, unreadable: 0 })
+    expect(log.readMonth(MONTH)[0]?.caller).toBe('someone')
   })
 })
 

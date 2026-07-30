@@ -32,6 +32,26 @@ type NotProgress<T> = T extends { readonly kind: 'progress' } ? never : T
 export type TaskOutcome = NotProgress<OutboundInstruction>
 
 /**
+ * How Chat says "this message is for you", and the space that separates it from
+ * what follows.
+ *
+ * `<users/{user}>` is Google's documented syntax and a Conversation Key is not
+ * involved: `caller` is already a Chat user resource name, so the mention is the
+ * identity in angle brackets and nothing else.
+ * https://developers.google.com/workspace/chat/identify-reference-users
+ *
+ * It earns its noise in a thread, which is the ordinary case: everybody there
+ * shares one Conversation, so two acknowledgements can sit side by side
+ * mutating for minutes with nothing to say which is whose, and an answer
+ * quoted months later has no owner. A DM gets one too — the Adapter could tell
+ * from the Conversation Key and deliberately does not, because a rule with an
+ * exception in it is a rule somebody has to remember.
+ */
+function addressedTo(caller: string): string {
+  return `<${caller}> `
+}
+
+/**
  * How a Task's outcome reads in Chat.
  *
  * Wording is the Channel's business: the Core hands over facts — stopped,
@@ -42,14 +62,22 @@ export type TaskOutcome = NotProgress<OutboundInstruction>
  *
  * One message per string, in the order they should be posted. More than one when
  * what has to be said is longer than Chat will take.
+ *
+ * The Caller is mentioned on the **first** message only, and inside the text
+ * rather than added to it afterwards: `split` cuts at Chat's 4096-character
+ * limit, so a mention bolted on after the split would push the first message
+ * over it and Chat would refuse the whole answer. Only the first, because each
+ * of these is a separate post and a long answer should not notify somebody once
+ * per 4096 characters of it.
  */
 export function outcomeMessages(instruction: TaskOutcome): string[] {
+  const to = addressedTo(instruction.caller)
   switch (instruction.kind) {
     case 'result': {
       // Its own message or messages, never the acknowledgement edited one last
       // time — the rule ADR-0003 makes unconditional, because the result is what
       // people search for and quote months later.
-      const messages = split(instruction.text)
+      const messages = split(to, instruction.text)
       // ADR-0002 requires the spend shown in the reply, and only where somebody
       // chose to spend it. Its own message rather than appended to the answer:
       // the answer is what gets quoted later, and a price tag inside it would be
@@ -64,19 +92,19 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
       // Turn's own text, and that has no more of a length limit than an answer
       // does. Posted whole, Chat would refuse it and the Conversation would be
       // told nothing at all about a Task that is already dead.
-      return split(instruction.reason)
+      return split(to, instruction.reason)
     case 'stopped':
-      return ['Stopped.']
+      return [`${to}Stopped.`]
     case 'command-outcome':
-      return [commandText(instruction.command, instruction.carriedOut)]
+      return [to + commandText(instruction.command, instruction.carriedOut)]
     case 'blocked':
-      return [blockedText(instruction.resetsAt)]
+      return [to + blockedText(instruction.resetsAt)]
     case 'overflow-refused':
       // What they can still do is the point of the sentence: the Task is not
       // over, and telling them only that they were refused would read as one
       // that is.
       return [
-        `Overflow is capped at $${money(instruction.capUsd)} a month and this month has ` +
+        `${to}Overflow is capped at $${money(instruction.capUsd)} a month and this month has ` +
           `spent $${money(instruction.spentUsd)}, so it is off until the month turns. ` +
           `Your task is still waiting for the shared quota to reset.`,
       ]
@@ -117,7 +145,20 @@ function money(usd: number): string {
  * runs, so it is read at a glance and never read twice — everything worth
  * keeping is in the result.
  */
-export function progressText(progress: TaskProgress): string {
+export function progressText(caller: string, progress: TaskProgress): string {
+  const to = addressedTo(caller)
+  return to + phrase(progress, MAX_TEXT - to.length)
+}
+
+/**
+ * The acknowledgement without its mention, inside what is left of the limit.
+ *
+ * The budget is passed in rather than read off `MAX_TEXT` because the mention is
+ * already spent out of it: a partial answer cut to the full limit and then
+ * prefixed is a message Chat refuses, and the acknowledgement is the message
+ * whose whole job is to keep arriving.
+ */
+function phrase(progress: TaskProgress, budget: number): string {
   switch (progress.phase) {
     case 'queued':
       // The count includes this Task, so 1 means nothing is ahead of it. Said as
@@ -135,7 +176,7 @@ export function progressText(progress: TaskProgress): string {
       // capture this was designed against.
       return `Running ${progress.tool}…`
     case 'writing':
-      return tail(progress.text)
+      return tail(progress.text, budget)
   }
 }
 
@@ -154,9 +195,9 @@ function commandText(command: Command, carriedOut: boolean): string {
  * Task is alive. Frozen at the first 4096 characters it would stop moving
  * halfway through a long answer, which is exactly what a dead Task looks like.
  */
-function tail(text: string): string {
-  if (text.length <= MAX_TEXT) return text
-  return `…${text.slice(-(MAX_TEXT - 1))}`
+function tail(text: string, budget: number): string {
+  if (text.length <= budget) return text
+  return `…${text.slice(-(budget - 1))}`
 }
 
 /**
@@ -166,14 +207,19 @@ function tail(text: string): string {
  * space — a paragraph boundary is where a reader would have broken it too, and
  * cutting mid-word makes a long answer read as corrupted rather than as
  * continued.
+ *
+ * The prefix goes on the first message and is counted against the limit rather
+ * than added after it, so that mentioning the Caller cannot be what makes Chat
+ * refuse an answer that would otherwise have fitted.
  */
-function split(text: string): string[] {
+function split(prefix: string, text: string): string[] {
   // A Turn can finish having written nothing. Posting nothing at all would make
-  // it indistinguishable from a Task that died.
-  if (text.trim() === '') return ['(roma finished without saying anything.)']
+  // it indistinguishable from a Task that died — and it is still somebody's
+  // Task, so it is still addressed to them.
+  if (text.trim() === '') return [`${prefix}(roma finished without saying anything.)`]
 
   const messages: string[] = []
-  let rest = text
+  let rest = prefix + text
   while (rest.length > MAX_TEXT) {
     const window = rest.slice(0, MAX_TEXT)
     const at = breakPoint(window)

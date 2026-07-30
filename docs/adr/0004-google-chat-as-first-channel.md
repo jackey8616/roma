@@ -111,6 +111,11 @@ Two consequences worth naming, because neither is obvious from the core side:
 
 ### Caller identity
 
+**Superseded by ADR-0009**, which carries the Caller further than this section
+allows and reads the display name this section does not. What follows is the
+original decision; the audit record remains the only place per-user attribution
+exists, and it is no longer the only place the Caller goes.
+
 The adapter passes the Chat sender through as the caller identity on every
 ingress message, which is what ADR-0003's audit record logs as "who". Per ADR-0002
 there is no per-user attribution at the provider, so this log is the only place

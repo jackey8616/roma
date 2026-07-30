@@ -201,12 +201,21 @@ Every commit, PR and comment is the App's. The person who asked is recorded in
 two places, neither of them the author field.
 
 **On the artifact**: a `Requested-by:` trailer, in the Channel's own terms
-(`Requested-by: alice@example.com (google-chat)`), appended unconditionally by a
+(`Requested-by: Ada <users/17> (google-chat)`), appended unconditionally by a
 `prepare-commit-msg` hook via `core.hooksPath`. Not `commit.template`, which
 applies only to interactive commits with no `-m`, and the agent always passes
 `-m`. Like the helper, this is for honesty and not for enforcement — an agent
 with a shell can defeat it, and the point is that the ordinary path records the
 truth.
+
+**Amended 2026-07-30 by ADR-0009**, which corrects the address rather than the
+decision. The trailer originally read `Requested-by: alice@example.com
+(google-chat)`, and that address cannot be obtained: Chat's sender field carries
+no email, so an address would mean the Directory API — a scope, a lookup per
+message, and the cached table roma does without. What roma holds is the Chat
+resource name and, usually, a display name, and the trailer now says so. Both
+halves, because the id is what stays unique when a display name changes; the name
+may be absent, and the trailer is then the id alone. Still unimplemented.
 
 The gitconfig and hook are rewritten at the start of each Task, because a Chat
 space is many people sharing one Conversation and therefore one Session, so the
