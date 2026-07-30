@@ -67,7 +67,44 @@ fi
 echo "the gh on PATH is roma's Credential Shim"
 
 # ---------------------------------------------------------------------------
-# 3. An empty environment is refused, out loud, naming what it cannot guess.
+# 3. The `gh` in the image is built for the architecture the image claims to be.
+#
+# The Dockerfile fetches one tarball and checks it against one hardcoded sha256,
+# on the grounds that only one architecture is built (ADR-0008). Nothing in the
+# Dockerfile enforces that: the workflows pin `platforms: linux/amd64`, and a bare
+# `docker build` on a developer's machine pins nothing — so on Apple Silicon it
+# produces an **arm64 image carrying the amd64 `gh`**, which then runs only
+# because Docker Desktop emulates it. Measured, on exactly that machine: the
+# version check above passed while `e_machine` said x86-64.
+#
+# That image would fail on a real arm64 host with "exec format error", and it is
+# not the image that ships — which is the whole reason to build one locally. So
+# the coherence is asserted rather than the platform: whichever architecture the
+# image is, the binary in it has to match. `--version` succeeding is not that
+# check, as this very build proved.
+#
+# `e_machine`, two bytes at offset 18 of the ELF header, is the only place the
+# answer is not somebody's label.
+# ---------------------------------------------------------------------------
+declared_arch="$(docker image inspect --format '{{ .Architecture }}' "${image}")"
+machine="$(docker run --rm --entrypoint sh "${image}" \
+  -c 'od -An -tx1 -j18 -N2 /usr/local/lib/roma/gh' | tr -d ' \n')"
+
+case "${machine}" in
+  '3e00') gh_arch='amd64' ;;
+  'b700') gh_arch='arm64' ;;
+  *) gh_arch="unrecognised (e_machine=${machine})" ;;
+esac
+
+if [ "${declared_arch}" != "${gh_arch}" ]; then
+  echo "the image says it is ${declared_arch} and its gh is ${gh_arch}" >&2
+  echo "build it for one architecture: docker build --platform linux/amd64 ..." >&2
+  exit 1
+fi
+echo "the image and its gh are both ${declared_arch}"
+
+# ---------------------------------------------------------------------------
+# 4. An empty environment is refused, out loud, naming what it cannot guess.
 #
 # This proves more than it looks. Node runs; `dist/` is complete; ESM resolution
 # works; both runtime dependencies import, since they are top-level static

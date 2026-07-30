@@ -33,6 +33,16 @@ ARG CLAUDE_CODE_VERSION=2.1.220
 # rather than a checksum fetched from the same place as the tarball, which only
 # detects corruption. One architecture is built here, so one checksum is the
 # whole maintenance cost.
+#
+# That architecture is **amd64**, and this file does not enforce it — the
+# workflows do, with `platforms: linux/amd64`. A bare `docker build` on an Apple
+# Silicon machine therefore produces an arm64 image carrying this amd64 binary,
+# which runs only because Docker Desktop emulates it and would fail on a real
+# arm64 host. Not defended here with `FROM --platform=`, because that would force
+# every local build through emulation for `npm ci` and `tsc` as well; defended in
+# `scripts/verify-image.sh`, which refuses an image whose `gh` disagrees with the
+# architecture it claims. Build locally with `--platform linux/amd64` to get the
+# image that ships.
 ARG GH_VERSION=2.96.0
 ARG GH_SHA256=83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60
 

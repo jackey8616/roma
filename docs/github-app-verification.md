@@ -210,6 +210,47 @@ substituted, so the default is what the real `git` is pointed at.
 The lesson is the general one and worth keeping: a test that constructs the thing
 production constructs, rather than using it, verifies the test.
 
+## The image, built at last
+
+`docker build` was not runnable in either environment #60 was developed in, so the
+Dockerfile had only ever been read. Built now, and `scripts/verify-image.sh` passes
+against it: the pinned Claude Code is what got installed, the real `gh` is 2.96.0
+at `/usr/local/lib/roma/gh`, what answers to `gh` on `PATH` is the Credential Shim,
+and an empty environment is refused naming both durable paths and the GitHub App.
+
+**It found one thing, and only because the build happened on an arm64 machine.**
+The Dockerfile fetches `gh_<version>_linux_amd64.tar.gz` against one hardcoded
+sha256, on ADR-0008's grounds that only one architecture is built. Nothing in the
+Dockerfile enforces that — the workflows do, with `platforms: linux/amd64` — so a
+bare `docker build` on Apple Silicon produced an **arm64 image carrying the amd64
+`gh`**. It ran, because Docker Desktop emulates it, and `--version` reported 2.96.0
+quite happily. `e_machine` in the ELF header said x86-64.
+
+On a real arm64 host that image's `gh` would fail with "exec format error", and it
+is not the image that ships — which is the entire reason to build one locally. So
+`verify-image.sh` now asserts the coherence rather than the platform: whichever
+architecture the image claims, the binary in it has to match. A `--version` that
+succeeds is not that check, as this build demonstrated.
+
+The platform is deliberately *not* pinned in the Dockerfile. Doing so would push
+every local build's `npm ci` and `tsc` through emulation to defend against a
+mistake the script now names in one line. Trying it confirmed the cost: an
+emulated `--platform linux/amd64` build fails at `apt-get`, whose GPG verification
+does not survive the emulation, while the native build of the same lines succeeds.
+So the amd64 image remains something only CI's native runners produce — which they
+already do.
+
+Two things the build settled that no question had asked, both of them the parts of
+the Dockerfile most likely to be quietly wrong:
+
+- **The `gh` checksum line works.** The tarball downloaded, `sha256sum --check
+  --strict` accepted it, `--strip-components=2` put the binary where the Shim looks
+  for it, and `--version` ran.
+- **`/run/roma` is usable by the user roma runs as.** Owned `node:node`, mode
+  `0700`, and a Unix domain socket binds in it as uid 1000 — which is the actual
+  thing `ShimServer.listen` does, and the one that would have turned every
+  credential request into a boot failure had `USER node` come before the `chown`.
+
 ## What was measured before any of this
 
 One thing, and it is the protocol everything else hangs off. On `git` 2.43.0,
