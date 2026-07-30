@@ -18,5 +18,5 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": ["src", "test", "vitest.config.ts", "vitest.seam2.config.ts"]
+  "include": ["src", "test", "scripts", "vitest.config.ts", "vitest.seam2.config.ts"]
 }

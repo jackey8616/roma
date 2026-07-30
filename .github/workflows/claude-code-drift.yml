@@ -1,0 +1,113 @@
+name: claude-code-drift
+
+# Does anybody know the pin has fallen behind?
+#
+# `Dockerfile` pins Claude Code exactly, and ADR-0007 makes moving that pin a
+# re-verification event a human does on purpose rather than a dependency bump —
+# which is why `.github/dependabot.yml` is the base image and the actions only.
+# What was missing is anybody finding out. Until this file, the answer was that
+# somebody happened to look.
+#
+# This reports and does nothing else. It never edits the pin, and it opens no pull
+# request: a bump PR would read as routine maintenance while silently invalidating
+# every measurement in `docs/`, and CI would go green, because seam 2 does not run
+# there. A green check on a diff that moves the pin is worse than no check at all —
+# it launders an unverified claim into an approved one.
+#
+# Weekly, matching the cadence `dependabot.yml` uses. Daily would re-report the
+# same declined fact seven times as often, and a check people mute is a check that
+# has stopped watching. `workflow_dispatch` is here because a scheduled workflow
+# cannot otherwise be run before its first Monday, and because a human who wants
+# the answer now should not have to wait for one.
+on:
+  schedule:
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+# `issues: write` is the whole of what this needs, and it is used to file one
+# report. No `contents: write`: nothing here commits, and the pin is not this
+# workflow's to move. No Shared Window token — `src/packaging.test.ts` fails if any
+# workflow in this repository is ever handed one.
+permissions:
+  contents: read
+  issues: write
+
+# One at a time, and not cancelled. A scheduled run and a dispatched one that
+# overlapped would both look for an existing report, find none, and file two.
+concurrency:
+  group: claude-code-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: is the pin still the published version?
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # For `tsx`, which is what runs the check. The alternative — the comparison
+      # inline in this file — would put the parsing of the `ARG` line somewhere the
+      # free run cannot reach it, and the failure this check most plausibly dies of
+      # is a regex that quietly stops matching.
+      - run: npm ci
+
+      # Reads the pin out of the `Dockerfile`, asks the registry, and sets
+      # `drift`. It ends the run red rather than quiet on an unresolvable pin, an
+      # unparseable `ARG`, a missing `Dockerfile` or a failed lookup — only a
+      # successful comparison is allowed to be silent, and only when the versions
+      # match.
+      - id: check
+        run: npm run check:claude-code-drift
+
+      - name: open or update the drift report
+        if: steps.check.outputs.drift == 'true'
+        # Through the environment rather than interpolated into the script, the way
+        # `release.yml` passes a refname: a title built from a version is a title
+        # that could contain a quote, and `--title '${{ … }}'` is a step that runs
+        # whatever closed it.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TITLE: ${{ steps.check.outputs.title }}
+          BODY_FILE: ${{ steps.check.outputs.body_file }}
+          LABEL: claude-code-drift
+        run: |
+          set -euo pipefail
+
+          # Created here rather than assumed to exist. The label is how a later run
+          # finds this report again, so a first run in a repository that has never
+          # had one must not fail on it — and `--force` makes the step idempotent
+          # rather than conditional.
+          gh label create "${LABEL}" --force \
+            --color 'BFD4F2' \
+            --description 'The pinned Claude Code has fallen behind the published one (notify-only)'
+
+          # Open ones only, and the oldest of those, so repeated runs converge on a
+          # single report rather than on whichever was created last.
+          #
+          # A closed report is deliberately not remembered. Closing one is how a
+          # version gets declined, and while that version is still what npm
+          # publishes the next run files a fresh report — which is the tedium #52
+          # names and answers: "if declining one becomes tedious enough that people
+          # mute the check, that is the signal to revisit the cadence, not to add
+          # automation that decides for them". Suppressing on a close would also
+          # leave a live drift with nothing saying so, green and unwatched, which is
+          # the failure this check exists to prevent.
+          open_report="$(gh issue list --label "${LABEL}" --state open --limit 100 --json number --jq 'sort_by(.number) | .[0].number // empty')"
+
+          if [ -n "${open_report}" ]; then
+            # Edited rather than commented on. The body is the current state of the
+            # drift, and a thread of "and now 2.1.222" comments is the shape that
+            # gets muted; the title carries the new version, which is what shows in
+            # a list of issues.
+            gh issue edit "${open_report}" --title "${TITLE}" --body-file "${BODY_FILE}"
+            echo "Updated the open drift report: #${open_report} — ${TITLE}" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            url="$(gh issue create --title "${TITLE}" --body-file "${BODY_FILE}" --label "${LABEL}")"
+            echo "Filed a drift report: ${url}" >> "${GITHUB_STEP_SUMMARY}"
+          fi

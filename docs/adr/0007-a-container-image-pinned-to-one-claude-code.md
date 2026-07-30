@@ -28,6 +28,13 @@ nowhere to meet. It was found by reading #41, not by any check. `src/adr-numberi
 now fails on a repeated number, which is the narrow thing that was actually
 missing.
 
+**Amended again 2026-07-30**, to the accepted risks rather than to the decision.
+"Nothing watches for Claude Code going stale" stopped being true when #52 landed
+`.github/workflows/claude-code-drift.yml`; the bullet is struck through with what
+replaced it, and nothing above it changes — the check reports the pin has fallen
+behind and refuses to move it, which is this ADR's position rather than a
+softening of it.
+
 The row was never argued. The other two rows carry a paragraph of reasoning each;
 this one carried four words and an inherited assumption. What is corrected below
 is therefore an oversight rather than an overturned decision, which is why this is
@@ -212,12 +219,44 @@ It runs as a non-root user, on `node:22-slim`.
 - **Nothing here narrows ADR-0003's other accepted risk.** Any member of any
   connected channel can still direct Claude Code to do anything inside the
   container.
-- **Nothing watches for Claude Code going stale.** The pin will fall behind and
+- **~~Nothing watches for Claude Code going stale.~~** The pin will fall behind and
   nothing will say so. Accepted here rather than overlooked: an automated bump
   pull request would look like routine maintenance while silently invalidating six
   documents' worth of evidence, and CI would pass. `.github/dependabot.yml` is
   therefore the base image and the actions only. A notify-only drift check is
   worth its own ticket.
+
+  **Amended 2026-07-30 — something watches now (#52), and the decision above is
+  unchanged by it.** `.github/workflows/claude-code-drift.yml` compares the `ARG`
+  against the `latest` dist-tag of `@anthropic-ai/claude-code` weekly and, when
+  they differ, files a single issue naming both versions, saying that moving the
+  pin means re-running seam 2 against the Shared Window, and listing every file in
+  the working tree that names the pinned version — generated with `grep`, so the
+  size of the re-verification is legible rather than guessed.
+
+  It is notify-only in the strict sense: it never edits the pin and it opens no
+  pull request, for the reason the bullet already gives. It reads the pin out of
+  the `Dockerfile` rather than carrying a third copy of the number, and an
+  unresolvable pin, an unparseable `ARG`, a missing `Dockerfile` or a failed
+  registry lookup ends the run **red** — only a successful comparison is allowed
+  to be quiet. A drift check that swallowed its own failures would pass forever
+  while watching nothing, and a green tick reads as "the pin is current".
+
+  **This makes upgrading visible, not safe.** The re-verification this ADR asks
+  for is still a human spending Shared Window money and reading a behavioural
+  diff. What is gone is the part where nobody knew there was a decision to make.
+
+  Two things it deliberately does not do. It has no opinion about *whether* to
+  move, and it has no memory: an open report is edited in place, but a closed one
+  is not remembered, so a version that is still what npm publishes is reported
+  again next week. That is #52's own answer to the tedium — the cadence is the
+  thing to change, not the check's willingness to keep saying so — and the
+  alternative leaves a live drift with nothing announcing it, green and unwatched.
+
+  One thing it cannot do: GitHub disables a `schedule` trigger in a repository with
+  no activity for 60 days, so the check can stop watching without saying so.
+  `workflow_dispatch` is the manual way to ask, and the reason it is there. Nothing
+  watches the watcher.
 - **The release workflow cannot be tested before it is merged.** It fires on
   tags, and tags come after merge. The first `0.1.0` is its first real run; if it
   fails, fix it and tag again.

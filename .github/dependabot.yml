@@ -8,8 +8,10 @@
 # would pass, because seam 2 does not run there. Moving that pin is a
 # re-verification event a human does on purpose (ADR-0006).
 #
-# Nothing watches for it going stale either. The pin will fall behind and nothing
-# will say so. A notify-only drift check is worth its own ticket.
+# Something does watch for it going stale, and deliberately not from here:
+# `.github/workflows/claude-code-drift.yml` compares the `ARG` against the
+# published version weekly and files a notify-only issue. It opens no pull
+# request, because a bump PR is the artifact this file exists to refuse.
 version: 2
 updates:
   - package-ecosystem: docker

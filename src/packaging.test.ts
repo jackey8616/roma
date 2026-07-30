@@ -107,12 +107,20 @@ function dockerfile(): string {
 }
 
 /**
- * Everything CI executes: the workflows, and the scripts they hand work to.
+ * Everything CI executes: the workflows, and the whole of `scripts/`.
  *
- * `scripts/` is here because both workflows delegate their image checks to it,
- * and a guard that stopped at the YAML would be a fence with a gate in it —
- * `docker run -e …` inside a shell script spends money exactly as well as a
- * workflow step does.
+ * `scripts/` is here because the workflows delegate to it, and a guard that
+ * stopped at the YAML would be a fence with a gate in it — `docker run -e …`
+ * inside a shell script spends money exactly as well as a workflow step does.
+ *
+ * The sweep is deliberately unfiltered rather than limited to what a workflow
+ * names, so a script added and wired up later cannot arrive outside the guard.
+ * The price is that it also reads files CI hands no work to, `*.test.ts` under
+ * `scripts/` among them — so the SEAM_2 patterns below constrain the *prose* of
+ * those tests as well as the commands of the real scripts. That is a live
+ * constraint, not a hypothetical: `scripts/claude-code-drift.test.ts` passes
+ * because it writes "seam 2" rather than `test:seam2`. Narrowing the filter would
+ * buy that freedom back and reopen the gate, so the prose pays instead.
  */
 function automation(): { file: string; source: string }[] {
   return [
