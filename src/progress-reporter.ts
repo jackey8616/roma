@@ -81,8 +81,15 @@ export class ProgressReporter {
    * and removes the race entirely.
    */
   #sending: Promise<void> = Promise.resolve()
-  /** Everything the Turn has written so far, accumulated across its deltas. */
-  #text = ''
+  /**
+   * How much the Turn has written so far, summed across its deltas.
+   *
+   * The length rather than the prose. Nothing downstream shows the answer as it
+   * is written — ADR-0010 — so accumulating it would be holding a second copy of
+   * a whole Turn's output (17706 characters, in the capture this was designed
+   * against) for a reader that does not exist.
+   */
+  #characters = 0
 
   constructor({ deliver, updates = true }: ProgressReporterOptions) {
     this.#deliver = deliver
@@ -151,8 +158,8 @@ export class ProgressReporter {
   #read(event: ClaudeEvent): TaskProgress | null {
     const text = readTextDelta(event)
     if (text !== '') {
-      this.#text += text
-      return { phase: 'writing', text: this.#text }
+      this.#characters += text.length
+      return { phase: 'writing', characters: this.#characters }
     }
     const estimatedTokens = readThinkingTokens(event)
     if (estimatedTokens !== null) return { phase: 'thinking', estimatedTokens }
@@ -238,6 +245,9 @@ function saysTheSame(a: TaskProgress, b: TaskProgress | null): boolean {
     case 'tool':
       return b.phase === 'tool' && b.tool === a.tool
     case 'writing':
-      return b.phase === 'writing' && b.text === a.text
+      // Why `writing` carries a number at all. Compared on the phase alone,
+      // every moment of a generating Turn would say the same thing as the last
+      // and the Acknowledgement would sit still for all 72 seconds of it.
+      return b.phase === 'writing' && b.characters === a.characters
   }
 }
