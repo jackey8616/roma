@@ -1,5 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { writeFileSync } from 'node:fs'
 import { join, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuditLog, monthOf } from './audit-log.js'
@@ -16,8 +15,9 @@ import { sessionIdFor } from './session-id.js'
 import { SessionPool } from './session-pool.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { TaskQueue } from './task-queue.js'
-import { FakeClaude, flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
+import { flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
+import { romaFixture, teardownRoma, type RomaFixture } from '../test/support/roma-fixture.js'
 import {
   apiRetries,
   feed,
@@ -94,24 +94,28 @@ const NOW = RESETS_AT * 1000 - UNTIL_RESET
 const MONTH = monthOf(new Date(NOW))
 
 let pools: SessionPool[] = []
-let workRoots: string[] = []
+let fixtures: RomaFixture[] = []
 
 function newCore({
-  workRoot = mkdtempSync(join(tmpdir(), 'roma-core-')),
-  auditDir = mkdtempSync(join(tmpdir(), 'roma-core-audit-')),
+  workRoot: existingWorkRoot,
   overflow = { monthlyCapUsd: 100 },
   capabilities,
   ...options
 }: {
+  /** An existing work root, for the one test that stands a second Core up over one. */
   workRoot?: string
-  auditDir?: string
   /** Null for a deployment with no metered credential at all. */
   overflow?: { monthlyCapUsd: number } | null
   retryBudget?: RetryBudget
   capabilities?: Partial<ChannelCapabilities>
 } = {}) {
-  const claude = new FakeClaude({ exitOnKill: true })
-  workRoots.push(workRoot, auditDir)
+  const fixture = romaFixture(
+    'core',
+    existingWorkRoot === undefined ? {} : { workRoot: existingWorkRoot },
+  )
+  fixtures.push(fixture)
+  const { claude, procFor, procIn } = fixture
+  const { workRoot, auditRoot } = fixture.dirs
   const pool = new SessionPool({
     workRoot,
     envs: {
@@ -128,7 +132,7 @@ function newCore({
   const queue = new TaskQueue()
   const sessions = new SessionGenerations({ workRoot })
   const adapter = new RecordingAdapter(capabilities)
-  const audit = new AuditLog({ auditRoot: auditDir })
+  const audit = new AuditLog({ auditRoot })
   const log: CoreLogRecord[] = []
   const core = new Core({
     channel: adapter,
@@ -158,7 +162,7 @@ function newCore({
   ): Promise<void> => {
     const task = core.handle(ingress(text, key))
     await flush()
-    feed(claude.processFor(join(workRoot, session)), events)
+    feed(procIn(session), events)
     await task
   }
 
@@ -170,10 +174,23 @@ function newCore({
     const task = core.handle(ingress(text, key))
     task.catch(() => {})
     await flush()
-    return { task, proc: claude.processFor(join(workRoot, sessionIdFor(key))) }
+    return { task, proc: procFor(key) }
   }
 
-  return { adapter, audit, claude, core, log, pool, queue, sessions, workRoot, say, start }
+  return {
+    adapter,
+    audit,
+    claude,
+    core,
+    log,
+    pool,
+    queue,
+    sessions,
+    workRoot,
+    procFor,
+    say,
+    start,
+  }
 }
 
 /**
@@ -265,11 +282,10 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
-  for (const pool of pools) await pool.shutdown()
+  await teardownRoma(pools, fixtures.flatMap(({ roots }) => roots))
   pools = []
+  fixtures = []
   vi.useRealTimers()
-  for (const root of workRoots) rmSync(root, { recursive: true, force: true })
-  workRoots = []
 })
 
 describe('finding the Session a message belongs to', () => {
@@ -389,7 +405,7 @@ describe('what the Channel is asked to post', () => {
   // received — so whoever handed it in has to hear about it.
   it('does not swallow an instruction the Channel never carried out', async () => {
     const shared = newCore()
-    const { claude, workRoot } = shared
+    const { procFor } = shared
     // A second Core over the same pool and queue: one Core per Channel is what
     // keeps the Core free of Channel identity, and both are shared between them.
     const core = coreOver(
@@ -401,7 +417,7 @@ describe('what the Channel is asked to post', () => {
 
     const task = core.handle(ingress('hello'))
     await flush()
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    feed(procFor(KEY), OK)
 
     await expect(task).rejects.toThrow('the Channel is down')
   })
@@ -411,12 +427,12 @@ describe('handling one Conversation one Task at a time', () => {
   // Forced, not chosen: two processes writing one Session file corrupt it. Two
   // messages sent in quick succession therefore queue rather than race.
   it('does not send a second message while the first Task is still running', async () => {
-    const { claude, core, workRoot } = newCore()
+    const { claude, core, procFor } = newCore()
 
     const first = core.handle(ingress('first'))
     const second = core.handle(ingress('second'))
     await flush()
-    const proc = claude.processFor(join(workRoot, sessionIdFor(KEY)))
+    const proc = procFor(KEY)
 
     expect(claude.processes).toHaveLength(1)
     expect(proc.sent).toHaveLength(1)
@@ -431,12 +447,12 @@ describe('handling one Conversation one Task at a time', () => {
   })
 
   it('answers both, in the order they arrived', async () => {
-    const { adapter, claude, core, workRoot } = newCore()
+    const { adapter, core, procFor } = newCore()
 
     const first = core.handle(ingress('first'))
     const second = core.handle(ingress('second'))
     await flush()
-    const proc = claude.processFor(join(workRoot, sessionIdFor(KEY)))
+    const proc = procFor(KEY)
     feed(proc, OK)
     await first
     await flush()
@@ -452,7 +468,7 @@ describe('handling one Conversation one Task at a time', () => {
   })
 
   it('tells the second caller it is waiting rather than leaving it silent', async () => {
-    const { adapter, claude, core, workRoot } = newCore()
+    const { adapter, core, procFor } = newCore()
 
     const first = core.handle(ingress('first'))
     const second = core.handle(ingress('second'))
@@ -467,7 +483,7 @@ describe('handling one Conversation one Task at a time', () => {
     ])
     expect(new Set(progressOf(adapter).map((instruction) => instruction.taskId)).size).toBe(2)
 
-    const proc = claude.processFor(join(workRoot, sessionIdFor(KEY)))
+    const proc = procFor(KEY)
     feed(proc, OK)
     await first
     await flush()
@@ -526,7 +542,7 @@ describe('running only so much at once', () => {
   // losing the work to it.
   it('still runs a Task whose caller could not be told anything about it', async () => {
     const shared = newCore()
-    const { claude, workRoot, core: first } = shared
+    const { core: first, procFor } = shared
     const delivered: OutboundInstruction[] = []
     const core = coreOver(
       shared,
@@ -540,7 +556,7 @@ describe('running only so much at once', () => {
     await flush()
     const behind = core.handle(ingress('second'))
 
-    const proc = claude.processFor(join(workRoot, sessionIdFor(KEY)))
+    const proc = procFor(KEY)
     feed(proc, OK)
     await running
     await flush()
@@ -555,7 +571,7 @@ describe('running only so much at once', () => {
   // received, so whoever handed it in still has to hear about it.
   it('does not extend that to the result of a Task that waited', async () => {
     const shared = newCore()
-    const { claude, workRoot, core: first } = shared
+    const { core: first, procFor } = shared
     const core = coreOver(
       shared,
       channelThat(() => {
@@ -568,7 +584,7 @@ describe('running only so much at once', () => {
     const behind = core.handle(ingress('second'))
     behind.catch(() => {})
 
-    const proc = claude.processFor(join(workRoot, sessionIdFor(KEY)))
+    const proc = procFor(KEY)
     feed(proc, OK)
     await running
     await flush()
@@ -605,7 +621,7 @@ describe('giving up on a Task that is only retrying', () => {
   // message is sent while all three slots are still wedged, because "roma
   // recovers once they finish" is not what the risk is about.
   it('takes new work while three Tasks are all stuck on a bad credential', async () => {
-    const { adapter, claude, core, workRoot } = newCore({ retryBudget })
+    const { adapter, claude, core, procFor } = newCore({ retryBudget })
 
     const stormed = ['one', 'two', 'three'].map((key) => core.handle(ingress('hello', key)))
     await flush()
@@ -621,7 +637,7 @@ describe('giving up on a Task that is only retrying', () => {
     for (const proc of claude.processes) feed(proc, RETRIES.slice(0, 3))
     await Promise.all(stormed)
     await flush()
-    feed(claude.processFor(join(workRoot, sessionIdFor('four'))), OK)
+    feed(procFor('four'), OK)
     await fourth
 
     expect(posted(adapter.instructions).at(-1)).toEqual({
@@ -768,7 +784,7 @@ describe('telling a Conversation its Task is alive', () => {
   // unconditional message hostage to the best-effort one.
   it('posts the result even where the Channel never finishes taking an update', async () => {
     const shared = newCore()
-    const { claude, workRoot } = shared
+    const { procFor } = shared
     const delivered: OutboundInstruction[] = []
     const core = coreOver(
       shared,
@@ -780,7 +796,7 @@ describe('telling a Conversation its Task is alive', () => {
 
     const task = core.handle(ingress('hello'))
     await flush()
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    feed(procFor(KEY), OK)
     await task
 
     expect(posted(delivered)).toEqual([{ kind: 'result', conversationKey: KEY, text: 'ok' }])
@@ -884,7 +900,7 @@ describe('the two Commands roma answers itself', () => {
   // that counted as a fourth would be exactly the message that cannot get
   // through: the one asking roma to stop doing something.
   it('gets through while roma is running as much as it runs at once', async () => {
-    const { adapter, claude, core, workRoot } = newCore()
+    const { adapter, core, procFor } = newCore()
     const tasks = ['one', 'two', 'three'].map((key) => core.handle(ingress('hello', key)))
     for (const task of tasks) task.catch(() => {})
     await flush()
@@ -898,9 +914,9 @@ describe('the two Commands roma answers itself', () => {
       carriedOut: true,
     })
 
-    feed(claude.processFor(join(workRoot, sessionIdFor('one'))), INTERRUPTED.turn(1))
+    feed(procFor('one'), INTERRUPTED.turn(1))
     for (const key of ['two', 'three']) {
-      feed(claude.processFor(join(workRoot, sessionIdFor(key))), OK)
+      feed(procFor(key), OK)
     }
     await Promise.all(tasks)
   })
@@ -933,7 +949,7 @@ describe('the two Commands roma answers itself', () => {
   // person would send, and there is no Turn to interrupt. A Task stopped there
   // must not quietly run later.
   it('stops a Task that has not started yet, rather than letting it run later', async () => {
-    const { adapter, claude, core, workRoot } = newCore()
+    const { adapter, claude, core, procFor } = newCore()
     const busy = ['one', 'two', 'three'].map((key) => core.handle(ingress('hello', key)))
     await flush()
     const waiting = core.handle(ingress('a long job', 'four'))
@@ -942,7 +958,7 @@ describe('the two Commands roma answers itself', () => {
     await core.handle(ingress('/stop', 'four'))
 
     for (const key of ['one', 'two', 'three']) {
-      feed(claude.processFor(join(workRoot, sessionIdFor(key))), OK)
+      feed(procFor(key), OK)
     }
     await Promise.all(busy)
     await waiting
@@ -963,14 +979,14 @@ describe('the two Commands roma answers itself', () => {
   // Turn begins instead — the alternative is a Task that was stopped answering
   // as though it never had been.
   it('stops a Task whose process has not finished starting', async () => {
-    const { adapter, claude, core, workRoot } = newCore()
+    const { adapter, core, procFor } = newCore()
     const task = core.handle(ingress('write me an essay'))
     task.catch(() => {})
 
     await core.handle(ingress('/stop'))
     await flush()
 
-    const proc = claude.processFor(join(workRoot, sessionIdFor(KEY)))
+    const proc = procFor(KEY)
     expect(proc.sent.map((frame) => frame['type'])).toEqual(['user', 'control_request'])
 
     feed(proc, INTERRUPTED.turn(1))
@@ -1176,12 +1192,12 @@ describe('the record every Task leaves behind', () => {
   // Turn's is what Claude Code was actually working for, and the difference is
   // what the concurrency cap costs.
   it('separates how long the person waited from how long the Turn took', async () => {
-    const { audit, claude, core, workRoot } = newCore()
+    const { audit, core, procFor } = newCore()
 
     const first = core.handle(ingress('first'))
     const second = core.handle(ingress('second'))
     await flush()
-    const proc = claude.processFor(join(workRoot, sessionIdFor(KEY)))
+    const proc = procFor(KEY)
     // Three seconds of the second Task's life spent waiting for the first.
     await vi.advanceTimersByTimeAsync(3_000)
     feed(proc, OK)
@@ -1248,7 +1264,7 @@ describe('the record every Task leaves behind', () => {
   // anything. It is still a Task somebody sent and still one the log has to
   // account for, and its duration is the only one it has.
   it('records a Task that was stopped before it ever reached Claude Code', async () => {
-    const { audit, claude, core, workRoot } = newCore()
+    const { audit, core, procFor } = newCore()
     const busy = ['one', 'two', 'three'].map((key) => core.handle(ingress('hello', key)))
     await flush()
     const waiting = core.handle(ingress('a long job', 'four'))
@@ -1256,7 +1272,7 @@ describe('the record every Task leaves behind', () => {
 
     await core.handle(ingress('/stop', 'four'))
     for (const key of ['one', 'two', 'three']) {
-      feed(claude.processFor(join(workRoot, sessionIdFor(key))), OK)
+      feed(procFor(key), OK)
     }
     await Promise.all(busy)
     await waiting
@@ -1298,7 +1314,7 @@ describe('the record every Task leaves behind', () => {
   // Task whose result never reached anybody still spent the money.
   it('records a Task whose outcome the Channel never took', async () => {
     const shared = newCore()
-    const { audit, claude, workRoot } = shared
+    const { audit, procFor } = shared
     const core = coreOver(
       shared,
       channelThat(() => {
@@ -1309,7 +1325,7 @@ describe('the record every Task leaves behind', () => {
     const task = core.handle(ingress('hello'))
     task.catch(() => {})
     await flush()
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    feed(procFor(KEY), OK)
     await expect(task).rejects.toThrow('the Channel is down')
 
     expect(recordsIn(audit)).toMatchObject([{ outcome: 'result', costUsd: expect.closeTo(0.0103129, 7) }])
@@ -1371,14 +1387,14 @@ describe('when the Shared Window is spent', () => {
   // The Task the window blocked is the Task that runs when it comes back — same
   // message, same Session, one answer to the person who asked.
   it('runs the Task again when the window resets, and answers it', async () => {
-    const { adapter, claude, workRoot, start } = newCore()
+    const { adapter, start, procFor } = newCore()
 
     const { task, proc } = await start('hello')
     feed(proc, BLOCKED)
     await flush()
     await vi.advanceTimersByTimeAsync(UNTIL_RESET)
     await flush()
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    feed(procFor(KEY), OK)
     await task
 
     expect(posted(adapter.instructions).at(-1)).toEqual({
@@ -1390,14 +1406,14 @@ describe('when the Shared Window is spent', () => {
 
   // One Task, one record, however many attempts it took.
   it('leaves one Audit Record for a Task that was blocked and then ran', async () => {
-    const { audit, claude, workRoot, start } = newCore()
+    const { audit, start, procFor } = newCore()
 
     const { task, proc } = await start('hello')
     feed(proc, BLOCKED)
     await flush()
     await vi.advanceTimersByTimeAsync(UNTIL_RESET)
     await flush()
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    feed(procFor(KEY), OK)
     await task
 
     expect(recordsIn(audit)).toHaveLength(1)
@@ -1465,14 +1481,14 @@ describe('offering Overflow, and taking it', () => {
   // map. ADR-0002: Overflow is not a mode, and the Session's context comes with
   // it — otherwise the answer would not be to the question that was asked.
   it('reruns the blocked Task on the metered credential', async () => {
-    const { adapter, audit, claude, workRoot, core, start } = newCore()
+    const { adapter, audit, claude, core, start, procFor } = newCore()
 
     const { task, proc } = await start('hello')
     feed(proc, BLOCKED_WITH_OVERAGE)
     await flush()
     expect(await core.takeOverflow(taskIdOf(adapter))).toBe(true)
     await flush()
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    feed(procFor(KEY), OK)
     await task
 
     expect(claude.lastSpawn.env).toMatchObject({ ANTHROPIC_API_KEY: 'metered-key' })
@@ -1482,14 +1498,14 @@ describe('offering Overflow, and taking it', () => {
   })
 
   it('shows what the Overflow Turn spent, in the reply', async () => {
-    const { adapter, claude, workRoot, core, start } = newCore()
+    const { adapter, core, start, procFor } = newCore()
 
     const { task, proc } = await start('hello')
     feed(proc, BLOCKED_WITH_OVERAGE)
     await flush()
     await core.takeOverflow(taskIdOf(adapter))
     await flush()
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    feed(procFor(KEY), OK)
     await task
 
     expect(adapter.instructions.at(-1)).toMatchObject({
@@ -1501,14 +1517,14 @@ describe('offering Overflow, and taking it', () => {
   // It applies to that Task and to nothing else. A Conversation left on metered
   // billing is the persistent toggle ADR-0002 refuses, arrived at by accident.
   it('leaves the next Task in the Conversation on the Shared Window', async () => {
-    const { adapter, claude, workRoot, core, start, say } = newCore()
+    const { adapter, claude, core, start, say, procFor } = newCore()
 
     const { task, proc } = await start('hello')
     feed(proc, BLOCKED_WITH_OVERAGE)
     await flush()
     await core.takeOverflow(taskIdOf(adapter))
     await flush()
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    feed(procFor(KEY), OK)
     await task
     await say('and another', { events: stream.turn(3) })
 
@@ -1539,14 +1555,14 @@ describe('a Task that is blocked more than once', () => {
   // its own would park against a moment in the past, rerun instantly, fail, and
   // spin as fast as Claude Code can start, announcing itself every pass.
   it('does not park again on a failure the window had nothing to do with', async () => {
-    const { adapter, claude, workRoot, start } = newCore()
+    const { adapter, start, procFor } = newCore()
 
     const { task, proc } = await start('hello')
     feed(proc, BLOCKED)
     await flush()
     await letTheWindowReset()
     // The rerun fails saying nothing at all about the window.
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), FAILED_OUTRIGHT)
+    feed(procFor(KEY), FAILED_OUTRIGHT)
     await task
 
     expect(adapter.instructions.filter(({ kind }) => kind === 'blocked')).toHaveLength(1)
@@ -1561,18 +1577,18 @@ describe('a Task that is blocked more than once', () => {
   // watching hours ago, and that a Task which never ends is one nobody can be
   // told anything about.
   it('answers the Task rather than holding it through a third window', async () => {
-    const { adapter, claude, workRoot, start } = newCore()
+    const { adapter, start, procFor } = newCore()
 
     const { task, proc } = await start('hello')
     feed(proc, BLOCKED)
     await flush()
     await letTheWindowReset()
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), BLOCKED)
+    feed(procFor(KEY), BLOCKED)
     await flush()
     // The reset time has passed by now, so this park is the floor rather than
     // the window's own time.
     await letTheWindowReset(60_000)
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), BLOCKED)
+    feed(procFor(KEY), BLOCKED)
     await task
 
     expect(adapter.instructions.filter(({ kind }) => kind === 'blocked')).toHaveLength(2)
@@ -1588,7 +1604,7 @@ describe('what Overflow is taken for', () => {
   // Overflow and then failed would go on spending metered money with nobody
   // asked and no cap consulted.
   it('goes back to the Shared Window for the next attempt of the same Task', async () => {
-    const { adapter, claude, workRoot, core, start } = newCore()
+    const { adapter, claude, core, start, procFor } = newCore()
 
     const { task, proc } = await start('hello')
     feed(proc, BLOCKED_WITH_OVERAGE)
@@ -1596,7 +1612,7 @@ describe('what Overflow is taken for', () => {
     await core.takeOverflow(taskIdOf(adapter))
     await flush()
     // The metered attempt is blocked too, so the Task parks a second time.
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), BLOCKED_WITH_OVERAGE)
+    feed(procFor(KEY), BLOCKED_WITH_OVERAGE)
     await flush()
     expect(claude.lastSpawn.env).toMatchObject({ ANTHROPIC_API_KEY: 'metered-key' })
 
@@ -1604,7 +1620,7 @@ describe('what Overflow is taken for', () => {
     // reset rather than on the floor.
     await vi.advanceTimersByTimeAsync(UNTIL_RESET)
     await flush()
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    feed(procFor(KEY), OK)
     await task
 
     expect(claude.lastSpawn.env).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' })
@@ -1617,7 +1633,7 @@ describe('what Overflow is taken for', () => {
   // a metered Task that produced nothing, which is the one question an Audit
   // Record exists to answer.
   it('files the Task under the credential that answered, not the one that only tried', async () => {
-    const { adapter, audit, claude, workRoot, core, start } = newCore()
+    const { adapter, audit, core, start, procFor } = newCore()
 
     const { task, proc } = await start('hello')
     feed(proc, BLOCKED_WITH_OVERAGE)
@@ -1625,11 +1641,11 @@ describe('what Overflow is taken for', () => {
     await core.takeOverflow(taskIdOf(adapter))
     await flush()
     // The metered attempt is blocked too, so the Task parks a second time.
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), BLOCKED_WITH_OVERAGE)
+    feed(procFor(KEY), BLOCKED_WITH_OVERAGE)
     await flush()
     await vi.advanceTimersByTimeAsync(UNTIL_RESET)
     await flush()
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    feed(procFor(KEY), OK)
     await task
 
     // One record, on the subscription. Neither blocked attempt was priced, so
@@ -1642,14 +1658,14 @@ describe('what Overflow is taken for', () => {
   // work over money nobody spent on a card — and would be shown to the person
   // who asked as what their decision cost them.
   it('bills the blocked attempt to the credential that was actually paying', async () => {
-    const { adapter, audit, claude, workRoot, core, start } = newCore()
+    const { adapter, audit, core, start, procFor } = newCore()
 
     const { task, proc } = await start('hello')
     feed(proc, BLOCKED_HAVING_SPENT)
     await flush()
     await core.takeOverflow(taskIdOf(adapter))
     await flush()
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    feed(procFor(KEY), OK)
     await task
 
     expect(audit.totalFor(MONTH, 'overflow')).toMatchObject({
@@ -1670,14 +1686,14 @@ describe('what Overflow is taken for', () => {
   // Both records name the same Task, because it is one Task. What differs is
   // which bill each part of it landed on.
   it('files the two halves under one Task id', async () => {
-    const { adapter, audit, claude, workRoot, core, start } = newCore()
+    const { adapter, audit, core, start, procFor } = newCore()
 
     const { task, proc } = await start('hello')
     feed(proc, BLOCKED_HAVING_SPENT)
     await flush()
     await core.takeOverflow(taskIdOf(adapter))
     await flush()
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    feed(procFor(KEY), OK)
     await task
 
     const records = recordsIn(audit)
@@ -1726,7 +1742,7 @@ describe('the monthly Overflow cap', () => {
   // Refused, not abandoned. The window still comes back, and the Task is still
   // the one that was blocked.
   it('leaves the refused Task waiting for the window rather than ending it', async () => {
-    const { adapter, audit, claude, workRoot, core, start } = newCore({
+    const { adapter, audit, core, start, procFor } = newCore({
       overflow: { monthlyCapUsd: 5 },
     })
     alreadySpent(audit, 5.5)
@@ -1738,7 +1754,7 @@ describe('the monthly Overflow cap', () => {
     await flush()
     await vi.advanceTimersByTimeAsync(UNTIL_RESET)
     await flush()
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    feed(procFor(KEY), OK)
     await task
 
     expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'result' })
@@ -1768,7 +1784,7 @@ describe('the monthly Overflow cap', () => {
   // argument: read off cumulative Session totals, a cap of five dollars would be
   // reached at a fraction of five dollars actually spent.
   it('is measured on per-Turn costs, so spend below it is still allowed', async () => {
-    const { adapter, audit, claude, workRoot, core, start } = newCore({
+    const { adapter, audit, core, start, procFor } = newCore({
       overflow: { monthlyCapUsd: 5 },
     })
     alreadySpent(audit, 1)
@@ -1778,7 +1794,7 @@ describe('the monthly Overflow cap', () => {
     await flush()
     await core.takeOverflow(taskIdOf(adapter))
     await flush()
-    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    feed(procFor(KEY), OK)
     await task
 
     expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'result' })

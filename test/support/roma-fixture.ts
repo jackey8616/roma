@@ -18,7 +18,13 @@ export interface RomaDirectories {
 
 export interface RomaFixture {
   readonly claude: FakeClaude
-  /** Spread straight into the options of whatever entry point is under test. */
+  /**
+   * Spread straight into the options of whatever entry point is under test.
+   *
+   * All three, always. A bare Core is given two of them and never asks for a
+   * `configDir` — the spare costs one `mkdtemp` and is deleted with the rest,
+   * which is cheaper than a fixture that has to be told which shape it is.
+   */
   readonly dirs: RomaDirectories
   /** The same three, as the teardown wants them. */
   readonly roots: readonly string[]
@@ -30,6 +36,14 @@ export interface RomaFixture {
    * out would be asserting it in passing every time it wanted to feed a Turn.
    */
   procFor(conversationKey: string): FakeClaudeProcess
+  /**
+   * The process serving one named Session.
+   *
+   * For the tests that mean a particular Session rather than whichever one a
+   * Conversation is on — after `/new`, when the interesting thing is that the
+   * next Turn runs somewhere else.
+   */
+  procIn(sessionId: string): FakeClaudeProcess
   /**
    * Answer the self-check's probe Turn, the way a real process would.
    *
@@ -50,19 +64,25 @@ export interface RomaFixture {
  * would have to take both apart again.
  *
  * `name` goes into the temporary directory names, so a test that leaves one
- * behind says which file it came from.
+ * behind says which file it came from. `workRoot` is for the one thing a fresh
+ * set of directories cannot express: a second roma coming up over the first
+ * one's work root, which is how a restart is written down.
  */
-export function romaFixture(name: string): RomaFixture {
+export function romaFixture(
+  name: string,
+  { workRoot = mkdtempSync(join(tmpdir(), `roma-${name}-`)) }: { workRoot?: string } = {},
+): RomaFixture {
   const claude = new FakeClaude({ exitOnKill: true })
-  const workRoot = mkdtempSync(join(tmpdir(), `roma-${name}-`))
   const auditRoot = mkdtempSync(join(tmpdir(), `roma-${name}-audit-`))
   const configDir = mkdtempSync(join(tmpdir(), `roma-${name}-claude-`))
+  const procIn = (sessionId: string) => claude.processFor(join(workRoot, sessionId))
 
   return {
     claude,
     dirs: { workRoot, auditRoot, configDir },
     roots: [workRoot, auditRoot, configDir],
-    procFor: (conversationKey) => claude.processFor(join(workRoot, sessionIdFor(conversationKey))),
+    procIn,
+    procFor: (conversationKey) => procIn(sessionIdFor(conversationKey)),
     answerProbe: async (events = OK) => {
       await flush()
       feed(claude.process, events)

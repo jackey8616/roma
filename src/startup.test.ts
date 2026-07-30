@@ -1,15 +1,13 @@
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { readdirSync } from 'node:fs'
 import { afterEach, describe, expect, it } from 'vitest'
 import { monthOf } from './audit-log.js'
 import type { Credential } from './build-env.js'
 import { sessionIdFor } from './session-id.js'
 import { startRoma, type Roma } from './startup.js'
 import { StartupSelfCheckFailed } from './startup-self-check.js'
-import type { ClaudeEvent } from './stream-events.js'
-import { FakeClaude, flush } from '../test/support/fake-claude.js'
+import { flush } from '../test/support/fake-claude.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
+import { romaFixture, teardownRoma, type RomaFixture } from '../test/support/roma-fixture.js'
 import { feed, recordedStream, upToFirst } from '../test/support/recorded-stream.js'
 
 /** One complete Turn of a real recorded stream. Its text is "ok". */
@@ -20,24 +18,19 @@ const OAUTH: Credential = { kind: 'shared-window', oauthToken: 'token' }
 const KEY = 'conversation-one'
 
 let started: Roma[] = []
-let workRoots: string[] = []
+let fixtures: RomaFixture[] = []
 
 function boot() {
-  const claude = new FakeClaude({ exitOnKill: true })
-  const workRoot = mkdtempSync(join(tmpdir(), 'roma-startup-'))
-  const auditRoot = mkdtempSync(join(tmpdir(), 'roma-startup-audit-'))
-  const configDir = mkdtempSync(join(tmpdir(), 'roma-startup-claude-'))
-  workRoots.push(workRoot, auditRoot, configDir)
+  const fixture = romaFixture('startup')
+  fixtures.push(fixture)
   const channel = new RecordingAdapter()
 
   let resolved = false
   const starting = startRoma({
     credential: OAUTH,
     channel,
-    workRoot,
-    auditRoot,
-    configDir,
-    spawn: claude.spawn,
+    ...fixture.dirs,
+    spawn: fixture.claude.spawn,
     log: () => {},
     selfCheckTimeoutMs: 1_000,
   }).then((roma) => {
@@ -47,25 +40,20 @@ function boot() {
   })
 
   return {
-    claude,
+    claude: fixture.claude,
     channel,
-    workRoot,
-    auditRoot,
+    auditRoot: fixture.dirs.auditRoot,
     starting,
     hasStarted: () => resolved,
-    /** Answer the probe Turn, the way a real process would. */
-    answerProbe: async (events: readonly ClaudeEvent[] = HEALTHY) => {
-      await flush()
-      feed(claude.process, events)
-    },
+    answerProbe: fixture.answerProbe,
+    procFor: fixture.procFor,
   }
 }
 
 afterEach(async () => {
-  for (const roma of started) await roma.shutdown()
+  await teardownRoma(started, fixtures.flatMap(({ roots }) => roots))
   started = []
-  for (const workRoot of workRoots) rmSync(workRoot, { recursive: true, force: true })
-  workRoots = []
+  fixtures = []
 })
 
 describe('starting roma', () => {
@@ -114,7 +102,7 @@ describe('starting roma', () => {
 
     const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
     await flush()
-    feed(roma.claude.processFor(join(roma.workRoot, sessionIdFor(KEY))), HEALTHY)
+    feed(roma.procFor(KEY), HEALTHY)
     await handled
 
     expect(roma.channel.instructions).toContainEqual(
@@ -133,7 +121,7 @@ describe('starting roma', () => {
 
     const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
     await flush()
-    feed(roma.claude.processFor(join(roma.workRoot, sessionIdFor(KEY))), HEALTHY)
+    feed(roma.procFor(KEY), HEALTHY)
     await handled
 
     const month = monthOf(new Date())
