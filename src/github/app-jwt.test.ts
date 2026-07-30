@@ -44,14 +44,15 @@ describe('the JWT roma signs as its App', () => {
     )
   })
 
-  // Ten minutes is the documented maximum and roma stays a minute inside it, so
-  // that the same drift the backdating allows for cannot push `exp` past the
-  // limit from the other end.
-  it('expires inside the ten minutes GitHub allows', () => {
+  // Inside the maximum rather than exactly on it. GitHub validates the span from
+  // `iat`, so a nine-minute span leaves a minute of room; spending that room on
+  // the backdating instead would put every JWT roma signs on the boundary, where
+  // any rounding on GitHub's side is a refusal nobody can diagnose.
+  it('spans nine of the ten minutes GitHub allows, not all ten', () => {
     const { iat, exp } = claimsOf(appJwt({ appId: '12345', privateKey: PEM, now: NOW }))
 
-    expect(exp - iat).toBeLessThanOrEqual(10 * 60)
-    expect(exp - NOW / 1000).toBeGreaterThan(8 * 60)
+    expect(exp - iat).toBe(9 * 60)
+    expect(exp - NOW / 1000).toBe(8 * 60)
   })
 
   it('is signed with the private key, RS256', async () => {

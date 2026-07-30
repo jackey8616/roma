@@ -61,7 +61,7 @@ function boot({ overflow = true }: { overflow?: boolean } = {}) {
 
   let resolved = false
   const minting = fakeMinting()
-  roots.push(minting.socketDir)
+  roots.push(minting.shimDir)
   const serving = serve({
     credential: OAUTH,
     minting,

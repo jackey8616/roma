@@ -76,10 +76,18 @@ export interface GitHubMinterOptions {
  * is arithmetic rather than product knowledge and is tested against a fake of
  * this.
  *
- * **The private key never leaves this process.** A key in the agent's reach would
- * turn a one-hour exposure into a permanent, indefinitely renewable one, which is
- * worse than the personal access token the whole arrangement exists to avoid.
- * ADR-0008 calls that the one line with no trade-off behind it.
+ * **The private key never leaves this object**, and no credential roma derives
+ * from it outlives an hour. A key that reached a Transcript would turn a
+ * one-hour exposure into a permanent, indefinitely renewable one, which is worse
+ * than the personal access token the whole arrangement exists to avoid.
+ *
+ * It is **not** out of the agent's reach, and ADR-0008 claims otherwise. The key
+ * is a file mounted into the container roma runs in, the agent's Claude Code
+ * process is a child of roma's, and they share a uid — so a shell can read it.
+ * Nothing here can change that: roma spawning the agent is what puts them in one
+ * container. It is the same kind of thing as a Credential Shim — a shape that
+ * makes the ordinary path correct, and not a boundary. `docs/github-app-verification.md`
+ * records the gap rather than letting the ADR's sentence stand unchallenged.
  *
  * Nothing here has been measured. Every behaviour it relies on — that listing
  * installations works this way, that a minted token clones and pushes, that `gh`
@@ -115,36 +123,28 @@ export class GitHubMinter implements Minter {
    * Which Installation roma is acting for, and everything it reaches.
    *
    * Called at boot, before anything that could accept an Ingress Message exists.
-   * There is no installation id to configure and none to look up by hand: roma
-   * lists them, uses the one, and refuses on any other number.
-   *
-   * The repository list needs an Installation Token rather than the JWT — the
-   * JWT is the App speaking as itself, and `GET /installation/repositories` is a
-   * question only an Installation can be asked. So the boot check mints once,
-   * which also proves the thing every later request depends on.
+   * A failure here blocks the boot, which is the point of asking at all.
    */
   async installation(): Promise<Installation> {
-    const installations = await this.#asApp<
-      { id: number; account: { login?: string } | null }[]
-    >('/app/installations', 'listing its installations')
-
-    const named = installations.map(
-      ({ id, account }) => account?.login ?? `installation ${String(id)}`,
-    )
-    if (installations.length === 0) throw new InstallationMissing()
-    if (installations.length > 1) throw new InstallationAmbiguous(named)
-
-    const only = installations[0]
-    if (only === undefined) throw new InstallationMissing()
-    this.#installationId = only.id
-
+    const { id, account } = await this.#onlyInstallation()
+    this.#installationId = id
+    // The repository list needs an Installation Token rather than the JWT — the
+    // JWT is the App speaking as itself, and `GET /installation/repositories` is
+    // a question only an Installation can be asked. So the boot check mints
+    // once, which also proves the thing every later request depends on.
     const { token } = await this.mint()
-    return { account: named[0] ?? '', repositories: await this.#repositories(token) }
+    return { account, repositories: await this.#repositories(token) }
   }
 
   /** One Installation Token, good for the whole Installation. */
   async mint(): Promise<MintedToken> {
-    const installationId = this.#installationId ?? (await this.#discover())
+    // Discovered here only for a `mint` that arrived before the boot check,
+    // which a running roma never produces — startup asks for the Installation
+    // before anything can ask for a token. Here so that the class is correct on
+    // its own terms rather than on its caller's ordering.
+    const installationId = this.#installationId ?? (await this.#onlyInstallation()).id
+    this.#installationId = installationId
+
     const minted = await this.#asApp<{ token: string; expires_at: string }>(
       `/app/installations/${String(installationId)}/access_tokens`,
       'minting an Installation Token',
@@ -163,17 +163,28 @@ export class GitHubMinter implements Minter {
   }
 
   /**
-   * The Installation, for a `mint` that arrived before the boot check.
+   * The one Installation roma acts for, or a refusal naming what it found.
    *
-   * Unreachable in a running roma, because startup asks for the Installation
-   * before anything can ask for a token. Here anyway, so that the class is
-   * correct on its own terms rather than on its caller's ordering.
+   * There is no installation id to configure and none to look up by hand: roma
+   * lists them, uses the one, and refuses on any other number — because roma
+   * refuses rather than guesses. Zero is refused as well as two, though the spec
+   * names only the ambiguous case: an App installed nowhere has no id to mint
+   * against, so the alternative is booting successfully and failing every
+   * credential request for the rest of the deployment's life.
    */
-  async #discover(): Promise<number> {
-    await this.installation()
-    const installationId = this.#installationId
-    if (installationId === null) throw new InstallationMissing()
-    return installationId
+  async #onlyInstallation(): Promise<{ id: number; account: string }> {
+    const installations = await this.#asApp<
+      { id: number; account: { login?: string } | null }[]
+    >('/app/installations', 'listing its installations')
+
+    const named = installations.map(
+      ({ id, account }) => account?.login ?? `installation ${String(id)}`,
+    )
+    if (installations.length > 1) throw new InstallationAmbiguous(named)
+
+    const only = installations[0]
+    if (only === undefined) throw new InstallationMissing()
+    return { id: only.id, account: named[0] ?? '' }
   }
 
   /** Every repository the Installation reaches, following GitHub's paging. */

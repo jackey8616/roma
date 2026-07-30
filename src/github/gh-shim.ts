@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { askMinter, shimEnvironment } from '../shim-client.js'
+import { credentialFor } from '../shim-client.js'
 import { realGhPath } from './env-config.js'
 
 /**
@@ -42,10 +42,8 @@ export async function main(
   // produce one — a credential nobody chose, used silently.
   for (const name of TOKEN_VARS) delete child[name]
 
-  try {
-    const shim = shimEnvironment(env)
-    const answer = await askMinter(shim.socketPath, {
-      session: shim.sessionId,
+  const answer = await credentialFor(
+    {
       operation: 'get',
       // `gh` announces no repository: `gh api graphql` and `gh search` have none
       // to announce, and inferring one from argv or the working directory is a
@@ -53,21 +51,15 @@ export async function main(
       // ADR-0008's amendment is where this decides the whole down-scoping
       // question.
       path: null,
-    })
-    if (answer.token === null) {
-      err.write(`roma has no GitHub credential to give: ${answer.reason ?? 'no reason given'}\n`)
-    } else {
-      for (const name of TOKEN_VARS) child[name] = answer.token
-    }
-  } catch (error) {
-    // `gh` runs anyway, unauthenticated, and fails in its own words. Nothing
-    // roma could say instead would be more use than what the tool says about the
-    // command that was actually run.
-    err.write(
-      `roma could not be reached for a GitHub credential: ` +
-        `${error instanceof Error ? error.message : String(error)}\n`,
-    )
-  }
+    },
+    env,
+  )
+
+  // Said out loud, and then `gh` runs anyway — unauthenticated, failing in its
+  // own words about the command that was actually attempted. Nothing roma could
+  // say instead would be more use than that.
+  if (answer.complaint !== null) err.write(`${answer.complaint}\n`)
+  if (answer.token !== null) for (const name of TOKEN_VARS) child[name] = answer.token
 
   return await run(realGhPath(env), argv, child)
 }

@@ -135,3 +135,28 @@ escalation path: the agent can rewrite what counts as passing, and CI is usually
 where a repository's secrets are. ADR-0008 takes that deliberately. It is
 restated here, and in the ticket, so that whoever runs the verification above
 reads it once more before granting anything.
+
+## The gap this slice could not close
+
+**Story 26 — "the App's private key to remain unreachable from inside the
+container the agent runs in" — is not met, and no arrangement of this code meets
+it.**
+
+ADR-0008 states it as the one line with no trade-off behind it: "the private key
+never enters the container's reachable space." As built, it does. roma reads the
+PEM from a path mounted into its own container; the agent's Claude Code process
+is a child of roma's and runs under the same uid; a shell therefore reaches both
+the file and `/proc/<roma>/environ`. `buildEnv` keeps the *path* out of a
+Session's environment, which makes finding it slightly less obvious and is not
+the same thing as a boundary.
+
+What roma actually has is the same shape as a Credential Shim: the ordinary path
+is correct, and the agent can step off it. The protection doing real work is the
+**one-hour expiry** — that is what bounds a token which escapes into a Transcript
+roma never deletes, and it holds regardless of the key.
+
+Closing it needs roma and the agent in different containers, which is a change to
+how roma spawns Claude Code and not a change to any of this. It is the same
+conversation as the credential-injecting proxy and the egress allowlist, both of
+which ADR-0008 defers for the same reason. Recorded here rather than left as a
+sentence in an ADR that the code quietly contradicts.

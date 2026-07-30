@@ -39,7 +39,7 @@ export interface MintingOptions {
    * roma failing at once with no explanation. Not inside a Working Directory
    * either — the agent runs `git add -A` in there.
    */
-  readonly socketDir: string
+  readonly shimDir: string
   /**
    * The gitconfig `GIT_CONFIG_GLOBAL` points every Session at, as text.
    *
@@ -226,10 +226,10 @@ export async function startRoma({
   // roma's own directory, made before anything points at it. The gitconfig goes
   // in beside the socket rather than in a Working Directory, for the reason
   // `MintingOptions` gives: the agent runs `git add -A` in one of those.
-  mkdirSync(minting.socketDir, { recursive: true, mode: 0o700 })
-  const gitConfigPath = join(minting.socketDir, 'gitconfig')
+  mkdirSync(minting.shimDir, { recursive: true, mode: 0o700 })
+  const gitConfigPath = join(minting.shimDir, 'gitconfig')
   writeFileSync(gitConfigPath, minting.gitConfig, { mode: 0o600 })
-  const socketPath = socketPathIn(minting.socketDir)
+  const socketPath = socketPathIn(minting.shimDir)
 
   const queue = new TaskQueue(
     maxConcurrentTasks === undefined ? {} : { maxConcurrent: maxConcurrentTasks },

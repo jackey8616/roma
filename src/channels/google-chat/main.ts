@@ -7,7 +7,8 @@ import { serve, type IngressLogRecord, type Serving } from '../../serve.js'
 import type { CoreLogRecord } from '../../core.js'
 import { readMinterEnv } from '../../github/env-config.js'
 import { GitHubMinter } from '../../github/github-minter.js'
-import { announce, gitConfig } from '../../github/shims.js'
+import { announce } from '../../github/announce.js'
+import { gitConfig } from '../../github/shims.js'
 import type { PoolLogRecord } from '../../session-pool.js'
 import type { ShimLogRecord } from '../../shim-server.js'
 import type { StartupSelfCheckReport } from '../../startup-self-check.js'
@@ -73,7 +74,7 @@ export async function startGoogleChatRoma(
   log: RomaLog = writeToStderr,
 ): Promise<Serving> {
   const { roma, channelEnv: chat, minterEnv } = readConfiguration(env, readChatEnv, readMinterEnv)
-  const { socketDir, ...core } = roma
+  const { shimDir, ...core } = roma
 
   // Application Default Credentials: a key file named by
   // GOOGLE_APPLICATION_CREDENTIALS, or the metadata server on a Google host.
@@ -106,7 +107,7 @@ export async function startGoogleChatRoma(
     ...core,
     minting: {
       minter: new GitHubMinter(minterEnv),
-      socketDir,
+      shimDir,
       gitConfig: gitConfig(),
       announce,
     },

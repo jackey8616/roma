@@ -14,11 +14,33 @@ import type { Minter, MintedToken } from './minter.js'
  */
 const REFRESH_MARGIN_MS = 5 * 60_000
 
+/**
+ * How long after honouring one rejection roma stops honouring others.
+ *
+ * One token serves everybody, and `git` reports a rejection for reasons that
+ * have nothing to do with the credential — the commonest being a repository the
+ * Installation does not reach, which authenticates fine and 404s. Without a
+ * floor, an agent looping on a name that does not exist would discard the token
+ * every other Session is using, once per attempt, and roma would mint on every
+ * failed clone. That is the round trip and the rate limit this class exists to
+ * avoid, arriving by the back door.
+ *
+ * A minute is enough to bound it at one mint per minute while leaving the case
+ * the discard is *for* intact: an App whose key was rotated has its dead token
+ * dropped on the first rejection, and the replacement is in hand before the
+ * agent's next command. What is given up is the second rejection inside the
+ * minute — and by then roma is already serving a token minted *after* the first
+ * one, so a rejection of that is evidence about the request rather than about
+ * the credential.
+ */
+const DISCARD_COOLDOWN_MS = 60_000
+
 export interface InstallationTokensOptions {
   readonly minter: Minter
   /** The clock, so that expiry arithmetic can be tested without waiting. */
   readonly now?: () => number
   readonly refreshMarginMs?: number
+  readonly discardCooldownMs?: number
 }
 
 /**
@@ -48,6 +70,7 @@ export class InstallationTokens {
   readonly #minter: Minter
   readonly #now: () => number
   readonly #refreshMarginMs: number
+  readonly #discardCooldownMs: number
 
   #cached: MintedToken | null = null
   /**
@@ -60,11 +83,19 @@ export class InstallationTokens {
    * happening at all, arriving all at once.
    */
   #minting: Promise<MintedToken> | null = null
+  /** When roma last threw a token away because it was told to. */
+  #discardedAt = Number.NEGATIVE_INFINITY
 
-  constructor({ minter, now = Date.now, refreshMarginMs = REFRESH_MARGIN_MS }: InstallationTokensOptions) {
+  constructor({
+    minter,
+    now = Date.now,
+    refreshMarginMs = REFRESH_MARGIN_MS,
+    discardCooldownMs = DISCARD_COOLDOWN_MS,
+  }: InstallationTokensOptions) {
     this.#minter = minter
     this.#now = now
     this.#refreshMarginMs = refreshMarginMs
+    this.#discardCooldownMs = discardCooldownMs
   }
 
   /**
@@ -86,14 +117,26 @@ export class InstallationTokens {
   /**
    * Drop a token the forge has rejected, so the next request mints instead.
    *
-   * Matched on the token itself rather than dropping whatever is held. A Shim can
-   * hand back a credential that has already been replaced — the erase arrives
-   * after a refresh, or a second Session is still using the one it was given —
-   * and throwing away the *current* token because an old one failed would turn
-   * one dead credential into a mint on every request.
+   * Two things stop one rejection from becoming a mint on every request, and
+   * they guard different mistakes.
+   *
+   * **Matched on the token itself**, rather than dropping whatever is held. A
+   * Shim can hand back a credential that has already been replaced — the erase
+   * arrives after a refresh, or a second Session is still using the one it was
+   * given — and throwing away the *current* token because an old one failed
+   * would be roma re-minting on somebody else's stale news.
+   *
+   * **And at most once a minute**, because the rejection is not always about the
+   * credential. One token serves every Session, and a repository the Installation
+   * does not reach authenticates perfectly well and then 404s — so an agent
+   * looping on a name that does not exist would otherwise discard everybody's
+   * token once per attempt. See `DISCARD_COOLDOWN_MS` for what that gives up.
    */
   discard(token: string): void {
-    if (this.#cached?.token === token) this.#cached = null
+    if (this.#cached?.token !== token) return
+    if (this.#now() - this.#discardedAt < this.#discardCooldownMs) return
+    this.#discardedAt = this.#now()
+    this.#cached = null
   }
 
   /** Mint once, however many callers are waiting for it. */

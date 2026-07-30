@@ -3,10 +3,12 @@ import { createSign } from 'node:crypto'
 /**
  * How long a JWT roma signs is good for.
  *
- * Nine minutes against a documented maximum of ten. The margin is for clock
- * drift in the same direction as `BACKDATED_S` below: a token whose `exp` GitHub
- * reads as more than ten minutes away is refused outright, and losing a minute
- * of a credential that is only ever used for one request costs nothing.
+ * Nine minutes against a documented maximum of ten, measured from `iat`. The
+ * spare minute is the margin: a JWT whose span GitHub reads as more than ten
+ * minutes is refused outright, and losing a minute of a credential that is only
+ * ever used for one request costs nothing. With the backdating below, what is
+ * left in front of the request is eight minutes, which is eight minutes more
+ * than it needs.
  *
  * Unverified here — this is GitHub's documented behaviour and nothing in this
  * repository has driven a real App (`docs/github-app-verification.md`).
@@ -45,7 +47,11 @@ export interface AppJwtOptions {
 export function appJwt({ appId, privateKey, now = Date.now() }: AppJwtOptions): string {
   const issuedAt = Math.floor(now / 1000) - BACKDATED_S
   const header = { alg: 'RS256', typ: 'JWT' }
-  const payload = { iat: issuedAt, exp: issuedAt + BACKDATED_S + LIFETIME_S, iss: appId }
+  // Measured from `iat`, not from now. GitHub validates the *span* — `exp` more
+  // than ten minutes after `iat` is refused — so adding the backdating back in
+  // here would put the span at exactly 600 seconds, on the boundary, with the
+  // margin below spent rather than held.
+  const payload = { iat: issuedAt, exp: issuedAt + LIFETIME_S, iss: appId }
 
   const signed = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(payload))}`
   const signature = createSign('RSA-SHA256').update(signed).sign(privateKey)

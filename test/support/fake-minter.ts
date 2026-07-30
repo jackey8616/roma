@@ -78,7 +78,7 @@ export function fakeMinting(overrides: Partial<MintingOptions> = {}): MintingOpt
   const minter = (overrides.minter as FakeMinter | undefined) ?? new FakeMinter()
   return {
     minter,
-    socketDir: overrides.socketDir ?? mkdtempSync(join(tmpdir(), 'roma-shims-')),
+    shimDir: overrides.shimDir ?? mkdtempSync(join(tmpdir(), 'roma-shims-')),
     gitConfig: overrides.gitConfig ?? '[credential]\n\tuseHttpPath = true\n',
     announce: overrides.announce ?? ((installation) => `reaches ${installation.repositories.join(', ')}`),
   }

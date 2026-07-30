@@ -92,8 +92,8 @@ describe('a token the forge has rejected', () => {
 
   // An erase can arrive after a refresh has already replaced what it names —
   // one Session handing back a credential another was given before the hour
-  // turned. Throwing away the current token because an old one failed would turn
-  // one dead credential into a mint on every request.
+  // turned. Throwing away the current token because an old one failed would be
+  // roma re-minting on somebody else's stale news.
   it('leaves the current one alone when it is an older token being rejected', async () => {
     const { tokens, minter, advance } = tokensAt()
     const first = await tokens.current()
@@ -105,6 +105,42 @@ describe('a token the forge has rejected', () => {
 
     expect(await tokens.current()).toBe(second)
     expect(minter.minted).toHaveLength(2)
+  })
+})
+
+describe('a rejection that is not about the credential', () => {
+  // One token serves every Session, and `git` erases for reasons that have
+  // nothing to do with the credential — a repository the Installation does not
+  // reach authenticates fine and then 404s. Left unguarded, an agent looping on
+  // a name that does not exist mints on every attempt, which is the rate limit
+  // this class exists to stay under.
+  it('is honoured once and then ignored for a while', async () => {
+    const { tokens, minter, advance } = tokensAt()
+    const first = await tokens.current()
+
+    tokens.discard(first)
+    const second = await tokens.current()
+    // The same failing clone, again, seconds later.
+    tokens.discard(second)
+    advance(5_000)
+
+    expect(await tokens.current()).toBe(second)
+    expect(minter.minted).toHaveLength(2)
+  })
+
+  // What is given up is bounded: a minute, after which a genuinely dead
+  // credential is dropped as usual.
+  it('is honoured again once the cooldown has passed', async () => {
+    const { tokens, minter, advance } = tokensAt()
+    tokens.discard(await tokens.current())
+    const second = await tokens.current()
+    tokens.discard(second)
+
+    advance(61_000)
+    tokens.discard(second)
+
+    expect(await tokens.current()).toBe('token-3')
+    expect(minter.minted).toHaveLength(3)
   })
 })
 

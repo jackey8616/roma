@@ -23,12 +23,16 @@ export type RomaEnv = Pick<
    * roma's own directory: the Credential Shim socket, and the gitconfig every
    * Session runs under.
    *
+   * Named for the Shims rather than for the socket, because it holds both and a
+   * name that mentioned one of them would go on being read as the whole of what
+   * is in there. `ROMA_SHIM_DIR` is the variable, and the two agree.
+   *
    * Not part of the `Pick` above because `startRoma` takes it inside `minting`,
    * alongside the two things only the composition root can supply — a Minter,
    * and the text of that gitconfig. This is the half of it an environment can
    * name.
    */
-  readonly socketDir: string
+  readonly shimDir: string
 }
 
 /**
@@ -67,11 +71,11 @@ export type Environment = Readonly<Record<string, string | undefined>>
  * the same reason in each case — which Channel roma has, and which forge it
  * mints against, are not things the Core is allowed to know.
  */
-export function readConfiguration<ChannelEnv, MinterEnv>(
+export function readConfiguration<ChannelEnv, MinterConfig>(
   env: Environment,
   readChannelEnv: (env: Environment) => ChannelEnv,
-  readMinterEnv: (env: Environment) => MinterEnv,
-): { roma: RomaEnv; channelEnv: ChannelEnv; minterEnv: MinterEnv } {
+  readMinterEnv: (env: Environment) => MinterConfig,
+): { roma: RomaEnv; channelEnv: ChannelEnv; minterEnv: MinterConfig } {
   const problems: string[] = []
   const roma = attempted(() => readRomaEnv(env), problems)
   const channelEnv = attempted(() => readChannelEnv(env), problems)
@@ -145,7 +149,7 @@ export function readRomaEnv(env: Environment): RomaEnv {
   // constant because running roma from source on a developer's machine is a
   // stated consequence of ADR-0008, and a fixed system path is not writable
   // there.
-  const socketDir = required(env, 'ROMA_SHIM_DIR', problems)
+  const shimDir = required(env, 'ROMA_SHIM_DIR', problems)
 
   const overflow = readOverflow(env, problems)
   const model = envValue(env, 'ROMA_MODEL')
@@ -162,7 +166,7 @@ export function readRomaEnv(env: Environment): RomaEnv {
     workRoot: certain(workRoot),
     auditRoot: certain(auditRoot),
     configDir: certain(configDir),
-    socketDir: certain(socketDir),
+    shimDir: certain(shimDir),
     ...(overflow === null ? {} : { overflow }),
     ...(model === null ? {} : { model }),
     ...(maxConcurrentTasks === null ? {} : { maxConcurrentTasks }),

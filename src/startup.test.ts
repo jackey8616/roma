@@ -30,7 +30,7 @@ function boot({ minter = new FakeMinter() }: { minter?: FakeMinter } = {}) {
   const auditRoot = mkdtempSync(join(tmpdir(), 'roma-startup-audit-'))
   const configDir = mkdtempSync(join(tmpdir(), 'roma-startup-claude-'))
   const minting = fakeMinting({ minter })
-  workRoots.push(workRoot, auditRoot, configDir, minting.socketDir)
+  workRoots.push(workRoot, auditRoot, configDir, minting.shimDir)
   const channel = new RecordingAdapter()
 
   let resolved = false
@@ -231,8 +231,8 @@ describe('putting a credential in front of a Session’s tools', () => {
     await handled
 
     expect(env['ROMA_SESSION_ID']).toBe(sessionIdFor(KEY))
-    expect(env['ROMA_MINTER_SOCKET']).toBe(socketPathIn(roma.minting.socketDir))
-    expect(env['GIT_CONFIG_GLOBAL']).toBe(join(roma.minting.socketDir, 'gitconfig'))
+    expect(env['ROMA_MINTER_SOCKET']).toBe(socketPathIn(roma.minting.shimDir))
+    expect(env['GIT_CONFIG_GLOBAL']).toBe(join(roma.minting.shimDir, 'gitconfig'))
   })
 
   // Not under the work root, which is walked by a reclaim that deletes what has
@@ -244,8 +244,8 @@ describe('putting a credential in front of a Session’s tools', () => {
     await roma.answerProbe()
     await roma.starting
 
-    expect(existsSync(socketPathIn(roma.minting.socketDir))).toBe(true)
-    expect(readFileSync(join(roma.minting.socketDir, 'gitconfig'), 'utf8')).toBe(
+    expect(existsSync(socketPathIn(roma.minting.shimDir))).toBe(true)
+    expect(readFileSync(join(roma.minting.shimDir, 'gitconfig'), 'utf8')).toBe(
       roma.minting.gitConfig,
     )
     expect(readdirSync(roma.workRoot)).toEqual([])

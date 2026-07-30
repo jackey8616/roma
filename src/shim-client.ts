@@ -1,4 +1,5 @@
 import { connect } from 'node:net'
+import { reasonOf } from './operator-log.js'
 import {
   MINTER_SOCKET_VAR,
   SESSION_ID_VAR,
@@ -72,6 +73,66 @@ export async function askMinter(socketPath: string, request: ShimRequest): Promi
       }
     })
   })
+}
+
+/**
+ * A credential, or the sentence to put in front of the person about why there
+ * is not one.
+ *
+ * Both Shims need exactly this pair and neither can produce it alone: the token
+ * goes somewhere tool-specific — git's `password=` line, `gh`'s child
+ * environment — and the sentence always goes to stderr, where the tool's own
+ * failure will land beside it and the agent will relay both.
+ */
+export interface ShimAnswer {
+  readonly token: string | null
+  /** What to write on stderr. Null where nothing went wrong. */
+  readonly complaint: string | null
+}
+
+/**
+ * Ask roma for a credential, and turn every way that can fail into one sentence.
+ *
+ * Here rather than in each Shim because the two would otherwise spell the same
+ * three failures — no socket named, socket unreachable, roma has nothing — in
+ * two places, and the first change to any of them would drift.
+ *
+ * Never rejects. A Shim that threw would make `git` or `gh` fail with a Node
+ * stack trace instead of with its own account of the command that was actually
+ * run, which is the thing the agent needs to relay.
+ *
+ * The wording names no forge, deliberately: this is the Core, and what roma
+ * mints against is not something it is allowed to know. The tool's own message
+ * beside it supplies the context anyway.
+ */
+export async function credentialFor(
+  request: Omit<ShimRequest, 'session'>,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ShimAnswer> {
+  let shim: ShimEnvironment
+  try {
+    shim = shimEnvironment(env)
+  } catch (error) {
+    return { token: null, complaint: reasonOf(error) }
+  }
+
+  let answer: ShimResponse
+  try {
+    answer = await askMinter(shim.socketPath, { ...request, session: shim.sessionId })
+  } catch (error) {
+    return { token: null, complaint: `roma could not be reached for a credential: ${reasonOf(error)}` }
+  }
+
+  if (answer.token !== null) return { token: answer.token, complaint: null }
+  // An `erase` is roma being told something, not asked for something. Answering
+  // it with no credential is the whole of a successful exchange, and complaining
+  // would put a line on stderr for every authentication failure git already
+  // reports perfectly well itself.
+  if (request.operation === 'erase') return { token: null, complaint: null }
+  return {
+    token: null,
+    complaint: `roma has no credential to give: ${answer.reason ?? 'no reason given'}`,
+  }
 }
 
 function readResponse(body: string): ShimResponse {

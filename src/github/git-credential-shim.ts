@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url'
-import { askMinter, shimEnvironment } from '../shim-client.js'
+import { credentialFor } from '../shim-client.js'
 
 /**
  * The `git` half of the Credential Shim: a git credential helper that holds
@@ -46,38 +46,23 @@ export async function main(
   if (operation !== 'get' && operation !== 'erase') return 0
 
   const fields = readFields(await readAll(input))
-
-  let shim
-  try {
-    shim = shimEnvironment(env)
-  } catch (error) {
-    // No credential, and a reason on stderr. git will report authentication
-    // failed in its own words, and the agent has the sentence that says why.
-    err.write(`${reasonOf(error)}\n`)
-    return 0
-  }
-
-  let answer
-  try {
-    answer = await askMinter(shim.socketPath, {
-      session: shim.sessionId,
+  const answer = await credentialFor(
+    {
       operation,
       // What git named it is reaching for, where `credential.useHttpPath` made
       // it say. Passed on rather than acted on here — the Shim decides nothing.
       path: fields.get('path') ?? null,
       // On `erase`, the credential git is handing back as rejected.
       token: fields.get('password') ?? null,
-    })
-  } catch (error) {
-    err.write(`roma could not be reached for a GitHub credential: ${reasonOf(error)}\n`)
-    return 0
-  }
+    },
+    env,
+  )
 
-  if (operation === 'erase') return 0
-  if (answer.token === null) {
-    err.write(`roma has no GitHub credential to give: ${answer.reason ?? 'no reason given'}\n`)
-    return 0
-  }
+  // On stderr rather than swallowed, and never on stdout: git parses stdout as
+  // the answer, and a sentence in there would be read as a credential field.
+  // git will report authentication failed in its own words; this is why.
+  if (answer.complaint !== null) err.write(`${answer.complaint}\n`)
+  if (operation === 'erase' || answer.token === null) return 0
 
   out.write(`username=${USERNAME}\npassword=${answer.token}\n`)
   return 0
@@ -106,10 +91,6 @@ async function readAll(input: NodeJS.ReadableStream): Promise<string> {
   let body = ''
   for await (const chunk of input) body += chunk as string
   return body
-}
-
-function reasonOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 // Run only when this file is the program. Imported — by a test — it defines

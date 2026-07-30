@@ -11,7 +11,7 @@ import { HttpChatApi, type ChatRequest } from './http-chat-api.js'
 import { PubSubTransport } from './pubsub-transport.js'
 import { FakeClaude, flush } from '../../../test/support/fake-claude.js'
 import { fakeMinting, FakeMinter } from '../../../test/support/fake-minter.js'
-import { announce } from '../../github/shims.js'
+import { announce } from '../../github/announce.js'
 import { askMinter } from '../../shim-client.js'
 import { socketPathIn } from '../../shim-protocol.js'
 import type { ShimLogRecord } from '../../shim-server.js'
@@ -96,7 +96,7 @@ async function boot() {
   // uses, and only the forge itself is a double.
   const minter = new FakeMinter({ installation: INSTALLATION })
   const minting = fakeMinting({ minter, announce })
-  roots.push(minting.socketDir)
+  roots.push(minting.shimDir)
   const serving = serve({
     credential: OAUTH,
     minting,

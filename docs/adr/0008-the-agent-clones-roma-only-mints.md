@@ -132,6 +132,14 @@ renewable one, which is worse than the personal access token this whole
 arrangement exists to avoid. This is the one line here with no trade-off behind
 it.
 
+**Amended by #60 — this sentence is false as built, and the code did not make it
+true.** roma spawns Claude Code as a child process, so roma and the agent are the
+same container and the same uid by construction; the key is a mounted file a
+shell can read. Nothing in the first slice could have changed that, and nothing
+short of running the agent somewhere else can. What is left doing the work is the
+one-hour expiry, which bounds a token that escapes and is unaffected by the key.
+`docs/github-app-verification.md` records the gap; it is not treated as met.
+
 It must also be said plainly, because a credential helper is easily sold as
 security it is not: **this is not a boundary against the agent.** The agent has a
 shell under `bypassPermissions`; `git credential fill` prints the token. What the

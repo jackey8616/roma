@@ -12,6 +12,14 @@ import type { ShimRequest, ShimResponse } from './shim-protocol.js'
  * request that belongs to no running Task is written down as belonging to no
  * Task. Not attributed to the nearest one — the same rule the Audit Record
  * already applies when it records a Turn as unpriced rather than as free.
+ *
+ * Every request is written down, not only the failures. That is more than a
+ * failure log and less than an Audit Record, and it is deliberately both: what
+ * is asked for is that a request "belongs to no running Task" be *recorded* as
+ * such, which needs the ordinary case written down to be a record of anything.
+ * The Audit Record gaining the repositories a Task minted for is a separate
+ * ticket and nothing here writes one — this is the Operator Log, which is not
+ * totalled and is where roma's running commentary goes.
  */
 export type ShimLogRecord =
   | {

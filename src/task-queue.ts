@@ -25,6 +25,26 @@ export interface TaskQueueOptions {
  */
 export type WaitNotice = (position: number) => void | Promise<void>
 
+/**
+ * What a caller can tell the queue about a Task beyond how to run it.
+ *
+ * Neither is needed to schedule anything, which is why they are together and
+ * apart from the two arguments that are: `notice` is how the caller is told it
+ * is waiting, and `taskId` is what `taskFor` answers with while it runs.
+ */
+export interface About {
+  /** Called only if the Task has to wait, and only once. */
+  readonly notice?: WaitNotice
+  /**
+   * Which Task this is, for `taskFor`.
+   *
+   * Optional because nothing about admission reads it. It is here so that
+   * something outside the queue can ask whose work a Session is doing, which is
+   * a question only the queue can answer honestly.
+   */
+  readonly taskId?: string
+}
+
 interface Waiting {
   readonly key: string
   /** What to record as running under this key once it is admitted. */
@@ -109,19 +129,12 @@ export class TaskQueue {
    * rejects with whatever `task` did, and releases the slot either way: a Task
    * that failed is a Task that is over.
    *
-   * `notice` is called only if the Task has to wait, and only once.
-   *
-   * `taskId` is what `taskFor` will answer with while this one runs. Optional,
-   * because nothing about admission needs it — it is here so that something
-   * outside the queue can ask whose work a Session is doing, which is a question
-   * only the queue can answer honestly.
+   * Everything else is optional and goes in `about`, one object rather than a
+   * row of positional maybes — a caller that wants only the second of them
+   * should not have to write `undefined` for the first.
    */
-  async run<T>(
-    key: string,
-    task: () => Promise<T>,
-    notice?: WaitNotice,
-    taskId: string | null = null,
-  ): Promise<T> {
+  async run<T>(key: string, task: () => Promise<T>, about: About = {}): Promise<T> {
+    const { notice, taskId = null } = about
     if (!this.#claim(key, taskId)) {
       // The place in the queue is taken first and the caller told second. The
       // other way round, two Tasks arriving together would each be told they

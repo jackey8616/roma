@@ -17,7 +17,7 @@ describe('reading roma out of the environment', () => {
       workRoot: '/srv/roma/sessions',
       auditRoot: '/var/lib/roma/audit',
       configDir: '/srv/roma/claude',
-      socketDir: '/run/roma',
+      shimDir: '/run/roma',
     })
   })
 
@@ -144,7 +144,7 @@ describe('reading roma out of the environment', () => {
         'auditRoot',
         'configDir',
         'credential',
-        'socketDir',
+        'shimDir',
         'workRoot',
       ])
     })

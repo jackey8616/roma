@@ -210,9 +210,9 @@ describe('telling a waiting caller where it is', () => {
     const first = pending()
     const second = pending()
 
-    const runningTask = queue.run(A, running.run, (position) => void positions.push(position))
-    const firstTask = queue.run(B, first.run, (position) => void positions.push(position))
-    const secondTask = queue.run(C, second.run, (position) => void positions.push(position))
+    const runningTask = queue.run(A, running.run, { notice: (position) => void positions.push(position) })
+    const firstTask = queue.run(B, first.run, { notice: (position) => void positions.push(position) })
+    const secondTask = queue.run(C, second.run, { notice: (position) => void positions.push(position) })
     await flush()
 
     expect(positions).toEqual([1, 2])
@@ -235,8 +235,8 @@ describe('telling a waiting caller where it is', () => {
     const running = pending()
     const behind = pending()
 
-    const runningTask = queue.run(A, running.run, (position) => void positions.push(position))
-    const behindTask = queue.run(A, behind.run, (position) => void positions.push(position))
+    const runningTask = queue.run(A, running.run, { notice: (position) => void positions.push(position) })
+    const behindTask = queue.run(A, behind.run, { notice: (position) => void positions.push(position) })
     await flush()
 
     expect(positions).toEqual([1])
@@ -268,7 +268,7 @@ describe('telling a waiting caller where it is', () => {
           order.push(name)
           return task()
         },
-        (position) => void positions.set(name, position),
+        { notice: (position) => void positions.set(name, position) },
       )
 
     const first = queue.run(A, running.a.run)
@@ -308,8 +308,10 @@ describe('telling a waiting caller where it is', () => {
     const task = pending()
     let told = false
 
-    const running = queue.run(A, task.run, () => {
-      told = true
+    const running = queue.run(A, task.run, {
+      notice: () => {
+        told = true
+      },
     })
     await flush()
 
@@ -328,7 +330,9 @@ describe('telling a waiting caller where it is', () => {
     const never = pending()
 
     const runningTask = queue.run(A, running.run)
-    const rejected = queue.run(B, never.run, () => Promise.reject(new Error('the Channel is down')))
+    const rejected = queue.run(B, never.run, {
+      notice: () => Promise.reject(new Error('the Channel is down')),
+    })
 
     await expect(rejected).rejects.toThrow('the Channel is down')
     expect(never.started()).toBe(false)
@@ -353,7 +357,7 @@ describe('telling a waiting caller where it is', () => {
     })
 
     const runningTask = queue.run(A, running.run)
-    const waitingTask = queue.run(B, waiting.run, () => told)
+    const waitingTask = queue.run(B, waiting.run, { notice: () => told })
     await flush()
     running.finish()
     await runningTask
@@ -377,7 +381,7 @@ describe('which Task a Session is running', () => {
   it('is the running one, while it runs', async () => {
     const queue = new TaskQueue()
     const task = pending()
-    const running = queue.run(A, task.run, undefined, 'task-1')
+    const running = queue.run(A, task.run, { taskId: 'task-1' })
     await flush()
 
     expect(queue.taskFor(A)).toBe('task-1')
@@ -397,8 +401,8 @@ describe('which Task a Session is running', () => {
     const queue = new TaskQueue({ maxConcurrent: 1 })
     const first = pending()
     const second = pending()
-    const running = queue.run(A, first.run, undefined, 'task-1')
-    const queued = queue.run(B, second.run, undefined, 'task-2')
+    const running = queue.run(A, first.run, { taskId: 'task-1' })
+    const queued = queue.run(B, second.run, { taskId: 'task-2' })
     await flush()
 
     expect(queue.taskFor(B)).toBeNull()
