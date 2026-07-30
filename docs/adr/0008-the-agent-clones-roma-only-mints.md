@@ -9,6 +9,15 @@ records a design settled in one sitting so that the code that follows has
 something to disagree with. The first thing built against it will find something
 wrong with it, and that is what an amendment is for.
 
+**Amended 2026-07-30**, before any code, which is earlier than that sentence
+expected. Two things did not need code to disagree with them: a statement of
+fact that a five-minute measurement contradicts, and a tool this ADR never
+considered. The decisions are unchanged — one of them is now held up by a
+different reason, and the mechanism under another is larger than described.
+Amendments are marked inline. Everything settled in the same session that is
+genuinely *new design* is deliberately **not** here: it is unbuilt, and putting
+it in an ADR would repeat the failure the paragraph above is an apology for.
+
 Extends ADR-0002 rather than reversing it: the same problem — everybody shares
 one credential, so the provider knows only that somebody spent it — arrives a
 second time on a second provider, and gets a second answer here.
@@ -62,6 +71,36 @@ It does not, so it cannot. **The blast radius of every Conversation is the whole
 Installation**, and every Workspace member who can reach roma has it. That is
 recorded as a property of the design rather than as an oversight.
 
+**Amended — "it does not" is false, and the decision now rests on something
+else.** roma does learn the repository, at the only moment that matters. With
+`credential.useHttpPath` set, `git` names it on every credential request — which
+is the same fact this ADR already spends further down, where the Audit Record
+gets the repositories a Task minted for "for free". Both cannot be true, and the
+one that survives is the one that was measured: `git` 2.43.0, a real clone of a
+repository that requires authentication, the helper receiving
+
+```
+protocol=https
+host=github.com
+path=jackey8616/a-repo-that-does-not-exist-9f3a.git
+```
+
+before any credential was supplied. Down-scoping at mint time was therefore on
+the table after all, and was reconsidered rather than left buried.
+
+It is still declined, for a reason that did not exist when this was written:
+`gh` is in scope now (see the amendment under *minted on demand*), and **`gh`
+announces no repository** — `gh api graphql` and `gh search` have none to
+announce, and inferring one from `argv` or the working directory is a guess whose
+failures surface as unexplained 404s inside somebody's Turn. The Credential Shim
+in front of `gh` must hand out a token for the whole Installation, and an agent
+that can invoke that Shim can obtain one whenever it likes. Scoping `git`'s side
+alone would bound accidental leakage on one path while the other stayed wide
+open, and would be read a year from now as a boundary it never was — the precise
+mistake the *not a boundary against the agent* paragraph below exists to prevent.
+
+So the blast radius above stands, and the reason for it is no longer ignorance.
+
 What it buys is that roma acquires no new state, no new Command, no lookup, and
 no checkout policy — and Claude Code's own judgement about what to clone is not
 second-guessed by a worse copy of it in roma.
@@ -94,6 +133,32 @@ the process environment — where `env`, a stack trace, or a diagnostic command
 would write it into a **Transcript roma has promised never to delete**
 (ADR-0006). The hour is what bounds that; nothing longer-lived than an hour could
 be allowed anywhere near an append-only record.
+
+**Amended — one helper is not the whole mechanism, because `gh` is not `git`.**
+Issues and pull requests are a good part of what this exists for: `issues: write`
+is granted below on the grounds that "file that as an issue" is among the first
+things anybody will ask, and this repository's tracker *is* GitHub Issues
+(`CLAUDE.md`). That work is done with `gh`, and **`gh` has no notion of a
+credential helper.** It takes a token from `GH_TOKEN`, or from a config file it
+was logged into — the process environment this section rejects on arithmetic, and
+a file the Alternatives below reject on the same expiry. Implemented exactly as
+written, an agent could clone and push and could not open a pull request, which
+is not a shortfall anybody would accept as the design.
+
+The mechanism is therefore one **Minter** and **two Credential Shims**, both
+named in CONTEXT.md: `git`'s credential helper, and something ahead of `gh` on
+`PATH` that mints per invocation and passes the token to that one child process
+and no other. Per invocation rather than per Session, for this section's own
+arithmetic — an environment fixed at spawn is stale within the hour, and a
+Resident Session outliving an hour is ordinary.
+
+The GitHub MCP server was considered in `gh`'s place and is worse here rather
+than better: its token is an environment variable read at launch, and an MCP
+server is started once per Session and then stays. It is `GH_TOKEN` at spawn with
+an extra process in front of it.
+
+What none of this changes: a Shim is still not a boundary against the agent, for
+the reason two paragraphs up. It has only stopped being singular.
 
 ### What the Installation may do
 
