@@ -8,11 +8,7 @@ import { StartupSelfCheckFailed } from './startup-self-check.js'
 import { flush } from '../test/support/fake-claude.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
 import { romaFixture, teardownRoma, type RomaFixture } from '../test/support/roma-fixture.js'
-import { feed, recordedStream, upToFirst } from '../test/support/recorded-stream.js'
-
-/** One complete Turn of a real recorded stream. Its text is "ok". */
-const HEALTHY = recordedStream('three-turns-one-process').turn(1)
-const STRAY_KEY = upToFirst(recordedStream('auth-failure').turn(1), 'system/init')
+import { feed, OK, STRAY_KEY } from '../test/support/recorded-stream.js'
 
 const OAUTH: Credential = { kind: 'shared-window', oauthToken: 'token' }
 const KEY = 'conversation-one'
@@ -102,7 +98,7 @@ describe('starting roma', () => {
 
     const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
     await flush()
-    feed(roma.procFor(KEY), HEALTHY)
+    feed(roma.procFor(KEY), OK)
     await handled
 
     expect(roma.channel.instructions).toContainEqual(
@@ -121,7 +117,7 @@ describe('starting roma', () => {
 
     const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
     await flush()
-    feed(roma.procFor(KEY), HEALTHY)
+    feed(roma.procFor(KEY), OK)
     await handled
 
     const month = monthOf(new Date())

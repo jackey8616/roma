@@ -4,10 +4,7 @@ import { join } from 'node:path'
 import { sessionIdFor } from '../../src/session-id.js'
 import type { ClaudeEvent } from '../../src/stream-events.js'
 import { FakeClaude, flush, type FakeClaudeProcess } from './fake-claude.js'
-import { feed, recordedStream } from './recorded-stream.js'
-
-/** One complete Turn of a real recorded stream. Its text is "ok". */
-const OK = recordedStream('three-turns-one-process').turn(1)
+import { feed, OK } from './recorded-stream.js'
 
 /** The three directories a whole roma is given, in the shape it takes them. */
 export interface RomaDirectories {

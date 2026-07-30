@@ -3,10 +3,8 @@ import type { TaskProgress } from './channel-adapter.js'
 import { ProgressReporter, type ProgressReporterOptions } from './progress-reporter.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { flush } from '../test/support/fake-claude.js'
-import { ofKind, recordedStream } from '../test/support/recorded-stream.js'
+import { GENERATING, ofKind, recordedStream } from '../test/support/recorded-stream.js'
 
-/** The 72-second generating Turn: 194 `text_delta` events and no tool at all. */
-const GENERATION = recordedStream('generation-partial-messages').turn(1)
 /** The tool-using Turn: a thinking block, a `Bash` call, and 25 seconds of silence. */
 const TOOL = recordedStream('tool-use-partial-messages').turn(1)
 
@@ -46,7 +44,7 @@ const ASKS_FOR_A_TOOL = ofKind(TOOL, 'assistant').find((event) =>
 const TOOL_STARTED = ofKind(TOOL, 'system/task_started')[0] as ClaudeEvent
 const TOOL_FINISHED = ofKind(TOOL, 'system/task_notification')[0] as ClaudeEvent
 const THINKING = ofKind(TOOL, 'system/thinking_tokens')[0] as ClaudeEvent
-const TEXT_DELTAS = ofKind(GENERATION, 'stream_event/text_delta')
+const TEXT_DELTAS = ofKind(GENERATING, 'stream_event/text_delta')
 
 beforeEach(() => {
   // setImmediate stays real, so `flush` can still drain the microtask queue
@@ -216,7 +214,7 @@ describe('what an update says the Task is doing', () => {
   it('does not read the finished message back as more prose', async () => {
     const { reporter, sent } = newReporter()
 
-    await acknowledgeAnd(reporter, GENERATION)
+    await acknowledgeAnd(reporter, GENERATING)
     await vi.advanceTimersByTimeAsync(INTERVAL)
 
     const written = TEXT_DELTAS.map(textOf).join('')

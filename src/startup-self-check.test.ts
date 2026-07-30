@@ -7,21 +7,7 @@ import { TERMINATE_GRACE_MS } from './claude-session.js'
 import { startupSelfCheck, StartupSelfCheckFailed } from './startup-self-check.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { FakeClaude, flush } from '../test/support/fake-claude.js'
-import { feed, recordedStream, upToFirst } from '../test/support/recorded-stream.js'
-
-/**
- * A real Turn under the Shared Window credential: `apiKeySource: "none"`,
- * `model: "claude-sonnet-5"`, `is_error: false`. What a boot that should be
- * allowed to proceed looks like.
- */
-const HEALTHY = recordedStream('three-turns-one-process').turn(1)
-/**
- * A real Turn under a stray `ANTHROPIC_API_KEY` — the capture that gives this
- * check a reason to exist. `apiKeySource: "ANTHROPIC_API_KEY"`, a model silently
- * moved to `claude-opus-5[1m]`, and a 401 arriving as `is_error: true` with
- * `subtype: "success"`.
- */
-const STRAY_KEY = recordedStream('auth-failure').turn(1)
+import { FAILED, feed, OK, STRAY_KEY, upToFirst } from '../test/support/recorded-stream.js'
 
 /**
  * A Turn that resolves the right credential and then fails to authenticate.
@@ -31,7 +17,7 @@ const STRAY_KEY = recordedStream('auth-failure').turn(1)
  * `system/init` — which is why the check drives the Turn to completion rather
  * than stopping there.
  */
-const DEAD_TOKEN = [...HEALTHY.slice(0, -1), ...STRAY_KEY.slice(-1)]
+const DEAD_TOKEN = [...OK.slice(0, -1), ...FAILED.slice(-1)]
 
 const OAUTH: Credential = { kind: 'shared-window', oauthToken: 'token' }
 const OVERFLOW: Credential = { kind: 'overflow', apiKey: 'sk-ant-key' }
@@ -53,7 +39,7 @@ interface SelfCheckRun {
   readonly events?: readonly ClaudeEvent[] | null
 }
 
-function selfCheck({ credential = OAUTH, model, timeoutMs, events = HEALTHY }: SelfCheckRun = {}) {
+function selfCheck({ credential = OAUTH, model, timeoutMs, events = OK }: SelfCheckRun = {}) {
   const claude = new FakeClaude({ exitOnKill: true })
   const cwd = mkdtempSync(join(tmpdir(), 'roma-self-check-'))
   dirs.push(cwd)
@@ -111,7 +97,7 @@ describe('the startup self-check', () => {
   // model at `claude-sonnet-5`. apiKeySource is what gives a stray key away.
   it('fails when the credential resolves to an API key instead', async () => {
     const { check } = selfCheck({
-      events: upToFirst(withInit(HEALTHY, { apiKeySource: 'ANTHROPIC_API_KEY' }), 'system/init'),
+      events: upToFirst(withInit(OK, { apiKeySource: 'ANTHROPIC_API_KEY' }), 'system/init'),
     })
 
     const { failures: failed } = await failures(check)
@@ -122,7 +108,7 @@ describe('the startup self-check', () => {
   // co-occur. An operator told only about the model would go looking for a
   // config change that never happened.
   it('reports every condition that failed, not only the first', async () => {
-    const { check } = selfCheck({ events: upToFirst(STRAY_KEY, 'system/init') })
+    const { check } = selfCheck({ events: STRAY_KEY })
 
     const { failures: failed } = await failures(check)
     expect(failed.map((failure) => failure.condition)).toEqual(['credential', 'model'])
@@ -133,7 +119,7 @@ describe('the startup self-check', () => {
   // waited for one would still be waiting.
   it('refuses at system/init without waiting for the Turn', async () => {
     const { check } = selfCheck({
-      events: upToFirst(withInit(HEALTHY, { apiKeySource: 'ANTHROPIC_API_KEY' }), 'system/init'),
+      events: upToFirst(withInit(OK, { apiKeySource: 'ANTHROPIC_API_KEY' }), 'system/init'),
     })
 
     await expect(check).rejects.toThrow(StartupSelfCheckFailed)
@@ -143,7 +129,7 @@ describe('the startup self-check', () => {
   // so the assertion has to hold on its own — not only as a side effect of the
   // credential being wrong.
   it('fails when the model is not the pinned one, on a credential that is right', async () => {
-    const { check } = selfCheck({ events: withInit(HEALTHY, { model: 'claude-opus-5[1m]' }) })
+    const { check } = selfCheck({ events: withInit(OK, { model: 'claude-opus-5[1m]' }) })
 
     const { failures: failed } = await failures(check)
     expect(failed.map((failure) => failure.condition)).toEqual(['model'])
@@ -164,7 +150,7 @@ describe('the startup self-check', () => {
   // A boot that stops with "self-check failed" names none of three unrelated
   // causes, and this check exists precisely because they are otherwise silent.
   it('says which condition failed and what to go and look at', async () => {
-    const { check } = selfCheck({ events: upToFirst(STRAY_KEY, 'system/init') })
+    const { check } = selfCheck({ events: STRAY_KEY })
 
     const error = await failures(check)
     expect(error.message).toContain('apiKeySource is "ANTHROPIC_API_KEY", expected "none"')
@@ -207,7 +193,7 @@ describe('the startup self-check', () => {
   })
 
   it('expects an API key rather than none under the Overflow credential', async () => {
-    const { check } = selfCheck({ credential: OVERFLOW, events: HEALTHY })
+    const { check } = selfCheck({ credential: OVERFLOW, events: OK })
 
     const { failures: failed } = await failures(check)
     expect(failed[0]?.condition).toBe('credential')
@@ -241,7 +227,7 @@ describe('the startup self-check', () => {
   it('ends the probe process whether it passed or failed', async () => {
     const passed = selfCheck()
     await passed.check
-    const refused = selfCheck({ events: upToFirst(STRAY_KEY, 'system/init') })
+    const refused = selfCheck({ events: STRAY_KEY })
     await failures(refused.check)
 
     expect(passed.claude.process.signals).toContain('SIGTERM')

@@ -7,11 +7,12 @@ import { FakeTransport } from '../test/support/fake-transport.js'
 import { RecordingAdapter, UNREADABLE } from '../test/support/recording-adapter.js'
 import { romaFixture, teardownRoma, type RomaFixture } from '../test/support/roma-fixture.js'
 import {
+  BLOCKED_WITH_OVERAGE,
+  FAILED_OUTRIGHT,
   feed,
-  kindOf,
-  quotaEvent,
-  recordedStream,
-  upToFirst,
+  OK,
+  STRAY_KEY,
+  THREE_TURNS,
 } from '../test/support/recorded-stream.js'
 
 // SEAM 1, at the outermost edge roma has: an event arrives on the Transport and
@@ -19,19 +20,6 @@ import {
 // settled. Claude Code is the recorded fake, the Channel is the recording
 // double, and the queue is a Transport a test drives by hand — so what is
 // asserted here is roma's own wiring, not anybody's client library.
-
-/** One complete Turn of a real recorded stream. Its text is "ok". */
-const OK = recordedStream('three-turns-one-process').turn(1)
-const FAILED = recordedStream('auth-failure').turn(1)
-/** The same 401 with its retry storm removed, so the Turn fails on its own. */
-const FAILED_OUTRIGHT = FAILED.filter((event) => kindOf(event) !== 'system/api_retry')
-/** A Turn that failed with the Shared Window spent and overage on offer. */
-const BLOCKED_WITH_OVERAGE = [
-  quotaEvent({ status: 'blocked', overageStatus: 'allowed' }),
-  ...FAILED_OUTRIGHT,
-]
-/** A `system/init` reporting a stray API key, which is what fails the self-check. */
-const STRAY_KEY = upToFirst(FAILED, 'system/init')
 
 const OAUTH: Credential = { kind: 'shared-window', oauthToken: 'oauth-token' }
 const METERED: Credential = { kind: 'overflow', apiKey: 'metered-key' }
@@ -265,7 +253,7 @@ describe('the same message delivered twice', () => {
 
     const again = roma.transport.deliver(said('hello'), 'm-1')
     await flush()
-    feed(roma.procFor(), recordedStream('three-turns-one-process').turn(2))
+    feed(roma.procFor(), THREE_TURNS.turn(2))
     await again
 
     expect(roma.transport.acked).toEqual(['m-1', 'm-1'])

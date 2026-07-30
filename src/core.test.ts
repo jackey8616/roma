@@ -19,49 +19,25 @@ import { flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
 import { romaFixture, teardownRoma, type RomaFixture } from '../test/support/roma-fixture.js'
 import {
-  apiRetries,
+  BLOCKED,
+  BLOCKED_WITH_OVERAGE,
+  FAILED,
+  FAILED_OUTRIGHT,
   feed,
-  kindOf,
-  recordedStream,
-  upToFirst,
+  GENERATING,
+  OK,
   quotaEvent,
+  recordedStream,
+  RETRIES,
+  THREE_TURNS,
+  upToFirst,
   withApiKeySource,
   withTotalCostUsd,
 } from '../test/support/recorded-stream.js'
 import { sources, type Source } from '../test/support/sources.js'
 
-const stream = recordedStream('three-turns-one-process')
-/** One complete Turn of a real recorded stream. Its text is "ok". */
-const OK = stream.turn(1)
-const FAILED = recordedStream('auth-failure').turn(1)
-/**
- * The same 401 with its retry storm taken out, so the Turn fails on its own.
- *
- * The capture holds ten `api_retry` events before the error surfaces, which is
- * more than the retry budget allows — fed whole, it is a Task roma abandons
- * rather than one Claude Code failed, and those are different endings with
- * different costs.
- */
-const FAILED_OUTRIGHT = FAILED.filter((event) => kindOf(event) !== 'system/api_retry')
-/**
- * A Turn that failed with the Shared Window reported spent.
- *
- * Built rather than captured: every recording roma holds says `status:
- * "allowed"`, and the only way to record the other case is to drain the window
- * everybody shares. `spentUntil` in `src/quota.ts` is where that guess lives.
- */
-const BLOCKED = [quotaEvent({ status: 'blocked' }), ...FAILED_OUTRIGHT]
-/** The same, with the provider willing to sell overage. */
-const BLOCKED_WITH_OVERAGE = [
-  quotaEvent({ status: 'blocked', overageStatus: 'allowed' }),
-  ...FAILED_OUTRIGHT,
-]
 /** When the window comes back, as the capture's own event reports it. */
 const RESETS_AT = 1785271200
-/** The real `api_retry` events a bad credential produced, 401 and all. */
-const RETRIES = apiRetries('auth-failure')
-/** 72 seconds of generation with `--include-partial-messages` on: 194 `text_delta` events. */
-const GENERATING = recordedStream('generation-partial-messages').turn(1)
 /**
  * A tool-using Turn up to the moment the tool starts.
  *
@@ -301,7 +277,7 @@ describe('finding the Session a message belongs to', () => {
     const { claude, say } = newCore()
 
     await say('first')
-    await say('second', { events: stream.turn(3) })
+    await say('second', { events: THREE_TURNS.turn(3) })
 
     expect(claude.processes).toHaveLength(1)
   })
@@ -440,7 +416,7 @@ describe('handling one Conversation one Task at a time', () => {
     feed(proc, OK)
     await first
     await flush()
-    feed(proc, stream.turn(3))
+    feed(proc, THREE_TURNS.turn(3))
     await second
 
     expect(proc.sent).toHaveLength(2)
@@ -456,7 +432,7 @@ describe('handling one Conversation one Task at a time', () => {
     feed(proc, OK)
     await first
     await flush()
-    feed(proc, stream.turn(3))
+    feed(proc, THREE_TURNS.turn(3))
     await second
 
     expect(
@@ -487,7 +463,7 @@ describe('handling one Conversation one Task at a time', () => {
     feed(proc, OK)
     await first
     await flush()
-    feed(proc, stream.turn(3))
+    feed(proc, THREE_TURNS.turn(3))
     await second
   })
 })
@@ -560,7 +536,7 @@ describe('running only so much at once', () => {
     feed(proc, OK)
     await running
     await flush()
-    feed(proc, stream.turn(3))
+    feed(proc, THREE_TURNS.turn(3))
     await behind
 
     expect(posted(delivered)).toEqual([{ kind: 'result', conversationKey: KEY, text: '47' }])
@@ -588,7 +564,7 @@ describe('running only so much at once', () => {
     feed(proc, OK)
     await running
     await flush()
-    feed(proc, stream.turn(3))
+    feed(proc, THREE_TURNS.turn(3))
 
     await expect(behind).rejects.toThrow('the Channel is down')
   })
@@ -1204,7 +1180,7 @@ describe('the record every Task leaves behind', () => {
     await first
     await flush()
     await vi.advanceTimersByTimeAsync(1_000)
-    feed(proc, stream.turn(3))
+    feed(proc, THREE_TURNS.turn(3))
     await second
 
     expect(recordsIn(audit).at(-1)).toMatchObject({ durationMs: 4_000, turnMs: 1_000 })
@@ -1526,7 +1502,7 @@ describe('offering Overflow, and taking it', () => {
     await flush()
     feed(procFor(KEY), OK)
     await task
-    await say('and another', { events: stream.turn(3) })
+    await say('and another', { events: THREE_TURNS.turn(3) })
 
     expect(claude.lastSpawn.env).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' })
   })

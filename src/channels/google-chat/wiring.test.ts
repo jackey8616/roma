@@ -8,7 +8,7 @@ import { PubSubTransport } from './pubsub-transport.js'
 import { flush } from '../../../test/support/fake-claude.js'
 import { FakePubSubMessage, FakeSubscription } from '../../../test/support/fake-pubsub.js'
 import { romaFixture, teardownRoma, type RomaFixture } from '../../../test/support/roma-fixture.js'
-import { feed, kindOf, quotaEvent, recordedStream } from '../../../test/support/recorded-stream.js'
+import { BLOCKED_WITH_OVERAGE, feed, OK } from '../../../test/support/recorded-stream.js'
 
 // The one test where roma is assembled out of its real parts: a Pub/Sub message
 // goes in, `PubSubTransport` decodes it, `GoogleChatAdapter` reads it, the Core
@@ -25,15 +25,6 @@ import { feed, kindOf, quotaEvent, recordedStream } from '../../../test/support/
 // The Chat event below is still **written from Google's documentation, not
 // captured**. Nothing in this repo can capture one — see ADR-0004, which is
 // explicit that the payload's fields are the thing a real Workspace closes.
-
-const OK = recordedStream('three-turns-one-process').turn(1)
-const FAILED_OUTRIGHT = recordedStream('auth-failure')
-  .turn(1)
-  .filter((event) => kindOf(event) !== 'system/api_retry')
-const BLOCKED_WITH_OVERAGE = [
-  quotaEvent({ status: 'blocked', overageStatus: 'allowed' }),
-  ...FAILED_OUTRIGHT,
-]
 
 const SPACE = 'spaces/AAAA'
 const THREAD = `${SPACE}/threads/thread-1`
