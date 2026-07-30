@@ -7,6 +7,10 @@ Date: 2026-07-30
 Accepted, and **built** in the same sitting. Narrow by design: it settles what
 one message says, and reverses nothing.
 
+**Amended 2026-07-30** — one Consequence has stopped being true: the length gap
+it recorded as inherited is closed (#75). The decision is unchanged. The
+amendment is marked inline.
+
 Refines ADR-0003 rather than amending it. That ADR's Progress reporting section
 is unchanged and stays unchanged — what follows is the other half of the same
 rule, which it never had cause to state because the collision had not been seen
@@ -100,12 +104,19 @@ outgrows it, which reads as a hang.
 - The Core no longer accumulates a Turn's prose to hand to a renderer that will
   not show it — 17706 characters in the capture this was designed against, held
   for nobody.
-- Nothing is trimmed to Chat's limit in the Acknowledgement any more, because
-  every phase is now a fixed sentence around a small number. The one phase that
+- ~~Nothing is trimmed to Chat's limit in the Acknowledgement any more, because
+  every phase is now a fixed sentence around a small number.~~ The one phase that
   can still exceed the limit is a tool named by Claude Code's own description of
-  it, which is the command itself; it was never trimmed before this either, so
-  the gap is inherited rather than introduced. Written down because a length
+  it, which is the command itself; ~~it was never trimmed before this either, so
+  the gap is inherited rather than introduced.~~ Written down because a length
   budget disappearing from the code otherwise reads as a guard that was removed.
+
+  **Amended — the gap is closed (#75), and the guard is somewhere else.** The
+  finished phrase is cut to what the mention leaves of the limit, rather than any
+  one phase carrying a budget of its own, so the next phase somebody adds cannot
+  forget it. Its **end** goes, which is the opposite end from the trimming this
+  decision removed: a command is identified by how it starts, where a partial
+  answer was alive by how it ended.
 - A second Channel that *can* show prose cheaply no longer gets it from
   `TaskProgress`. That is the intended trade: `channel-adapter.ts` says to expect
   the second Channel to change the interface and to prefer changing it then to

@@ -378,6 +378,28 @@ describe('the acknowledgement', () => {
     expect(api.texts).toEqual([`${TO}Running awk…`])
   })
 
+  // The one phase whose length roma does not control: a tool is named by Claude
+  // Code's own description of it, which is the command itself. Over Chat's limit
+  // the message is refused rather than trimmed, and a refused *post* is worse
+  // than a refused edit — it is the first update for that Task, so the
+  // Conversation would be left with no acknowledgement at all, which is the
+  // silence that makes people send their message again.
+  it('fits Chat even when a tool is named by a command of any length', async () => {
+    const { adapter, api } = newAdapter()
+    const tool = `awk ${'-v x=1 '.repeat(1000)}`
+
+    await adapter.deliver(to(THREAD, { kind: 'progress', progress: { phase: 'tool', tool } }))
+
+    const text = api.texts[0] ?? ''
+    expect(api.calls).toEqual(['post'])
+    expect(text.length).toBeLessThanOrEqual(MAX_TEXT)
+    // The beginning is what names the command, so it is the end that goes — the
+    // opposite end from the partial answer this replaces, where the tail moving
+    // was the whole point.
+    expect(text.startsWith(`${TO}Running awk -v x=1 `)).toBe(true)
+    expect(text).not.toContain(tool)
+  })
+
   // A second Task in the same Conversation must not inherit the first one's
   // message, and a Task id is a uuid so this cannot happen in production — it is
   // the bookkeeping being wrong that it would come from.

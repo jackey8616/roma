@@ -146,22 +146,39 @@ function money(usd: number): string {
  * keeping is in the result.
  */
 export function progressText(caller: string, progress: TaskProgress): string {
-  return addressedTo(caller) + phrase(progress)
+  const to = addressedTo(caller)
+  return to + fitted(phrase(progress), MAX_TEXT - to.length)
+}
+
+/**
+ * One acknowledgement phrase, inside what the mention leaves of Chat's limit.
+ *
+ * On the finished phrase rather than inside the one phase that can overrun it —
+ * a tool, named by Claude Code's own description of it, whose length roma does
+ * not control — because a guard that sits on the result cannot be forgotten by
+ * the next phase somebody writes. Over the limit is not a longer message but no
+ * message: Chat refuses the whole thing rather than trimming it, and a refused
+ * *post* leaves a Task with no acknowledgement at all.
+ *
+ * The **end** is what goes: a command is identified by how it begins, which is
+ * the opposite end from the partial answer ADR-0010 removed.
+ *
+ * The budget is passed in rather than read off `MAX_TEXT` for the reason `split`
+ * gives below — the mention is already spent out of the limit.
+ */
+function fitted(text: string, budget: number): string {
+  if (text.length <= budget) return text
+  // Clamped because a negative length reads from the *end* in JavaScript, which
+  // is the one input that would turn this from a trim into its own opposite.
+  return `${text.slice(0, Math.max(0, budget - 1))}…`
 }
 
 /**
  * The acknowledgement without its mention.
  *
- * Nothing here is cut to fit any more, and nothing here needs to be: every
- * phrase is a fixed sentence around a small number. The one that was not — the
- * partial answer, which had to be trimmed to what the mention left of Chat's
- * limit — is gone with ADR-0010.
- *
- * The exception is a tool named by Claude Code's own description of it, which is
- * the command itself and has no length roma controls. It was never trimmed
- * either, so nothing about that changed here; it is written down because the
- * budget disappearing is the kind of thing that later reads as the guard having
- * been removed.
+ * Every phrase is a fixed sentence around a small number, except the tool's,
+ * which is named by Claude Code's own description of it. Nothing here does any
+ * fitting — `fitted` does it once, on whatever this returns.
  */
 function phrase(progress: TaskProgress): string {
   switch (progress.phase) {
