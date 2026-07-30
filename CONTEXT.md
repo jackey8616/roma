@@ -96,12 +96,16 @@ _Avoid_: history, session file, event log, and the bare word "log" (that reads
 as the Operator Log, which is roma's and says something else entirely)
 
 **Working Directory**:
-Where a Session does its work. roma's, unlike the Transcript: roma makes it and
-ADR-0003 reclaims it after seven idle days. It is named here because it is the
-Transcript's opposite number and the two are easily mistaken for one kind of
-thing — they sit side by side and have opposite lifetimes, because losing this
-one costs a checkout and losing the other destroys the only account there is of
-what an agent did.
+Where a Session does its work — created empty, because roma checks nothing out
+into it: the agent clones what it was asked about (ADR-0008). roma's, unlike the
+Transcript: roma makes it and ADR-0003 reclaims it after seven idle days. It is
+named here because it is the Transcript's opposite number and the two are easily
+mistaken for one kind of thing — they sit side by side and have opposite
+lifetimes, because losing the other destroys the only account there is of what an
+agent did. Losing this one used to be described as costing a checkout, and since
+ADR-0008 that undersells it: it can hold work an agent did and never pushed, and
+the Transcript's account of that is prose rather than a diff. The seven days
+still run, unexamined — the cost is accepted, not overlooked.
 _Avoid_: workspace, checkout, sandbox, and using this word for the directory the
 Transcript lives in — that one is nobody's to reclaim
 
@@ -193,6 +197,32 @@ _Avoid_: health check, preflight, smoke test, and `claude auth status` — that
 reports a token valid right up to the moment it 401s, which is why this is a real
 invocation instead
 
+### Reaching the code
+
+**Installation**:
+Which repositories roma can reach at all. A GitHub App is installed on a list of
+them, and roma acts as that App rather than as anybody. Because no Conversation
+is bound to a repository — the agent clones what it was asked about, and roma
+performs no checkout — this list is the *only* boundary there is: every
+Conversation reaches all of it, and so does everyone who can message roma
+(ADR-0008). Named here for that reason and not for GitHub's sake: a term that is
+the whole of a security property should be a term.
+_Avoid_: the App (that is the thing installed, not what it reaches), repo access,
+scope, permissions (those are what an Installation may *do*, which is a second
+question)
+
+**Installation Token**:
+The credential roma mints so that a Session's `git` can reach the Installation.
+An hour long, asked for at the moment git needs one, and never put in a process
+environment — an environment is fixed at spawn and would be stale within the
+hour, and a token that reaches a Transcript is in a record roma never deletes.
+roma holds the App's private key and mints; the helper the agent's git talks to
+holds nothing. It is not a boundary against the agent, which has a shell and can
+print it — what it bounds is how long a token that escapes is worth anything.
+_Avoid_: Credential (that word is taken, and by the other provider entirely —
+see Shared Window and Overflow), Repository Token (it is scoped to the whole
+Installation and a name should not claim otherwise), GitHub token, PAT, secret
+
 ### Paying for it
 
 **Shared Window**:
@@ -217,7 +247,11 @@ _Avoid_: paused, retrying, backing off, queued (that word is the Task Queue's)
 
 **Audit Record**:
 The line roma writes when a Task ends: who asked, which Session ran it, how long
-they waited, what it cost, and which credential paid. One per Task — a failed or
+they waited, what it cost, which credential paid, and which repositories it
+minted an Installation Token for. That last one is what roma can honestly know:
+git names the repository every time it asks for a credential, so what a Task
+reached for is free — and what it did once it got there is not, since learning
+that would mean reading the Transcript. One per Task — a failed or
 stopped one included — and the cost on it is the Turn's own delta, never the
 Session's running total. It can also be nothing at all: a Turn that began and
 never reached a terminal event spent real tokens nothing will ever name, and that
