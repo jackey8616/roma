@@ -254,15 +254,34 @@ const NOTHING_SPENT: Spend = { costUsd: null, turnMs: null }
  */
 class Ledger {
   readonly #byCredential = new Map<CredentialKind, Spend>()
+  #answeredOn: CredentialKind | null = null
 
   /** What one credential paid for. */
   on(credential: CredentialKind): Spend {
     return this.#byCredential.get(credential) ?? NOTHING_SPENT
   }
 
-  /** Every credential that paid for part of this Task, in the order they did. */
+  /** Every credential that paid for part of this Task. */
   get credentials(): CredentialKind[] {
     return [...this.#byCredential.keys()]
+  }
+
+  /**
+   * The credential the attempt that ended this Task was paid for by, or null
+   * before there has been one.
+   *
+   * Kept as the attempts go by rather than read off `credentials`, because that
+   * is a `Map`'s key order — the order each credential *first* paid — and
+   * setting an existing key does not move it. A Task blocked on the Shared
+   * Window, rerun on Overflow, blocked again, and finally answered by the window
+   * coming back would name Overflow: the one credential that produced nothing.
+   *
+   * `#drive` adds exactly one attempt per pass before it returns or parks, so
+   * the last one added is always the attempt the Task ended on — the answer
+   * where there is one, and the last thing tried where there is not.
+   */
+  get answeredOn(): CredentialKind | null {
+    return this.#answeredOn
   }
 
   /**
@@ -277,6 +296,7 @@ class Ledger {
    * ticket exists to avoid, pointing the other way.
    */
   add(credential: CredentialKind, turn: Turn | null, task: RunningTask): void {
+    this.#answeredOn = credential
     const spend = this.on(credential)
     const turnMs = turn?.durationMs ?? spend.turnMs
     if (turn?.costUsd != null) {
@@ -538,7 +558,7 @@ export class Core {
     // cannot throw — see `AuditLog.record` — so it also cannot silence a Task.
     // The credential the answer came from, which is the one this Task is filed
     // under. Almost always the only one it used.
-    const answeredOn = spend.credentials.at(-1) ?? this.#credential
+    const answeredOn = spend.answeredOn ?? this.#credential
     const durationMs = Date.now() - startedAt
     const outcome = outcomeOf(instruction)
     for (const credential of [answeredOn, ...spend.credentials.filter((c) => c !== answeredOn)]) {
