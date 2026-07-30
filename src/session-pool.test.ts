@@ -11,7 +11,14 @@ import {
 import type { CredentialKind } from './build-env.js'
 import type { Turn } from './claude-session.js'
 import { FakeClaude, flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
-import { apiRetries, feed, recordedStream, withTotalCostUsd } from '../test/support/recorded-stream.js'
+import {
+  feed,
+  OK,
+  recordedStream,
+  RETRIES,
+  THREE_TURNS,
+  withTotalCostUsd,
+} from '../test/support/recorded-stream.js'
 import type { ClaudeEvent } from './stream-events.js'
 
 const MINUTE = 60_000
@@ -73,15 +80,6 @@ function newPool(options: Partial<SessionPoolOptions> = {}) {
 
   return { claude, pool, workRoot, log, processFor, send }
 }
-
-const stream = recordedStream('three-turns-one-process')
-/** One complete Turn of a real recorded stream. Its text is "ok". */
-const OK = stream.turn(1)
-/**
- * The ten real `api_retry` events a bad credential produced — the ones the
- * retry-storm cap exists for, 401 `authentication_failed` and all.
- */
-const RETRIES = apiRetries('auth-failure')
 
 beforeEach(() => {
   // setImmediate stays real so `flush` can still drain the microtask queue while
@@ -611,7 +609,7 @@ describe('driving a resident Session', () => {
     const { claude, pool, send } = newPool()
 
     await send(A, 'first', OK)
-    await send(A, 'second', stream.turn(3))
+    await send(A, 'second', THREE_TURNS.turn(3))
 
     expect(claude.processes).toHaveLength(1)
     expect(pool.residents).toEqual([A])
@@ -834,7 +832,7 @@ describe('giving up on a retry storm', () => {
 
     const second = pool.send(A, 'second')
     await flush()
-    feed(processFor(A), [...RETRIES.slice(2, 4), ...stream.turn(3)])
+    feed(processFor(A), [...RETRIES.slice(2, 4), ...THREE_TURNS.turn(3)])
 
     await expect(second).resolves.toMatchObject({ isError: false })
     expect(pool.residents).toEqual([A])
@@ -956,7 +954,7 @@ describe('running a Turn on the other credential', () => {
     const { claude, send } = newPool()
     await send(A, 'first', OK, 'overflow')
 
-    await send(A, 'and again', stream.turn(3), 'overflow')
+    await send(A, 'and again', THREE_TURNS.turn(3), 'overflow')
 
     expect(claude.processes).toHaveLength(1)
   })

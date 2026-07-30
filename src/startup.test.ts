@@ -1,5 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { monthOf } from './audit-log.js'
@@ -8,40 +7,32 @@ import { sessionIdFor } from './session-id.js'
 import { socketPathIn } from './shim-protocol.js'
 import { startRoma, type Roma } from './startup.js'
 import { StartupSelfCheckFailed } from './startup-self-check.js'
-import type { ClaudeEvent } from './stream-events.js'
-import { FakeClaude, flush } from '../test/support/fake-claude.js'
+import { flush } from '../test/support/fake-claude.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
 import { fakeMinting, FakeMinter } from '../test/support/fake-minter.js'
-import { feed, recordedStream, upToFirst } from '../test/support/recorded-stream.js'
-
-/** One complete Turn of a real recorded stream. Its text is "ok". */
-const HEALTHY = recordedStream('three-turns-one-process').turn(1)
-const STRAY_KEY = upToFirst(recordedStream('auth-failure').turn(1), 'system/init')
+import { romaFixture, teardownRoma, type RomaFixture } from '../test/support/roma-fixture.js'
+import { feed, OK, STRAY_KEY } from '../test/support/recorded-stream.js'
 
 const OAUTH: Credential = { kind: 'shared-window', oauthToken: 'token' }
 const KEY = 'conversation-one'
 
 let started: Roma[] = []
-let workRoots: string[] = []
+let fixtures: RomaFixture[] = []
 
 function boot({ minter = new FakeMinter() }: { minter?: FakeMinter } = {}) {
-  const claude = new FakeClaude({ exitOnKill: true })
-  const workRoot = mkdtempSync(join(tmpdir(), 'roma-startup-'))
-  const auditRoot = mkdtempSync(join(tmpdir(), 'roma-startup-audit-'))
-  const configDir = mkdtempSync(join(tmpdir(), 'roma-startup-claude-'))
+  const fixture = romaFixture('startup')
+  fixtures.push(fixture)
   const minting = fakeMinting({ minter })
-  workRoots.push(workRoot, auditRoot, configDir, minting.shimDir)
+  fixture.alsoRemove(minting.shimDir)
   const channel = new RecordingAdapter()
 
   let resolved = false
   const starting = startRoma({
     credential: OAUTH,
     channel,
-    workRoot,
-    auditRoot,
-    configDir,
+    ...fixture.dirs,
     minting,
-    spawn: claude.spawn,
+    spawn: fixture.claude.spawn,
     log: () => {},
     selfCheckTimeoutMs: 1_000,
   }).then((roma) => {
@@ -51,27 +42,23 @@ function boot({ minter = new FakeMinter() }: { minter?: FakeMinter } = {}) {
   })
 
   return {
-    claude,
+    claude: fixture.claude,
     channel,
-    workRoot,
-    auditRoot,
+    workRoot: fixture.dirs.workRoot,
+    auditRoot: fixture.dirs.auditRoot,
     minter,
     minting,
     starting,
     hasStarted: () => resolved,
-    /** Answer the probe Turn, the way a real process would. */
-    answerProbe: async (events: readonly ClaudeEvent[] = HEALTHY) => {
-      await flush()
-      feed(claude.process, events)
-    },
+    answerProbe: fixture.answerProbe,
+    procFor: fixture.procFor,
   }
 }
 
 afterEach(async () => {
-  for (const roma of started) await roma.shutdown()
+  await teardownRoma(started, fixtures.flatMap(({ roots }) => roots))
   started = []
-  for (const workRoot of workRoots) rmSync(workRoot, { recursive: true, force: true })
-  workRoots = []
+  fixtures = []
 })
 
 describe('starting roma', () => {
@@ -120,7 +107,7 @@ describe('starting roma', () => {
 
     const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
     await flush()
-    feed(roma.claude.processFor(join(roma.workRoot, sessionIdFor(KEY))), HEALTHY)
+    feed(roma.procFor(KEY), OK)
     await handled
 
     expect(roma.channel.instructions).toContainEqual(
@@ -139,7 +126,7 @@ describe('starting roma', () => {
 
     const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
     await flush()
-    feed(roma.claude.processFor(join(roma.workRoot, sessionIdFor(KEY))), HEALTHY)
+    feed(roma.procFor(KEY), OK)
     await handled
 
     const month = monthOf(new Date())
@@ -212,7 +199,7 @@ describe('putting a credential in front of a Session’s tools', () => {
     const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
     await flush()
     const spawn = roma.claude.lastSpawn
-    feed(roma.claude.processFor(join(roma.workRoot, sessionIdFor(KEY))), HEALTHY)
+    feed(roma.procFor(KEY), OK)
     await handled
 
     const at = spawn.args.indexOf('--append-system-prompt')
@@ -227,7 +214,7 @@ describe('putting a credential in front of a Session’s tools', () => {
     const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
     await flush()
     const { env } = roma.claude.lastSpawn
-    feed(roma.claude.processFor(join(roma.workRoot, sessionIdFor(KEY))), HEALTHY)
+    feed(roma.procFor(KEY), OK)
     await handled
 
     expect(env['ROMA_SESSION_ID']).toBe(sessionIdFor(KEY))
@@ -262,7 +249,7 @@ describe('putting a credential in front of a Session’s tools', () => {
     const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
     await flush()
     const { env } = roma.claude.lastSpawn
-    feed(roma.claude.processFor(join(roma.workRoot, sessionIdFor(KEY))), HEALTHY)
+    feed(roma.procFor(KEY), OK)
     await handled
 
     expect(roma.minter.minted).toEqual([])

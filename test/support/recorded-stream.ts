@@ -172,3 +172,81 @@ export function feed(
     proc.emitStdout(ndjson.slice(i, i + chunkSize))
   }
 }
+
+// The Turns the tests share, derived here rather than in each of them.
+//
+// Every one of these was being cut out of the same two captures in three or four
+// files at once, and they had already come apart: `STRAY_KEY` meant the whole
+// 401 Turn in one file and the same Turn cut short in two others, so a test
+// reading one file's name got the other file's events. Both of those Turns are
+// wanted, they are just not the same Turn, and naming them once is what keeps
+// that true.
+
+/** The capture of one process serving three Turns, for whichever one is wanted. */
+export const THREE_TURNS = recordedStream('three-turns-one-process')
+
+/**
+ * One complete Turn under the Shared Window credential. Its text is "ok".
+ *
+ * `apiKeySource: "none"`, `model: "claude-sonnet-5"`, `is_error: false` — what a
+ * boot that should be allowed to proceed looks like, and what a Task that worked
+ * looks like everywhere else.
+ */
+export const OK: readonly ClaudeEvent[] = THREE_TURNS.turn(1)
+
+/**
+ * The whole Turn run under a stray `ANTHROPIC_API_KEY`, as captured.
+ *
+ * `apiKeySource: "ANTHROPIC_API_KEY"`, a model silently moved to
+ * `claude-opus-5[1m]`, ten `api_retry` events spread over 182 seconds, and a 401
+ * arriving as `is_error: true` with `subtype: "success"`.
+ */
+export const FAILED: readonly ClaudeEvent[] = recordedStream('auth-failure').turn(1)
+
+/**
+ * The same 401 with its retry storm taken out, so the Turn fails on its own.
+ *
+ * The capture holds more `api_retry` events than the retry budget allows — fed
+ * whole, it is a Task roma abandons rather than one Claude Code failed, and
+ * those are different endings with different costs.
+ */
+export const FAILED_OUTRIGHT: readonly ClaudeEvent[] = FAILED.filter(
+  (event) => kindOf(event) !== 'system/api_retry',
+)
+
+/**
+ * The same Turn cut off after the `system/init` that reports the stray key.
+ *
+ * The shortest stream that fails the startup self-check: `apiKeySource` is
+ * settled before the first API call, so nothing after it changes the answer.
+ */
+export const STRAY_KEY: readonly ClaudeEvent[] = upToFirst(FAILED, 'system/init')
+
+/**
+ * The ten real `api_retry` events a bad credential produced — the ones the
+ * retry-storm cap exists for, 401 `authentication_failed` and all.
+ */
+export const RETRIES: readonly ClaudeEvent[] = apiRetries('auth-failure')
+
+/**
+ * A Turn that failed with the Shared Window reported spent.
+ *
+ * Built rather than captured: every recording roma holds says `status:
+ * "allowed"`, and the only way to record the other case is to drain the window
+ * everybody shares. `spentUntil` in `src/quota.ts` is where that guess lives.
+ */
+export const BLOCKED: readonly ClaudeEvent[] = [
+  quotaEvent({ status: 'blocked' }),
+  ...FAILED_OUTRIGHT,
+]
+
+/** The same, with the provider willing to sell overage. */
+export const BLOCKED_WITH_OVERAGE: readonly ClaudeEvent[] = [
+  quotaEvent({ status: 'blocked', overageStatus: 'allowed' }),
+  ...FAILED_OUTRIGHT,
+]
+
+/** The 72-second generating Turn: 194 `text_delta` events and no tool at all. */
+export const GENERATING: readonly ClaudeEvent[] = recordedStream(
+  'generation-partial-messages',
+).turn(1)
