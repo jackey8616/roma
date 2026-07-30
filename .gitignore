@@ -30,6 +30,10 @@ coverage/
 # Agent scratch space (prototypes, working notes)
 .scratch/
 
+# Agent worktrees. A git worktree checked out inside the repo it belongs to —
+# committing one would embed a second copy of the tree in itself.
+.claude/worktrees/
+
 # Local test scratch (seam 2 working dirs, isolated claude config)
 .tmp/
 
