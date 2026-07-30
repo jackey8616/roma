@@ -1,16 +1,13 @@
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Credential } from '../../build-env.js'
 import { serve, type Serving } from '../../serve.js'
 import { sessionIdFor } from '../../session-id.js'
-import type { ClaudeEvent } from '../../stream-events.js'
 import { GoogleChatAdapter } from './google-chat-adapter.js'
 import { HttpChatApi, type ChatRequest } from './http-chat-api.js'
 import { PubSubTransport } from './pubsub-transport.js'
-import { FakeClaude, flush } from '../../../test/support/fake-claude.js'
+import { flush } from '../../../test/support/fake-claude.js'
 import { FakePubSubMessage, FakeSubscription } from '../../../test/support/fake-pubsub.js'
+import { romaFixture, teardownRoma, type RomaFixture } from '../../../test/support/roma-fixture.js'
 import { feed, kindOf, quotaEvent, recordedStream } from '../../../test/support/recorded-stream.js'
 
 // The one test where roma is assembled out of its real parts: a Pub/Sub message
@@ -61,14 +58,11 @@ function mentioned(text: string): Record<string, unknown> {
 }
 
 let running: Serving[] = []
-let roots: string[] = []
+let fixtures: RomaFixture[] = []
 
 async function boot() {
-  const claude = new FakeClaude({ exitOnKill: true })
-  const workRoot = mkdtempSync(join(tmpdir(), 'roma-wiring-'))
-  const auditRoot = mkdtempSync(join(tmpdir(), 'roma-wiring-audit-'))
-  const configDir = mkdtempSync(join(tmpdir(), 'roma-wiring-claude-'))
-  roots.push(workRoot, auditRoot, configDir)
+  const fixture = romaFixture('wiring')
+  fixtures.push(fixture)
 
   // Chat with the network taken out, and nothing else taken out: the requests
   // recorded here are the ones Google would have been sent.
@@ -88,22 +82,18 @@ async function boot() {
     overflow: { credential: METERED, monthlyCapUsd: 100 },
     channel: new GoogleChatAdapter({ api }),
     transport: new PubSubTransport({ subscription, log: () => {} }),
-    workRoot,
-    auditRoot,
-    configDir,
-    spawn: claude.spawn,
+    ...fixture.dirs,
+    spawn: fixture.claude.spawn,
     log: () => {},
     selfCheckTimeoutMs: 1_000,
   })
 
-  // The self-check's own probe Turn, answered the way a real process would.
-  await flush()
-  feed(claude.process, OK)
+  await fixture.answerProbe()
   const roma = await serving
   running.push(roma)
 
   return {
-    claude,
+    claude: fixture.claude,
     requests,
     subscription,
     roma,
@@ -112,17 +102,14 @@ async function boot() {
       requests
         .filter(({ method }) => method === 'POST')
         .map(({ body }) => body['text'] as string),
-    /** The process serving one Conversation. */
-    procFor: (conversationKey = THREAD) =>
-      claude.processFor(join(workRoot, sessionIdFor(conversationKey))),
+    procFor: (conversationKey = THREAD) => fixture.procFor(conversationKey),
   }
 }
 
 afterEach(async () => {
-  for (const roma of running) await roma.shutdown().catch(() => {})
+  await teardownRoma(running, fixtures.flatMap(({ roots }) => roots))
   running = []
-  for (const root of roots) rmSync(root, { recursive: true, force: true })
-  roots = []
+  fixtures = []
 })
 
 describe('a Chat message, all the way through and back', () => {
