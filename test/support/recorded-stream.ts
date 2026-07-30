@@ -233,7 +233,8 @@ export const RETRIES: readonly ClaudeEvent[] = apiRetries('auth-failure')
  *
  * Built rather than captured: every recording roma holds says `status:
  * "allowed"`, and the only way to record the other case is to drain the window
- * everybody shares. `spentUntil` in `src/quota.ts` is where that guess lives.
+ * everybody shares. `spentUntil` in `src/shared-window.ts` is where that guess
+ * lives.
  */
 export const BLOCKED: readonly ClaudeEvent[] = [
   quotaEvent({ status: 'blocked' }),
