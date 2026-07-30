@@ -28,6 +28,7 @@ npm install
 | `npm run typecheck` | `tsc --noEmit`, over `src` **and** `test`. |
 | `npm run build` | `src` alone to `dist/`, which is what the image runs. |
 | `npm run test:seam2` | **Spends money.** Drives a real `claude -p`. |
+| `npm run check:claude-code-drift` | Is the pinned Claude Code still the published one? Reports; changes nothing. |
 
 ### Seam 2 spends Shared Window quota
 
@@ -70,6 +71,11 @@ It carries **its own Claude Code, pinned to v2.1.220** — the version every mea
 Window money, not a dependency bump, and nothing automated will ever move it for you.
 ADR-0007 is why, and `src/packaging.test.ts` is what keeps it.
 
+Something does say when it has fallen behind. `.github/workflows/claude-code-drift.yml`
+compares the pin against what npm publishes, weekly, and files one issue when they differ —
+naming both versions, what re-verification would cost, and every file that currently rests
+on the pinned version. It opens no pull request and it edits nothing.
+
 There is **no `latest` tag, and no `0.1` or `0`**. A tag that moves is a deployment whose
 Claude Code changes underneath it, which is the whole thing the pin exists to prevent, so
 `docker run` without a tag fails rather than guessing.
@@ -99,6 +105,11 @@ children, which a PID 1 that does not reap would leave as zombies.
 Every pull request runs `typecheck`, `test`, `build` and a `docker build` that pushes
 nothing. Pushing a tag equal to `package.json`'s `version` publishes that one image tag to
 GHCR and no other; a tag that disagrees fails before anything is built.
+
+One workflow is not a check. `claude-code-drift` runs weekly rather than on a commit,
+compares the `Dockerfile`'s pin against the published Claude Code, and files a notify-only
+issue when they differ. It ends red on an unreadable pin or a failed lookup, because a
+drift check that passes while watching nothing reads as "the pin is current".
 
 **Seam 2 never runs in CI** and no workflow is given a Shared Window token — roma is never
 booted there. What the image is checked against instead is `claude --version` inside it, and
