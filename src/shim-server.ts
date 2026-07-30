@@ -99,6 +99,15 @@ export class ShimServer {
   readonly #tokens: InstallationTokens
   readonly #taskFor: (sessionId: string) => string | null
   readonly #log: OperatorLog<ShimLogRecord>
+  /**
+   * The connections currently open, so that `close` can cut them.
+   *
+   * `net.Server.close` waits for every one of them, and unlike `http.Server`
+   * there is no `closeAllConnections` to ask for. Kept rather than hoped about,
+   * because a Shim that connects and never speaks would otherwise be the reason
+   * roma does not shut down.
+   */
+  readonly #open = new Set<Socket>()
 
   private constructor(options: ShimServerOptions, server: Server) {
     this.socketPath = options.socketPath
@@ -140,14 +149,27 @@ export class ShimServer {
     return shims
   }
 
-  /** Stop answering, and take the socket file with it. */
+  /**
+   * Stop answering, and take the socket file with it.
+   *
+   * Open connections are cut rather than waited for. This runs after every
+   * Session's process is already dead, so anything still holding a connection is
+   * a Shim whose tool has nothing left to talk to — and `close` alone waits for
+   * every one of them, which would make a Shim that never disconnects the reason
+   * roma does not shut down.
+   */
   async close(): Promise<void> {
-    await new Promise<void>((closed) => this.#server.close(() => closed()))
+    const closed = new Promise<void>((done) => this.#server.close(() => done()))
+    for (const socket of this.#open) socket.destroy()
+    this.#open.clear()
+    await closed
     rmSync(this.socketPath, { force: true })
   }
 
   /** One connection: one line in, one line out, then closed. */
   #serve(socket: Socket): void {
+    this.#open.add(socket)
+    socket.on('close', () => this.#open.delete(socket))
     socket.setEncoding('utf8')
     let buffer = ''
     socket.on('data', (chunk: string) => {

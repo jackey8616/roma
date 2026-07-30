@@ -296,8 +296,13 @@ export async function startRoma({
     // turns a clean shutdown into a handful of authentication failures in
     // somebody's Transcript.
     shutdown: async () => {
-      await pool.shutdown()
-      await shims.close()
+      try {
+        await pool.shutdown()
+      } finally {
+        // Whatever the pool did. A socket left listening on a roma that is
+        // otherwise gone is a credential still being served to nothing.
+        await shims.close()
+      }
     },
   }
 }
