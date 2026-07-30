@@ -1582,6 +1582,33 @@ describe('what Overflow is taken for', () => {
     expect(claude.lastSpawn.env).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' })
   })
 
+  // Which credential answered is the order the attempts happened in, not the
+  // order the credentials first appeared. A Task that tried the Shared Window,
+  // was sold Overflow, was blocked on that too, and was finally answered by the
+  // window coming back is a Shared Window Task — filed under Overflow it reports
+  // a metered Task that produced nothing, which is the one question an Audit
+  // Record exists to answer.
+  it('files the Task under the credential that answered, not the one that only tried', async () => {
+    const { adapter, audit, claude, workRoot, core, start } = newCore()
+
+    const { task, proc } = await start('hello')
+    feed(proc, BLOCKED_WITH_OVERAGE)
+    await flush()
+    await core.takeOverflow(taskIdOf(adapter))
+    await flush()
+    // The metered attempt is blocked too, so the Task parks a second time.
+    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), BLOCKED_WITH_OVERAGE)
+    await flush()
+    await vi.advanceTimersByTimeAsync(UNTIL_RESET)
+    await flush()
+    feed(claude.processFor(join(workRoot, sessionIdFor(KEY))), OK)
+    await task
+
+    // One record, on the subscription. Neither blocked attempt was priced, so
+    // Overflow has no spend of its own to account for and earns no second record.
+    expect(recordsIn(audit).map((record) => record.credential)).toEqual(['shared-window'])
+  })
+
   // The money the window refused is the subscription's, and it is charged to the
   // subscription. Summed into the Overflow figure it would refuse other people's
   // work over money nobody spent on a card — and would be shown to the person
