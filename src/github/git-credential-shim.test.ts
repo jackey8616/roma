@@ -2,13 +2,12 @@ import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { InstallationTokens } from '../installation-tokens.js'
 import { MINTER_SOCKET_VAR, SESSION_ID_VAR, socketPathIn } from '../shim-protocol.js'
 import { ShimServer, type ShimLogRecord } from '../shim-server.js'
 import { FakeMinter } from '../../test/support/fake-minter.js'
-import { gitConfig, gitCredentialHelper } from './shims.js'
+import { gitConfig } from './shims.js'
 
 /**
  * The single most important test in this repository's GitHub work, and the one
@@ -32,10 +31,6 @@ import { gitConfig, gitCredentialHelper } from './shims.js'
  * which is the failure mode this repository already documents for seam 2. If
  * `git` is not installed, `spawn` fails and so does the test.
  */
-
-/** The Shim, run from source. `--import tsx` is the only reason this is not just `node`. */
-const SHIM = fileURLToPath(new URL('./git-credential-shim.ts', import.meta.url))
-const NODE_RUNNING_TYPESCRIPT = `${process.execPath} --import tsx`
 
 const SESSION = 'a-session'
 const REPOSITORY = 'a-team/roma.git'
@@ -63,11 +58,14 @@ async function pointGitAtRoma(minter = new FakeMinter()) {
   })
   servers.push(server)
 
-  // The real gitconfig, from the real function, with only the path to the Shim
-  // changed — which is the one thing about it that differs between a build and a
-  // checkout.
+  // The real gitconfig, from the real function, with **nothing substituted** —
+  // including the helper command, which is the part this test used to supply for
+  // itself and which was broken in exactly the way that hid: `gitCredentialHelper`
+  // resolved the right `.ts` path and produced a command `node` could not load,
+  // so a from-source roma answered every credential request with a crash. A test
+  // that builds its own command cannot see that.
   const configPath = join(dir, 'gitconfig')
-  writeFileSync(configPath, gitConfig(gitCredentialHelper(SHIM, NODE_RUNNING_TYPESCRIPT)))
+  writeFileSync(configPath, gitConfig())
 
   return {
     minter,

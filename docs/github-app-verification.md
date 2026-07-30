@@ -1,17 +1,23 @@
 # Verification: what only a real GitHub App can settle
 
 Date: 2026-07-30
-Status: **not yet run.** Every question below is open, and this document exists so
-that the list is written down honestly rather than discovered one failure at a
-time.
+Status: **run, mostly.** Five of the seven questions are answered, against a real
+GitHub App on a real organisation. Two are still open and are marked so, and one
+of them needs a running roma rather than a script.
 
-ADR-0008 says of itself that "nothing here has been measured", and the ticket
-that implemented it (#60) kept that admission rather than quietly dropping it.
-The house standard is measurement — ADR-0002, ADR-0003, and the transcript
-collision work all rest on captures — and the GitHub work does not meet it yet.
+Measured on: macOS, `git` **2.41.0**, `gh` **2.93.0**, Node **22.22.3**, roma at
+`cd3ca2c` plus the fix this run produced. The Installation was one organisation
+with 15 private repositories; the clone below was of a private one, so every
+credential in this document did real work.
 
-What has been measured is in the last section. What has not is everything else,
-and the code that depends on it says so at the point where it depends on it.
+**The organisation and its repositories are deliberately not named here.** They
+are somebody's private inventory and this repository is public. What is recorded
+is what was measured, which is all the design needs.
+
+ADR-0008 said of itself that "nothing here has been measured", and #60 kept that
+admission rather than dropping it. This is that debt being paid, and the house
+standard — ADR-0002, ADR-0003, the transcript collision work — is what asked for
+it.
 
 ## Why no test does this
 
@@ -41,36 +47,77 @@ The single load-bearing assumption. `git clone https://github.com/<owner>/<repo>
 with `x-access-token` as the username and the token as the password, then a
 commit and a push.
 
-**Expected:** both succeed, on `contents: write`.
+**Clone: YES.** A private repository, over HTTPS, through the real Credential
+Shim with the real `gitConfig()` — `git` asked, the Shim answered
+`username=x-access-token` and a minted token, and the clone completed. That it
+asked at all is the proof the repository was private: git only consults a helper
+after a 401.
+
+**Push: not yet run.** It writes to somebody's repository, so it is not something
+to do on the way past. The read half is the half the design rests on.
 
 ### 2. Does `gh` authenticate with an Installation Token?
 
 `GH_TOKEN=<installation token> gh auth status`, then `gh issue create`,
 `gh pr create` and `gh pr comment`.
 
-**Expected:** all four succeed on `issues: write` and `pull_requests: write`.
-This is the one that decides whether the `gh` Shim is worth having at all — if
-`gh` refuses an Installation Token, the whole issues-and-pull-requests half of
-ADR-0008 needs a different mechanism.
+**YES — and this was the biggest single risk in the slice.** `gh auth status`
+through the real Shim reports:
+
+```
+github.com
+  ✓ Logged in to github.com account <app-name>[bot] (GH_TOKEN)
+  - Active account: true
+  - Git operations protocol: https
+```
+
+So `gh` takes an Installation Token from `GH_TOKEN` without complaint, and
+identifies itself as the App. The issues-and-pull-requests half of ADR-0008
+stands, and the `gh` Shim is worth having. Had this failed, that half needed a
+different mechanism entirely.
+
+`gh issue create` is **not yet run** — it writes to somebody's repository.
+
+One thing worth naming, because the output demonstrated it: `gh auth status`
+prints the token it is using, partially masked. The token is itself a JWT whose
+payload carries `iat` and `exp` 3600 seconds apart — **the one-hour lifetime,
+observed rather than quoted**. That hour is the whole of what bounds a credential
+which reaches a Transcript roma never deletes, and a diagnostic command printing
+one is exactly the leak ADR-0008 expects and accepts.
 
 ### 3. Are the resulting artifacts attributed to the App?
 
 Read back the issue, the pull request and the comment from question 2.
 
-**Expected:** author is `<app-name>[bot]`, visibly not a person. Story 11 asks for
-exactly this, and nothing in roma can enforce it — it is GitHub's behaviour or it
-is not true.
+**Not yet run** — it needs an issue, and an issue is a write.
+
+Strongly indicated all the same: `gh auth status` in question 2 reports the
+account as `<app-name>[bot]`, which is the identity anything `gh` creates will be
+attributed to. What is unconfirmed is only that the artifact carries it too.
 
 ### 4. How many times does `git` call a Shim during a successful clone, fetch and
 push?
 
-**Unknown, and it is the number that decides whether the caching matters.** If a
-clone asks once, `InstallationTokens` is saving one round trip an hour and could
-have been a great deal simpler. If it asks per object or per redirect, the cache
-is load-bearing and the single-flight in it is too.
+**Once per operation. One call for a clone, one for a fetch.** Counted by the
+`ShimServer` itself, which logs every request.
 
-Run each of the three operations against a repository large enough to redirect,
-with a Shim that counts.
+That is the low end of the range this question was worried about, and it is worth
+being straight about what it means: **the caching is doing less than feared.**
+`git` does not ask per object or per redirect, so a clone costs one credential
+request, not hundreds. `InstallationTokens` is therefore saving one network round
+trip per git operation rather than rescuing roma from a rate limit.
+
+It is still worth having, and the reasons are the ones that survive the number:
+`gh` asks once per *invocation* and an agent runs many; three Tasks run at once by
+design, so the single-flight is about concurrent Sessions rather than about one
+clone; and a token that expired mid-operation would be a failure nobody could
+reproduce. But "the cache is load-bearing" would be an overstatement, and the
+class's own comments should not make it.
+
+Also confirmed here: every `git` request carried the repository path
+(`<owner>/<repo>.git`), and the `gh` request carried none — `credential(-)` in the
+log. Both are exactly what `credential.useHttpPath` and ADR-0008's amendment
+predict.
 
 ### 5. Does listing installations behave as described — including the
 more-than-one case?
@@ -78,10 +125,14 @@ more-than-one case?
 `GET /app/installations` with an App JWT, on an App installed once and then on
 one installed twice.
 
-**Expected:** an array; `account.login` present on each. The two-installation case
-is what `InstallationAmbiguous` refuses on, and the refusal names what that field
-returned — so if the field is absent or shaped differently, the refusal names
-`installation 12345` and is much less use.
+**YES for the one-installation case.** `GET /app/installations` returned an array
+of one, with `account.login` present, and `GET /installation/repositories` paged
+back 15 repositories through an Installation Token. So the boot check works and
+`InstallationAmbiguous` would have a real name to print.
+
+**The more-than-one case is still unrun**, and it needs a second installation of
+the same App rather than a second App. Worth doing eventually; the refusal's
+wording is what rides on it.
 
 ### 6. Does `--append-system-prompt` actually change what the agent believes it
 can do?
@@ -98,10 +149,48 @@ is unmet by the thing built for it.
 `appJwt` backdates `iat` by a minute and expires nine minutes later, both from
 GitHub's documentation.
 
-**Expected:** accepted. A rejection here presents as roma failing to mint with a
-401 that says nothing about time.
+**YES.** Every call in this run needed one and none was refused, so the
+nine-minute span measured from a backdated `iat` is inside whatever GitHub
+actually enforces.
 
-## What *has* been measured
+Worth noting what this run would *not* have caught: #60's review found `exp - iat`
+was originally exactly 600 seconds — the documented maximum — because the
+backdating was added twice. That would probably have passed here too, which is
+why it was fixed on the argument rather than on a measurement.
+
+## What this run found that no question asked for
+
+**A real bug, in the product, on the path ADR-0008 promises works.**
+
+`gitCredentialHelper()`'s default resolves the Shim beside `shims.ts` with the
+same extension — `.js` from `dist/`, `.ts` from a checkout — so that running roma
+from source works, which ADR-0008 lists as a consequence it accepts and story 22
+asks for. Node 22 runs a `.ts` file happily by stripping types. What it cannot do
+is resolve the `../shim-client.js` the Shim imports, because that file is `.ts` on
+disk. So from a checkout the helper died with `ERR_MODULE_NOT_FOUND`, `git` fell
+through to asking for a username, and **every credential request in a from-source
+roma failed**:
+
+```
+致命錯誤: could not read Username for 'https://github.com/...': terminal prompts disabled
+```
+
+`dist/` was never affected, so the image was fine and every test passed. The test
+suite could not see it because the real-`git` test built its own helper command
+instead of using the default — it supplied `--import tsx` by hand, which is
+exactly the thing production was missing.
+
+Fixed two ways. `gitCredentialHelper` now asks for a TypeScript loader when the
+Shim is one, resolved to an **absolute** path — `--import` resolves a bare name
+against the current working directory, and `git` runs the helper wherever git
+happens to be, which is the agent's Working Directory and has no `node_modules`.
+And `git-credential-shim.test.ts` now writes `gitConfig()` with nothing
+substituted, so the default is what the real `git` is pointed at.
+
+The lesson is the general one and worth keeping: a test that constructs the thing
+production constructs, rather than using it, verifies the test.
+
+## What was measured before any of this
 
 One thing, and it is the protocol everything else hangs off. On `git` 2.43.0,
 against real GitHub, before any credential was supplied:
