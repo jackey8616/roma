@@ -10,6 +10,11 @@ import { GoogleChatAdapter } from './google-chat-adapter.js'
 import { HttpChatApi, type ChatRequest } from './http-chat-api.js'
 import { PubSubTransport } from './pubsub-transport.js'
 import { FakeClaude, flush } from '../../../test/support/fake-claude.js'
+import { fakeMinting, FakeMinter } from '../../../test/support/fake-minter.js'
+import { announce } from '../../github/announce.js'
+import { askMinter } from '../../shim-client.js'
+import { socketPathIn } from '../../shim-protocol.js'
+import type { ShimLogRecord } from '../../shim-server.js'
 import { FakePubSubMessage, FakeSubscription } from '../../../test/support/fake-pubsub.js'
 import { feed, kindOf, quotaEvent, recordedStream } from '../../../test/support/recorded-stream.js'
 
@@ -41,6 +46,8 @@ const BLOCKED_WITH_OVERAGE = [
 const SPACE = 'spaces/AAAA'
 const THREAD = `${SPACE}/threads/thread-1`
 const SENDER = 'users/17'
+
+const INSTALLATION = { account: 'a-team', repositories: ['a-team/roma', 'a-team/infra'] }
 
 const OAUTH: Credential = { kind: 'shared-window', oauthToken: 'oauth-token' }
 const METERED: Credential = { kind: 'overflow', apiKey: 'metered-key' }
@@ -83,8 +90,16 @@ async function boot() {
   })
 
   const subscription = new FakeSubscription()
+  const log: ShimLogRecord[] = []
+  // The real announcement over a Minter with no App behind it: what a Session is
+  // told it can reach is assembled here out of the same two parts production
+  // uses, and only the forge itself is a double.
+  const minter = new FakeMinter({ installation: INSTALLATION })
+  const minting = fakeMinting({ minter, announce })
+  roots.push(minting.shimDir)
   const serving = serve({
     credential: OAUTH,
+    minting,
     overflow: { credential: METERED, monthlyCapUsd: 100 },
     channel: new GoogleChatAdapter({ api }),
     transport: new PubSubTransport({ subscription, log: () => {} }),
@@ -92,7 +107,7 @@ async function boot() {
     auditRoot,
     configDir,
     spawn: claude.spawn,
-    log: () => {},
+    log: (record) => log.push(record as ShimLogRecord),
     selfCheckTimeoutMs: 1_000,
   })
 
@@ -106,6 +121,9 @@ async function boot() {
     claude,
     requests,
     subscription,
+    minter,
+    minting,
+    log,
     roma,
     /** Everything roma posted into Chat, in order. */
     texts: () =>
@@ -284,6 +302,50 @@ describe('a message that is not one', () => {
 
     expect(rubbish.settlements).toEqual(['ack'])
     expect(roma.texts()).toContain('ok')
+  })
+})
+
+describe('reaching the code, out of the real parts', () => {
+  // The whole credential path, assembled: a Session is spawned with a socket
+  // path and a Session id, roma is listening on that socket, and what comes back
+  // is a token. Only the forge is a double — the Minter is fake and everything
+  // between it and the process environment is the real thing.
+  it('gives a Session a socket it can actually get a credential from', async () => {
+    const roma = await boot()
+    const message = roma.subscription.publishJson(mentioned('have a look at roma'), 'msg-1')
+    await flush()
+
+    // Mid-Turn, which is when a `git clone` inside the agent's shell would ask.
+    const sessionId = sessionIdFor(THREAD)
+    const answer = await askMinter(roma.claude.lastSpawn.env['ROMA_MINTER_SOCKET'] ?? '', {
+      session: sessionId,
+      operation: 'get',
+      path: 'a-team/roma.git',
+    })
+
+    feed(roma.procFor(), OK)
+    await until(() => message.settlements.length > 0)
+
+    expect(answer.token).toBe('token-1')
+    // Attribution by Session, resolved to a Task through the Task Queue, which
+    // is the only thing that knows the answer — and it is a real Task id here
+    // rather than a null, because the Turn was in flight when the tool asked.
+    const asked = roma.log.find((record) => record.event === 'credential')
+    expect(asked).toMatchObject({ sessionId, path: 'a-team/roma.git' })
+    expect(asked?.event === 'credential' ? asked.taskId : null).toMatch(/\S/)
+  })
+
+  // Story 3 and 4, through the real announcement: a Session that is not told it
+  // has credentials refuses work it is perfectly able to do.
+  it('tells the Session which repositories it reaches', async () => {
+    const roma = await boot()
+    roma.subscription.publishJson(mentioned('have a look at roma'), 'msg-1')
+    await flush()
+
+    const { args } = roma.claude.lastSpawn
+    expect(args[args.indexOf('--append-system-prompt') + 1]).toContain('a-team/infra')
+
+    feed(roma.procFor(), OK)
   })
 })
 

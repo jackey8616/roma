@@ -482,12 +482,19 @@ export class Core {
         turn = await this.#queue.run(
           task.sessionId,
           () => this.#runTurn(task, paidBy, text, reporter),
-          // The one thing roma will go without, and it is the reporter that
-          // absorbs the failure: a Channel too broken to carry this is too broken
-          // to carry the failure that abandoning the Task would produce, so
-          // refusing to run it buys no less silence — it only adds losing the
-          // work to it.
-          (position) => reporter.update({ phase: 'queued', position }),
+          {
+            // The one thing roma will go without, and it is the reporter that
+            // absorbs the failure: a Channel too broken to carry this is too
+            // broken to carry the failure that abandoning the Task would
+            // produce, so refusing to run it buys no less silence — it only adds
+            // losing the work to it.
+            notice: (position) => reporter.update({ phase: 'queued', position }),
+            // So that the queue can say whose work this Session is doing while
+            // it is doing it. Nothing about admission reads it — it is what lets
+            // a credential request arriving from this Session be attributed to
+            // this Task rather than to a guess.
+            taskId,
+          },
         )
       } catch (thrown) {
         error = thrown

@@ -118,6 +118,19 @@ export interface ClaudeSessionOptions {
    */
   readonly resume?: boolean
   readonly model?: string
+  /**
+   * What this Session is told about itself on top of Claude Code's own prompt.
+   *
+   * A capability nobody knows about is a capability nobody has: an agent in an
+   * empty directory has no reason to believe it can clone anything, and will
+   * explain that it has no access rather than trying.
+   *
+   * `--append-system-prompt` rather than a file in the working directory,
+   * because that directory is the agent's own — it clones into it and runs
+   * `git add -A` in it, and anything roma left there would eventually be
+   * committed into somebody's repository (ADR-0008).
+   */
+  readonly appendSystemPrompt?: string
   readonly spawn?: SpawnClaudeProcess
 }
 
@@ -175,6 +188,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
   readonly #env: Readonly<Record<string, string>>
   readonly #resume: boolean
   readonly #model: string
+  readonly #appendSystemPrompt: string | undefined
   readonly #spawn: SpawnClaudeProcess
 
   #process: ClaudeProcess | null = null
@@ -201,6 +215,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     this.#env = options.env
     this.#resume = options.resume ?? false
     this.#model = options.model ?? PINNED_MODEL
+    this.#appendSystemPrompt = options.appendSystemPrompt
     this.#spawn = options.spawn ?? spawnClaudeProcess
   }
 
@@ -240,6 +255,9 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
       'bypassPermissions',
       '--model',
       this.#model,
+      ...(this.#appendSystemPrompt === undefined
+        ? []
+        : ['--append-system-prompt', this.#appendSystemPrompt]),
       ...(this.#resume ? ['--resume', this.sessionId] : ['--session-id', this.sessionId]),
     ]
   }

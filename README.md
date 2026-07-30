@@ -61,8 +61,10 @@ docker run --rm \
   -e CLAUDE_CODE_OAUTH_TOKEN -e ROMA_PUBSUB_PROJECT_ID -e ROMA_PUBSUB_SUBSCRIPTION \
   -e ROMA_AUDIT_ROOT=/var/lib/roma/audit \
   -e ROMA_CLAUDE_CONFIG_DIR=/var/lib/roma/claude \
+  -e ROMA_GITHUB_APP_ID -e ROMA_GITHUB_PRIVATE_KEY_FILE=/run/secrets/github-app.pem \
   -v roma-audit:/var/lib/roma/audit \
   -v roma-claude:/var/lib/roma/claude \
+  -v /path/to/github-app.pem:/run/secrets/github-app.pem:ro \
   ghcr.io/jackey8616/roma:0.1.0
 ```
 
@@ -95,8 +97,15 @@ instead, so `chown 1000:1000` each host directory first — otherwise roma start
 refusal, and then loses the first Audit Record or the first Transcript to a permission
 error, which is the same data gone by a longer route.
 
-The image is `node:22-slim`, `linux/amd64`, non-root, with `git`, `ca-certificates` and
-`tini` and nothing else. roma's agent runs arbitrary shell commands, so that list is a
+It also carries **`gh`, pinned to v2.96.0** by release tarball and hardcoded sha256. That
+pin exists so that a rebuild cannot move it with nobody deciding to, and for no stronger
+reason: unlike Claude Code's, moving it invalidates no measurement, so nothing watches it
+for drift. The real binary is at `/usr/local/lib/roma/gh`, deliberately **off `PATH`** —
+what answers to `gh` is roma's Credential Shim, which mints a token and hands it to the
+one child process it starts.
+
+The image is `node:22-slim`, `linux/amd64`, non-root, with `git`, `gh`, `curl`,
+`ca-certificates` and `tini` and nothing else. roma's agent runs arbitrary shell commands, so that list is a
 decision rather than an accident — and `tini` is there because roma spawns `claude`
 children, which a PID 1 that does not reap would leave as zombies.
 
@@ -134,6 +143,9 @@ Terraform cannot do, in the order they have to happen.
 | `ROMA_WORK_ROOT` | **Required.** Where Sessions get their working directories. Reclaimed after a week untouched. |
 | `ROMA_AUDIT_ROOT` | **Required.** Where Audit Records go, one file per calendar month. Deliberately not under `ROMA_WORK_ROOT`, which is reclaimed. |
 | `ROMA_CLAUDE_CONFIG_DIR` | **Required**, and it decides two separate things. `CLAUDE_SECURESTORAGE_CONFIG_DIR` is what keeps a host keychain login out of a Claude Code process; `CLAUDE_CONFIG_DIR` is where that process writes the Transcript — the only account there is of what an agent did (ADR-0005). **Give it durable storage that only grows**: roma deletes nothing from here (ADR-0006), so unlike `ROMA_WORK_ROOT` it is never reclaimed. Order of 1.5 GB a year at a hundred Tasks a day — extrapolated from a recorded stream rather than measured from a Transcript, so plan for the magnitude and not the number (#41). |
+| `ROMA_GITHUB_APP_ID` | **Required.** roma's GitHub App. There is no installation id to set: roma lists the App's installations and refuses to start if there is anything but one, naming all of them. |
+| `ROMA_GITHUB_PRIVATE_KEY_FILE` | **Required.** A path to the App's private key, PEM. A path rather than the key inline, following `GOOGLE_APPLICATION_CREDENTIALS`: multi-line secrets belong in mounts. **Mount it read-only, and know what it is not:** roma is the only thing that reads it, but the agent runs in the same container under the same uid, so a shell can read it too. ADR-0008 claims otherwise and is wrong about that — `docs/github-app-verification.md` records the gap. |
+| `ROMA_SHIM_DIR` | **Required**, and **defaulted in the image** to `/run/roma`. Where the Credential Shim socket and the gitconfig every Session runs under live. Holds nothing that outlives a boot, which is why it has a default at all — and it is deliberately not under `ROMA_WORK_ROOT`, whose weekly reclaim would take the socket with it. Set it when running from source; `/run` is not writable on a developer's machine. |
 | `ROMA_PUBSUB_PROJECT_ID` | **Required.** The project the subscription lives in. |
 | `ROMA_PUBSUB_SUBSCRIPTION` | **Required.** The subscription's name. Read, never created. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Google's own, not roma's: a service account key file, or nothing at all on a Google host with a metadata server. |
@@ -141,6 +153,7 @@ Terraform cannot do, in the order they have to happen.
 | `ROMA_OVERFLOW_MONTHLY_CAP_USD` | Required **whenever** the line above is set, and vice versa. There is no default: how much of your money roma may spend is not roma's to decide. |
 | `ROMA_MODEL` | Overrides the pinned model. The self-check asserts on whatever this resolves to. |
 | `ROMA_MAX_CONCURRENT_TASKS` | Tasks that may run at once across every Session. Three by default. |
+| `ROMA_GH_BIN` | Where the real `gh` is, for the Shim in front of it. `/usr/local/lib/roma/gh` by default, which is where the image puts it. Read by the Shim from **its own** environment, not from a Session's — `buildEnv` does not pass it through — so in practice this is for the tests and for anything invoking the Shim by hand. Running from source installs no Shim in front of `gh` at all, and the agent's `gh` is then whatever the developer has. |
 | `ROMA_PUBSUB_MAX_MESSAGES` | Messages roma holds a lease on at once. Twenty by default — see `src/channels/google-chat/env-config.ts` for why it is not near the concurrency cap. |
 | `ROMA_PUBSUB_MAX_LEASE_MINUTES` | How long a message may stay unsettled while its Task runs. An hour by default. |
 

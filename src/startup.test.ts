@@ -1,15 +1,17 @@
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { monthOf } from './audit-log.js'
 import type { Credential } from './build-env.js'
 import { sessionIdFor } from './session-id.js'
+import { socketPathIn } from './shim-protocol.js'
 import { startRoma, type Roma } from './startup.js'
 import { StartupSelfCheckFailed } from './startup-self-check.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { FakeClaude, flush } from '../test/support/fake-claude.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
+import { fakeMinting, FakeMinter } from '../test/support/fake-minter.js'
 import { feed, recordedStream, upToFirst } from '../test/support/recorded-stream.js'
 
 /** One complete Turn of a real recorded stream. Its text is "ok". */
@@ -22,12 +24,13 @@ const KEY = 'conversation-one'
 let started: Roma[] = []
 let workRoots: string[] = []
 
-function boot() {
+function boot({ minter = new FakeMinter() }: { minter?: FakeMinter } = {}) {
   const claude = new FakeClaude({ exitOnKill: true })
   const workRoot = mkdtempSync(join(tmpdir(), 'roma-startup-'))
   const auditRoot = mkdtempSync(join(tmpdir(), 'roma-startup-audit-'))
   const configDir = mkdtempSync(join(tmpdir(), 'roma-startup-claude-'))
-  workRoots.push(workRoot, auditRoot, configDir)
+  const minting = fakeMinting({ minter })
+  workRoots.push(workRoot, auditRoot, configDir, minting.shimDir)
   const channel = new RecordingAdapter()
 
   let resolved = false
@@ -37,6 +40,7 @@ function boot() {
     workRoot,
     auditRoot,
     configDir,
+    minting,
     spawn: claude.spawn,
     log: () => {},
     selfCheckTimeoutMs: 1_000,
@@ -51,6 +55,8 @@ function boot() {
     channel,
     workRoot,
     auditRoot,
+    minter,
+    minting,
     starting,
     hasStarted: () => resolved,
     /** Answer the probe Turn, the way a real process would. */
@@ -160,5 +166,106 @@ describe('starting roma', () => {
     const { audit } = await roma.starting
 
     expect(audit.readMonth(monthOf(new Date()))).toEqual([])
+  })
+})
+
+describe('proving roma can reach the code, before anything can ask it to', () => {
+  // Free, unlike the Claude one, and asked first for that reason: a deployment
+  // that is wrong in both ways is told about the cheap problem without having
+  // paid for a Turn to find out about the other.
+  it('asks for the Installation before it drives a single Turn', async () => {
+    const roma = boot()
+
+    await flush()
+
+    expect(roma.minter.installations).toBe(1)
+  })
+
+  // The Startup Self-Check's shape, for the Startup Self-Check's reason. A bad
+  // private key surfacing instead as an inexplicable `git clone` failure inside
+  // somebody's Turn would read as "roma is broken" with no diagnosis attached.
+  it('refuses to start at all when it cannot', async () => {
+    const roma = boot({ minter: new FakeMinter({ failsWith: new Error('a bad private key') }) })
+
+    await expect(roma.starting).rejects.toThrow('a bad private key')
+    // Not one process. The paid check never ran, because the free one had
+    // already answered.
+    expect(roma.claude.spawns).toHaveLength(0)
+  })
+
+  it('reports what it found, for the boot log', async () => {
+    const roma = boot()
+    await roma.answerProbe()
+
+    await expect(roma.starting).resolves.toMatchObject({
+      installation: { account: 'a-team', repositories: ['a-team/roma'] },
+    })
+  })
+})
+
+describe('putting a credential in front of a Session’s tools', () => {
+  it('tells every Session what it can reach', async () => {
+    const roma = boot()
+    await roma.answerProbe()
+    const { core } = await roma.starting
+
+    const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
+    await flush()
+    const spawn = roma.claude.lastSpawn
+    feed(roma.claude.processFor(join(roma.workRoot, sessionIdFor(KEY))), HEALTHY)
+    await handled
+
+    const at = spawn.args.indexOf('--append-system-prompt')
+    expect(spawn.args[at + 1]).toBe('reaches a-team/roma')
+  })
+
+  it('tells every Session where to ask for a credential, and who is asking', async () => {
+    const roma = boot()
+    await roma.answerProbe()
+    const { core } = await roma.starting
+
+    const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
+    await flush()
+    const { env } = roma.claude.lastSpawn
+    feed(roma.claude.processFor(join(roma.workRoot, sessionIdFor(KEY))), HEALTHY)
+    await handled
+
+    expect(env['ROMA_SESSION_ID']).toBe(sessionIdFor(KEY))
+    expect(env['ROMA_MINTER_SOCKET']).toBe(socketPathIn(roma.minting.shimDir))
+    expect(env['GIT_CONFIG_GLOBAL']).toBe(join(roma.minting.shimDir, 'gitconfig'))
+  })
+
+  // Not under the work root, which is walked by a reclaim that deletes what has
+  // gone a week untouched — a reclaimed socket would present as every credential
+  // request in roma failing at once, with no explanation. Not inside a Working
+  // Directory either: the agent runs `git add -A` in one of those.
+  it('keeps the socket and the gitconfig in a directory of roma’s own', async () => {
+    const roma = boot()
+    await roma.answerProbe()
+    await roma.starting
+
+    expect(existsSync(socketPathIn(roma.minting.shimDir))).toBe(true)
+    expect(readFileSync(join(roma.minting.shimDir, 'gitconfig'), 'utf8')).toBe(
+      roma.minting.gitConfig,
+    )
+    expect(readdirSync(roma.workRoot)).toEqual([])
+  })
+
+  // The one thing that must never be in a process environment. It expires within
+  // the hour, and a Resident Session outliving an hour is ordinary — and `env` in
+  // a Turn would write it into a Transcript roma has promised never to delete.
+  it('puts no credential for the forge in any Session’s environment', async () => {
+    const roma = boot()
+    await roma.answerProbe()
+    const { core } = await roma.starting
+
+    const handled = core.handle({ conversationKey: KEY, caller: 'someone', text: 'hello' })
+    await flush()
+    const { env } = roma.claude.lastSpawn
+    feed(roma.claude.processFor(join(roma.workRoot, sessionIdFor(KEY))), HEALTHY)
+    await handled
+
+    expect(roma.minter.minted).toEqual([])
+    expect(Object.keys(env)).not.toContain('GH_TOKEN')
   })
 })

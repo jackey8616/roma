@@ -8,6 +8,7 @@ import { sessionIdFor } from './session-id.js'
 import { StartupSelfCheckFailed } from './startup-self-check.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { FakeClaude, flush } from '../test/support/fake-claude.js'
+import { fakeMinting } from '../test/support/fake-minter.js'
 import { FakeTransport } from '../test/support/fake-transport.js'
 import { RecordingAdapter, UNREADABLE } from '../test/support/recording-adapter.js'
 import {
@@ -59,8 +60,11 @@ function boot({ overflow = true }: { overflow?: boolean } = {}) {
   const transport = new FakeTransport()
 
   let resolved = false
+  const minting = fakeMinting()
+  roots.push(minting.shimDir)
   const serving = serve({
     credential: OAUTH,
+    minting,
     ...(overflow ? { overflow: { credential: METERED, monthlyCapUsd: 100 } } : {}),
     channel,
     transport,
