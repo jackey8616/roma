@@ -151,7 +151,8 @@ rides on it is the wording of a refusal, not whether anything works.
 ### 6. Does `--append-system-prompt` actually change what the agent believes it
 can do?
 
-**Still open, and it is the one that needs a running roma** rather than a script:
+**Still open, and tracked as #64.** It is the one that needs a running roma rather
+than a script:
 two Sessions in an empty working directory, one with the announcement and one
 without, both asked to look at a repository by name.
 
