@@ -212,16 +212,36 @@ scope, permissions (those are what an Installation may *do*, which is a second
 question)
 
 **Installation Token**:
-The credential roma mints so that a Session's `git` can reach the Installation.
-An hour long, asked for at the moment git needs one, and never put in a process
-environment — an environment is fixed at spawn and would be stale within the
-hour, and a token that reaches a Transcript is in a record roma never deletes.
-roma holds the App's private key and mints; the helper the agent's git talks to
+The credential roma mints so that a Session's tools can reach the Installation.
+An hour long, asked for at the moment a tool needs one, and never put in a
+process environment — an environment is fixed at spawn and would be stale within
+the hour, and a token that reaches a Transcript is in a record roma never
+deletes. The Minter holds the App's private key and mints; a Credential Shim
 holds nothing. It is not a boundary against the agent, which has a shell and can
 print it — what it bounds is how long a token that escapes is worth anything.
 _Avoid_: Credential (that word is taken, and by the other provider entirely —
 see Shared Window and Overflow), Repository Token (it is scoped to the whole
 Installation and a name should not claim otherwise), GitHub token, PAT, secret
+
+**Minter**:
+The only thing that holds the App's private key, and therefore the only thing
+that can produce an Installation Token. Named because it carries the one
+absolute rule in this area — the private key never enters the space the agent
+can reach — and a term that is the whole of a security property should be a
+term. The Core sees a port for obtaining a credential and nothing else.
+_Avoid_: token service, credential provider, GitHub client (it is not a general
+client for the product; it does this and nothing else)
+
+**Credential Shim**:
+The thin client in the agent's userland that asks the Minter for an Installation
+Token on a tool's behalf. One concept with two instances — a `git` credential
+helper, and something standing in front of `gh` — because the two tools ask for
+a credential in incompatible ways and neither may be handed one that outlives
+the hour. It holds nothing, decides nothing, and is **not** a boundary against
+the agent: the agent has a shell and can invoke either one itself.
+_Avoid_: helper (that is `git`'s word for one of the two, and using it for both
+hides the other), wrapper, proxy (a proxy sees the traffic; this fetches one
+string), adapter (that word is a Channel's)
 
 ### Paying for it
 
