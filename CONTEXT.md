@@ -189,11 +189,27 @@ _Avoid_: timing out, garbage collection, idling out
 One of the two messages roma answers itself instead of handing to Claude Code:
 `/stop` ends the work this Conversation has in flight — running, queued, or
 still starting — and `/new` gives the Conversation a fresh Session. Recognised in the Core, never in a Channel Adapter, and only when the
-whole message is one of the two — everything else, Claude Code's own slash
-commands included, is work. A Command is not a Task: it drives no Turn, is not
-queued, and is not counted against the concurrency cap.
-_Avoid_: slash command (those are Claude Code's, and roma passes them through),
-instruction (that is an Outbound Instruction)
+whole message is one of the two — everything else is work, apart from the few
+Claude Code commands a Readout relays. A Command is not a Task: it drives no
+Turn, is not queued, and is not counted against the concurrency cap.
+_Avoid_: slash command (those are Claude Code's, and a Readout is the only way
+any of them reaches it), instruction (that is an Outbound Instruction)
+
+**Readout**:
+A message roma hands to the Session's process as itself rather than as something
+for the model to read — one of a short list of Claude Code's own commands, and
+only when the whole message is one of them. Named by what roma does with it
+rather than by what it costs: the list holds nothing that spends money, but that
+is the rule for what may go on it and not what the word means, because a term
+defined by one build's behaviour is a term that turns false on somebody else's
+release (ADR-0012). Neither of the two things it sits between: not a Command,
+because it needs the Session's process and therefore queues; not a Task, because
+no Turn is driven and the model never sees it. The Caller Marker goes *after* a
+Readout, which is safe only because the whole message is the command and the
+Caller supplied no text to hide behind it.
+_Avoid_: passthrough, relay, slash command (that is Claude Code's name for what a
+Readout carries, not for the carrying), and using this for `/stop` or `/new` —
+those are roma's own and are Commands
 
 **Task**:
 One message from one person, from arrival to final result. The unit that is

@@ -6,8 +6,17 @@
  * Session with nothing in it, for when the context has gone stale or wrong.
  *
  * There are two, and ADR-0003 fixed the number: everything else a person types
- * is work for Claude Code, including every slash command Claude Code has of its
- * own.
+ * is work for Claude Code — apart from the few of Claude Code's own commands
+ * ADR-0012 relays as a Readout.
+ *
+ * This comment used to say that every Claude Code slash command was passed
+ * through as work, and it was never true. What is passed through is the *text*
+ * of one: `attributed()` puts the Caller Marker above every message, so what
+ * reaches stdin begins with `<from>` and Claude Code — which parses a command
+ * only when the message starts with a slash — sees prose. The Turn is real and
+ * is billed, and the answer is the model's guess about the command rather than
+ * the command. A Readout is the only route by which one of them arrives as
+ * itself.
  */
 export type Command = 'stop' | 'new'
 
