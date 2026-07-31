@@ -20,49 +20,95 @@ two, the decision it defends stands.
 
 ### Verification status
 
-Read out of the pinned build's bundle (2.1.220, ADR-0007) with `grep`, in this
-repo's container. No `claude -p` was run and no Turn was driven, so **nothing
-here is a behavioural measurement.** The seam 2 check this ADR asks for is what
-turns the first two readings into evidence, and it now exists —
-`src/model-menu.live.test.ts`, opt-in and out of CI's reach. Until somebody runs
-it against a Shared Window token, everything below is still a reading.
+This ADR was written entirely off `grep` against the pinned build's bundle
+(2.1.220, ADR-0007). **`src/model-menu.live.test.ts` has since been run against a
+real `claude -p` on that build**, which turns most of what follows from a reading
+into a measurement. Each item below says which it is, and the two that disagreed
+say so.
 
-**Read — the first-party alias table.**
+**Measured — the id roma sends is accepted and echoed.** `--model claude-opus-5`,
+`--model claude-sonnet-5` and `--model claude-haiku-4-5` each start and report
+themselves back as `system/init.model`. This is the one the design rests on:
+`--model` receives the id, the Audit Record and the Operator Log file the id, and
+this is the evidence that what roma writes down is what ran.
+
+**Measured, and it corrected the reading — the first-party alias table.** Read
+out of the bundle as
 
 ```
 {fable:"claude-fable-5", opus:"claude-opus-5",
  sonnet:"claude-sonnet-5", haiku:"claude-haiku-4-5"}
 ```
 
+and the live build expands `opus` and `sonnet` to exactly that, but `haiku` to
+`claude-haiku-4-5-20251001` — a **dated snapshot**, where the other two are
+undated ids. The Menu is unaffected and was not changed: it holds undated ids
+uniformly, roma sends the id rather than the alias, and `--model claude-haiku-4-5`
+is accepted and echoed undated. What was wrong was the first seam 2 check, which
+spawned on the alias and demanded the id back — one spawn asked to carry both an
+assertion about roma and a recording of a table roma does not control, and it went
+red without either being at fault. It now measures the two separately.
+
+The consequence worth naming: every id on the Menu is an **undated alias**, so the
+model behind it can be re-pointed upstream and the Audit Record will go on
+spelling it the same way across that move. Accepted, because the alternative —
+pinning dated snapshots — puts roma in the business of tracking model releases to
+keep the Menu working at all. It is the same standing re-audit the Menu already
+carries, and the check below is what surfaces it.
+
 `PINNED_MODEL` is `claude-sonnet-5`, which is what `sonnet` resolves to. roma
 pins the resolved id and a Caller would type the alias, so the two spellings have
 to be understood as the same model.
 
-**Read — `/model` has two descriptors.** `{type:"local", name:"model",
-supportsNonInteractive:!0, argumentHint:"<model>", isEnabled:()=>yn()}` and a
-second `{type:"local-jsx", name:"model", …}`. The first takes an argument
-non-interactively; the second is a picker, which a Channel cannot show. Which one
-wins depends on `yn()`, and **that is not readable statically** — it is one of
-the things the seam 2 check exists to settle.
+**Measured — `/model` has two descriptors, and the non-interactive one is live.**
+The bundle declares `{type:"local", name:"model", supportsNonInteractive:!0,
+argumentHint:"<model>", isEnabled:()=>yn()}` and a second `{type:"local-jsx",
+name:"model", …}`; the first takes an argument non-interactively, the second is a
+picker a Channel could not show, and which wins depends on `yn()`, which is not
+readable statically. Relayed to a real `claude -p`, the first is what answers:
 
-**Read — what `/model` accepts.** Its own error text: `` `/model <name>.
-Available: ${…}, default, or a full model ID.` `` So an arbitrary model id is a
-legal argument upstream. There is no list roma could hold that would make
-validation complete, which is why the decision below is about what roma *offers*
-rather than about what it can check.
+```
+/model      → "Current model: Sonnet 5
+               Usage: /model <name>. Available: sonnet, opus, haiku, fable, best,
+               sonnet[1m], opus[1m], fable[1m], opusplan, default, or a full model ID."
+/model opus → "Set model to Opus 5 for this session only"
+```
+
+both at `turns=0, cost=0`.
+
+**This does not reopen the decision; it sharpens the reason for it.** A relayed
+`/model` is not expensive — it is free, and it works. What ADR-0012 measured at
+`$0.0549` was the *other* shape, where the Caller Marker sits above the message so
+Claude Code never sees a command at all. The reason roma owns the fact is the
+clause the build supplies itself: **"for this session only"**. That setting lives
+in the process, and Eviction, Reaping and a deploy all end processes at moments
+`CONTEXT.md` defines as unobservable to the person using the Session.
+
+**Measured — what `/model` accepts.** The `Available:` line above is the live
+text, and it ends `or a full model ID`. So an arbitrary model id is a legal
+argument upstream, and there is no list roma could hold that would make validation
+complete — which is why the decision below is about what roma *offers* rather than
+about what it can check. It also names three the Menu does not carry — `fable`,
+`best` and `opusplan` — which is the Menu behaving as an offer rather than as a
+filter, and is worth re-reading when the pin moves.
 
 **Read — the 1M variants.** `{alias:"opus[1m]", name:"Opus 1M", multiplier:5}`
 and the same for `sonnet`, with the tip text `` `You have access to ${t.name}
 with ${t.multiplier}x more context` ``. The multiplier is **context, not price**
 — stated because the first reading of that field was the other one, and the
-mistake is easy to repeat.
+mistake is easy to repeat. Still a reading: the live `Available:` line lists
+`sonnet[1m]`, `opus[1m]` and `fable[1m]`, which confirms they exist and says
+nothing about the multiplier.
 
-**Not verified — that `--model` and a relayed `/model` disagree after a
+**Still not verified — that `--model` and a relayed `/model` disagree after a
 respawn.** The reasoning below rests on `--model` being a spawn argument
 (`claude-session.ts:256`) and a respawn therefore re-applying it. That is roma's
 own code and is certain; what is not measured is what Claude Code does with a
 `/model` issued to a process that is later resumed under a different `--model`.
-The design avoids depending on the answer.
+The build now says `for this session only` in its own words, which is the same
+claim from the other side and is not the same as having watched a respawn. The
+design avoids depending on the answer, so this stays unmeasured deliberately
+rather than pending.
 
 ## Context
 
@@ -249,10 +295,18 @@ It still does not *enforce* it. What changes is that the re-audit list stops bei
 something somebody has to remember and becomes something the report already
 prints.
 
-**In seam 2, by measuring.** A check spawns the pinned binary once per Menu entry
-and asserts `system/init.model` resolves — the same field the Startup Self-Check
-already asserts on, parsed by the same `stream-events.ts`. It also settles `yn()`,
-which cannot be read statically.
+**In seam 2, by measuring.** A check spawns the pinned binary twice per Menu entry
+and reads `system/init.model` — the same field the Startup Self-Check already
+asserts on, parsed by the same `stream-events.ts`. Twice rather than once because
+the two things it has to say are different in kind: that the **id** roma sends is
+accepted and echoed, which is roma's own invariant and is asserted as equality,
+and that the **alias** a Caller types still means that model, which is a fact
+about a build roma does not control and is asserted only as the id or a dated
+snapshot of it. It also settles `yn()`, which cannot be read statically.
+
+Run once against 2.1.220, which is what the verification section above now
+reports. That run is also where the one-spawn version of this check earned its
+second spawn.
 
 **It cannot live in CI**, and that is not a preference. `src/packaging.test.ts`
 sweeps every workflow and the whole of `scripts/` for `CLAUDE_CODE_OAUTH_TOKEN`,
