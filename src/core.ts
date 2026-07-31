@@ -320,10 +320,14 @@ export class Core {
     })
 
     let instruction: OutboundInstruction
-    let sessionId: string | null = null
+    // Held outside the try only so the Audit Record can name it, and null for
+    // the one failure that happens before there is one: a Conversation whose
+    // Session roma could not work out.
+    let session: string | null = null
     let turn: Turn | null = null
     try {
-      sessionId = this.#sessions.sessionFor(conversationKey)
+      const sessionId = this.#sessions.sessionFor(conversationKey)
+      session = sessionId
       // Acknowledged only where it cannot be answered at once, which is the
       // whole of ADR-0012's rule about this. A Readout on a Session with a live
       // process comes back in milliseconds, and an acknowledgement there would
@@ -340,7 +344,7 @@ export class Core {
 
       turn = await this.#queue.run(
         sessionId,
-        () => this.#pool.send(sessionId as string, attributedReadout(message, command), this.#credential),
+        () => this.#pool.send(sessionId, attributedReadout(message, command), this.#credential),
         {
           notice: (position) => reporter.update({ phase: 'queued', position }),
           // Serialised against the Session like anything else, and outside the
@@ -388,7 +392,7 @@ export class Core {
       taskId,
       caller: message.caller,
       callerName: message.callerName,
-      sessionId,
+      sessionId: session,
       outcome: outcomeOf(instruction),
       // Zero rather than null where no Turn ran at all: a Readout that never
       // reached Claude Code spent nothing, and that is a fact rather than an
