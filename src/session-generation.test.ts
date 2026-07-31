@@ -119,6 +119,29 @@ describe('starting a fresh Session', () => {
     expect(() => sessions.sessionFor(KEY)).toThrow()
     expect(sessions.sessionFor(OTHER_KEY)).toBe(sessionIdFor(OTHER_KEY))
   })
+
+  // A record is written to a name of its own and renamed onto the live one, so
+  // that the reader above is defending against a disk rather than against roma.
+  // The property itself — that no reader ever sees a part of a record — is
+  // structural and cannot be asserted from here without racing a power cut.
+  // What can be: the rename happened, so the name it was written under is gone.
+  //
+  // Worth pinning because the failure is silent in both directions. A rename
+  // that never happened leaves the record missing and the work root filling with
+  // `.pending` files, and both readers would report a Conversation that has never
+  // used `/clear` — the exact silent resurrection every test above exists for.
+  it('leaves the record and nothing beside it', () => {
+    const sessions = generations()
+    const chosen = models()
+
+    sessions.freshSession(KEY)
+    chosen.choose(SESSION, 'claude-opus-5')
+
+    expect(readdirSync(workRoot).filter((name) => name.endsWith('.pending'))).toEqual([])
+    expect(readdirSync(workRoot).sort()).toEqual(
+      [`${sessionIdFor(KEY)}.generation`, `${SESSION}.model`].sort(),
+    )
+  })
 })
 
 /**
@@ -127,9 +150,14 @@ describe('starting a fresh Session', () => {
  * What a Caller can observe about choosing a model — that the next Turn runs on
  * it, that a reset puts it back, that it survives a restart — is asserted against
  * a whole roma in `core.test.ts`, because that is where it is observable. These
- * two are not: one is a state only a machine that lost power mid-write produces,
- * and the other is a property of the shape of the record rather than of anything
- * roma does with it.
+ * two are not: one is a record roma did not write, and the other is a property
+ * of the shape of the record rather than of anything roma does with it.
+ *
+ * "A record roma did not write" is meant literally, and it is what `writeRecord`
+ * changed. roma's own writes go through a rename, so a half-written record is no
+ * longer something roma can leave behind — which makes the refusal below a
+ * defence against a disk, an operator or a restore rather than against roma, and
+ * a reason to keep it rather than to drop it.
  */
 describe('the model a Session runs on', () => {
   // Fail loudly rather than fall back to the Pinned Model. Falling back is a

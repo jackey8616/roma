@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { MENU } from './model-menu.js'
 import { sessionIdFor } from './session-id.js'
@@ -41,13 +41,14 @@ const COUNT = /^\d+$/
 /**
  * Every model a record may name: the Menu's own, and nothing else.
  *
- * Read against rather than parsed with a pattern, so that one check covers two
- * failures a Session must not run through. A torn line — what a machine that lost
- * power mid-write leaves — is not a model roma offers. Neither is a name roma has
- * *stopped* offering, and that one is the reason this is a membership test:
- * removing a Menu entry should be a change somebody notices, and a record quietly
- * passed through to `--model` would let a Session go on running on something the
- * Menu no longer stands behind.
+ * A membership test rather than a pattern, and for one reason now rather than
+ * two. It used to also stand in for a torn line — what a machine that lost power
+ * mid-write leaves — and `writeRecord` has since made that state unreachable
+ * rather than detected. What is left is the reason this could never have been a
+ * pattern anyway: a name roma has *stopped* offering. Removing a Menu entry
+ * should be a change somebody notices, and a record quietly passed through to
+ * `--model` would let a Session go on running on something the Menu no longer
+ * stands behind.
  *
  * Nothing else can get in here: the only thing that writes a record is a `/model`
  * whose argument was on the Menu.
@@ -64,6 +65,35 @@ const OFFERED = new Set(Object.values(MENU))
  */
 function isMissing(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT'
+}
+
+/**
+ * Write one record so that nothing can ever read half of it.
+ *
+ * Both readers here refuse a record they cannot make sense of rather than
+ * guessing at one — a generation that is not a count, a model that is not on the
+ * Menu — and both are right to. That is not the same as the state being
+ * unreachable: a `writeFileSync` onto the live name leaves a third thing a
+ * reader can observe besides the old contents and the new, and a machine that
+ * loses power mid-write is what produces it. What the Conversation gets is a
+ * thread that stops working for a write nobody got wrong.
+ *
+ * A rename within one directory is atomic, so a reader sees the old record or
+ * the new one and never a part of either. The temporary name is in that same
+ * directory for exactly that reason: across filesystems a rename is a copy, and
+ * a copy is the thing being avoided.
+ *
+ * What it can leave behind is a `.pending` file, where the power went between
+ * the write and the rename. It is bounded — one per record, overwritten by the
+ * next attempt — and it is not a record: nothing reads that name, and the
+ * reclaim sweep steps over files as it does over the records themselves. Litter
+ * of the same kind ADR-0014 already accepts, in exchange for a state no reader
+ * has to be defended against.
+ */
+function writeRecord(path: string, contents: string): void {
+  const pending = `${path}.pending`
+  writeFileSync(pending, contents, 'utf8')
+  renameSync(pending, path)
 }
 
 export interface SessionGenerationsOptions {
@@ -125,7 +155,7 @@ export class SessionGenerations {
     // Session for is refused before anything is written down.
     const sessionId = sessionIdFor(conversationKey, generation)
     mkdirSync(this.#workRoot, { recursive: true })
-    writeFileSync(this.#recordFor(conversationKey), String(generation), 'utf8')
+    writeRecord(this.#recordFor(conversationKey), String(generation))
     return sessionId
   }
 
@@ -304,7 +334,7 @@ export class ChosenModels {
    */
   choose(sessionId: string, model: string): void {
     mkdirSync(this.#workRoot, { recursive: true })
-    writeFileSync(this.#recordFor(sessionId), model, 'utf8')
+    writeRecord(this.#recordFor(sessionId), model)
   }
 
   /**
