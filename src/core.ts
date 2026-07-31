@@ -106,13 +106,13 @@ export interface CoreOptions {
    */
   readonly queue: TaskQueue
   /**
-   * Which Session each Conversation is on — only a question because `/new` can
+   * Which Session each Conversation is on — only a question because `/clear` can
    * move one.
    *
    * Shared with every other Core over the same working directories, for the
    * reason the pool and the queue are: a Conversation two Cores each kept their
    * own answer for would be two Conversations, one of which never heard about
-   * the `/new`.
+   * the `/clear`.
    */
   readonly sessions: SessionGenerations
   /**
@@ -162,7 +162,7 @@ type Resumption = 'reset' | 'overflow' | 'stopped'
 interface RunningTask extends TaskAddress {
   /**
    * The Session it is on, which is not always the one its Conversation is on: a
-   * `/new` in between moves the Conversation and leaves the Task where it
+   * `/clear` in between moves the Conversation and leaves the Task where it
    * started.
    */
   readonly sessionId: string
@@ -277,7 +277,8 @@ export class Core {
    * that roma's own two can never be shadowed by something added to the Readout
    * list. Nothing is on both lists today and this is what keeps that from
    * mattering — Claude Code has a `/stop` of its own, and roma's is the one that
-   * must win.
+   * must win. Since ADR-0013 the same is true of `/clear`, where it is a safety
+   * property rather than a preference — see `COMMANDS`.
    *
    * Resolves when the Conversation has been told how it went. It rejects only
    * if the Channel could not be told at all — a failed Task is an outcome, not
@@ -457,8 +458,8 @@ export class Core {
 
   /** Do what the Command asks, and say whether there was anything to do. */
   #carryOut(command: Command, conversationKey: string): boolean {
-    if (command === 'new') {
-      // Nothing is torn down. `/new` is aimed at what the *next* message
+    if (command === 'clear') {
+      // Nothing is torn down. `/clear` is aimed at what the *next* message
       // reaches: a Task already running in the old Session finishes and still
       // answers the person who asked, and the process behind it is left to the
       // pool, which reaps or evicts it like any other Session nobody is talking
@@ -475,7 +476,7 @@ export class Core {
    *
    * Aimed at the Tasks roma is actually in the middle of rather than at the
    * Session the Conversation is on now, because those are not always the same
-   * Session: a `/new` between the message and the `/stop` moves the Conversation
+   * Session: a `/clear` between the message and the `/stop` moves the Conversation
    * on while the work it was asked to stop carries on where it started. Asking
    * the generation would answer about an empty Session and leave the Task
    * running with the person told there was nothing to stop.
@@ -543,9 +544,9 @@ export class Core {
     try {
       // No lookup and nothing to have gone stale: the Conversation Key is the
       // Session id, one hash apart. The one thing read is which generation of it
-      // `/new` has left the Conversation on, and a Conversation that has never
-      // used `/new` is on the first. Read on arrival rather than on admission,
-      // so that a message already waiting in the queue when a `/new` lands still
+      // `/clear` has left the Conversation on, and a Conversation that has never
+      // used `/clear` is on the first. Read on arrival rather than on admission,
+      // so that a message already waiting in the queue when a `/clear` lands still
       // goes to the Session it was sent to — and read inside the try, because a
       // Conversation roma cannot work out the Session for is one that would
       // otherwise be answered with silence.

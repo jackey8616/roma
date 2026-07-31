@@ -26,6 +26,9 @@
  * moves Claude Code to a session roma does not know about, `/model` takes a
  * Session off the pinned model, `/config` sets anything at all — and every one
  * of those is free and non-interactive on the pinned build.
+ *
+ * `/clear` is out of reach twice over since ADR-0013: it is one of roma's own
+ * Commands now, and the Core reads a Command before it consults this list.
  */
 const READOUTS: readonly string[] = [
   // Show current context usage: how full this Session's context window is.

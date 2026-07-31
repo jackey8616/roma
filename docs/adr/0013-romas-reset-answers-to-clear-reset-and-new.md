@@ -4,8 +4,8 @@ Date: 2026-07-31
 
 ## Status
 
-Accepted. Not implemented — this records the decision; `src/commands.ts` still
-holds one string.
+Accepted, and implemented: `src/commands.ts` maps all three spellings to the one
+`clear` Command, which is what the Core carries out and what an Adapter renders.
 
 Corrects a *name* in ADR-0003 without disturbing anything it decided. ADR-0003
 fixed roma's Commands at two and matched them whole; both stand. What changes is

@@ -18,7 +18,10 @@ describe('reading a Readout', () => {
   it('leaves Claude Code commands that are not on the list alone', () => {
     // The list is a whitelist, and these are exactly what it is a whitelist
     // *against*: all three are free and non-interactive on the pinned build, and
-    // all three change state roma owns or depends on.
+    // all three change state roma owns or depends on. `/clear` is doubly out of
+    // reach — it is roma's own Command now (ADR-0013), and the Core reads
+    // Commands first — and it is still asserted here, because what keeps it off
+    // the wire is this list not carrying it.
     expect(readReadout('/clear')).toBeNull()
     expect(readReadout('/model opus')).toBeNull()
     expect(readReadout('/config theme=dark')).toBeNull()
@@ -44,8 +47,11 @@ describe('reading a Readout', () => {
   it('shares no string with a Command', () => {
     // Claude Code has a `/stop` of its own, and roma's must win. The Core checks
     // Commands first, so an overlap would be shadowed rather than ambiguous —
-    // this is what keeps the ordering from mattering.
-    for (const command of ['/stop', '/new']) {
+    // this is what keeps the ordering from mattering. `/clear` is the one where
+    // that ordering is a safety property rather than a tidiness one (ADR-0013):
+    // relayed, it would move Claude Code onto a session roma is not tracking, and
+    // being a Command puts it out of reach of this list by construction.
+    for (const command of ['/stop', '/clear', '/reset', '/new']) {
       expect(readCommand(command)).not.toBeNull()
       expect(readReadout(command)).toBeNull()
     }

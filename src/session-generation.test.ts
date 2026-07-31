@@ -69,7 +69,7 @@ describe('starting a fresh Session', () => {
 
   // The point of writing this down rather than holding it in memory. A restart
   // that forgot which Session a Conversation was on would resume the very
-  // context `/new` was used to drop — the stale answers coming back, with
+  // context `/clear` was used to drop — the stale answers coming back, with
   // nothing in the Conversation explaining why.
   it("is still the Conversation's Session after roma has restarted", () => {
     const fresh = generations().freshSession(KEY)
@@ -100,7 +100,7 @@ describe('starting a fresh Session', () => {
   })
 
   // "There is no record" is one specific failure — every conversation that has
-  // never used `/new` — and only it means the first generation. A read that
+  // never used `/clear` — and only it means the first generation. A read that
   // failed for any other reason describes a record that is there and could not
   // be read, and answering the first generation to that is the same silent
   // resurrection by another route.

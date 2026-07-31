@@ -138,7 +138,7 @@ function newCore({
    * recording.
    *
    * `session` is which Session is expected to serve it, and defaults to the one
-   * a Conversation that has never used `/new` is on.
+   * a Conversation that has never used `/clear` is on.
    */
   const say = async (
     text: string,
@@ -926,15 +926,15 @@ describe('the two Commands roma answers itself', () => {
   })
 
   // A Task and its Conversation can end up on different Sessions, and only one
-  // of them is the Task: `/new` moves the Conversation on while the work it was
+  // of them is the Task: `/clear` moves the Conversation on while the work it was
   // asked to stop carries on where it started. Asking which Session the
   // Conversation is on now would interrupt an empty one and report that nothing
   // was running, while the Task nobody wants keeps going.
-  it('stops the Task it was sent to stop, even after a /new moved the Conversation', async () => {
+  it('stops the Task it was sent to stop, even after a /clear moved the Conversation', async () => {
     const { adapter, core, start } = newCore()
     const { task, proc } = await start('write me an essay')
 
-    await core.handle(ingress('/new'))
+    await core.handle(ingress('/clear'))
     await core.handle(ingress('/stop'))
 
     expect(proc.sent.at(-1)).toMatchObject({
@@ -1040,24 +1040,40 @@ describe('the two Commands roma answers itself', () => {
     expect(claude.process.sent.filter((frame) => frame['type'] === 'control_request')).toEqual([])
   })
 
-  // `/new` cannot mean a different Conversation Key — the key is the Channel's,
+  // `/clear` cannot mean a different Conversation Key — the key is the Channel's,
   // and a DM carries the same one forever — so it means a different Session
   // under the same key. Created rather than resumed is the whole of "the old
   // context does not come with it".
+  //
+  // Once per spelling, because ADR-0013 gives the reset three of them — `clear`
+  // is Claude Code's own name for this and `reset` and `new` are the aliases it
+  // declares — and one that reached a Task instead would be somebody billed for
+  // a plausible sentence about what it would have done.
   it('gives the Conversation a Session with nothing in it', async () => {
-    const { adapter, claude, core, say } = newCore()
-    await say('hello')
+    for (const spelling of ['/clear', '/reset', '/new']) {
+      const { adapter, claude, core, say } = newCore()
+      await say('hello')
 
-    await core.handle(ingress('/new'))
-    await say('and now', { session: sessionIdFor(KEY, 1) })
+      await core.handle(ingress(spelling))
+      await say('and now', { session: sessionIdFor(KEY, 1) })
 
-    expect(claude.lastSpawn.args).toContain(sessionIdFor(KEY, 1))
-    expect(claude.lastSpawn.args).toContain('--session-id')
-    expect(claude.lastSpawn.args).not.toContain('--resume')
-    expect(claude.lastSpawn.args).not.toContain(sessionIdFor(KEY))
-    expect(posted(adapter.instructions).filter(({ kind }) => kind === 'command-outcome')).toEqual([
-      { kind: 'command-outcome', conversationKey: KEY, command: 'new', carriedOut: true },
-    ])
+      expect(claude.lastSpawn.args, spelling).toContain(sessionIdFor(KEY, 1))
+      expect(claude.lastSpawn.args, spelling).toContain('--session-id')
+      expect(claude.lastSpawn.args, spelling).not.toContain('--resume')
+      expect(claude.lastSpawn.args, spelling).not.toContain(sessionIdFor(KEY))
+      expect(
+        posted(adapter.instructions).filter(({ kind }) => kind === 'command-outcome'),
+        spelling,
+      ).toEqual([
+        { kind: 'command-outcome', conversationKey: KEY, command: 'clear', carriedOut: true },
+      ])
+      // All three are one Command, so none of them reached a Turn: what Claude
+      // Code was given is the two messages either side of it.
+      expect(
+        claude.processes.flatMap((proc) => proc.sent.filter((frame) => frame['type'] === 'user')),
+        spelling,
+      ).toHaveLength(2)
+    }
   })
 
   // Held in memory this would survive until the next deploy and then be silently
@@ -1067,7 +1083,7 @@ describe('the two Commands roma answers itself', () => {
   it("is still the Conversation's Session after roma has restarted", async () => {
     const first = newCore()
     await first.say('hello')
-    await first.core.handle(ingress('/new'))
+    await first.core.handle(ingress('/clear'))
 
     const second = newCore({ workRoot: first.workRoot })
     await second.say('and now', { session: sessionIdFor(KEY, 1) })
@@ -1076,13 +1092,13 @@ describe('the two Commands roma answers itself', () => {
     expect(second.claude.lastSpawn.args).not.toContain(sessionIdFor(KEY))
   })
 
-  // `/new` is aimed at what the next message reaches, not at the work in flight.
+  // `/clear` is aimed at what the next message reaches, not at the work in flight.
   // A Task torn down here would be one nobody stopped and nobody was told about.
   it('leaves a Task that is already running to finish and answer', async () => {
     const { adapter, core, start } = newCore()
     const { task, proc } = await start('a long job')
 
-    await core.handle(ingress('/new'))
+    await core.handle(ingress('/clear'))
     feed(proc, OK)
     await task
 
@@ -1095,24 +1111,21 @@ describe('the two Commands roma answers itself', () => {
   })
 
   // Claude Code's own slash commands are work unless they are on the Readout
-  // list, and `/clear` is deliberately not: it would move Claude Code to a
-  // session roma does not know about, leaving the next `--resume` pointed at one
-  // roma believes in and Claude Code has left. `/new` is how a Conversation
-  // makes that move, through the one piece of state that records it.
-  //
-  // So this still goes through as work, marker first — which is also what it
-  // looks like when a Readout is *not* recognised, and is the fault ADR-0012
-  // describes. For `/clear` that outcome is the intended one.
-  it('interprets no command string but its own two and the Readout list', async () => {
+  // list or are one of roma's own. `/compact` is neither: it is left to Claude
+  // Code, which never sees it as a command, because ADR-0009 puts the Caller
+  // Marker above it and what reaches stdin therefore begins with `<from>`. That
+  // is the fault ADR-0012 describes, and it is what every string roma has not
+  // claimed still does.
+  it('interprets no command string but its own and the Readout list', async () => {
     const { adapter, claude, say } = newCore()
 
-    await say('/clear')
+    await say('/compact')
 
     // Untouched under the marker, which is what passing a message through has to
     // mean now that ADR-0009 puts roma's own line above every one of them.
     expect(claude.process.sent.at(-1)).toMatchObject({
       type: 'user',
-      message: { content: [{ text: '<from>Ada (users/17)</from>\n\n/clear' }] },
+      message: { content: [{ text: '<from>Ada (users/17)</from>\n\n/compact' }] },
     })
     expect(posted(adapter.instructions).at(-1)).toEqual({
       kind: 'result',
@@ -1132,7 +1145,7 @@ describe('the two Commands roma answers itself', () => {
     writeFileSync(join(workRoot, `${sessionIdFor(KEY)}.generation`), 'half a wr')
 
     await core.handle(ingress('hello'))
-    await core.handle(ingress('/new'))
+    await core.handle(ingress('/clear'))
 
     expect(posted(adapter.instructions)).toEqual([
       { kind: 'failure', conversationKey: KEY, reason: 'roma could not run this Task.' },
@@ -1145,7 +1158,7 @@ describe('the two Commands roma answers itself', () => {
     await say('hello')
 
     await core.handle(ingress('/stop'))
-    await core.handle(ingress('/new'))
+    await core.handle(ingress('/clear'))
 
     expect(claude.process.sent.filter((frame) => frame['type'] === 'user')).toHaveLength(1)
   })
@@ -1242,7 +1255,7 @@ describe('who asked', () => {
   it('addresses a Command’s outcome to whoever typed it', async () => {
     const { adapter, core } = newCore()
 
-    await core.handle(ingress('/new', KEY, BOB))
+    await core.handle(ingress('/clear', KEY, BOB))
 
     expect(adapter.instructions.at(-1)).toMatchObject({
       kind: 'command-outcome',
@@ -1439,7 +1452,7 @@ describe('the record every Task leaves behind', () => {
 
     await say('hello')
     await core.handle(ingress('/stop'))
-    await core.handle(ingress('/new'))
+    await core.handle(ingress('/clear'))
 
     expect(recordsIn(audit)).toHaveLength(1)
   })

@@ -261,7 +261,7 @@ function phrase(progress: TaskProgress): string {
 }
 
 function commandText(command: Command, carriedOut: boolean): string {
-  if (command === 'new') return 'Started a fresh session. Nothing from before this is in it.'
+  if (command === 'clear') return 'Started a fresh session. Nothing from before this is in it.'
   // Two messages for one `/stop`, and both earn their place: this one answers
   // the person who typed it, and the Task's own "Stopped." lands on the
   // acknowledgement they had been watching.
