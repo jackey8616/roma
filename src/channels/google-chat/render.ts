@@ -146,22 +146,64 @@ function money(usd: number): string {
  * keeping is in the result.
  */
 export function progressText(caller: string, progress: TaskProgress): string {
-  return addressedTo(caller) + phrase(progress)
+  const to = addressedTo(caller)
+  return to + fitted(phrase(progress), MAX_TEXT - to.length)
 }
+
+/**
+ * One acknowledgement phrase, inside what the mention leaves of Chat's limit.
+ *
+ * **Nothing reaches this any more.** Every phase is bounded where it is written
+ * — four of them are a fixed sentence around a small number, and the fifth is
+ * cut to `MAX_TOOL_CHARS` — so the longest phrase this can be handed is around
+ * 129 characters against a budget of roughly 4077. It is kept anyway, and the
+ * reason is the sixth phase rather than any of the five: `tool` was added
+ * without anybody thinking about its length, and this file went a release
+ * carrying a phrase Chat could refuse outright (#75). A guard that sits on the
+ * finished string is the one the next phase cannot forget to ask for.
+ *
+ * Which is why it is exported and tested directly. Reached through
+ * `progressText` it cannot be made to fire, so a test that drives a long tool
+ * through the Adapter is testing `MAX_TOOL_CHARS` and would stay green if this
+ * function were deleted.
+ *
+ * Over the limit is not a longer message but no message: Chat refuses the whole
+ * thing rather than trimming it. The **end** is what goes, for the reason the
+ * `tool` phase gives below.
+ *
+ * The budget is passed in rather than read off `MAX_TEXT` for the reason `split`
+ * gives below — the mention is already spent out of the limit.
+ */
+export function fitted(text: string, budget: number): string {
+  if (text.length <= budget) return text
+  // Clamped because a negative length reads from the *end* in JavaScript, which
+  // is the one input that would turn this from a trim into its own opposite.
+  return `${text.slice(0, Math.max(0, budget - 1))}…`
+}
+
+/**
+ * How much of a tool's command the acknowledgement quotes.
+ *
+ * A judgement rather than a measurement, and said so because the other numbers
+ * near it are not: the throttle has a measured worst gap of 2641ms behind it,
+ * and `MAX_TEXT` is Chat's own. What is behind this one is two recorded
+ * `task_started` descriptions — `sleep 45` at 8 characters and an `awk`
+ * one-liner at 56 — which is enough to say the ordinary case is never cut, and
+ * nothing at all about the tail.
+ *
+ * Its distance from `MAX_TEXT` is the point rather than an accident. The two
+ * bounds answer different questions: this one asks what can be read at a
+ * glance, and `fitted` asks what Chat will accept.
+ */
+const MAX_TOOL_CHARS = 120
 
 /**
  * The acknowledgement without its mention.
  *
- * Nothing here is cut to fit any more, and nothing here needs to be: every
- * phrase is a fixed sentence around a small number. The one that was not — the
- * partial answer, which had to be trimmed to what the mention left of Chat's
- * limit — is gone with ADR-0010.
- *
- * The exception is a tool named by Claude Code's own description of it, which is
- * the command itself and has no length roma controls. It was never trimmed
- * either, so nothing about that changed here; it is written down because the
- * budget disappearing is the kind of thing that later reads as the guard having
- * been removed.
+ * Every phrase is a fixed sentence around a small number, except the tool's,
+ * which is named by Claude Code's own description of it and is bounded here.
+ * `fitted` bounds whatever this returns a second time, and by a different
+ * measure — see there for why that is not the same guard twice.
  */
 function phrase(progress: TaskProgress): string {
   switch (progress.phase) {
@@ -179,7 +221,19 @@ function phrase(progress: TaskProgress): string {
       // The one thing that keeps a tool window from reading as a hang: the
       // stream says nothing at all until the tool finishes, 25 seconds in the
       // capture this was designed against.
-      return `Running ${progress.tool}…`
+      //
+      // Cut mid-character rather than at a word boundary, against the example
+      // `split` sets below: a command cut at a space reads as a whole command,
+      // and `Running rm -rf…` is a worse thing to put in front of somebody at a
+      // glance than the visibly severed `Running rm -rf /home/user/proj…`.
+      // `split` trims prose, where a clean edge is the point; this quotes a
+      // command, where a clean edge is the lie.
+      //
+      // The sentence's own `…` carries both meanings at once — the tool is
+      // still running, and the command goes on past here. There is no second
+      // marker deliberately: a reader who learned how much was cut would do
+      // nothing differently with it, and this message is read at a glance.
+      return `Running ${progress.tool.slice(0, MAX_TOOL_CHARS)}…`
     case 'writing':
       // Deliberately not the prose. Shown here it would say what the Result is
       // about to say, seconds later and one message further down — the
