@@ -142,24 +142,66 @@ them apart:
   The file is a credential. It is not in this repo's `.gitignore` by name because it should
   not be in this repo at all.
 
-### The account was renamed, and an existing deployment should pin the old name
+### The account was renamed, and an existing deployment has to choose
 
 `service_account_id` used to default to `roma-agent` and now defaults to `roma-runtime`. In
 roma's vocabulary the **agent** is the Claude Code process, and this account is precisely the
 one the agent must never be able to act as — so the old name was an invitation to bind the
 agent's Google Cloud access to the identity roma's own ingress depends on (ADR-0015 §2).
 
-A Google Cloud account id is immutable, so a plain `terraform apply` against an existing
-deployment **destroys and recreates the service account**, along with its key and every grant
-bound to it. If you are already running roma, pin the old value before applying:
+**A Google Cloud account id is immutable**, so changing it is a destroy-and-create: a plain
+`terraform apply` against an existing deployment deletes `roma-agent@` and everything bound to
+it — its keys included — before making `roma-runtime@`. Do not apply this without picking one
+of the two paths below first.
+
+#### Either: hand the name to the agent (recommended)
+
+Keep `roma-agent@`, stop it being roma's runtime identity, and make it the agent's **Cloud
+Reach**. The name then stops being an invitation and starts being accurate — `roma-agent@`
+really is what the agent acts as — which resolves what the rename was for rather than working
+around it. It also means nothing is deleted.
+
+Take the account out of Terraform's hands first, or the apply below will destroy it:
+
+```bash
+cd infra
+terraform state rm google_service_account.roma
+terraform plan     # read this before applying — see what to expect below
+terraform apply
+```
+
+Expect the plan to create `roma-runtime@`, move `roles/pubsub.subscriber` from `roma-agent@`
+to it, and say nothing about `roma-agent@` itself, which is now unmanaged. If it proposes
+destroying a service account, stop: the `state rm` did not take.
+
+Two things this does **not** do for you:
+
+- **There is a gap.** The moment the subscriber role moves, a roma still running as
+  `roma-agent@` has lost its subscription. Swap roma onto `roma-runtime@` in the same
+  window — a new key, or re-attaching the instance's service account. Pick a quiet time.
+- **`roma-agent@` keeps living in this project**, which is the one thing the Cloud Reach
+  section below recommends against: the agent's identity ends up one IAM binding from the
+  ingress it must never touch. That is a real trade rather than a blocker — make it
+  knowingly, and read the verification step in that section, which exists for exactly this
+  arrangement.
+
+Losing `roles/pubsub.subscriber` is not a side effect to work around; it is required. A Cloud
+Reach holding it could consume or acknowledge roma's own ingress, which presents as roma
+quietly not answering rather than as an attack.
+
+#### Or: pin the old name and change nothing
+
+If you would rather not touch a running deployment at all, keep `roma-agent@` as roma's
+runtime identity:
 
 ```hcl
 # terraform.tfvars
 service_account_id = "roma-agent"
 ```
 
-Nothing else about the rename is load-bearing. It is a name that misleads forever against one
-loud release note.
+Nothing breaks. What you keep is the misleading name, so whoever configures a Cloud Reach
+later finds an account called `roma-agent@` and has to be told it is the one account that must
+never be one.
 
 ## The agent's Cloud Reach
 
@@ -183,10 +225,15 @@ the project the agent works in may belong to somebody else. That is also why the
 Terraform for it here — a placeholder in this file would put the agent's identity exactly
 where it does not belong.
 
-It must **never** be the account above. An agent standing in roma's own identity can delete
-the subscription roma pulls from, publish forged events to the topic roma trusts, and mint
-itself a key that outlives every rotation — each of which presents as roma quietly not
-working rather than as an attack.
+It must **never** be the identity roma itself runs on. An agent standing in roma's own
+identity can delete the subscription roma pulls from, publish forged events to the topic roma
+trusts, and mint itself a key that outlives every rotation — each of which presents as roma
+quietly not working rather than as an attack.
+
+> **Reusing `roma-agent@`?** The rename section above offers exactly that, and it is the one
+> case where a Cloud Reach lives in this project on purpose. It is only safe once
+> `roles/pubsub.subscriber` has moved off it — follow those steps, then come back and run the
+> check below before granting anything broad.
 
 By hand, in the project the agent should work in:
 
@@ -214,6 +261,46 @@ export ROMA_CLOUD_KEY_FILE=/run/secrets/cloud-reach.json
 roma reads it at boot, mints one token with it and throws that token away — so a key that is
 unreadable, empty, malformed or revoked stops the boot rather than surfacing inside somebody's
 first Task. Rotating it needs a restart.
+
+### Check what a broad role actually reached
+
+`roles/viewer` above is a placeholder for "whatever the agent is for", and the broader the
+role the more worth checking it is. Two questions are worth answering before anybody messages
+roma, and neither is answerable from roma — it is told which identity to hand over and
+nothing about what that identity may do.
+
+**Can it reach the ingress?** This matters whenever the Cloud Reach and the control plane
+share a project, which is every deployment that reused `roma-agent@`. Basic roles are broad,
+and whether `roles/viewer` carries `pubsub.subscriptions.consume` is not something to take on
+trust:
+
+```bash
+gcloud pubsub subscriptions pull roma-chat-events-sub \
+  --impersonate-service-account=THE_CLOUD_REACH_EMAIL
+```
+
+**`PERMISSION_DENIED` is the result you want.** If it pulls a message, the Cloud Reach can eat
+roma's own ingress: swap to a narrower role, or bind the readonly role everywhere except this
+project.
+
+**How far does it reach?** A role bound at the **organisation** level means every Conversation,
+and everyone who can message roma, reads the whole organisation. That may be what you want; it
+should not be what you discover. Prefer project-level bindings on the projects the agent is
+actually for.
+
+### Standing it up for the first time
+
+Nothing in roma's cloud path has ever run against a real service account (ADR-0015, Status), so
+the first deployment is the first evidence. Two steps rather than one keeps the unproven part
+isolated:
+
+1. **Deploy with `ROMA_CLOUD_KEY_FILE` unset.** Identical behaviour to a roma without any of
+   this, so nothing about the Cloud Reach can be what broke it.
+2. **Add the key and restart.** If Google will not mint, roma refuses to boot and says why —
+   that is what the boot proof is for. Unset the variable to get straight back to step 1.
+
+The failure mode being "roma will not start" rather than "somebody's Task fails halfway" is the
+whole reason the key is proved at boot.
 
 **Know what it is not.** roma is the only thing that reads the key, but the agent runs in the
 same container under the same uid, so a shell can read it too — the same gap

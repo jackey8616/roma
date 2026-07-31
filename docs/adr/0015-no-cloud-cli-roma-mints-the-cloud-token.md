@@ -377,6 +377,18 @@ Cloud account id is immutable, so this is a destroy-and-create — but
 value in `terraform.tfvars` is untouched. One loud release note, against a name
 that misleads forever.
 
+**Amended on the migration, not on the decision.** This paragraph offers pinning
+as the way out for an existing deployment, and there is a better one it did not
+think of: hand `roma-agent@` to the *agent* as its Cloud Reach and let Terraform
+create `roma-runtime@` beside it. That resolves what the rename is for rather
+than deferring it — the name stops being an invitation and becomes accurate,
+since `roma-agent@` really is what the agent acts as — and nothing is deleted.
+It works because the objection was never the string: it is that this account
+holds `roles/pubsub.subscriber` on roma's own ingress, and the migration moves
+that grant to `roma-runtime@`. It needs `terraform state rm` before the apply, or
+the account being preserved is the one destroyed. `infra/README.md` carries both
+paths and recommends this one; pinning remains available and changes nothing.
+
 ## Consequences
 
 - Nothing in the packaging changes: one `Dockerfile`, one image, one tag per

@@ -46,9 +46,13 @@ variable "service_account_id" {
   # **This default changed from `roma-agent` to `roma-runtime`**, and a Google
   # Cloud account id is immutable — so applying this against an existing
   # deployment is a destroy-and-create of the service account, its key and every
-  # grant bound to it. Pin `service_account_id = "roma-agent"` in
-  # `terraform.tfvars` to keep what you have; nothing else about the change is
-  # load-bearing.
+  # grant bound to it. Do not apply it without choosing a path first; both are in
+  # README.md, under "The account was renamed".
+  #
+  # The recommended one keeps `roma-agent@` and hands it to the agent as its
+  # Cloud Reach, which makes the name true rather than working around it. It
+  # needs `terraform state rm google_service_account.roma` *before* the apply,
+  # or the account this is trying to preserve is the one that gets deleted.
   default     = "roma-runtime"
   description = <<-EOT
     The account id of the identity roma runs as — the local part of its email.
@@ -66,8 +70,13 @@ variable "service_account_id" {
     imprecise, it was an invitation: somebody configuring the agent's Google
     Cloud access found an account named for exactly what they were setting up.
 
-    An existing deployment should pin the old value rather than recreate the
-    account — see the comment above.
+    Whichever id is set here, the account is roma's own and gets
+    `roles/pubsub.subscriber` on the ingress subscription. That is what makes it
+    the wrong account for a Cloud Reach, and the reason is the grant rather than
+    the name: an identity holding it can consume or acknowledge roma's own
+    messages. A deployment reusing the `roma-agent@` name for its Cloud Reach —
+    README.md's recommended migration — is safe precisely because this resource
+    stops managing that account, and the grant moves here with it.
   EOT
 
   validation {

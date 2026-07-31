@@ -8,9 +8,12 @@ project_id = "your-project-id"
 # topic_name             = "roma-chat-events"
 # subscription_name      = "roma-chat-events-sub"
 # service_account_id     = "roma-runtime"
-# ^ was `roma-agent`. An account id is immutable, so an existing deployment
-#   should uncomment this and pin the old value rather than let Terraform
-#   destroy and recreate the account, its key and its grants.
+# ^ was `roma-agent`. An account id is immutable, so an existing deployment that
+#   applies this as-is has its account, key and grants destroyed and recreated.
+#   README.md's "The account was renamed" has the two ways out; the recommended
+#   one leaves this commented and runs `terraform state rm` first, so that
+#   `roma-agent@` survives and becomes the agent's Cloud Reach. Uncomment and pin
+#   the old value only if you would rather change nothing at all.
 # dead_letter_topic_name = "roma-chat-events-dead-letter"
 
 # The three numbers worth understanding before changing — `variables.tf` says why
