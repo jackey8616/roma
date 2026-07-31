@@ -355,8 +355,9 @@ refused by Google and never by roma. Named here for the reason an Installation
 is: a term that is the whole of a security property should be a term.
 Deliberately **not** the identity roma itself runs on — one that could reach
 roma's own ingress could end roma quietly, and a deployment where those two are
-the same has no boundary at all. Most deployments have none, and one with none
-has no `gcloud` either: the tool and the Reach arrive together or neither does.
+the same has no boundary at all (ADR-0016). Most deployments have none, and one
+with none has no `gcloud` either: the tool ships in an image of its own
+(ADR-0015), and roma refuses to start holding one without the other.
 _Avoid_: Installation (that is GitHub's, and it is minted against; this one is
 handed over), project (a Reach may span several, and need not include roma's
 own), service account (what it is made of, not what it bounds), permissions,
@@ -370,7 +371,7 @@ rather than an hour long, and in an environment the agent can read rather than
 never entering one — and opposite on purpose rather than by oversight. What pays
 for that is the Cloud Reach: nothing bounds what this key is worth except the
 roles behind it, which is why the boundary and not the credential is the term
-that carries the security property. roma proves it is live once, at boot, and
+that carries the security property (ADR-0016). roma proves it is live once, at boot, and
 then never uses it again — so what a Task did with it is the one thing an Audit
 Record cannot say.
 _Avoid_: Installation Token (the two sit in the same place and are contraries;
