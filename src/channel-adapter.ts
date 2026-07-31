@@ -268,7 +268,16 @@ export type OutboundInstruction = TaskAddress &
          * has no result — so this is the whole of what one emits.
          */
         readonly kind: 'command-outcome'
-        readonly command: Command
+        /**
+         * Which Command, and never `/model`.
+         *
+         * The two whose whole outcome is "there was something to do, or there
+         * was not". `/model` has an answer rather than an outcome — which model,
+         * which ones are on offer, why a name was refused — so it comes back as
+         * a `result` or a `failure`, the way a Readout's output does, and an
+         * Adapter needs to learn nothing new to post it.
+         */
+        readonly command: Exclude<Command, 'model'>
         /**
          * Whether it had anything to do.
          *

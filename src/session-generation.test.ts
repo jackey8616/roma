@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { sessionIdFor } from './session-id.js'
-import { SessionGenerations } from './session-generation.js'
+import { ChosenModels, SessionGenerations } from './session-generation.js'
 
 const KEY = 'conversation-one'
 const OTHER_KEY = 'conversation-two'
@@ -20,6 +20,14 @@ afterEach(() => {
 
 function generations(): SessionGenerations {
   return new SessionGenerations({ workRoot })
+}
+
+/** The model roma runs on where nobody has chosen anything. */
+const PINNED = 'claude-sonnet-5'
+const SESSION = sessionIdFor(KEY)
+
+function models(): ChosenModels {
+  return new ChosenModels({ workRoot, pinnedModel: PINNED })
 }
 
 describe('the Session a Conversation is on', () => {
@@ -110,5 +118,91 @@ describe('starting a fresh Session', () => {
 
     expect(() => sessions.sessionFor(KEY)).toThrow()
     expect(sessions.sessionFor(OTHER_KEY)).toBe(sessionIdFor(OTHER_KEY))
+  })
+
+  // A record is written to a name of its own and renamed onto the live one, so
+  // that the reader above is defending against a disk rather than against roma.
+  // The property itself — that no reader ever sees a part of a record — is
+  // structural and cannot be asserted from here without racing a power cut.
+  // What can be: the rename happened, so the name it was written under is gone.
+  //
+  // Worth pinning because the failure is silent in both directions. A rename
+  // that never happened leaves the record missing and the work root filling with
+  // `.pending` files, and both readers would report a Conversation that has never
+  // used `/clear` — the exact silent resurrection every test above exists for.
+  it('leaves the record and nothing beside it', () => {
+    const sessions = generations()
+    const chosen = models()
+
+    sessions.freshSession(KEY)
+    chosen.choose(SESSION, 'claude-opus-5')
+
+    expect(readdirSync(workRoot).filter((name) => name.endsWith('.pending'))).toEqual([])
+    expect(readdirSync(workRoot).sort()).toEqual(
+      [`${sessionIdFor(KEY)}.generation`, `${SESSION}.model`].sort(),
+    )
+  })
+})
+
+/**
+ * The Chosen Model, in the two places seam 1 cannot reach.
+ *
+ * What a Caller can observe about choosing a model — that the next Turn runs on
+ * it, that a reset puts it back, that it survives a restart — is asserted against
+ * a whole roma in `core.test.ts`, because that is where it is observable. These
+ * two are not: one is a record roma did not write, and the other is a property
+ * of the shape of the record rather than of anything roma does with it.
+ *
+ * "A record roma did not write" is meant literally, and it is what `writeRecord`
+ * changed. roma's own writes go through a rename, so a half-written record is no
+ * longer something roma can leave behind — which makes the refusal below a
+ * defence against a disk, an operator or a restore rather than against roma, and
+ * a reason to keep it rather than to drop it.
+ */
+describe('the model a Session runs on', () => {
+  // Fail loudly rather than fall back to the Pinned Model. Falling back is a
+  // Chosen Model disappearing silently — the Session runs on something nobody
+  // asked for, bills the window everybody shares for it, and the only evidence
+  // is answers that read as if they came from somewhere else.
+  it('refuses to guess when the record it kept is not readable', () => {
+    models().choose(SESSION, 'claude-opus-5')
+    writeFileSync(join(workRoot, `${SESSION}.model`), '{"half a wr')
+
+    expect(() => models().modelFor(SESSION)).toThrow(/chosen model/i)
+  })
+
+  // The same refusal, for the case that is somebody's decision rather than a
+  // machine's accident: a name roma has stopped offering is not passed through to
+  // `--model`, so removing a Menu entry is a change somebody notices rather than
+  // a Session quietly going on running on something the Menu no longer stands
+  // behind.
+  it('refuses a model roma no longer offers', () => {
+    writeFileSync(join(workRoot, `${SESSION}.model`), 'claude-something-else')
+
+    expect(() => models().modelFor(SESSION)).toThrow(/offers/i)
+  })
+
+  // "There is no record" is one specific failure — every Session nobody has
+  // moved, which is almost all of them — and only it means the Pinned Model. A
+  // read that failed for any other reason describes a record that is there and
+  // could not be read.
+  it('refuses to guess when the record cannot be read at all', () => {
+    mkdirSync(join(workRoot, `${SESSION}.model`))
+
+    expect(() => models().modelFor(SESSION)).toThrow()
+    expect(models().modelFor(sessionIdFor(OTHER_KEY))).toBe(PINNED)
+  })
+
+  // A file rather than a directory, which is the whole of why a Chosen Model
+  // outlives the working directory's seven days: `reclaimIdleWorkDirs` deletes
+  // directories nothing has used and steps over everything else. Reclaimed, a
+  // Conversation that went quiet for a week would come back on the Pinned Model
+  // having asked for something else, at a moment nobody can observe.
+  it('is a file, so the reclaim that empties the work root steps over it', () => {
+    models().choose(SESSION, 'claude-opus-5')
+
+    const written = readdirSync(workRoot, { withFileTypes: true })
+    expect(written.map((entry) => entry.name)).toEqual([`${SESSION}.model`])
+    expect(written.every((entry) => entry.isFile())).toBe(true)
   })
 })
