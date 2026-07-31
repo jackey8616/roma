@@ -10,10 +10,17 @@ import type {
   TaskAddress,
 } from './channel-adapter.js'
 import { TurnFailedError, wasInterrupted, type Turn } from './claude-session.js'
-import { readCommand, type Command } from './commands.js'
+import { readCommand, type Command, type CommandRequest } from './commands.js'
+import {
+  MENU_NAMES,
+  menuNameFor,
+  PINNED_NAME,
+  readModelRequest,
+  type ModelRequest,
+} from './model-menu.js'
 import { readReadout } from './readouts.js'
 import { ProgressReporter } from './progress-reporter.js'
-import type { SessionGenerations } from './session-generation.js'
+import type { ChosenModels, SessionGenerations } from './session-generation.js'
 import { writeToStderr, type OperatorLog } from './operator-log.js'
 import { RetryStormError, type SessionPool } from './session-pool.js'
 import { readSharedWindow, readSystemInit, type ClaudeEvent } from './stream-events.js'
@@ -116,6 +123,16 @@ export interface CoreOptions {
    */
   readonly sessions: SessionGenerations
   /**
+   * Which model each Session runs on, and what the deployment pinned.
+   *
+   * Shared with the Session Pool rather than kept apart from it, which is what
+   * makes `/model` mean anything: the Core writes what somebody chose and the
+   * pool reads it at the next spawn. Required for the reason `sessions` is — a
+   * Core that made its own would answer `/model` correctly and change nothing
+   * about what the next process runs on.
+   */
+  readonly models: ChosenModels
+  /**
    * Where every Task is written down, and shared like everything else here.
    *
    * Required rather than optional, though an optional one would be easy: a Core
@@ -166,6 +183,18 @@ interface RunningTask extends TaskAddress {
    * started.
    */
   readonly sessionId: string
+  /**
+   * The model this Task ran on, for its Audit Record.
+   *
+   * Read when the Task arrives so that a Task which never reaches a Turn still
+   * names one, and read again immediately before each Attempt is sent — a Task
+   * that waited behind three others is one somebody may have moved the model
+   * under, and the ledger has to say what was actually spent rather than what was
+   * true when it arrived. The pool reads the same record microseconds later to
+   * decide what to spawn, which is as close as these two can be brought without
+   * the Core being told how the pool works.
+   */
+  model: string
   /** Set by `/stop`, and read at each point the Task can still be stopped. */
   stopped: boolean
   /**
@@ -221,6 +250,7 @@ export class Core {
   readonly #pool: SessionPool
   readonly #queue: TaskQueue
   readonly #sessions: SessionGenerations
+  readonly #models: ChosenModels
   readonly #audit: AuditLog
   readonly #credential: CredentialKind
   readonly #overflow: OverflowOptions | null
@@ -240,6 +270,7 @@ export class Core {
     pool,
     queue,
     sessions,
+    models,
     audit,
     credential,
     overflow,
@@ -259,6 +290,7 @@ export class Core {
     this.#pool = pool
     this.#queue = queue
     this.#sessions = sessions
+    this.#models = models
     this.#audit = audit
     this.#credential = credential
     this.#overflow = overflow ?? null
@@ -274,11 +306,12 @@ export class Core {
    * kind of message. Everything that is none of them is work.
    *
    * Order matters, and only in one direction: a Command is checked first so
-   * that roma's own two can never be shadowed by something added to the Readout
+   * that roma's own three can never be shadowed by something added to the Readout
    * list. Nothing is on both lists today and this is what keeps that from
    * mattering — Claude Code has a `/stop` of its own, and roma's is the one that
    * must win. Since ADR-0013 the same is true of `/clear`, where it is a safety
-   * property rather than a preference — see `COMMANDS`.
+   * property rather than a preference — see `COMMANDS` — and since ADR-0014 of
+   * `/model`, which must never reach a process at all.
    *
    * Resolves when the Conversation has been told how it went. It rejects only
    * if the Channel could not be told at all — a failed Task is an outcome, not
@@ -335,10 +368,14 @@ export class Core {
     // the one failure that happens before there is one: a Conversation whose
     // Session roma could not work out.
     let session: string | null = null
+    // The same, for the model: a Readout runs on whatever process its Session
+    // has, so its record names one for the same reason a Task's does.
+    let model: string | null = null
     let turn: Turn | null = null
     try {
       const sessionId = this.#sessions.sessionFor(conversationKey)
       session = sessionId
+      model = this.#models.modelFor(sessionId)
       // Acknowledged only where it cannot be answered at once, which is the
       // whole of ADR-0012's rule about this. A Readout on a Session with a live
       // process comes back in milliseconds, and an acknowledgement there would
@@ -412,6 +449,7 @@ export class Core {
       durationMs: Date.now() - startedAt,
       turnMs: turn?.durationMs ?? null,
       credential: this.#credential,
+      model: model ?? this.#models.pinnedModel,
       apiKeySource: null,
     })
 
@@ -433,7 +471,7 @@ export class Core {
    * to acknowledge: it is over by the time the Conversation could be told it had
    * begun.
    */
-  async #runCommand(command: Command, message: IngressMessage): Promise<void> {
+  async #runCommand(request: CommandRequest, message: IngressMessage): Promise<void> {
     const { conversationKey } = message
     // Not a Task, and it still gets an id — see `TaskAddress` for why. It is
     // addressed for the same reason: `/stop` is something one person typed, and
@@ -442,8 +480,15 @@ export class Core {
 
     let instruction: OutboundInstruction
     try {
-      const carriedOut = this.#carryOut(command, conversationKey)
-      instruction = { kind: 'command-outcome', ...address, command, carriedOut }
+      instruction =
+        request.command === 'model'
+          ? this.#answerModel(readModelRequest(request.argument), conversationKey, address)
+          : {
+              kind: 'command-outcome',
+              ...address,
+              command: request.command,
+              carriedOut: this.#carryOut(request.command, conversationKey),
+            }
     } catch {
       // Silence is not an outcome here either. Nothing routine reaches this —
       // it takes a generation record roma cannot read, or a Conversation Key an
@@ -456,8 +501,92 @@ export class Core {
     await this.#channel.deliver(instruction)
   }
 
+  /**
+   * Say which model this Conversation is on, or move it, and say so.
+   *
+   * Answered here rather than relayed, and that is the whole of ADR-0014: a
+   * `/model` handed to the process would be a choice living inside something that
+   * ends for reasons nobody using it can observe — an Eviction, a Reaping, a
+   * deploy — so what a Caller would get is not model switching but a setting that
+   * reverts at a moment they cannot see, on a bill nobody can attribute.
+   *
+   * **Nothing is torn down.** This writes the record and answers; the Session
+   * Pool is what makes the next Turn run on it. So a Task already running
+   * finishes on the model it started under and still answers the person who asked
+   * — which is the reset Command's behaviour and is right for the same reason.
+   * The reply has to say that out loud, though: a bare acknowledgement while a
+   * Task is running would be read as having changed that Task.
+   *
+   * An answer rather than a `command-outcome`, because "it was carried out" is
+   * not what any of these say. It is a `result` for the same reason a Readout's
+   * output is one: text to be posted as its own message, which an Adapter already
+   * knows how to do. A refusal is a `failure`, whose reason an Adapter passes
+   * through — so a name roma does not offer is refused in the reply to the
+   * message that contained it, addressed to whoever typed it, and Claude Code is
+   * never asked about it.
+   */
+  #answerModel(
+    request: ModelRequest,
+    conversationKey: string,
+    address: TaskAddress,
+  ): OutboundInstruction {
+    // Which Session, not which Conversation. A Chosen Model belongs to a Session,
+    // which is why clearing a Conversation puts it back on the Pinned Model
+    // without anything being deleted.
+    const sessionId = this.#sessions.sessionFor(conversationKey)
+
+    // A switch rather than a chain of ifs, so that a fifth thing `/model` could
+    // mean cannot be added without this stopping compiling.
+    switch (request.kind) {
+      case 'unknown':
+        // Nothing is written, so a typo cannot move a Session somebody shares
+        // with other people.
+        return { kind: 'failure', ...address, reason: unknownModelReason(request.name) }
+      case 'report':
+        // No process, no Turn, no money, and no interruption of whatever this
+        // Conversation is waiting on: roma owns the answer, so asking is never
+        // the slow thing.
+        return { kind: 'result', ...address, text: this.#modelReport(sessionId) }
+      case 'default':
+        this.#models.usePinnedModel(sessionId)
+        // Named as `default` rather than by whatever the deployment pinned it
+        // to, because `default` is the word they typed and the word they would
+        // type again — and the id beside it says which model that turned out to
+        // be.
+        return {
+          kind: 'result',
+          ...address,
+          text: fromNextMessage(PINNED_NAME, this.#models.pinnedModel),
+        }
+      case 'chosen':
+        this.#models.choose(sessionId, request.model)
+        return {
+          kind: 'result',
+          ...address,
+          text: fromNextMessage(request.name, request.model),
+        }
+    }
+  }
+
+  /**
+   * Which model this Session is on, and what else it may be on.
+   *
+   * Both spellings of the model, because they are answers to two different
+   * questions a person has at once: the id is what the Audit Record and the
+   * Operator Log call it, and the name is the only thing they may actually type —
+   * the id is refused, deliberately, so a report that named it alone would offer
+   * a list nothing in the sentence above it belonged to.
+   */
+  #modelReport(sessionId: string): string {
+    const model = this.#models.modelFor(sessionId)
+    const name = model === this.#models.pinnedModel ? PINNED_NAME : menuNameFor(model)
+    return (
+      `This conversation is on ${named(name, model)}. ` + `You can choose: ${MENU_LIST}.`
+    )
+  }
+
   /** Do what the Command asks, and say whether there was anything to do. */
-  #carryOut(command: Command, conversationKey: string): boolean {
+  #carryOut(command: Exclude<Command, 'model'>, conversationKey: string): boolean {
     if (command === 'clear') {
       // Nothing is torn down. `/clear` is aimed at what the *next* message
       // reaches: a Task already running in the old Session finishes and still
@@ -553,7 +682,14 @@ export class Core {
       const sessionId = this.#sessions.sessionFor(conversationKey)
       // Known from here on rather than from the first token, so that `/stop`
       // reaches a Task that is queued or still starting its process.
-      const task: RunningTask = { ...address, sessionId, stopped: false, attempts, parked: null }
+      const task: RunningTask = {
+        ...address,
+        sessionId,
+        model: this.#models.modelFor(sessionId),
+        stopped: false,
+        attempts,
+        parked: null,
+      }
       running = task
       this.#running.add(task)
 
@@ -609,6 +745,11 @@ export class Core {
         durationMs,
         turnMs: paid.turnMs,
         credential,
+        // What this Task ran on. The Pinned Model only where roma never got as
+        // far as a Session to ask about — the same failure that leaves
+        // `sessionId` null — because a row that says nothing is a row the month's
+        // spending cannot be read against.
+        model: running?.model ?? this.#models.pinnedModel,
         apiKeySource: attempts.apiKeySource(),
       })
     }
@@ -771,9 +912,9 @@ export class Core {
   /**
    * Take the offer of Overflow on one Task, and say whether there was one.
    *
-   * A method rather than a third Command. ADR-0003 has exactly two, recognised
-   * only when the whole message is one of them, and a `/overflow` anybody could
-   * type at any moment would have to answer for itself when nothing is blocked.
+   * A method rather than another Command. roma's are recognised only when the
+   * whole message is one of them, and a `/overflow` anybody could type at any
+   * moment would have to answer for itself when nothing is blocked.
    * This is an answer to a specific offer roma made about a specific Task, so it
    * is named by that Task's id — which the Adapter already has, on the
    * instruction that carried the offer.
@@ -878,6 +1019,11 @@ export class Core {
     if (task.stopped) throw new TaskStopped()
 
     const { sessionId, attempts } = task
+    // Read here rather than only on arrival: this Attempt is about to be sent,
+    // and what it runs on is whatever the Session is on now — which is not what
+    // it was on if this Task queued behind another one and somebody chose in
+    // between.
+    task.model = this.#models.modelFor(sessionId)
     reporter.update({ phase: 'working' })
     const onEvent = (id: string, event: ClaudeEvent): void => {
       if (id !== sessionId) return
@@ -939,6 +1085,61 @@ const ROMA_FAILED = 'roma could not run this Task.'
  * it.
  */
 const ROMA_FAILED_COMMAND = 'roma could not carry out that command.'
+
+/**
+ * What roma says when a Conversation has been put on a model.
+ *
+ * The one thing it must not leave out is *when*. `/model` is aimed at what the
+ * next message reaches, and a bare acknowledgement sent while a Task is running
+ * would be read as having changed that Task — so the sentence says both halves,
+ * whether or not there is anything running to be confused about.
+ *
+ * Prose written by the Core, which an Outbound Instruction otherwise avoids. It
+ * is here for the reason a failure's reason is: this reads the same on every
+ * Channel, and the alternative is every Adapter growing its own copy of the Menu
+ * and of this sentence.
+ */
+/**
+ * The Menu as a sentence names it.
+ *
+ * Held once rather than joined at each of the two places that quote it, so a
+ * report and a refusal cannot come to describe different Menus.
+ */
+const MENU_LIST = MENU_NAMES.join(', ')
+
+function fromNextMessage(name: string, model: string): string {
+  return (
+    `This conversation runs on ${named(name, model)} from your next message. ` +
+    `Anything already running finishes on the model it started under.`
+  )
+}
+
+/**
+ * One model, in both spellings a person needs.
+ *
+ * The name is what they may type and the id is what every record roma keeps calls
+ * it, so a sentence carrying one of them sends somebody looking for the other.
+ * The id alone where the Menu has no name for the model, which is what a
+ * deployment that pinned something off the Menu has.
+ */
+function named(name: string | null, model: string): string {
+  return name === null ? model : `${name} (${model})`
+}
+
+/**
+ * What roma says about a name it does not offer.
+ *
+ * Named back, so it can be corrected in the next message, and the Menu is quoted
+ * so the correction does not need looking up. That nothing changed is said
+ * because a Conversation is shared: the people in it are owed the difference
+ * between a model that moved and a typo that did not move one.
+ */
+function unknownModelReason(name: string): string {
+  return (
+    `roma does not offer a model called “${name}”. ` +
+    `Choose one of: ${MENU_LIST}. Nothing has changed.`
+  )
+}
 
 /**
  * A Task that was stopped before it ever reached Claude Code.

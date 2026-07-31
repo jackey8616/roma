@@ -108,6 +108,25 @@ export interface AuditRecord {
   /** The credential roma ran this Task on. */
   readonly credential: CredentialKind
   /**
+   * The model roma ran this Task on: the Session's Chosen Model, or the Pinned
+   * Model where it had none.
+   *
+   * Here because a Chosen Model is a Caller moving the shared bill and nothing
+   * else would remember which Task did (ADR-0014). The whole justification for
+   * letting anybody do that is that it becomes answerable afterwards, and this is
+   * where the answer is.
+   *
+   * Optional, and **absent means the Pinned Model** — which is what every record
+   * roma wrote before ADR-0014 ran on, since nothing else was reachable. roma
+   * writes it on every record all the same, so the ledger has no blank rows going
+   * forward; the optionality is for reading the past. That is `callerName`'s
+   * reasoning exactly: `readRecord` drops a line it cannot read, a dropped line
+   * leaves the month's total, and the month's total is what the Overflow cap is
+   * enforced against — so a required field would silently reset the month across
+   * the deploy that added it.
+   */
+  readonly model?: string
+  /**
    * What Claude Code said its credential resolved to — `apiKeySource` off
    * `system/init`, and null where no Turn reached that point.
    *
@@ -429,6 +448,12 @@ function readRecord(line: string): AuditRecord | null {
   // counted as a Task, and the whole reason the field exists is to stop one kind
   // being read as the other.
   if (record['kind'] !== undefined && !KINDS.includes(record['kind'] as AuditKind)) return null
+  // Absent is the Pinned Model, which is what every record written before
+  // ADR-0014 ran on. Present and not a name is a torn line rather than a record
+  // with a hole in it: the one question this field exists to answer is which
+  // model spent the shared window, and a line that answers it with a number
+  // answers it wrongly.
+  if (record['model'] !== undefined && typeof record['model'] !== 'string') return null
   if (record['credential'] !== 'shared-window' && record['credential'] !== 'overflow') return null
   return record as unknown as AuditRecord
 }

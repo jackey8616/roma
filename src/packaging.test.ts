@@ -145,6 +145,28 @@ describe('the image defaults the one path whose loss is by design', () => {
   })
 })
 
+/**
+ * The two lists that are a person's judgement about one Claude Code build.
+ *
+ * Neither can be checked by machine — nothing in the stream marks a command as
+ * read-only, and Claude Code accepts model names roma has never heard of — so
+ * both have to be re-audited by hand when the ADR-0007 pin moves. What is
+ * asserted here is only that they will be *listed* when that happens:
+ * `scripts/claude-code-drift.ts` greps the working tree for files naming the
+ * pinned version and reports them under "What currently rests on 2.1.220", so a
+ * file that names it is one the report already prints. Enumeration rather than
+ * enforcement, which is what ADR-0012 recorded as open and ADR-0014 closed this
+ * much of.
+ */
+describe('the lists that rest on the pin say so', () => {
+  it.each([
+    ['src/readouts.ts', 'the Claude Code commands roma relays as themselves'],
+    ['src/model-menu.ts', 'the models roma offers a Caller'],
+  ])('%s names the version it was judged against', (file) => {
+    expect(fromRepo(file)).toContain(CLAUDE_CODE_VERSION)
+  })
+})
+
 describe('nothing CI runs can reach seam 2', () => {
   it('runs no seam 2 test and is handed no Shared Window token', () => {
     const offenders = automation().filter(({ source }) =>
@@ -226,4 +248,9 @@ function withoutComments(source: string): string {
 
 function fromRoot(path: string): string {
   return fileURLToPath(new URL(`../${path}`, import.meta.url))
+}
+
+/** One file of this repository, whole — commentary included, which is the point. */
+function fromRepo(path: string): string {
+  return readFileSync(fromRoot(path), 'utf8')
 }

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -519,6 +519,25 @@ describe('reclaiming working directories', () => {
     expect(existsSync(join(workRoot, A))).toBe(true)
   })
 
+  // What roma remembers about a Conversation lives in this same directory as
+  // files — its Session Generation, and since ADR-0014 its Chosen Model — and the
+  // sweep must step over both. Reclaimed, a Conversation that went quiet for a
+  // week would come back on a Session it was moved off, or on the Pinned Model
+  // having asked for something else, at a moment nobody can observe.
+  it('takes only directories, so the records beside them survive it', async () => {
+    const { pool, workRoot, send } = newPool()
+    await send(A, 'hello', OK)
+    await pool.evict(A)
+    const records = [join(workRoot, `${A}.generation`), join(workRoot, `${A}.model`)]
+    writeFileSync(records[0] ?? '', '1', 'utf8')
+    writeFileSync(records[1] ?? '', 'claude-opus-5', 'utf8')
+    ageWorkDir(join(workRoot, A), 8 * DAY)
+    for (const record of records) ageWorkDir(record, 8 * DAY)
+
+    expect(pool.reclaimIdleWorkDirs()).toEqual([A])
+    expect(records.map((record) => existsSync(record))).toEqual([true, true])
+  })
+
   it('leaves a resident Session alone however old its directory looks', async () => {
     const { pool, workRoot, send } = newPool()
     await send(A, 'hello', OK)
@@ -982,8 +1001,45 @@ describe('running a Turn on the other credential', () => {
     expect(log).toContainEqual({
       event: 'swap',
       sessionId: A,
+      reason: 'credential',
       from: 'shared-window',
       to: 'overflow',
     })
+  })
+
+  // The other reason a process ends for money: `--model` is fixed at spawn too,
+  // so a Session whose Chosen Model has moved needs a different process to serve
+  // its next Turn. Read at the spawn rather than handed over, which is what makes
+  // the invariant survive a restart nobody told the pool about.
+  it('starts a new process when the Session has been moved to another model', async () => {
+    const chosen = new Map<string, string>()
+    const { log, send, claude } = newPool({
+      models: { modelFor: (sessionId) => chosen.get(sessionId) ?? 'claude-sonnet-5' },
+    })
+    await send(A, 'first', OK)
+
+    chosen.set(A, 'claude-opus-5')
+    await send(A, 'and again', OK)
+
+    expect(claude.lastSpawn.args).toContain('claude-opus-5')
+    expect(log).toContainEqual({
+      event: 'swap',
+      sessionId: A,
+      reason: 'model',
+      from: 'claude-sonnet-5',
+      to: 'claude-opus-5',
+    })
+  })
+
+  // A Session nobody has moved is one process for as long as the pool keeps it.
+  // Asked because the comparison is made at every acquisition, and one that read
+  // the record wrongly would present as a cold start on every message.
+  it('keeps the process when the model has not moved', async () => {
+    const { log, send } = newPool({ models: { modelFor: () => 'claude-sonnet-5' } })
+
+    await send(A, 'first', OK)
+    await send(A, 'and again', OK)
+
+    expect(log.filter(({ event }) => event === 'swap')).toEqual([])
   })
 })

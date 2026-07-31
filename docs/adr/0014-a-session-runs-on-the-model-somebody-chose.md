@@ -4,8 +4,9 @@ Date: 2026-07-31
 
 ## Status
 
-Accepted. Not implemented — this records the design. Nothing in `src/` knows
-what a Chosen Model is yet.
+Accepted and implemented. `src/model-menu.ts` holds the Menu, `ChosenModels` in
+`src/session-generation.ts` holds the record, and `src/session-pool.ts` maintains
+the invariant on the swap it already had.
 
 Builds on ADR-0013, which decides which string puts a Conversation back on the
 Pinned Model by clearing it.
@@ -22,7 +23,9 @@ two, the decision it defends stands.
 Read out of the pinned build's bundle (2.1.220, ADR-0007) with `grep`, in this
 repo's container. No `claude -p` was run and no Turn was driven, so **nothing
 here is a behavioural measurement.** The seam 2 check this ADR asks for is what
-turns the first two readings into evidence.
+turns the first two readings into evidence, and it now exists —
+`src/model-menu.live.test.ts`, opt-in and out of CI's reach. Until somebody runs
+it against a Shared Window token, everything below is still a reading.
 
 **Read — the first-party alias table.**
 

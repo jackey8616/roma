@@ -354,3 +354,52 @@ describe('telling a Readout from a Task', () => {
     })
   })
 })
+
+/**
+ * ADR-0014: a Chosen Model is a Caller moving the shared bill, and nothing else
+ * would remember which Task did.
+ */
+describe('which model spent the month', () => {
+  it('keeps the model across a restart', () => {
+    const dir = newDir()
+    new AuditLog({ auditRoot: dir }).record(entry({ model: 'claude-opus-5' }))
+
+    const [record] = new AuditLog({ auditRoot: dir }).readMonth(MONTH)
+    expect(record?.model).toBe('claude-opus-5')
+  })
+
+  // Every record roma wrote before ADR-0014 lacks the field and ran on the
+  // Pinned Model, because nothing else was reachable. Requiring it would make all
+  // of them unreadable at once — and `readRecord` drops what it cannot read, so
+  // the month the Overflow cap is enforced against would silently reset across
+  // the deploy that added the field.
+  it('reads a record written before a Session could be moved', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), at: new Date().toISOString() })}\n`,
+    )
+
+    const [record] = log.readMonth(MONTH)
+    expect(record?.model).toBeUndefined()
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 0, costUsd: 0.0103129 })
+  })
+
+  // Absent is the Pinned Model; present and not a name is a torn line. Counted
+  // as unreadable rather than read as a record with a hole in it, for the reason
+  // a missing cost is: the one question this field answers is which model spent
+  // the shared window, and a line that answers it with a number answers it
+  // wrongly.
+  it('refuses a model that is not a name', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ model: 'claude-sonnet-5' }))
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), model: 5, at: new Date().toISOString() })}\n`,
+    )
+
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+  })
+})

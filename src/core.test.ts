@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs'
+import { readdirSync, writeFileSync } from 'node:fs'
 import { join, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuditLog, monthOf } from './audit-log.js'
@@ -9,10 +9,11 @@ import type {
   IngressMessage,
   OutboundInstruction,
 } from './channel-adapter.js'
+import { PINNED_MODEL } from './claude-session.js'
 import type { RetryBudget } from './config.js'
-import { SessionGenerations } from './session-generation.js'
+import { ChosenModels, SessionGenerations } from './session-generation.js'
 import { sessionIdFor } from './session-id.js'
-import { SessionPool } from './session-pool.js'
+import { SessionPool, type PoolLogRecord } from './session-pool.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { TaskQueue } from './task-queue.js'
 import { flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
@@ -93,8 +94,13 @@ function newCore({
   fixtures.push(fixture)
   const { claude, procFor, procIn } = fixture
   const { workRoot, auditRoot } = fixture.dirs
+  // Shared by the pool and the Core, which is what makes `/model` observable: the
+  // Core writes what somebody chose and the pool reads it at the next spawn.
+  const models = new ChosenModels({ workRoot, pinnedModel: PINNED_MODEL })
+  const poolLog: PoolLogRecord[] = []
   const pool = new SessionPool({
     workRoot,
+    models,
     envs: {
       // A function of the Session, because two of the variables a real one
       // carries are the Session's own. Nothing here needs them, so the Session
@@ -111,7 +117,7 @@ function newCore({
       }),
     },
     spawn: claude.spawn,
-    log: () => {},
+    log: (record) => poolLog.push(record),
     ...(options.retryBudget === undefined ? {} : { retryBudget: options.retryBudget }),
   })
   pools.push(pool)
@@ -127,6 +133,7 @@ function newCore({
     pool,
     queue,
     sessions,
+    models,
     audit,
     credential: 'shared-window',
     log: (record) => log.push(record),
@@ -178,7 +185,9 @@ function newCore({
     claude,
     core,
     log,
+    models,
     pool,
+    poolLog,
     queue,
     sessions,
     workRoot,
@@ -227,6 +236,7 @@ function coreOver(shared: ReturnType<typeof newCore>, channel: ChannelAdapter): 
     pool: shared.pool,
     queue: shared.queue,
     sessions: shared.sessions,
+    models: shared.models,
     audit: shared.audit,
     credential: 'shared-window',
   })
@@ -833,7 +843,7 @@ describe('telling a Conversation its Task is alive', () => {
   })
 })
 
-describe('the two Commands roma answers itself', () => {
+describe('the Commands roma answers itself', () => {
   /** A real interrupt: the aborted Turn, then the Turn the same process served next. */
   const INTERRUPTED = recordedStream('interrupted-turn')
 
@@ -1165,6 +1175,249 @@ describe('the two Commands roma answers itself', () => {
 })
 
 /**
+ * ADR-0014: a Conversation says which model its Session runs on, and roma owns
+ * that fact rather than handing it to a process.
+ *
+ * Asserted here, at the Core, because that is where the whole feature is
+ * observable: what a Caller is told, and what the *next* process is spawned with.
+ * Nothing below reaches for the record on disk — a `/model` that wrote a perfect
+ * file and changed nothing about the next Turn is exactly the failure this is
+ * built to prevent, and a test that read the file would pass through it.
+ *
+ * The model `/model opus` names is asserted as a literal rather than read out of
+ * the Menu, so that a Menu edited by accident fails here as well as in
+ * `model-menu.test.ts`.
+ */
+describe('the model a Conversation runs on', () => {
+  const OPUS = 'claude-opus-5'
+
+  // The whole of it: somebody says so, and the next Turn runs on it. Answered at
+  // once — no Turn is driven, so nobody is billed for asking — and the answer has
+  // to say *when* it applies, because a bare acknowledgement sent while a Task is
+  // running would be read as having changed that Task.
+  it('runs the next Task on the model somebody chose, and says so from that message on', async () => {
+    const { adapter, claude, core, say } = newCore()
+
+    await core.handle(ingress('/model opus'))
+    await say('hello')
+
+    expect(claude.lastSpawn.args).toContain(OPUS)
+    expect(posted(adapter.instructions)[0]).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: expect.stringContaining('from your next message'),
+    })
+    expect(posted(adapter.instructions)[0]).toMatchObject({ text: expect.stringContaining(OPUS) })
+  })
+
+  // Aimed at what the next message reaches, never backwards into work somebody
+  // is waiting on. `--model` is fixed at spawn, so the alternative is a Task
+  // whose answer was written half by one model and half by another.
+  it('leaves a Task that is already running on the model it started under', async () => {
+    const { claude, core, say, start } = newCore()
+    const { task, proc } = await start('a long job')
+
+    await core.handle(ingress('/model opus'))
+    feed(proc, OK)
+    await task
+
+    expect(claude.lastSpawn.args).toContain(PINNED_MODEL)
+    expect(claude.lastSpawn.args).not.toContain(OPUS)
+
+    // And the Task after it is the one that moves.
+    await say('and now')
+    expect(claude.lastSpawn.args).toContain(OPUS)
+  })
+
+  // Refused in the reply to the message that contained it, addressed to whoever
+  // typed it. The alternative is not a later check but no check: Claude Code
+  // takes "a full model ID", so an unknown name would surface as a process that
+  // will not start, on somebody else's next message, in a thread where they
+  // typed nothing.
+  it('refuses a name it does not offer, by name, and moves nothing', async () => {
+    const { adapter, claude, core, say } = newCore()
+
+    await core.handle(ingress('/model gpt-5'))
+    await say('hello')
+
+    expect(posted(adapter.instructions)[0]).toEqual({
+      kind: 'failure',
+      conversationKey: KEY,
+      reason: expect.stringContaining('gpt-5'),
+    })
+    expect(claude.lastSpawn.args).toContain(PINNED_MODEL)
+    // Refused as a Command rather than falling through to a Task: the only Turn
+    // driven here is the "hello" that followed it.
+    expect(claude.process.sent.filter((frame) => frame['type'] === 'user')).toHaveLength(1)
+  })
+
+  // Claude Code's own no-argument `/model` is a picker, which a Channel cannot
+  // render. Reporting is what the gesture can honestly mean in a text channel,
+  // and roma can answer it with no process, no Turn and no money — so asking is
+  // never the slow thing, and never interrupts what the Conversation is waiting
+  // on.
+  it('reports the current model and the Menu, without a process or a Turn', async () => {
+    const { adapter, claude, core } = newCore()
+
+    await core.handle(ingress('/model'))
+
+    expect(claude.processes).toHaveLength(0)
+    expect(posted(adapter.instructions)).toEqual([
+      {
+        kind: 'result',
+        conversationKey: KEY,
+        text: expect.stringContaining(PINNED_MODEL),
+      },
+    ])
+    const [reported] = posted(adapter.instructions)
+    for (const name of ['opus', 'sonnet', 'haiku', 'default']) {
+      expect(reported).toMatchObject({ text: expect.stringContaining(name) })
+    }
+  })
+
+  // Both spellings, because the Caller needs both: the id is what the Audit
+  // Record and the Operator Log call it, and the name is the only one of the two
+  // they are allowed to type — `/model claude-opus-5` is refused by design.
+  it('reports the model it was moved to, by name and by id', async () => {
+    const { adapter, core } = newCore()
+
+    await core.handle(ingress('/model opus'))
+    await core.handle(ingress('/model'))
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      text: expect.stringContaining(`opus (${OPUS})`),
+    })
+  })
+
+  // Back to whatever `ROMA_MODEL` resolved to rather than to a name written down
+  // somewhere, and without clearing anything the Conversation has said — which is
+  // the difference between this and the reset.
+  it('goes back to the Pinned Model on /model default, keeping the context', async () => {
+    const { claude, core, say } = newCore()
+    await core.handle(ingress('/model opus'))
+    await say('hello')
+
+    await core.handle(ingress('/model default'))
+    await say('and now')
+
+    expect(claude.lastSpawn.args).toContain(PINNED_MODEL)
+    // The same Session throughout: `/model default` moves the model and nothing
+    // else, so the second message resumes the context the first one built.
+    expect(claude.lastSpawn.args).toContain(sessionIdFor(KEY))
+    expect(claude.lastSpawn.args).toContain('--resume')
+  })
+
+  // Reverting is arithmetic rather than an action somebody has to remember: a
+  // Chosen Model is keyed by the Session id, the reset moves the generation, and
+  // the new Session has no record. Nothing is deleted — forgetting a deletion is
+  // exactly the failure this feature exists to prevent, and the old Session's
+  // record staying put is the proof that no deletion is relied on.
+  it('goes back to the Pinned Model when the Conversation is cleared, deleting nothing', async () => {
+    const { claude, core, models, say, workRoot } = newCore()
+    await core.handle(ingress('/model opus'))
+    await say('hello')
+
+    await core.handle(ingress('/clear'))
+    await say('and now', { session: sessionIdFor(KEY, 1) })
+
+    expect(claude.lastSpawn.args).toContain(PINNED_MODEL)
+    expect(claude.lastSpawn.args).toContain(sessionIdFor(KEY, 1))
+    // The record the cleared Session left behind, still where it was. It is
+    // litter — tens of bytes under a Session id nothing will use again — and it
+    // is accepted over a deletion that has to be remembered.
+    expect(readdirSync(workRoot)).toContain(`${sessionIdFor(KEY)}.model`)
+    expect(models.modelFor(sessionIdFor(KEY))).toBe(OPUS)
+  })
+
+  // Held in memory this would be undone by a deploy nobody in the Conversation
+  // knows about: the thread would go on running on the Pinned Model, having
+  // asked for something else, with nothing to say when it changed.
+  it('is still in force after roma has restarted', async () => {
+    const first = newCore()
+    await first.core.handle(ingress('/model opus'))
+
+    const second = newCore({ workRoot: first.workRoot })
+    await second.say('hello')
+
+    expect(second.claude.lastSpawn.args).toContain(OPUS)
+  })
+
+  // A Chosen Model belongs to one Session. A thread that moved to Opus must not
+  // move anybody else's, which is what keeps the Menu's spending boundary from
+  // being one person's decision for the whole deployment.
+  it('moves only the Conversation that asked for it', async () => {
+    const { claude, core, say } = newCore()
+
+    await core.handle(ingress('/model opus'))
+    await say('hello', { key: OTHER_KEY, session: sessionIdFor(OTHER_KEY) })
+
+    expect(claude.lastSpawn.args).toContain(PINNED_MODEL)
+    expect(claude.lastSpawn.args).not.toContain(OPUS)
+  })
+
+  // Everybody shares one subscription token, so a Session moved onto a costlier
+  // model spends a window the rest of the team is standing in — and the person
+  // who pays is usually not the person who chose. This is the only place that is
+  // answerable afterwards.
+  it('names the model on the Audit Record of every Task', async () => {
+    const { audit, core, say } = newCore()
+
+    await say('on the pinned model')
+    await core.handle(ingress('/model opus'))
+    await say('and this one is not')
+
+    expect(recordsIn(audit).map((record) => record.model)).toEqual([PINNED_MODEL, OPUS])
+  })
+
+  // `--model` is fixed at spawn, so a Session whose model has moved needs a new
+  // process — the sequence the pool already uses when the next Turn is to be paid
+  // for by the other credential, and for the same underlying reason. An operator
+  // reading an unexplained respawn needs to be able to tell money moving between
+  // models from roma making room.
+  it('writes the process change down as a swap, and not as an Eviction', async () => {
+    const { core, poolLog, say } = newCore()
+    await say('hello')
+
+    await core.handle(ingress('/model opus'))
+    await say('and now')
+
+    expect(poolLog.filter(({ event }) => event === 'swap')).toEqual([
+      {
+        event: 'swap',
+        sessionId: sessionIdFor(KEY),
+        reason: 'model',
+        from: PINNED_MODEL,
+        to: OPUS,
+      },
+    ])
+    expect(poolLog.filter(({ event }) => event === 'evict' || event === 'reap')).toEqual([])
+  })
+
+  // One argument is an argument; several words are a sentence. `/model` claims
+  // the gesture and not the prefix, so something meant for the agent is not
+  // swallowed by a Command that would answer it with a refusal.
+  it('treats a message that merely begins with /model as work', async () => {
+    const { adapter, claude, say } = newCore()
+
+    await say('/model the deploy as a state machine')
+
+    expect(claude.process.sent.at(-1)).toMatchObject({
+      type: 'user',
+      message: {
+        content: [
+          { text: '<from>Ada (users/17)</from>\n\n/model the deploy as a state machine' },
+        ],
+      },
+    })
+    expect(posted(adapter.instructions).at(-1)).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: 'ok',
+    })
+  })
+})
+
+/**
  * ADR-0009: a Chat thread is many people sharing one Conversation and therefore
  * one Session, so a Session that cannot tell its Callers apart is one long
  * message from nobody in particular — and every answer in the thread is
@@ -1311,6 +1564,11 @@ describe('the record every Task leaves behind', () => {
         durationMs: 0,
         turnMs: 0,
         credential: 'shared-window',
+        // What it ran on, which for a Conversation that has chosen nothing is
+        // the Pinned Model. Written rather than left out, so that the month's
+        // spending can be read against what it was spent on with no blank rows
+        // in it (ADR-0014).
+        model: PINNED_MODEL,
         apiKeySource: 'none',
       },
     ])

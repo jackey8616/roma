@@ -5,6 +5,7 @@ import { spawnClaudeProcess, type SpawnClaudeProcess } from './claude-process.js
 import {
   ClaudeExitedError,
   ClaudeSession,
+  PINNED_MODEL,
   TERMINATE_GRACE_MS,
   type Turn,
 } from './claude-session.js'
@@ -50,22 +51,53 @@ export type PoolLogRecord =
       readonly cwd: string
       /** Which of the two bills this process's Turns land on. */
       readonly credential: CredentialKind
+      /**
+       * Which model its Turns run on: this Session's Chosen Model, or the
+       * Pinned Model.
+       *
+       * Here as well as on the Audit Record because the two answer different
+       * questions. The record says what a Task was spent on; this says what a
+       * *process* was started for, which is what makes the swap above readable —
+       * a swap says the terms changed, and the spawn that follows it says what
+       * they changed to.
+       */
+      readonly model: string
       readonly residents: number
     }
   | {
       /**
-       * A process ended because the next Turn is to be paid for by the other
-       * credential.
+       * A process ended because the next Turn's terms are not the ones it was
+       * started for.
        *
        * Its own record rather than an eviction, because an eviction is roma
        * making room and this is money moving. It is the only place the move
        * appears as something that happened to a process; what it cost appears
        * on the Task's Audit Record.
+       *
+       * Two reasons, one shape — the way `evict` and `reap` already differ only
+       * in what prompted them. A credential change is money moving between
+       * bills and a model change is money moving between models, and an operator
+       * looking at an unexplained respawn is asking which. Where both differ at
+       * once the model is named, because the credential is on the `spawn` record
+       * that follows and the model would otherwise appear nowhere.
+       *
+       * `from` and `to` say what changed rather than being two fields per
+       * reason, and they are typed by the reason so that a model can never land
+       * in a field an operator reads as a credential.
        */
       readonly event: 'swap'
       readonly sessionId: string
+      readonly reason: 'credential'
       readonly from: CredentialKind
       readonly to: CredentialKind
+    }
+  | {
+      /** The same event, moving between models rather than between bills. */
+      readonly event: 'swap'
+      readonly sessionId: string
+      readonly reason: 'model'
+      readonly from: string
+      readonly to: string
     }
   | {
       /** Both end a process the same way; they differ in what prompted it. */
@@ -173,12 +205,39 @@ export type BuildSessionEnv = (sessionId: string) => Readonly<Record<string, str
  */
 export type CredentialEnvs = Readonly<Partial<Record<CredentialKind, BuildSessionEnv>>>
 
+/**
+ * Which model a Session runs on, asked afresh at every spawn.
+ *
+ * A port rather than the record itself, because what the pool needs is one
+ * question answered and not a directory of files: `ChosenModels` is what
+ * implements it. Asked at spawn rather than handed over per call so the invariant
+ * re-establishes itself after a restart — the same reason the pool reads whether
+ * a Session is resuming off the filesystem instead of remembering it.
+ */
+export interface SessionModels {
+  modelFor(sessionId: string): string
+}
+
 export interface SessionPoolOptions {
   /** Working directories live directly under here, one per Session. */
   readonly workRoot: string
   /** One environment per credential a Turn may run on. */
   readonly envs: CredentialEnvs
+  /**
+   * The model a Session runs on when nothing else says otherwise.
+   *
+   * The fallback rather than the answer since ADR-0014: where `models` is given
+   * it is what decides, and this is what a pool built without one runs
+   * everything on.
+   */
   readonly model?: string
+  /**
+   * Which model each Session runs on, where somebody has chosen one.
+   *
+   * Omitted, every Session runs on `model` — which is what roma did before a
+   * Conversation could say otherwise.
+   */
+  readonly models?: SessionModels
   /**
    * What every Session is told about itself on top of Claude Code's own prompt.
    *
@@ -229,6 +288,17 @@ interface Resident {
    * the whole serialisation rule exists to prevent.
    */
   readonly credential: CredentialKind
+  /**
+   * Which model this process was spawned on, and therefore which one its Turns
+   * run on.
+   *
+   * Kept for the reason the credential is: `--model` is fixed at spawn, so a
+   * Session whose next Turn is to run on a different model needs a different
+   * process. It is also what makes a Task finish on the model it started under —
+   * a `/model` mid-Turn moves what the *next* acquisition compares against and
+   * cannot reach the process already serving somebody.
+   */
+  readonly model: string
   readonly session: ClaudeSession
   /** Whether this process was started with `--resume`. */
   readonly resumed: boolean
@@ -270,6 +340,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   readonly #workRoot: string
   readonly #envs: CredentialEnvs
   readonly #model: string | undefined
+  readonly #models: SessionModels | undefined
   readonly #appendSystemPrompt: string | undefined
   readonly #maxResident: number
   readonly #retryBudget: RetryBudget
@@ -294,6 +365,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     this.#workRoot = options.workRoot
     this.#envs = options.envs
     this.#model = options.model
+    this.#models = options.models
     this.#appendSystemPrompt = options.appendSystemPrompt
     this.#maxResident = options.maxResident ?? MAX_RESIDENT
     this.#retryBudget = options.retryBudget ?? defaultConfig.retryBudget
@@ -443,7 +515,10 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       })
       this.#forget(resident)
       return await this.#turn(
-        await this.#spawn(resident.sessionId, resident.credential, correction.resume),
+        // On the model the Turn began under rather than whatever the Session is
+        // on now: this is one Turn being served twice, and a `/model` that landed
+        // in between is aimed at the next message.
+        await this.#spawn(resident.sessionId, resident.credential, resident.model, correction.resume),
         text,
         true,
       )
@@ -459,31 +534,54 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     }
   }
 
+  /**
+   * Take a Session for a Turn on these terms, on a process started for them.
+   *
+   * The invariant rather than an effect somebody performs: a Turn runs on the
+   * credential it is to be paid for by and on the model its Session is on, and
+   * this is the one place that is made true. Stated here, it cannot be forgotten
+   * by a later caller and it re-establishes itself after a restart — which is why
+   * `/model` writes a record and tears nothing down.
+   */
   async #acquire(sessionId: string, credential: CredentialKind): Promise<Resident> {
+    const model = this.#modelFor(sessionId)
     const resident = this.#residents.get(sessionId)
     if (resident !== undefined && resident.session.alive) {
-      if (resident.credential === credential) {
+      if (resident.credential === credential && resident.model === model) {
         this.#markUsed(resident)
         return resident
       }
-      // The Session is resident on the credential this Turn is not to be paid
-      // for by. The process goes before the next one starts — not because the
-      // old one is in the way, but because two processes on one transcript
-      // corrupt it, and "alive but idle" is not a state anybody has measured as
-      // safe. The Session itself survives, as it does through any eviction.
-      await this.#swap(resident, credential)
+      // The Session is resident on terms this Turn is not to run on — the
+      // credential it is not to be paid for by, or the model it is not to run on.
+      // The process goes before the next one starts, not because the old one is
+      // in the way but because two processes on one transcript corrupt it, and
+      // "alive but idle" is not a state anybody has measured as safe. The Session
+      // itself survives, as it does through any eviction.
+      await this.#swap(resident, credential, model)
     } else if (resident !== undefined) {
       this.#forget(resident)
     }
-    return await this.#spawn(sessionId, credential)
+    return await this.#spawn(sessionId, credential, model)
+  }
+
+  /**
+   * The model this Session's next process runs on.
+   *
+   * Read at the moment of spawning rather than held, so that a Chosen Model
+   * written while roma was somewhere else — or before it last restarted — is in
+   * force without anybody telling the pool about it.
+   */
+  #modelFor(sessionId: string): string {
+    return this.#models?.modelFor(sessionId) ?? this.#model ?? PINNED_MODEL
   }
 
   async #spawn(
     sessionId: string,
     credential: CredentialKind,
+    model: string,
     resume?: boolean,
   ): Promise<Resident> {
-    const spawned = this.#spawning.then(() => this.#spawnNow(sessionId, credential, resume))
+    const spawned = this.#spawning.then(() => this.#spawnNow(sessionId, credential, model, resume))
     // The queue itself never carries a rejection onward: a Session that failed
     // to start is that caller's problem, not the next one's.
     this.#spawning = spawned.catch(() => undefined)
@@ -493,6 +591,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   async #spawnNow(
     sessionId: string,
     credential: CredentialKind,
+    model: string,
     resume?: boolean,
   ): Promise<Resident> {
     const buildEnvFor = this.#envs[credential]
@@ -518,7 +617,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       env: buildEnvFor(sessionId),
       resume: resuming,
       spawn: this.#spawnProcess,
-      ...(this.#model === undefined ? {} : { model: this.#model }),
+      model,
       ...(this.#appendSystemPrompt === undefined
         ? {}
         : { appendSystemPrompt: this.#appendSystemPrompt }),
@@ -527,6 +626,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       sessionId,
       cwd,
       credential,
+      model,
       session,
       resumed: resuming,
       stderr: '',
@@ -566,6 +666,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       resume: resuming,
       cwd,
       credential,
+      model,
       residents: this.#residents.size,
     })
     this.#scheduleReap(resident)
@@ -603,16 +704,22 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   }
 
   /**
-   * End a resident's process because the next Turn is to be paid for by the
-   * other credential.
+   * End a resident's process because the next Turn is not on the terms it was
+   * started for.
    *
    * Its own path rather than a third kind of eviction: an eviction is roma
-   * managing processes and this is money moving between two bills, and the two
-   * are read by different people looking for different things.
+   * managing processes and this is money moving — between two bills, or between
+   * two models — and the two are read by different people looking for different
+   * things.
    */
-  async #swap(resident: Resident, to: CredentialKind): Promise<void> {
+  async #swap(resident: Resident, to: CredentialKind, model: string): Promise<void> {
     this.#leave(resident)
-    this.#log({ event: 'swap', sessionId: resident.sessionId, from: resident.credential, to })
+    const sessionId = resident.sessionId
+    this.#log(
+      resident.model === model
+        ? { event: 'swap', sessionId, reason: 'credential', from: resident.credential, to }
+        : { event: 'swap', sessionId, reason: 'model', from: resident.model, to: model },
+    )
     await this.#terminate(resident)
   }
 

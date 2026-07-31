@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AuditLog } from './audit-log.js'
 import { buildEnv, type Credential } from './build-env.js'
+import { PINNED_MODEL } from './claude-session.js'
 import type { CredentialEnvs } from './session-pool.js'
 import type { ChannelAdapter } from './channel-adapter.js'
 import type { SpawnClaudeProcess } from './claude-process.js'
@@ -10,7 +11,7 @@ import type { RetryBudget } from './config.js'
 import { Core, type CoreLogRecord } from './core.js'
 import { InstallationTokens } from './installation-tokens.js'
 import type { Installation, Minter } from './minter.js'
-import { SessionGenerations } from './session-generation.js'
+import { ChosenModels, SessionGenerations } from './session-generation.js'
 import type { OperatorLog } from './operator-log.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
 import { socketPathIn } from './shim-protocol.js'
@@ -200,6 +201,12 @@ export async function startRoma({
   // read as "roma is broken" with no diagnosis attached.
   const installation = await minting.minter.installation()
 
+  // What the deployment pinned, named once rather than defaulted in each of the
+  // three places that need it. `/model default` returns a Session to *this*
+  // rather than to a literal, which is the whole of why `ROMA_MODEL` and a Chosen
+  // Model cannot come to disagree.
+  const pinnedModel = model ?? PINNED_MODEL
+
   // Built once and handed to both the check and the pool, so that what was
   // verified is the environment roma actually runs on rather than one built the
   // same way and hoped to be identical. The probe's own environment carries no
@@ -214,6 +221,9 @@ export async function startRoma({
       credential,
       env,
       cwd: probeCwd,
+      // Unchanged by ADR-0014, and deliberately: no Chosen Model can reach the
+      // probe, which is not a Session roma serves. What this proves is that the
+      // deployment boots on what it pinned.
       ...(model === undefined ? {} : { model }),
       ...(spawn === undefined ? {} : { spawn }),
       ...(selfCheckTimeoutMs === undefined ? {} : { timeoutMs: selfCheckTimeoutMs }),
@@ -259,11 +269,20 @@ export async function startRoma({
     ...(overflow === undefined ? {} : { overflow: sessionEnv(overflow.credential) }),
   }
 
+  // Beside the generations, and shared by the pool and the Core for the reason
+  // everything else here is: the Core is what writes a Chosen Model down and the
+  // pool is what makes the next process run on it, and two copies would be a
+  // `/model` that answered correctly and changed nothing.
+  const models = new ChosenModels({ workRoot, pinnedModel })
+
   const pool = new SessionPool({
     workRoot,
     envs,
+    // No `model` beside it: `models` is what answers, and a second copy of the
+    // Pinned Model here would be a second thing to keep in step with the one
+    // `ChosenModels` holds.
+    models,
     appendSystemPrompt: minting.announce(installation),
-    ...(model === undefined ? {} : { model }),
     ...(retryBudget === undefined ? {} : { retryBudget }),
     ...(spawn === undefined ? {} : { spawn }),
     ...(log === undefined ? {} : { log }),
@@ -280,6 +299,7 @@ export async function startRoma({
       pool,
       queue,
       sessions,
+      models,
       audit,
       credential: credential.kind,
       ...(overflow === undefined ? {} : { overflow: { monthlyCapUsd: overflow.monthlyCapUsd } }),
