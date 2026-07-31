@@ -1706,6 +1706,11 @@ describe('the record every Task leaves behind', () => {
         // spending can be read against what it was spent on with no blank rows
         // in it (ADR-0014).
         model: PINNED_MODEL,
+        // Whether this Task obtained a Cloud Token — a yes or a no rather than
+        // a count, since one token does unlimited API calls for an hour
+        // (ADR-0015 §10). No, here: this Core was built with nothing to ask,
+        // which is what a deployment with no Cloud Reach looks like.
+        cloudReach: false,
         apiKeySource: 'none',
       },
     ])

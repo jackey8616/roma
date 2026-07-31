@@ -170,16 +170,38 @@ describe('the Core, its Channel and its Minter, read as one configuration', () =
     return { thing: env['MINTER_THING'] }
   }
 
-  it('hands back all three parts', () => {
-    const { roma, channelEnv, minterEnv } = readConfiguration(
-      { ...MINIMAL, CHANNEL_THING: 'yes', MINTER_THING: 'also yes' },
+  const readCloud = (env: Parameters<typeof readRomaEnv>[0]) => {
+    const thing = env['CLOUD_THING']
+    if (thing === 'broken') throw new ConfigurationMissing(['CLOUD_THING is nonsense.'])
+    // Most deployments have no Cloud Reach, and nothing is wrong with that.
+    return thing === undefined ? null : { thing }
+  }
+
+  it('hands back all four parts', () => {
+    const { roma, channelEnv, minterEnv, cloudEnv } = readConfiguration(
+      { ...MINIMAL, CHANNEL_THING: 'yes', MINTER_THING: 'also yes', CLOUD_THING: 'and yes' },
       readChannel,
       readMinter,
+      readCloud,
     )
 
     expect(roma.workRoot).toBe('/srv/roma/sessions')
     expect(channelEnv).toEqual({ thing: 'yes' })
     expect(minterEnv).toEqual({ thing: 'also yes' })
+    expect(cloudEnv).toEqual({ thing: 'and yes' })
+  })
+
+  // The one part that may legitimately find nothing. A deployment with no Cloud
+  // Reach is not half-configured, so this is not the Overflow shape.
+  it('starts perfectly well with nothing to say about the cloud', () => {
+    const { cloudEnv } = readConfiguration(
+      { ...MINIMAL, CHANNEL_THING: 'yes', MINTER_THING: 'also yes' },
+      readChannel,
+      readMinter,
+      readCloud,
+    )
+
+    expect(cloudEnv).toBeNull()
   })
 
   // Somebody standing roma up sets all of it in one go. Told about the Channel's
@@ -187,7 +209,7 @@ describe('the Core, its Channel and its Minter, read as one configuration', () =
   // things they could have been told at once.
   it('refuses once, with what is wrong with any of them', () => {
     try {
-      readConfiguration({}, readChannel, readMinter)
+      readConfiguration({ CLOUD_THING: 'broken' }, readChannel, readMinter, readCloud)
       expect.unreachable('should have refused')
     } catch (error) {
       expect((error as ConfigurationMissing).problems).toEqual([
@@ -198,6 +220,7 @@ describe('the Core, its Channel and its Minter, read as one configuration', () =
         'ROMA_SHIM_DIR is not set.',
         'CHANNEL_THING is not set.',
         'MINTER_THING is not set.',
+        'CLOUD_THING is nonsense.',
       ])
     }
   })
@@ -213,6 +236,7 @@ describe('the Core, its Channel and its Minter, read as one configuration', () =
           throw new TypeError('the reader is broken')
         },
         readMinter,
+        readCloud,
       ),
     ).toThrow(TypeError)
   })

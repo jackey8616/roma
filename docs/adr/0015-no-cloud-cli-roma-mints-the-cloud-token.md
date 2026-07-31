@@ -4,7 +4,30 @@ Date: 2026-07-31
 
 ## Status
 
-Accepted, and **unbuilt**. Nothing below exists in the repository yet.
+Accepted, and **built** in #95. `src/cloud/` holds everything that knows this is
+Google — the key, the assertion, the exchange, the announcement, the Shortcut —
+and `src/cloud-containment.test.ts` keeps it there and keeps Application Default
+Credentials out of it. The Minter port gained a cloud half, `FreshTokens` (which
+was `InstallationTokens`) now serves both credentials from one piece of expiry
+arithmetic, and the socket answers a second kind of request.
+
+**Still unmeasured, and still the one thing that matters:** no Cloud Reach has
+ever existed. Every response in `src/cloud/google-cloud-minter.test.ts` is
+written from Google's documentation, and only a real service account can settle
+whether Google behaves this way.
+
+**One thing §8 asks for that is not built.** It says a failed boot proof is "one
+of the problems the single `readConfiguration` refusal reports". `readConfiguration`
+is synchronous and the proof is a network round trip, so what was built instead
+refuses in that same *shape* — a `ConfigurationMissing` from `startRoma` — rather
+than joining that same *message*. A deployment with both a missing audit root and
+a revoked key therefore still boots twice. Everything a key file can be wrong
+about short of being revoked — unreadable, empty, not JSON, not a service account
+key — is caught by `readCloudEnv` and does join the single refusal, so only the
+revoked case diverges. The `minter.installation()` check has had the identical
+property since ADR-0008, so this is the existing shape rather than a new
+exception. Closing it means `readConfiguration` collecting problems rather than
+throwing them, which changes how every reader reports and was not in scope here.
 
 **This record has been reversed twice and merged once, all in the session that
 wrote it.** The history matters, because what overturned it both times was

@@ -104,6 +104,35 @@ describe('the image carries its own gh, pinned exactly', () => {
   })
 })
 
+/**
+ * ADR-0015's claims about the image, which are mostly claims about what is *not*
+ * in it.
+ *
+ * The Cloud Shortcut is three lines of shell and no new bytes, and the whole
+ * decision is that it stays that way: 439 MiB of cloud CLI buys convenience and
+ * no capability, on a public registry, for every deployment that never touches a
+ * cloud. §1 named its own reversal trigger, so this is what makes reversing it
+ * a decision rather than a commit.
+ */
+describe('the image carries a Cloud Shortcut and no cloud CLI', () => {
+  // Installed on every image, including the deployments with no Cloud Reach.
+  // Omitted it would be `command not found`, which a model reads as a broken
+  // PATH and spends a Turn investigating — the Turn the Shortcut exists to save.
+  it('puts the Shortcut on PATH, under a name of roma’s own', () => {
+    expect(dockerfile()).toMatch(/cloud-token\.js[^\n]*> \/usr\/local\/bin\/roma-cloud-token/)
+  })
+
+  // No `gcloud`, no `aws`, no `az`, and no second image tag to put one in. Not
+  // by apt, not by tarball, not at boot — a container whose contents depend on
+  // what a package index served that morning is not a pinned artifact.
+  it('installs no cloud CLI, by any route', () => {
+    expect(dockerfile()).not.toMatch(/\bgcloud\b/)
+    expect(dockerfile()).not.toMatch(/google-cloud-(cli|sdk)/)
+    expect(dockerfile()).not.toMatch(/\bawscli\b/)
+    expect(dockerfile()).not.toMatch(/\bazure-cli\b/)
+  })
+})
+
 describe('the image defaults the one path whose loss is by design', () => {
   it('names a work root, the one a weekly reclaim deletes on purpose', () => {
     expect(dockerfile()).toMatch(/^\s*ROMA_WORK_ROOT=\S+/m)

@@ -425,13 +425,18 @@ _Avoid_: paused, retrying, backing off, queued (that word is the Task Queue's)
 
 **Audit Record**:
 The line roma writes when a Task ends: the Caller, which Session ran it, how long
-they waited, what it cost, which credential paid, which model ran it, and which
-repositories it minted an Installation Token for. The model is here because a
+they waited, what it cost, which credential paid, which model ran it, which
+repositories it minted an Installation Token for, and whether it used the Cloud
+Reach. The model is here because a
 Chosen Model is a Caller moving the shared bill and nothing else would remember
-which Task did (ADR-0014). That last one is what roma can honestly know:
+which Task did (ADR-0014). The repositories are what roma can honestly know:
 git names the repository every time it asks for a credential, so what a Task
 reached for is free — and what it did once it got there is not, since learning
-that would mean reading the Transcript. One per Task — a failed or
+that would mean reading the Transcript. The Cloud Reach is a yes or a no and
+never a count: one Cloud Token does unlimited work for an hour, so a number would
+be read as a measure of activity roma does not have — and on that side even the
+destination is not free, since a request for a Cloud Token carries none
+(ADR-0015). One per Task — a failed or
 stopped one included — and the cost on it is the Turn's own delta, never the
 Session's running total. It can also be nothing at all: a Turn that began and
 never reached a terminal event spent real tokens nothing will ever name, and that

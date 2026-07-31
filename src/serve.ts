@@ -3,7 +3,7 @@ import type { Core, CoreLogRecord } from './core.js'
 import { reasonOf, writeToStderr, type OperatorLog } from './operator-log.js'
 import type { PoolLogRecord } from './session-pool.js'
 import type { ShimLogRecord } from './shim-server.js'
-import { startRoma, type Roma, type StartRomaOptions } from './startup.js'
+import { startRoma, type CloudLogRecord, type Roma, type StartRomaOptions } from './startup.js'
 import type { Delivery, Settle, Transport } from './transport.js'
 
 /**
@@ -78,7 +78,7 @@ export type IngressLogRecord =
 
 /** Everything the Channel-independent half of roma writes to the operator log. */
 export type ServeLog = OperatorLog<
-  PoolLogRecord | CoreLogRecord | IngressLogRecord | ShimLogRecord
+  PoolLogRecord | CoreLogRecord | IngressLogRecord | ShimLogRecord | CloudLogRecord
 >
 
 export interface ServeOptions<Event> extends Omit<StartRomaOptions, 'log' | 'channel'> {

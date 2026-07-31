@@ -15,7 +15,7 @@ is what keeps those two halves apart.
 | --- | --- |
 | `roma-chat-events` | the topic Chat publishes interaction events to |
 | `roma-chat-events-sub` | the subscription roma pulls from — `ROMA_PUBSUB_SUBSCRIPTION` |
-| `roma-agent@…` | the service account roma runs as |
+| `roma-runtime@…` | the service account roma runs as — **renamed from `roma-agent`**, see below |
 | `roma-chat-events-dead-letter` (+ a subscription on it) | where a message nobody could answer is set aside |
 | two grants | `chat-api-push@system.gserviceaccount.com` may publish to the topic; roma may subscribe |
 | two more grants | Pub/Sub's own service agent may move a message to the dead-letter topic |
@@ -31,6 +31,8 @@ an override.
 - **A service account key.** A `google_service_account_key` resource writes the private key
   into Terraform state in plaintext, which turns the state file into a credential. Minting
   one is below too.
+- **The agent's Cloud Reach.** The identity the *agent* acts as in Google Cloud is not made
+  here and should not live in this project at all. The manual steps are below.
 - **Anything that runs roma** — no container, no VM, no firewall, and **no egress
   allowlist**. ADR-0003 describes that allowlist as the only protection still doing real
   work under `bypassPermissions`; roma does not have it and neither does this. A template
@@ -139,6 +141,86 @@ them apart:
 
   The file is a credential. It is not in this repo's `.gitignore` by name because it should
   not be in this repo at all.
+
+### The account was renamed, and an existing deployment should pin the old name
+
+`service_account_id` used to default to `roma-agent` and now defaults to `roma-runtime`. In
+roma's vocabulary the **agent** is the Claude Code process, and this account is precisely the
+one the agent must never be able to act as — so the old name was an invitation to bind the
+agent's Google Cloud access to the identity roma's own ingress depends on (ADR-0015 §2).
+
+A Google Cloud account id is immutable, so a plain `terraform apply` against an existing
+deployment **destroys and recreates the service account**, along with its key and every grant
+bound to it. If you are already running roma, pin the old value before applying:
+
+```hcl
+# terraform.tfvars
+service_account_id = "roma-agent"
+```
+
+Nothing else about the rename is load-bearing. It is a name that misleads forever against one
+loud release note.
+
+## The agent's Cloud Reach
+
+Separate from everything above, and **this directory creates none of it**.
+
+A **Cloud Reach** is one Google Cloud identity the *agent* acts as. A deployment may name one
+by pointing `ROMA_CLOUD_KEY_FILE` at its service account key; roma holds that key, never
+hands it over, and mints an hour-long token whenever the agent asks (ADR-0015). Leave the
+variable unset and roma behaves exactly as it does without one.
+
+**The roles you grant that identity are the whole of the boundary.** Every Conversation
+reaches all of it, and so does everyone who can message roma. roma is told which identity to
+hand over and nothing about what it may do, so work refused for want of a role is refused by
+Google and never by roma.
+
+**Put it in a different project from this one.** This project holds roma's control plane —
+the topic, the subscription, the identity roma runs as. A Cloud Reach created here would be
+one IAM binding away from the ingress it must never touch, and it would imply the agent's
+Google Cloud is roma's. Often it will not be: roma may not run on Google Cloud at all, and
+the project the agent works in may belong to somebody else. That is also why there is no
+Terraform for it here — a placeholder in this file would put the agent's identity exactly
+where it does not belong.
+
+It must **never** be the account above. An agent standing in roma's own identity can delete
+the subscription roma pulls from, publish forged events to the topic roma trusts, and mint
+itself a key that outlives every rotation — each of which presents as roma quietly not
+working rather than as an attack.
+
+By hand, in the project the agent should work in:
+
+```bash
+gcloud config set project THE_AGENTS_PROJECT
+
+gcloud iam service-accounts create roma-cloud-reach \
+  --display-name="What roma's agent may touch in Google Cloud"
+
+# Whatever the agent is actually for. Grant narrowly; this is the boundary.
+gcloud projects add-iam-policy-binding THE_AGENTS_PROJECT \
+  --member="serviceAccount:roma-cloud-reach@THE_AGENTS_PROJECT.iam.gserviceaccount.com" \
+  --role="roles/viewer"
+
+gcloud iam service-accounts keys create cloud-reach.json \
+  --iam-account="roma-cloud-reach@THE_AGENTS_PROJECT.iam.gserviceaccount.com"
+```
+
+Then mount the key read-only and name it:
+
+```bash
+export ROMA_CLOUD_KEY_FILE=/run/secrets/cloud-reach.json
+```
+
+roma reads it at boot, mints one token with it and throws that token away — so a key that is
+unreadable, empty, malformed or revoked stops the boot rather than surfacing inside somebody's
+first Task. Rotating it needs a restart.
+
+**Know what it is not.** roma is the only thing that reads the key, but the agent runs in the
+same container under the same uid, so a shell can read it too — the same gap
+`docs/github-app-verification.md` records for the App's PEM. And on a Google host nothing here
+stops the agent reaching the metadata server and standing in roma's *own* identity with one
+`fetch`; roma has no egress control. That is an argument for keeping the account above at the
+`pubsub.subscriber` it has today and nothing more.
 
 ## The three numbers this directory decides
 

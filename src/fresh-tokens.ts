@@ -1,4 +1,4 @@
-import type { Minter, MintedToken } from './minter.js'
+import type { MintsTokens, MintedToken } from './minter.js'
 
 /**
  * How long before expiry a token is treated as spent.
@@ -35,22 +35,43 @@ const REFRESH_MARGIN_MS = 5 * 60_000
  */
 const DISCARD_COOLDOWN_MS = 60_000
 
-export interface InstallationTokensOptions {
-  readonly minter: Minter
+export interface FreshTokensOptions {
+  readonly minter: MintsTokens
   /** The clock, so that expiry arithmetic can be tested without waiting. */
   readonly now?: () => number
   readonly refreshMarginMs?: number
   readonly discardCooldownMs?: number
+  /**
+   * Told each time a token is actually minted, rather than served from the one
+   * already held.
+   *
+   * Here rather than at the caller because this is the only thing that knows the
+   * difference, and the difference is the whole point of watching: an operator
+   * asking "is something minting in a loop" cannot answer it from a count of
+   * *requests*, since a Credential Shim asks on every invocation by design and
+   * almost all of those are cache hits. Without this, a mint storm and an
+   * ordinary busy hour look identical in the log.
+   */
+  readonly onMint?: () => void
 }
 
 /**
- * One Installation Token, kept for as long as it is worth keeping.
+ * One minted token, kept for as long as it is worth keeping.
  *
- * Between the Minter and the Credential Shims, and it exists because the two
- * ends want different things. A Shim asks at the moment a tool needs a
- * credential; minting is a JWT signature and two network round trips, and the App
- * has a rate limit. So roma mints rarely and answers immediately, which is only
- * safe because of the three rules here.
+ * Between a Minter and whatever asks it for a credential, and it exists because
+ * the two ends want different things. A Credential Shim asks at the moment a
+ * tool needs one; minting is a signature and a network round trip, and the
+ * provider has a rate limit. So roma mints rarely and answers immediately, which
+ * is only safe because of the three rules here.
+ *
+ * **One class, two credentials.** An Installation Token and a Cloud Token are
+ * different in every way except the arithmetic, and the arithmetic is the whole
+ * of what is here: refresh before expiry, one mint however many askers, drop
+ * what the provider rejected. Two copies of it would be two places for the
+ * margin below to be right in, and ADR-0015 says the tricky part is written
+ * once. What that costs is the naming — the prose below reaches for `git` for
+ * its examples because that is where the behaviour was measured, and the reader
+ * should not read those examples as the class's scope.
  *
  * **How much this is actually saving is now measured, and it is less than this
  * class was built expecting.** `git` asks once per operation — one request for a
@@ -78,11 +99,12 @@ export interface InstallationTokensOptions {
  * which is roma's only signal that a token it believes in has stopped working.
  * Without it a rotated or revoked App produces an hour of identical failures.
  */
-export class InstallationTokens {
-  readonly #minter: Minter
+export class FreshTokens {
+  readonly #minter: MintsTokens
   readonly #now: () => number
   readonly #refreshMarginMs: number
   readonly #discardCooldownMs: number
+  readonly #onMint: () => void
 
   #cached: MintedToken | null = null
   /**
@@ -103,11 +125,13 @@ export class InstallationTokens {
     now = Date.now,
     refreshMarginMs = REFRESH_MARGIN_MS,
     discardCooldownMs = DISCARD_COOLDOWN_MS,
-  }: InstallationTokensOptions) {
+    onMint = () => {},
+  }: FreshTokensOptions) {
     this.#minter = minter
     this.#now = now
     this.#refreshMarginMs = refreshMarginMs
     this.#discardCooldownMs = discardCooldownMs
+    this.#onMint = onMint
   }
 
   /**
@@ -119,11 +143,28 @@ export class InstallationTokens {
    * down.
    */
   async current(): Promise<string> {
+    return (await this.fresh()).token
+  }
+
+  /**
+   * The same credential, with the moment it stops being one.
+   *
+   * A second method rather than widening `current`, because the two callers want
+   * different things and the narrower one is the common one. A Credential Shim
+   * has nowhere to put an expiry — `git` takes a password and `gh` takes an
+   * environment variable — and the Cloud Shortcut's `--json` is the one asker
+   * that can say when what it printed dies.
+   *
+   * The expiry is the provider's answer rather than roma's arithmetic on it, so
+   * what `--json` reports is when the token actually expires and not when roma
+   * will next refresh.
+   */
+  async fresh(): Promise<MintedToken> {
     const cached = this.#cached
     if (cached !== null && this.#now() < cached.expiresAt - this.#refreshMarginMs) {
-      return cached.token
+      return cached
     }
-    return (await this.#mint()).token
+    return await this.#mint()
   }
 
   /**
@@ -161,6 +202,10 @@ export class InstallationTokens {
     try {
       const minted = await minting
       this.#cached = minted
+      // After the mint rather than before it, so the log counts credentials
+      // actually produced rather than attempts — a provider that is refusing
+      // every request is a different event, and the caller reports that one.
+      this.#onMint()
       return minted
     } finally {
       // Cleared whichever way it went, and only if this is still the mint in

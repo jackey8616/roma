@@ -1,9 +1,21 @@
 import { createServer, type Server, type Socket } from 'node:net'
 import { chmodSync, mkdirSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { InstallationTokens } from './installation-tokens.js'
+import type { FreshTokens } from './fresh-tokens.js'
 import { reasonOf, writeToStderr, type OperatorLog } from './operator-log.js'
-import type { ShimRequest, ShimResponse } from './shim-protocol.js'
+import type { CredentialWanted, ShimRequest, ShimResponse } from './shim-protocol.js'
+
+/**
+ * What roma says when something asks for a cloud credential and there is no
+ * Cloud Reach.
+ *
+ * A plain sentence rather than a failure, because most deployments have none and
+ * that is not a fault (ADR-0015 §9). The Cloud Shortcut is installed either way
+ * so that this is what an agent reads instead of `command not found`, which it
+ * would spend a Turn investigating as a broken `PATH`.
+ */
+export const NO_CLOUD_REACH =
+  'This roma has no Cloud Reach, so there is no cloud credential for it to give.'
 
 /**
  * One credential request, as an operator sees it.
@@ -23,11 +35,20 @@ import type { ShimRequest, ShimResponse } from './shim-protocol.js'
  */
 export type ShimLogRecord =
   | {
-      /** A tool asked, and was given a credential. */
+      /**
+       * A tool asked, and was given a credential.
+       *
+       * `credential` says which of the two, because they are different events to
+       * an operator: one is somebody's `git` doing its job, and the other is a
+       * Cloud Token being minted against an identity whose Google Cloud bill
+       * somebody pays. A mint storm on either is visible here, and telling them
+       * apart is the first thing anybody looking would want.
+       */
       readonly event: 'credential'
       readonly sessionId: string
       readonly taskId: string | null
       readonly path: string | null
+      readonly credential: CredentialWanted
     }
   | {
       /**
@@ -41,6 +62,7 @@ export type ShimLogRecord =
       readonly sessionId: string
       readonly taskId: string | null
       readonly path: string | null
+      readonly credential: CredentialWanted
     }
   | {
       /**
@@ -56,6 +78,7 @@ export type ShimLogRecord =
       readonly sessionId: string
       readonly taskId: string | null
       readonly path: string | null
+      readonly credential: CredentialWanted
       readonly reason: string
     }
   | {
@@ -63,6 +86,19 @@ export type ShimLogRecord =
       readonly event: 'shim-unreadable'
       readonly reason: string
     }
+
+/**
+ * What roma needs to answer a request for a cloud credential.
+ *
+ * The account rides along with the tokens rather than being asked for per
+ * request, for the reason a Cloud Reach is a value roma holds: it is fixed at
+ * boot and identical in every Session.
+ */
+export interface CloudCredentials {
+  readonly tokens: FreshTokens
+  /** Which identity a Cloud Token acts as. */
+  readonly account: string
+}
 
 export interface ShimServerOptions {
   /**
@@ -74,7 +110,27 @@ export interface ShimServerOptions {
    * that can write to the whole Installation.
    */
   readonly socketPath: string
-  readonly tokens: InstallationTokens
+  readonly tokens: FreshTokens
+  /**
+   * The Cloud Reach's tokens and the identity they act as, or null where the
+   * deployment has none.
+   *
+   * Null rather than absent-or-present because "there is no Cloud Reach" is an
+   * answer roma gives out loud (ADR-0015 §9) rather than a case it has no branch
+   * for — the Cloud Shortcut is installed either way and gets a sentence.
+   */
+  readonly cloud?: CloudCredentials | null
+  /**
+   * Told that a Task obtained a Cloud Token, so that its Audit Record can say
+   * so.
+   *
+   * A callback rather than a record kept here, because what this owns is one
+   * request over one socket and what an Audit Record is filed against is a Task
+   * that has ended. Called with null for a request belonging to no running Task,
+   * which is the same honesty the log above keeps: a background process the
+   * agent left running is attributed to nobody rather than to the nearest Task.
+   */
+  readonly onCloudToken?: (taskId: string | null) => void
   /**
    * Which Task that Session is running right now, or null.
    *
@@ -104,7 +160,9 @@ export interface ShimServerOptions {
 export class ShimServer {
   readonly socketPath: string
   readonly #server: Server
-  readonly #tokens: InstallationTokens
+  readonly #tokens: FreshTokens
+  readonly #cloud: CloudCredentials | null
+  readonly #onCloudToken: (taskId: string | null) => void
   readonly #taskFor: (sessionId: string) => string | null
   readonly #log: OperatorLog<ShimLogRecord>
   /**
@@ -121,6 +179,8 @@ export class ShimServer {
     this.socketPath = options.socketPath
     this.#server = server
     this.#tokens = options.tokens
+    this.#cloud = options.cloud ?? null
+    this.#onCloudToken = options.onCloudToken ?? (() => {})
     this.#taskFor = options.taskFor
     this.#log = options.log ?? writeToStderr
   }
@@ -209,22 +269,56 @@ export class ShimServer {
     const sessionId = request.session
     const taskId = this.#taskFor(sessionId)
     const path = request.path ?? null
+    const credential = request.credential ?? 'code'
+    const where = { sessionId, taskId, path, credential } as const
+    // Decided once. Which credential a request is about is the only question
+    // that branches here, and asking it in each of the three places below would
+    // be three chances to answer it differently — the worst of which hands a
+    // Cloud Shortcut an Installation Token, and looks like everything working
+    // until the first API call.
+    //
+    // Null for a cloud request on a deployment with no Cloud Reach, which is
+    // answered rather than crashed on below.
+    const wanted = credential === 'cloud' ? this.#cloud : { tokens: this.#tokens, account: null }
 
     if (request.operation === 'erase') {
+      // Only `git` ever sends one — the Cloud Shortcut has nothing to hand back,
+      // because nothing it prints goes through a tool that could report the
+      // rejection. It is routed by `wanted` all the same, so that a caller who
+      // does send one cannot drop the *other* credential by naming the wrong
+      // side: an agent could otherwise force a re-mint of every Session's
+      // Installation Token by erasing tokens labelled cloud.
       if (typeof request.token === 'string' && request.token !== '') {
-        this.#tokens.discard(request.token)
+        wanted?.tokens.discard(request.token)
       }
-      this.#log({ event: 'credential-rejected', sessionId, taskId, path })
+      this.#log({ event: 'credential-rejected', ...where })
       return { token: null }
     }
 
+    // Said rather than failed. A deployment with no Cloud Reach is the ordinary
+    // case, and the Cloud Shortcut is installed on every image so that this
+    // sentence is what an agent reads — a refusal it can repeat to a person,
+    // rather than a hang, a crash, or a `PATH` it would go and investigate.
+    if (wanted === null) {
+      this.#log({ event: 'credential-failed', ...where, reason: NO_CLOUD_REACH })
+      return { token: null, reason: NO_CLOUD_REACH }
+    }
+
     try {
-      const token = await this.#tokens.current()
-      this.#log({ event: 'credential', sessionId, taskId, path })
-      return { token }
+      const { token, expiresAt } = await wanted.tokens.fresh()
+      // Before the log line and before the answer, so that a Task credited with
+      // a Cloud Token is one that was actually handed one.
+      if (credential === 'cloud') this.#onCloudToken(taskId)
+      this.#log({ event: 'credential', ...where })
+      // The expiry and the account go only to the asker that has somewhere to
+      // put them. A Credential Shim hands its token to `git` or to one child
+      // process's environment, neither of which has a field for either.
+      return wanted.account === null
+        ? { token }
+        : { token, expiresAt, account: wanted.account }
     } catch (error) {
       const reason = reasonOf(error)
-      this.#log({ event: 'credential-failed', sessionId, taskId, path, reason })
+      this.#log({ event: 'credential-failed', ...where, reason })
       return { token: null, reason }
     }
   }
@@ -241,15 +335,23 @@ export class ShimServer {
 function readRequest(line: string): ShimRequest {
   const parsed: unknown = JSON.parse(line)
   if (typeof parsed !== 'object' || parsed === null) throw new Error('not an object')
-  const { session, operation, path, token } = parsed as Record<string, unknown>
+  const { session, operation, path, token, credential } = parsed as Record<string, unknown>
   if (typeof session !== 'string' || session === '') throw new Error('no session was named')
   if (operation !== 'get' && operation !== 'erase') {
     throw new Error(`unknown operation ${JSON.stringify(operation)}`)
+  }
+  // Absent is `code`, which is what the two Credential Shims send and what every
+  // request sent before there was a second credential meant. A value that is
+  // neither is refused rather than defaulted: defaulting it would answer a
+  // request for a credential roma does not have with one it does.
+  if (credential !== undefined && credential !== 'code' && credential !== 'cloud') {
+    throw new Error(`unknown credential ${JSON.stringify(credential)}`)
   }
   return {
     session,
     operation,
     path: typeof path === 'string' ? path : null,
     token: typeof token === 'string' ? token : null,
+    credential: credential ?? 'code',
   }
 }

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { InstallationTokens } from '../installation-tokens.js'
+import { FreshTokens } from '../fresh-tokens.js'
 import { MINTER_SOCKET_VAR, SESSION_ID_VAR, socketPathIn } from '../shim-protocol.js'
 import { ShimServer } from '../shim-server.js'
 import { FakeMinter } from '../../test/support/fake-minter.js'
@@ -45,7 +45,7 @@ async function shimInFrontOf(stub: string, minter = new FakeMinter()) {
 
   const server = await ShimServer.listen({
     socketPath: socketPathIn(dir),
-    tokens: new InstallationTokens({ minter }),
+    tokens: new FreshTokens({ minter }),
     taskFor: () => null,
     log: () => {},
   })
