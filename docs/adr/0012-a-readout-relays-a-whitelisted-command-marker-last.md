@@ -300,6 +300,14 @@ marker's rejected alternative could.
 - A Readout leaves nothing in the Operator Log on the happy path and, on a warm
   Session, causes no `spawn` or `evict` either. Its only trace is the Audit
   Record.
+- **`/stop` does not reach a Readout.** The Core tracks Tasks in flight so that
+  `/stop` can mark them, and a Readout is not one — so `/stop` in a Conversation
+  whose only work in flight is a Readout says there was nothing to stop, and the
+  Readout then answers. What that costs is a stale context reading posted after
+  the Task it queued behind, for no money. Closing it means giving a Readout the
+  shape of a running Task, with Attempts it does not have and a park it can never
+  take; that was judged wider than the fault this ADR was written for, and is
+  recorded here rather than left for somebody to find.
 - `/context` output is mostly Markdown tables, and Google Chat is not a Markdown
   renderer. `render.ts` splits at `MAX_TEXT = 4096` rather than truncating, so a
   long one arrives whole across several messages. How it *reads* is the Channel's

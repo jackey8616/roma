@@ -307,6 +307,16 @@ export class Core {
    * work: it is serialised against its Session, because two processes on one
    * transcript corrupt it, and it is written down, because the list it came from
    * is a person's judgement and can be wrong.
+   *
+   * **`/stop` does not reach one, and that is a gap rather than a decision.** A
+   * Readout is not in `#running`, so `#stop` neither marks it nor counts it —
+   * which means `/stop` in a Conversation whose only work in flight is a Readout
+   * answers "nothing to stop" and then the Readout answers anyway. It costs
+   * nothing and cannot be interrupted usefully once it runs, so what is actually
+   * lost is a stale context reading arriving after the Task it queued behind.
+   * Left alone because closing it means giving a Readout the shape of a
+   * `RunningTask` — Attempts it has none of, a park it can never take — and that
+   * is a wider change than the fault this was built for.
    */
   async #runReadout(command: string, message: IngressMessage): Promise<void> {
     const { conversationKey } = message
