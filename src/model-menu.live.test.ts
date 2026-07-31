@@ -62,26 +62,64 @@ async function initOn(model: string): Promise<SystemInit> {
   return init
 }
 
+/**
+ * Two spawns per Menu entry, because there are two facts here and no single
+ * spawn holds both.
+ *
+ * The first version of this file tried. It spawned on the **alias** and demanded
+ * the **id** back, reasoning that asking the build to resolve `haiku` and being
+ * handed `claude-haiku-4-5` would measure the bundle reading and the string roma
+ * sends at once — and that spawning on the id would assert that `--model X`
+ * reports X, which is nearly a tautology.
+ *
+ * Run, it went red on `haiku` and the Menu was not wrong. This build expands
+ * `haiku` to `claude-haiku-4-5-20251001` and `opus` to `claude-opus-5`: its alias
+ * table is not uniform about dated snapshots, and roma never sends an alias
+ * anyway. One spawn conflated an assertion about roma's own invariant with a
+ * recording of a table roma does not control, and what it bought for the saved
+ * Turn was a failure that named neither.
+ *
+ * So: one spawn for what roma rests on, one for what roma read. Still minimal
+ * Turns, and each is a real one on the window everybody shares.
+ */
 describe('every model on the Menu, against the pinned build', () => {
-  // One spawn per Menu entry and no more, because each is a real Turn on the
-  // window everybody shares.
+  // What roma rests on. `--model` receives the **id**, `system/init.model` is
+  // where the Startup Self-Check reads the model back, and the Audit Record and
+  // the Operator Log both file the string roma sent — so an id this build did
+  // not accept is a process that refuses to start on somebody's next message,
+  // and an id it accepted and renamed is a ledger with two names for one model.
   //
-  // Spawned on the **alias** rather than on the id, and that is the choice worth
-  // explaining. The alias table is the half that was read rather than measured —
-  // `{opus:"claude-opus-5", sonnet:"claude-sonnet-5", haiku:"claude-haiku-4-5"}`,
-  // out of a minified bundle — and the id is the half roma passes to `--model`.
-  // Asking the build to resolve the alias and demanding the id back measures both
-  // at once: the reading was right, and the string roma sends is what this build
-  // calls that model. Spawning on the id would assert that `--model X` reports X,
-  // which is nearly a tautology and leaves the reading unmeasured.
-  it.each(Object.entries(MENU))('resolves %s to the id the Menu names', async (name, model) => {
-    const init = await initOn(name)
+  // Not a tautology, whatever it looks like: `--model` is where a name this
+  // build has never heard of would be refused, and the echo is the only evidence
+  // that what roma files is what ran.
+  it.each(Object.entries(MENU))('runs on the id the Menu holds for %s', async (name, model) => {
+    const init = await initOn(model)
 
     expect(init.model).toBe(model)
-    // Recorded rather than asserted: everything here is version-specific, so the
-    // day this starts failing the first question is what changed underneath it.
     console.log(
-      `seam 2: /model ${name} resolved to ${String(init.model)} ` +
+      `seam 2: --model ${model} (${name}) reported ${String(init.model)} ` +
+        `on Claude Code ${String(init.claudeCodeVersion)}`,
+    )
+  })
+
+  // What roma read rather than measured: that the name a Caller types and the id
+  // roma sends are the same model. ADR-0014 took this from a minified object
+  // literal, which is a reading of a build and not a fact about one.
+  //
+  // The id, or a dated snapshot of it — asserted that way rather than as equality
+  // because the two are not one string here and the difference is not drift. What
+  // this still refuses is the thing worth knowing: an alias re-pointed at another
+  // model, which is the day the Menu — one person's judgement about one build —
+  // starts handing people a model they did not ask for while roma reports the one
+  // they did.
+  it.each(Object.entries(MENU))('means by %s the model the Menu names', async (name, model) => {
+    const init = await initOn(name)
+
+    expect(String(init.model)).toMatch(new RegExp(`^${model}(-\\d{8})?$`))
+    // Recorded as well as asserted: everything here is version-specific, so the
+    // day this starts failing the first question is what moved underneath it.
+    console.log(
+      `seam 2: --model ${name} expanded to ${String(init.model)} ` +
         `on Claude Code ${String(init.claudeCodeVersion)}`,
     )
   })
@@ -99,6 +137,11 @@ describe('every model on the Menu, against the pinned build', () => {
  * never relayed, which is the decision this measurement exists to inform rather
  * than to justify. It is recorded because the alternative to knowing is guessing
  * the day somebody proposes relaying it after all.
+ *
+ * What one run found is in ADR-0014's verification section, where a measurement
+ * of a specific build belongs. It is not repeated here: this file's job is to
+ * produce the reading, and prose that restates a result goes stale the first time
+ * somebody runs it against a newer pin without touching the comment.
  */
 describe('what Claude Code does with a /model of its own', () => {
   it('answers a relayed /model, one way or the other', async () => {
