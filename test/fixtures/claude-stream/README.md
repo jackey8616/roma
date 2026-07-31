@@ -26,11 +26,28 @@ are computed from it.
 | `generation-no-partial-messages.jsonl` | `q5-B-gen-flag-off-06bce022.jsonl` | `q5.mjs` | The control for the above, same prompt with the flag off: 6 events, the whole answer after 66747ms of dead stream. |
 | `tool-use-partial-messages.jsonl` | `q5-C-tool-flag-on-c2ac815b.jsonl` | `q5.mjs` | A tool-using Turn with the flag on — 25339ms of silence while the tool ran, against a largest generating gap of 208ms. |
 | `readout-context.jsonl` | captured for ADR-0012 | — | A Readout: `/context` with the Caller Marker written *after* it, relayed exactly as roma relays one. `num_turns: 0` and `total_cost_usd: 0` — the command answered locally and the model was never called — with the command's own output as `result`. What the marker-first version does instead is a real Turn at $0.0549, which is the fault ADR-0012 exists to fix. |
+| `compaction-auto.jsonl` | captured for #98 | — | An auto-Compaction, on stdout: `system/compact_boundary` with `compact_metadata.trigger: "auto"`, 61486 tokens in and 1375 out over 19487ms. Also the cost claim #98 rests on, in one file — two byte-identical `OK` messages, the quiet one $0.0186 over 1 turn, the one the Compaction landed inside $0.0917 over 2. And a `compact_result: "failed"` (`too_few_groups`) *earlier in the same run*, during a healthy Turn, which is why "failed therefore dead" is not a rule roma can use. |
+| `compaction-failed.jsonl` | captured for #98 | — | The same failure on its own, provoked with the threshold under the floor: `system/status` carrying `compact_result: "failed"` and `compact_error: "too_few_groups"` — a code rather than the error text. The Session then served the next Turn normally at $0.0104. |
 
 `tool-use-turn.jsonl` and `generation-no-partial-messages.jsonl` are not
 exercised by any test. They are the flag-off world, which roma does not run in —
 kept as the control the flag-on captures are read against, and because
 regenerating them means spending the Shared Window again.
+
+The two `compaction-*.jsonl` captures did not come from the prototype either.
+They were taken by `src/compaction.live.test.ts` — the seam 2 test that produced
+them is in the repository and can be run again, so they are the first captures
+here that are reproducible rather than only kept. Raw stdout was teed to disk on
+the way past rather than re-serialised from parsed events, because a fixture that
+went through `JSON.parse` is one somebody has to take on trust. They carry no
+`_t`, for the same reason `readout-context.jsonl` does not.
+
+One thing to know before reading them: **the auto-compact threshold was shrunk**,
+with `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, from 967k to roughly 40k in one and to
+roughly 10k in the other. A Compaction at a shrunk threshold is a Compaction and
+the events are the real ones, but nothing in them is evidence about when a real
+Compaction fires, how long a full-size one takes, or what it preserves.
+`docs/compaction-verification.md` is the run.
 
 `readout-context.jsonl` is the one capture that did **not** come from the
 prototype's mac. It was taken in a Claude Code cloud container on the same
