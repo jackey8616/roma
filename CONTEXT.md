@@ -142,9 +142,14 @@ as the Operator Log, which is roma's and says something else entirely)
 
 **Working Directory**:
 Where a Session does its work — created empty, and roma still checks nothing out
-into it: the agent clones what it was asked about (ADR-0008). The one thing roma
-does put there is an Enclosure, which is not code and came from a person rather
-than from GitHub (ADR-0011). roma's, unlike the Transcript: roma makes it and
+into it: the agent clones what it was asked about (ADR-0008). Two things roma
+does put there, and they are different in kind. An Enclosure is somebody else's
+file, which roma only lands (ADR-0011). The other is roma's own words — the
+`CLAUDE.md` naming a Cloud Shortcut where a deployment has one (ADR-0015) — and
+it is the only place roma writes *to* the agent rather than passing on what
+somebody said to it. Written here rather than into the message frame because a
+fact that changes once per Session should not be repeated on every message.
+roma's, unlike the Transcript: roma makes it and
 ADR-0003 reclaims it after seven idle days. It is
 named here because it is the Transcript's opposite number and the two are easily
 mistaken for one kind of thing — they sit side by side and have opposite
@@ -360,7 +365,7 @@ refused by Google and never by roma. Named here for the reason an Installation
 is: a term that is the whole of a security property should be a term.
 Deliberately **not** the identity roma itself runs on — one that could reach
 roma's own ingress could end roma quietly, and a deployment where those two are
-the same has no boundary at all (ADR-0016). Most deployments have none, and a
+the same has no boundary at all (ADR-0015). Most deployments have none, and a
 deployment with none has no Cloud Shortcut either: the Reach is what there is to
 reach, so without one there is nothing to be handed.
 _Avoid_: Installation (that is GitHub's; the two are the same idea on two
@@ -375,7 +380,7 @@ every property that one was argued for: minted at the moment something needs one
 never put in a process environment — which is fixed at spawn and would be stale
 within the hour — and never written anywhere that outlives the command it was
 made for. What it is minted *from* is the Minter's alone and the agent never sees
-it (ADR-0016). Enough to do the work and not enough to keep: an hour after it
+it (ADR-0015). Enough to do the work and not enough to keep: an hour after it
 escapes it is worth nothing.
 _Avoid_: Cloud Key (there is no such term — the thing it is minted from belongs
 to the Minter's definition and to nothing else), Installation Token (that one is
