@@ -233,17 +233,42 @@ export const RETRIES: readonly ClaudeEvent[] = apiRetries('auth-failure')
  *
  * Built rather than captured: every recording roma holds says `status:
  * "allowed"`, and the only way to record the other case is to drain the window
- * everybody shares. `spentUntil` in `src/shared-window.ts` is where that guess
- * lives.
+ * everybody shares.
+ *
+ * `"rejected"` because that is what the provider sends. These constants said
+ * `"blocked"` for as long as they existed, which is a string Claude Code has
+ * never emitted — and because `spentUntil` read "anything that is not allowed"
+ * as spent, the invented value and the code agreed perfectly about a case
+ * neither had seen, while the case that really arrives (`"allowed_warning"`,
+ * meaning nearly spent and still serving) was read as an outage. A made-up
+ * fixture value is not a neutral placeholder: it is a second wrong belief that
+ * makes the first one look tested.
  */
 export const BLOCKED: readonly ClaudeEvent[] = [
-  quotaEvent({ status: 'blocked' }),
+  quotaEvent({ status: 'rejected' }),
   ...FAILED_OUTRIGHT,
 ]
 
 /** The same, with the provider willing to sell overage. */
 export const BLOCKED_WITH_OVERAGE: readonly ClaudeEvent[] = [
-  quotaEvent({ status: 'blocked', overageStatus: 'allowed' }),
+  quotaEvent({ status: 'rejected', overageStatus: 'allowed' }),
+  ...FAILED_OUTRIGHT,
+]
+
+/**
+ * A Turn that failed while the Shared Window was merely *close* to spent.
+ *
+ * The pairing the `allowed_warning` bug needed and nothing exercised: the
+ * window is still serving, and the Turn failed for its own reasons. Read as an
+ * outage — which is what "anything that is not allowed is spent" did — the
+ * Caller is told the shared quota is gone and given a reset time, and the 401
+ * that actually happened is never mentioned to anybody.
+ *
+ * `utilization` is on it because Claude Code only sends that field once a
+ * threshold has been crossed, so a real `allowed_warning` event carries one.
+ */
+export const NEARLY_SPENT: readonly ClaudeEvent[] = [
+  quotaEvent({ status: 'allowed_warning', utilization: 0.82 }),
   ...FAILED_OUTRIGHT,
 ]
 
