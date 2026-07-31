@@ -7,9 +7,11 @@ Date: 2026-07-30
 Accepted, and **built** in the same sitting. Narrow by design: it settles what
 one message says, and reverses nothing.
 
-**Amended 2026-07-30** — one Consequence has stopped being true: the length gap
-it recorded as inherited is closed (#75). The decision is unchanged. The
-amendment is marked inline.
+**Amended 2026-07-30**, in the way ADR-0002 and ADR-0003 were — the decision is
+unchanged, and amendments are marked inline — but not for the reason they were.
+Theirs corrected the evidence beneath a decision that stood. This one corrects a
+Consequence that has stopped being true: the length gap it recorded as inherited
+is closed (#75).
 
 Refines ADR-0003 rather than amending it. That ADR's Progress reporting section
 is unchanged and stays unchanged — what follows is the other half of the same
