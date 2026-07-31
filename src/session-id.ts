@@ -34,7 +34,7 @@ const GENERATION_SEPARATOR = '\u0000'
  * rule is that it is stable.
  *
  * A Conversation Key names a Conversation for as long as that Conversation
- * exists, which is exactly what makes `/new` impossible without the second
+ * exists, which is exactly what makes `/clear` impossible without the second
  * argument: the key cannot move, so the generation is what does. Generation zero
  * is the plain derivation and every Conversation starts there, so a Session that
  * has never been rotated has the id it always had — see `SessionGenerations` for

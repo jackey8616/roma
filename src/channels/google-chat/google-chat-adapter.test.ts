@@ -427,7 +427,9 @@ describe('what a Conversation is told', () => {
     await adapter.deliver(
       to(THREAD, { kind: 'command-outcome', command: 'stop', carriedOut: false }),
     )
-    await adapter.deliver(to(THREAD, { kind: 'command-outcome', command: 'new', carriedOut: true }))
+    await adapter.deliver(
+      to(THREAD, { kind: 'command-outcome', command: 'clear', carriedOut: true }),
+    )
     await adapter.deliver(to(THREAD, { kind: 'failure', reason: 'roma could not run this Task.' }))
 
     expect(api.texts).toEqual([

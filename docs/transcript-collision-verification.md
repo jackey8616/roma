@@ -102,7 +102,7 @@ This retires the reason ADR-0003 gave for rejecting in-place session reset:
 > **Rejected: resetting the session in place** […] It needs no new concept, but it
 > turns on unmeasured behaviour.
 
-The behaviour is now measured and it works. Whether `/new` *should* rotate in
+The behaviour is now measured and it works. Whether `/clear` *should* rotate in
 place — and whether `session-generation.ts` can therefore go — is #35's to
 decide; this only removes the objection that it was unknowable.
 

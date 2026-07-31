@@ -45,7 +45,7 @@ export interface RomaFixture {
    * The process serving one named Session.
    *
    * For the tests that mean a particular Session rather than whichever one a
-   * Conversation is on — after `/new`, when the interesting thing is that the
+   * Conversation is on — after `/clear`, when the interesting thing is that the
    * next Turn runs somewhere else.
    */
   procIn(sessionId: string): FakeClaudeProcess

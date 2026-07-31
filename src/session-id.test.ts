@@ -42,7 +42,7 @@ describe('a Session id derived from a Conversation Key', () => {
 })
 
 describe('a Session generation', () => {
-  // What `/new` moves. The Conversation Key cannot change — it is the Channel's,
+  // What `/clear` moves. The Conversation Key cannot change — it is the Channel's,
   // and the same DM keeps it forever — so a fresh Session has to come from
   // somewhere else, and this is the only thing in the derivation roma owns.
   it('is a different Session for the same Conversation', () => {
