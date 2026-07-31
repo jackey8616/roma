@@ -50,7 +50,7 @@ _Avoid_: chat, thread (thread is a Google Chat term, not a roma one)
 **Conversation Key**:
 The stable string an Adapter supplies to name one Conversation. The Session id
 is derived from it — and from the Session Generation, which is the only thing
-`/new` can move — which is why roma needs no database.
+`/clear` can move — which is why roma needs no database.
 _Avoid_: thread id, chat id, room id
 
 **Caller**:
@@ -102,7 +102,7 @@ What the Core hands back to an Adapter — the result of a Task, why there isn't
 one, or what the Task is doing meanwhile. It says what happened and whose it is,
 never how either should look: how a failure reads and how a person is addressed
 are the Channel's.
-_Avoid_: response, reply, command (a command is `/new` or `/stop`)
+_Avoid_: response, reply, command (a command is `/clear`, `/model` or `/stop`)
 
 **Acknowledgement**:
 The one message roma posts as soon as a Task arrives and then keeps editing
@@ -158,9 +158,9 @@ Transcript lives in — that one is nobody's to reclaim
 
 **Session Generation**:
 Which of a Conversation's Sessions is the current one. A Conversation Key never
-changes, so `/new` moves this instead: the Session id derives from the key and
+changes, so `/clear` moves this instead: the Session id derives from the key and
 the generation together, and every Conversation starts at the first. Written
-down, because a restart that forgot it would resume the context `/new` was used
+down, because a restart that forgot it would resume the context `/clear` was used
 to drop.
 _Avoid_: reset, epoch, version, session number
 
@@ -188,11 +188,17 @@ make room. Distinct from Eviction only in what prompted it.
 _Avoid_: timing out, garbage collection, idling out
 
 **Command**:
-One of the two messages roma answers itself instead of handing to Claude Code:
+One of the three messages roma answers itself instead of handing to Claude Code:
 `/stop` ends the work this Conversation has in flight — running, queued, or
-still starting — and `/new` gives the Conversation a fresh Session. Recognised in the Core, never in a Channel Adapter, and only when the
-whole message is one of the two — everything else is work, apart from the few
-Claude Code commands a Readout relays. A Command is not a Task: it drives no
+still starting — `/clear` gives the Conversation a fresh Session, and `/model`
+sets its Chosen Model. Recognised in the Core, never in a Channel Adapter, and
+only when the whole message is one of them — everything else is work, apart from
+the few Claude Code commands a Readout relays. `/clear` answers to `/reset` and
+`/new` as well, because those are Claude Code's own spellings of it and a
+spelling roma leaves unclaimed is one somebody is billed for (ADR-0013). `/model`
+takes an argument and is the only Command that may: a listed head takes one,
+nothing else does, which is what keeps the whole-message rule from widening into
+the prefix match ADR-0003 refused. A Command is not a Task: it drives no
 Turn, is not queued, and is not counted against the concurrency cap.
 _Avoid_: slash command (those are Claude Code's, and a Readout is the only way
 any of them reaches it), instruction (that is an Outbound Instruction)
@@ -210,7 +216,7 @@ no Turn is driven and the model never sees it. The Caller Marker goes *after* a
 Readout, which is safe only because the whole message is the command and the
 Caller supplied no text to hide behind it.
 _Avoid_: passthrough, relay, slash command (that is Claude Code's name for what a
-Readout carries, not for the carrying), and using this for `/stop` or `/new` —
+Readout carries, not for the carrying), and using this for `/stop`, `/clear` or `/model` —
 those are roma's own and are Commands
 
 **Task**:
@@ -260,6 +266,36 @@ could accept an Ingress Message is built until it has passed.
 _Avoid_: health check, preflight, smoke test, and `claude auth status` — that
 reports a token valid right up to the moment it 401s, which is why this is a real
 invocation instead
+
+**Pinned Model**:
+The model roma runs every Session on, unless that Session has a Chosen Model. One
+per deployment, fixed before boot, and proved at startup against what Claude Code
+says it resolved to — because the model follows the credential and moves without
+saying so (ADR-0003). Not a fallback and not Claude Code's own default, which
+never runs: this is what roma insists on.
+_Avoid_: default model (that is the argument `/model default` takes, not the name
+of the thing it returns to), the model, configured model
+
+**Chosen Model**:
+The model one Session runs on because somebody said so, in place of the Pinned
+Model. Roma's to keep rather than the process's — a model handed to a process
+lives and dies with it, and processes end for reasons nobody using them can
+observe. It belongs to a Session and not to a Conversation, which is why clearing
+a Conversation returns it to the Pinned Model without anything being deleted
+(ADR-0014). Almost every Session has none.
+_Avoid_: override, preference, model setting, session model (that reads as
+whatever model a Session is on, which for nearly all of them is the Pinned Model)
+
+**Model Menu**:
+The short list of models a Caller may pick a Chosen Model from, and the whole of
+what stops one person moving everybody's Shared Window onto something costlier
+without anybody agreeing to it. Roma's own rather than everything Claude Code
+would take — it accepts arbitrary model ids, so no list roma held could ever be a
+complete check, which makes this an offer rather than a filter. Named for the
+reason an Installation is: a term that is the whole of a security property should
+be a term.
+_Avoid_: whitelist, allowlist (that is its shape, and the word is the Readouts'),
+supported models (roma is not saying the rest do not work), model list
 
 ### Reaching the code
 
@@ -331,8 +367,10 @@ _Avoid_: paused, retrying, backing off, queued (that word is the Task Queue's)
 
 **Audit Record**:
 The line roma writes when a Task ends: the Caller, which Session ran it, how long
-they waited, what it cost, which credential paid, and which repositories it
-minted an Installation Token for. That last one is what roma can honestly know:
+they waited, what it cost, which credential paid, which model ran it, and which
+repositories it minted an Installation Token for. The model is here because a
+Chosen Model is a Caller moving the shared bill and nothing else would remember
+which Task did (ADR-0014). That last one is what roma can honestly know:
 git names the repository every time it asks for a credential, so what a Task
 reached for is free — and what it did once it got there is not, since learning
 that would mean reading the Transcript. One per Task — a failed or
@@ -349,7 +387,7 @@ record, telemetry
 
 **Operator Log**:
 The running commentary roma writes for whoever is running it: an Eviction, a
-Reaping, a credential swap, a refusal. What roma decided and why, as it happens —
+Reaping, a credential or model swap, a refusal. What roma decided and why, as it happens —
 never what an agent did, which is the Transcript's, and never the account of the
 money, which is the Audit Records'. Nothing is totalled from it.
 _Avoid_: audit log (that is the Audit Records), event log (that is nearer the
