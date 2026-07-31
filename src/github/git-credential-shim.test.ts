@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { InstallationTokens } from '../installation-tokens.js'
+import { FreshTokens } from '../fresh-tokens.js'
 import { MINTER_SOCKET_VAR, SESSION_ID_VAR, socketPathIn } from '../shim-protocol.js'
 import { ShimServer, type ShimLogRecord } from '../shim-server.js'
 import { FakeMinter } from '../../test/support/fake-minter.js'
@@ -52,7 +52,7 @@ async function pointGitAtRoma(minter = new FakeMinter()) {
   const log: ShimLogRecord[] = []
   const server = await ShimServer.listen({
     socketPath: socketPathIn(dir),
-    tokens: new InstallationTokens({ minter }),
+    tokens: new FreshTokens({ minter }),
     taskFor: () => 'the-task',
     log: (record) => log.push(record),
   })
@@ -113,6 +113,10 @@ describe('a real git, asking a real Credential Shim', () => {
       sessionId: SESSION,
       taskId: 'the-task',
       path: REPOSITORY,
+      // `git` asks for the one credential it can use, and says nothing about
+      // which — this is roma reading an absent field as the forge's, which is
+      // what every request written before there was a second credential meant.
+      credential: 'code',
     })
   })
 

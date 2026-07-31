@@ -6,8 +6,10 @@ import { GoogleChatAdapter } from './google-chat-adapter.js'
 import { HttpChatApi, type ChatRequest } from './http-chat-api.js'
 import { PubSubTransport } from './pubsub-transport.js'
 import { flush } from '../../../test/support/fake-claude.js'
-import { fakeMinting, FakeMinter } from '../../../test/support/fake-minter.js'
+import { fakeCloud, fakeMinting, FakeMinter } from '../../../test/support/fake-minter.js'
 import { announce } from '../../github/announce.js'
+import { announceCloud } from '../../cloud/announce.js'
+import type { CloudOptions } from '../../startup.js'
 import { askMinter } from '../../shim-client.js'
 import { socketPathIn } from '../../shim-protocol.js'
 import type { ShimLogRecord } from '../../shim-server.js'
@@ -60,7 +62,7 @@ function mentioned(text: string): Record<string, unknown> {
 let running: Serving[] = []
 let fixtures: RomaFixture[] = []
 
-async function boot() {
+async function boot({ cloud }: { cloud?: CloudOptions } = {}) {
   const fixture = romaFixture('wiring')
   fixtures.push(fixture)
 
@@ -88,6 +90,7 @@ async function boot() {
   const serving = serve({
     credential: OAUTH,
     minting,
+    ...(cloud === undefined ? {} : { cloud }),
     overflow: { credential: METERED, monthlyCapUsd: 100 },
     channel: new GoogleChatAdapter({ api }),
     transport: new PubSubTransport({ subscription, log: () => {} }),
@@ -325,6 +328,22 @@ describe('reaching the code, out of the real parts', () => {
 
     const { args } = roma.claude.lastSpawn
     expect(args[args.indexOf('--append-system-prompt') + 1]).toContain('a-team/infra')
+
+    feed(roma.procFor(), OK)
+  })
+
+  // The same join, for the second capability, and deliberately no more than
+  // that: this file is the one place the seams meet, not the place this
+  // feature's behaviour is tested. What it catches is a Cloud Reach configured
+  // and never announced — a roma that mints perfectly and whose agent never
+  // knows it can ask.
+  it('tells the Session about the Cloud Reach, where the deployment has one', async () => {
+    const roma = await boot({ cloud: fakeCloud({ announce: announceCloud }) })
+    roma.subscription.publishJson(mentioned('what is in that bucket'), 'msg-1')
+    await flush()
+
+    const { args } = roma.claude.lastSpawn
+    expect(args[args.indexOf('--append-system-prompt') + 1]).toContain('roma-cloud-token')
 
     feed(roma.procFor(), OK)
   })

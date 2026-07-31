@@ -127,6 +127,31 @@ export interface AuditRecord {
    */
   readonly model?: string
   /**
+   * Whether this Task obtained a Cloud Token.
+   *
+   * A yes or a no, and deliberately **not a count** (ADR-0015 §10). One token
+   * does unlimited API calls for an hour, so a number of mints is not a measure
+   * of what was done and would be read as one — the same trade this file already
+   * refuses in the other direction when it writes an unpriced Turn down as
+   * unpriced rather than as free.
+   *
+   * Not *what* was reached for, either, because roma cannot know: a request to
+   * the Cloud Shortcut carries no destination, and asking the agent to declare
+   * one would record an unverifiable self-report.
+   *
+   * What it is for is the Google Cloud bill. Everything the agent does there is
+   * done as one service account, so unexplained activity on it can be narrowed
+   * to the people whose Tasks touched it — and nowhere else answers that.
+   *
+   * Optional, and **absent means no** — which is what every record roma wrote
+   * before there were Cloud Reaches means, since there was no way to obtain one.
+   * roma writes it on every record going forward. That is `model`'s reasoning
+   * exactly: `readRecord` drops a line it cannot read, a dropped line leaves the
+   * month's total, and the month's total is what the Overflow cap is enforced
+   * against.
+   */
+  readonly cloudReach?: boolean
+  /**
    * What Claude Code said its credential resolved to — `apiKeySource` off
    * `system/init`, and null where no Turn reached that point.
    *
@@ -454,6 +479,12 @@ function readRecord(line: string): AuditRecord | null {
   // model spent the shared window, and a line that answers it with a number
   // answers it wrongly.
   if (record['model'] !== undefined && typeof record['model'] !== 'string') return null
+  // Absent is a no, which is what every record written before there were Cloud
+  // Reaches means. Present and not a boolean is a torn line rather than a record
+  // with a hole in it: the one question this field answers is yes or no, and a
+  // line that answers it with a number is answering a different question — the
+  // count ADR-0015 refused.
+  if (record['cloudReach'] !== undefined && typeof record['cloudReach'] !== 'boolean') return null
   if (record['credential'] !== 'shared-window' && record['credential'] !== 'overflow') return null
   return record as unknown as AuditRecord
 }

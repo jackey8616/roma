@@ -8,11 +8,13 @@ import type { CredentialEnvs } from './session-pool.js'
 import type { ChannelAdapter } from './channel-adapter.js'
 import type { SpawnClaudeProcess } from './claude-process.js'
 import type { RetryBudget } from './config.js'
+import { CloudReachUse } from './cloud-reach-use.js'
 import { Core, type CoreLogRecord } from './core.js'
-import { InstallationTokens } from './installation-tokens.js'
-import type { Installation, Minter } from './minter.js'
+import { ConfigurationMissing } from './env-config.js'
+import { FreshTokens } from './fresh-tokens.js'
+import type { CloudMinter, CloudReach, Installation, Minter } from './minter.js'
 import { ChosenModels, SessionGenerations } from './session-generation.js'
-import type { OperatorLog } from './operator-log.js'
+import { reasonOf, type OperatorLog } from './operator-log.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
 import { socketPathIn } from './shim-protocol.js'
 import { ShimServer, type ShimLogRecord } from './shim-server.js'
@@ -59,6 +61,65 @@ export interface MintingOptions {
    */
   readonly announce: (installation: Installation) => string
 }
+
+/**
+ * What roma needs to give a Session's work a Cloud Token, where a deployment has
+ * a Cloud Reach.
+ *
+ * Optional in `StartRomaOptions` and complete when it is there, which is the
+ * `MintingOptions` shape rather than the Overflow shape — but for the opposite
+ * reason. Overflow is refused half-configured because a cap with no key caps
+ * nothing; there is no half of this to configure, because both halves come out
+ * of one key file. What makes it one object is the same rule: a Minter with
+ * nothing announcing it is a capability the agent will never try.
+ */
+export interface CloudOptions {
+  /** The only thing that holds the Cloud Reach's key. */
+  readonly minter: CloudMinter
+  /**
+   * What every Session is told it can reach in the cloud.
+   *
+   * A function for the reason the Installation's is, minus the fetching: the
+   * text names the identity, and naming a provider's identity is not something
+   * the Core may do. It reaches here as a value.
+   */
+  readonly announce: (reach: CloudReach) => string
+}
+
+/** What an operator is told about the Cloud Reach: once at boot, and per mint. */
+export type CloudLogRecord =
+  | {
+      /**
+       * Whether this deployment has a Cloud Reach, and which identity it is.
+       *
+       * Written on every boot, including the boots where the answer is "none".
+       * Which deployment an operator is looking at is exactly the question, and
+       * a line that appeared only sometimes would make its absence mean two
+       * things — no Cloud Reach, or an older roma.
+       *
+       * It is also the record of the boot proof: the line is written after the
+       * mint that proved the key, so a boot that reaches it is a boot where the
+       * Cloud Reach worked. That mint gets no `cloud-token-minted` of its own,
+       * because it was never served to anybody and counting it would put a
+       * standing +1 on every deployment's mint rate.
+       */
+      readonly event: 'cloud-reach'
+      readonly account: string | null
+    }
+  | {
+      /**
+       * A Cloud Token was minted — not merely asked for.
+       *
+       * The distinction is the whole reason this is a record rather than a
+       * field on the credential line beside it. Something in the agent's
+       * userland asks on every invocation by design, and almost every ask is
+       * served from the token roma already holds; a mint is a signed assertion
+       * and a round trip to the provider. An operator watching for a mint storm
+       * needs the count that can actually storm.
+       */
+      readonly event: 'cloud-token-minted'
+      readonly account: string
+    }
 
 export interface StartRomaOptions {
   /** The credential every Session runs on, and the one the self-check verifies. */
@@ -120,6 +181,15 @@ export interface StartRomaOptions {
   readonly configDir: string
   /** How a Session's tools get a credential, and what it reaches. */
   readonly minting: MintingOptions
+  /**
+   * The Cloud Reach, where this deployment has one.
+   *
+   * Absent is the ordinary case and costs nothing: roma starts, announces
+   * nothing about the cloud, and the Cloud Shortcut answers that there is none
+   * (ADR-0015 §9). Present, it is proved live before anything can accept an
+   * Ingress Message — see the boot proof in `startRoma`.
+   */
+  readonly cloud?: CloudOptions
   /** The pinned model. Defaults to the one every Session runs on. */
   readonly model?: string
   readonly maxConcurrentTasks?: number
@@ -133,7 +203,7 @@ export interface StartRomaOptions {
    * system, and an operator reading a credential swap wants the refusal that
    * prompted it on the same lines.
    */
-  readonly log?: OperatorLog<PoolLogRecord | CoreLogRecord | ShimLogRecord>
+  readonly log?: OperatorLog<PoolLogRecord | CoreLogRecord | ShimLogRecord | CloudLogRecord>
   /**
    * Where the self-check's probe Session runs. A throwaway directory by default,
    * removed once the check is done.
@@ -157,6 +227,8 @@ export interface Roma {
   readonly selfCheck: StartupSelfCheckReport
   /** What roma proved at boot that it can reach, and told every Session about. */
   readonly installation: Installation
+  /** The identity the agent acts as in the cloud, or null where there is none. */
+  readonly cloudReach: CloudReach | null
   /** End every resident process. Sessions keep their context on disk. */
   shutdown(): Promise<void>
 }
@@ -185,6 +257,7 @@ export async function startRoma({
   auditRoot,
   configDir,
   minting,
+  cloud,
   model,
   maxConcurrentTasks,
   retryBudget,
@@ -200,6 +273,44 @@ export async function startRoma({
   // surfaced instead as an inexplicable `git clone` inside somebody's Turn would
   // read as "roma is broken" with no diagnosis attached.
   const installation = await minting.minter.installation()
+
+  // The other free check, and the same argument: a key that is syntactically
+  // perfect and revoked is a blind spot no amount of parsing closes, so roma
+  // uses the key rather than reading it. The token is thrown away — what is
+  // being proved is that one can be had at all.
+  //
+  // It lives here rather than in `startup-self-check.ts` deliberately. That term
+  // is defined as the live *Turn* roma drives at boot, and a check driving no
+  // Turn would make the definition false (ADR-0015 §8). It never falls back to
+  // another identity, which is the whole reason the key is loaded by an exact
+  // path in the first place.
+  //
+  // **It refuses in `readConfiguration`'s shape rather than inside it, and that
+  // is a gap rather than a choice.** ADR-0015 §8 asks for "one of the problems
+  // the single `readConfiguration` refusal reports"; that reader is synchronous
+  // and this is a network round trip, so a deployment with both a missing audit
+  // root and a revoked key still boots twice. Everything a *file* can be wrong
+  // about — unreadable, empty, not a key — is caught by `readCloudEnv` and does
+  // join the single refusal; only a key that parses and does not work lands
+  // here. The line above has the same property for a bad App key and has since
+  // ADR-0008, so this is the existing shape rather than a new one. Closing it
+  // means `readConfiguration` collecting problems instead of throwing them,
+  // which is a change to how every reader reports and is not this ticket's.
+  if (cloud !== undefined) {
+    try {
+      await cloud.minter.mint()
+    } catch (error) {
+      throw new ConfigurationMissing([
+        `roma could not mint a Cloud Token with the key it was given, so its Cloud Reach ` +
+          `(${cloud.minter.account}) does not work: ${reasonOf(error)}`,
+      ])
+    }
+  }
+  const cloudReach: CloudReach | null = cloud === undefined ? null : { account: cloud.minter.account }
+  // Said on every boot, including the boots with nothing to say, so that which
+  // deployment this is can be read off the log rather than inferred from a line
+  // that is not there.
+  log?.({ event: 'cloud-reach', account: cloudReach?.account ?? null })
 
   // What the deployment pinned, named once rather than defaulted in each of the
   // three places that need it. `/model default` returns a Session to *this*
@@ -244,9 +355,34 @@ export async function startRoma({
   const queue = new TaskQueue(
     maxConcurrentTasks === undefined ? {} : { maxConcurrent: maxConcurrentTasks },
   )
+  // Between the socket and the Audit Record, and built here because this is the
+  // only place that can see both ends. Made whether or not there is a Cloud
+  // Reach: without one nothing ever puts a Task in it, so every record says no,
+  // which is true.
+  const cloudUse = new CloudReachUse()
   const shims = await ShimServer.listen({
     socketPath,
-    tokens: new InstallationTokens({ minter: minting.minter }),
+    tokens: new FreshTokens({ minter: minting.minter }),
+    // Two `FreshTokens` rather than one, because they hold two credentials with
+    // two expiries. The arithmetic is one class; the state is not shared.
+    cloud:
+      cloud === undefined
+        ? null
+        : {
+            tokens: new FreshTokens({
+              minter: cloud.minter,
+              // What makes a mint storm visible. The credential line beside this
+              // one is written per *request*, and a Cloud Shortcut asks on every
+              // invocation by design — so without this an operator counting the
+              // log cannot tell a loop that is minting from a loop that is being
+              // served the token roma already holds.
+              onMint: () => log?.({ event: 'cloud-token-minted', account: cloud.minter.account }),
+            }),
+            account: cloud.minter.account,
+          },
+    onCloudToken: (taskId) => {
+      cloudUse.minted(taskId)
+    },
     // Attribution is by Session, resolved to a Task through the queue — which
     // serialises the Tasks of a Session already, so the answer is unambiguous.
     taskFor: (sessionId) => queue.taskFor(sessionId),
@@ -284,7 +420,14 @@ export async function startRoma({
     // Pinned Model here would be a second thing to keep in step with the one
     // `ChosenModels` holds.
     models,
-    appendSystemPrompt: minting.announce(installation),
+    // Both announcements, or only the one there is. A blank line between them
+    // rather than a joined paragraph, because they are two capabilities and an
+    // agent skimming a system prompt reads a break as a change of subject —
+    // which it is.
+    appendSystemPrompt: [
+      minting.announce(installation),
+      ...(cloud === undefined || cloudReach === null ? [] : [cloud.announce(cloudReach)]),
+    ].join('\n\n'),
     ...(retryBudget === undefined ? {} : { retryBudget }),
     ...(spawn === undefined ? {} : { spawn }),
     ...(log === undefined ? {} : { log }),
@@ -304,6 +447,7 @@ export async function startRoma({
       models,
       audit,
       credential: credential.kind,
+      usedCloudReach: (taskId) => cloudUse.takeUsedBy(taskId),
       ...(overflow === undefined ? {} : { overflow: { monthlyCapUsd: overflow.monthlyCapUsd } }),
       ...(log === undefined ? {} : { log }),
     }),
@@ -313,6 +457,7 @@ export async function startRoma({
     audit,
     selfCheck,
     installation,
+    cloudReach,
     // The socket goes after the processes, not before: a Session being killed can
     // still have a `git` mid-operation, and taking the credential away first
     // turns a clean shutdown into a handful of authentication failures in

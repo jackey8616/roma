@@ -72,7 +72,7 @@ export interface GitHubMinterOptions {
  * and it caches exactly one thing — which Installation roma is acting for, since
  * that is settled at boot and cannot change without a restart. It deliberately
  * does *not* cache tokens: refreshing before expiry, serving concurrent askers
- * from one mint and discarding a rejected token are `InstallationTokens`', which
+ * from one mint and discarding a rejected token are `FreshTokens`', which
  * is arithmetic rather than product knowledge and is tested against a fake of
  * this.
  *

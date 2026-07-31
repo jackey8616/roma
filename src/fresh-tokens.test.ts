@@ -1,15 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { InstallationTokens } from './installation-tokens.js'
+import { FreshTokens } from './fresh-tokens.js'
 import { FakeMinter } from '../test/support/fake-minter.js'
 
 /**
- * The arithmetic between a Minter and a Credential Shim, against a fake clock.
+ * The arithmetic between a Minter and whatever asks it for a credential, against
+ * a fake clock.
  *
- * Every decision here is about *when* rather than about GitHub, which is why it
- * is Core code with a Core test: mint rarely, refresh before expiry rather than
- * at it, never mint twice for one gap, and drop what has been rejected. All four
- * are the difference between a credential that works for an hour and one that
- * dies in the middle of somebody's clone.
+ * Every decision here is about *when* rather than about a provider, which is why
+ * it is Core code with a Core test: mint rarely, refresh before expiry rather
+ * than at it, never mint twice for one gap, and drop what has been rejected. All
+ * four are the difference between a credential that works for an hour and one
+ * that dies in the middle of somebody's clone.
+ *
+ * Asserted here against an Installation Token because that is the credential the
+ * numbers were chosen for. A Cloud Token gets the same class and therefore the
+ * same four rules — `src/shim-server.test.ts` is where that is observed from
+ * outside, over a real socket.
  */
 
 const HOUR_MS = 60 * 60_000
@@ -19,7 +25,7 @@ function tokensAt(start = 1_000_000) {
   const minter = new FakeMinter({ now: () => now })
   return {
     minter,
-    tokens: new InstallationTokens({ minter, now: () => now }),
+    tokens: new FreshTokens({ minter, now: () => now }),
     advance: (ms: number) => {
       now += ms
     },

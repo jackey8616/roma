@@ -403,3 +403,51 @@ describe('which model spent the month', () => {
     expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
   })
 })
+
+/**
+ * ADR-0015 §10: whoever pays the Google Cloud bill can narrow unexplained
+ * activity on the service account to the Tasks that touched it.
+ */
+describe('whether a Task used the Cloud Reach', () => {
+  it('keeps the answer across a restart', () => {
+    const dir = newDir()
+    new AuditLog({ auditRoot: dir }).record(entry({ cloudReach: true }))
+
+    const [record] = new AuditLog({ auditRoot: dir }).readMonth(MONTH)
+    expect(record?.cloudReach).toBe(true)
+  })
+
+  // Every record roma wrote before there were Cloud Reaches lacks the field, and
+  // none of those Tasks could have obtained a Cloud Token — there was no way to.
+  // Requiring it would make all of them unreadable at once, which is the failure
+  // `model` and `callerName` already carry the reasoning for: a dropped line
+  // leaves the month's total, and the month's total is what the Overflow cap is
+  // enforced against.
+  it('reads a record written before there was a cloud to reach', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), at: new Date().toISOString() })}\n`,
+    )
+
+    const [record] = log.readMonth(MONTH)
+    expect(record?.cloudReach).toBeUndefined()
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 0 })
+  })
+
+  // A yes or a no. A line answering with a number is answering a different
+  // question — the count ADR-0015 refused, because one token does unlimited API
+  // calls for an hour and a number would be read as a measure of what was done.
+  it('refuses an answer that is not a yes or a no', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ cloudReach: false }))
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), cloudReach: 3, at: new Date().toISOString() })}\n`,
+    )
+
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+  })
+})

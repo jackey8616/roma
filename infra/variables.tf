@@ -42,13 +42,32 @@ variable "service_account_id" {
   type = string
   # Not "roma", which Google will not accept: a service account id has a floor of
   # six characters, and the refusal arrives from the API rather than from here.
-  default     = "roma-agent"
+  #
+  # **This default changed from `roma-agent` to `roma-runtime`**, and a Google
+  # Cloud account id is immutable — so applying this against an existing
+  # deployment is a destroy-and-create of the service account, its key and every
+  # grant bound to it. Pin `service_account_id = "roma-agent"` in
+  # `terraform.tfvars` to keep what you have; nothing else about the change is
+  # load-bearing.
+  default     = "roma-runtime"
   description = <<-EOT
     The account id of the identity roma runs as — the local part of its email.
 
     This is the identity behind `GOOGLE_APPLICATION_CREDENTIALS`, or the one
     attached to the instance when roma runs on a Google host and that variable is
     unset.
+
+    Named `roma-runtime` and **not** `roma-agent`, which it used to be. In roma's
+    vocabulary the agent is the Claude Code process, and this is precisely the
+    identity the agent's Cloud Reach must never be — one that could reach roma's
+    own ingress could delete the subscription roma pulls from or publish forged
+    events to its topic, each of which presents as roma quietly not working
+    rather than as an attack (ADR-0015 §2). The old name was not merely
+    imprecise, it was an invitation: somebody configuring the agent's Google
+    Cloud access found an account named for exactly what they were setting up.
+
+    An existing deployment should pin the old value rather than recreate the
+    account — see the comment above.
   EOT
 
   validation {

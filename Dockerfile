@@ -129,6 +129,22 @@ COPY --from=builder /app/dist ./dist
 RUN printf '#!/bin/sh\nexec node /app/dist/github/gh-shim.js "$@"\n' > /usr/local/bin/gh \
   && chmod 0755 /usr/local/bin/gh
 
+# The Cloud Shortcut, and the same three lines for the same reason — what has to
+# run is `node` with a module in `dist/`.
+#
+# Installed on every image, including the ones whose deployment has no Cloud
+# Reach, and that is the decision rather than an oversight (ADR-0015 §9). Omitted
+# it would be `command not found`, which a model reads as a broken PATH or a
+# broken image and spends a Turn investigating; installed, it answers in one
+# sentence that this deployment has none.
+#
+# `roma-` prefixed, unlike the Shim above. That one occupies a vendor tool's name
+# so the correct path is taken without anybody choosing it; this stands in front
+# of nothing — there is no cloud CLI in this image, deliberately, and 439 MiB of
+# one buys no capability roma does not already have (ADR-0015 §1).
+RUN printf '#!/bin/sh\nexec node /app/dist/cloud/cloud-token.js "$@"\n' > /usr/local/bin/roma-cloud-token \
+  && chmod 0755 /usr/local/bin/roma-cloud-token
+
 # The asymmetry here is the decision, not an oversight.
 #
 # ROMA_WORK_ROOT is defaulted because losing it is by design: a Session's

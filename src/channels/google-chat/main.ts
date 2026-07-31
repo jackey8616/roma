@@ -9,8 +9,12 @@ import { readMinterEnv } from '../../github/env-config.js'
 import { GitHubMinter } from '../../github/github-minter.js'
 import { announce } from '../../github/announce.js'
 import { gitConfig } from '../../github/shims.js'
+import { announceCloud } from '../../cloud/announce.js'
+import { readCloudEnv } from '../../cloud/env-config.js'
+import { GoogleCloudMinter } from '../../cloud/google-cloud-minter.js'
 import type { PoolLogRecord } from '../../session-pool.js'
 import type { ShimLogRecord } from '../../shim-server.js'
+import type { CloudLogRecord } from '../../startup.js'
 import type { StartupSelfCheckReport } from '../../startup-self-check.js'
 import { readChatEnv } from './env-config.js'
 import type { ChatEventLogRecord } from './chat-events.js'
@@ -65,6 +69,7 @@ type RomaLog = OperatorLog<
   | ShimLogRecord
   | PubSubLogRecord
   | ChatEventLogRecord
+  | CloudLogRecord
   | ProcessLogRecord
 >
 
@@ -80,7 +85,12 @@ export async function startGoogleChatRoma(
   env: Environment = process.env,
   log: RomaLog = writeToStderr,
 ): Promise<Serving> {
-  const { roma, channelEnv: chat, minterEnv } = readConfiguration(env, readChatEnv, readMinterEnv)
+  const {
+    roma,
+    channelEnv: chat,
+    minterEnv,
+    cloudEnv,
+  } = readConfiguration(env, readChatEnv, readMinterEnv, readCloudEnv)
   const { shimDir, ...core } = roma
 
   // Application Default Credentials: a key file named by
@@ -113,10 +123,18 @@ export async function startGoogleChatRoma(
     maxExtensionTime: Duration.from({ minutes: chat.maxLeaseMinutes }),
   })
 
-  // The one place a forge is named, for the reason a Channel is named here and
-  // nowhere else: assembling roma means saying what it is assembled out of, and
-  // `src/` proper is not allowed to know either answer. `src/github-containment.test.ts`
-  // is what holds the rest of the tree to that.
+  // The one place a forge is named, and now the one place the agent's cloud is,
+  // for the reason a Channel is named here and nowhere else: assembling roma
+  // means saying what it is assembled out of, and `src/` proper is not allowed
+  // to know any of the three answers. `src/github-containment.test.ts` and
+  // `src/cloud-containment.test.ts` are what hold the rest of the tree to that.
+  //
+  // Note what the Cloud Reach's Minter is **not** given: the `GoogleAuth` above,
+  // or anything else that would go looking for a credential. It is handed the
+  // key `readCloudEnv` read from the path the deployment named, and nothing
+  // else — because the resolution chain ends at the metadata server, and on a
+  // Google host that is roma's own identity (ADR-0015 §4). The two credentials
+  // on this page are deliberately unrelated: one is roma's, one is the agent's.
   return await serve({
     ...core,
     minting: {
@@ -125,6 +143,9 @@ export async function startGoogleChatRoma(
       gitConfig: gitConfig(),
       announce,
     },
+    ...(cloudEnv === null
+      ? {}
+      : { cloud: { minter: new GoogleCloudMinter(cloudEnv), announce: announceCloud } }),
     channel: new GoogleChatAdapter({ api: new HttpChatApi({ send, download }), log }),
     transport: new PubSubTransport({ subscription, log }),
     log,

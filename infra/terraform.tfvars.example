@@ -7,7 +7,10 @@ project_id = "your-project-id"
 
 # topic_name             = "roma-chat-events"
 # subscription_name      = "roma-chat-events-sub"
-# service_account_id     = "roma-agent"
+# service_account_id     = "roma-runtime"
+# ^ was `roma-agent`. An account id is immutable, so an existing deployment
+#   should uncomment this and pin the old value rather than let Terraform
+#   destroy and recreate the account, its key and its grants.
 # dead_letter_topic_name = "roma-chat-events-dead-letter"
 
 # The three numbers worth understanding before changing — `variables.tf` says why

@@ -161,6 +161,16 @@ export interface CoreOptions {
   readonly credential: CredentialKind
   /** Metered billing. Omitted, Overflow is never offered and never taken. */
   readonly overflow?: OverflowOptions
+  /**
+   * Whether one Task obtained a Cloud Token, asked once as its record is
+   * written.
+   *
+   * A question rather than a component, because this is the whole of what the
+   * Core is allowed to know about it: something outside answers yes or no, and
+   * the Core prints the answer. Omitted, every record says no — which is exactly
+   * right for a deployment with no Cloud Reach, where no Task can have used one.
+   */
+  readonly usedCloudReach?: (taskId: string) => boolean
   readonly log?: CoreLog
 }
 
@@ -261,6 +271,7 @@ export class Core {
   readonly #audit: AuditLog
   readonly #credential: CredentialKind
   readonly #overflow: OverflowOptions | null
+  readonly #usedCloudReach: (taskId: string) => boolean
   readonly #log: CoreLog
   /**
    * The Tasks this Core has taken on and not yet answered — queued ones
@@ -281,6 +292,7 @@ export class Core {
     audit,
     credential,
     overflow,
+    usedCloudReach,
     log,
   }: CoreOptions) {
     if (!channel.capabilities.stableConversationKey) {
@@ -301,6 +313,7 @@ export class Core {
     this.#audit = audit
     this.#credential = credential
     this.#overflow = overflow ?? null
+    this.#usedCloudReach = usedCloudReach ?? (() => false)
     this.#log = log ?? writeToStderr
   }
 
@@ -457,6 +470,10 @@ export class Core {
       turnMs: turn?.durationMs ?? null,
       credential: this.#credential,
       model: model ?? this.#models.pinnedModel,
+      // Asked rather than assumed false. A Readout drives no Turn so nothing it
+      // does can mint, but the answer is read-and-forget and a hard `false` here
+      // would be roma writing down a fact it declined to check.
+      cloudReach: this.#usedCloudReach(taskId),
       apiKeySource: null,
     })
 
@@ -751,6 +768,11 @@ export class Core {
     const answeredOn = attempts.answeredOn() ?? this.#credential
     const durationMs = Date.now() - startedAt
     const outcome = outcomeOf(instruction)
+    // Asked once, outside the loop. A Task can produce two records — one per
+    // credential that paid — and both describe the same Task, so both say the
+    // same thing about the cloud. Asking inside would have the second record
+    // report a Cloud Token the first one had already consumed the answer for.
+    const cloudReach = this.#usedCloudReach(taskId)
     for (const credential of [answeredOn, ...attempts.credentials().filter((c) => c !== answeredOn)]) {
       const paid = attempts.spentOn(credential)
       // The Task's own record is written whatever it spent, including nothing.
@@ -782,6 +804,7 @@ export class Core {
         // `sessionId` null — because a row that says nothing is a row the month's
         // spending cannot be read against.
         model: running?.model ?? this.#models.pinnedModel,
+        cloudReach,
         apiKeySource: attempts.apiKeySource(),
       })
     }

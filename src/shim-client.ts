@@ -138,9 +138,13 @@ export async function credentialFor(
 function readResponse(body: string): ShimResponse {
   const parsed: unknown = JSON.parse(body)
   if (typeof parsed !== 'object' || parsed === null) throw new Error('roma answered with nonsense')
-  const { token, reason } = parsed as Record<string, unknown>
+  const { token, reason, expiresAt, account } = parsed as Record<string, unknown>
   return {
     token: typeof token === 'string' ? token : null,
     ...(typeof reason === 'string' ? { reason } : {}),
+    // Carried through rather than required, because only one asker has any use
+    // for them and roma answers a request for the other credential without.
+    ...(typeof expiresAt === 'number' ? { expiresAt } : {}),
+    ...(typeof account === 'string' ? { account } : {}),
   }
 }

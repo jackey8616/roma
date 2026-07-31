@@ -68,6 +68,15 @@ docker run --rm \
   ghcr.io/jackey8616/roma:0.1.0
 ```
 
+Add two more to give the agent a Cloud Reach — the identity it acts as in Google Cloud. Most
+deployments have none and are unaffected; see `ROMA_CLOUD_KEY_FILE` below and
+`infra/README.md` for how to create one and which project to put it in.
+
+```bash
+  -e ROMA_CLOUD_KEY_FILE=/run/secrets/cloud-reach.json \
+  -v /path/to/cloud-reach.json:/run/secrets/cloud-reach.json:ro \
+```
+
 It carries **its own Claude Code, pinned to v2.1.220** — the version every measurement in
 `docs/` was taken against. Moving that pin is a re-verification event that costs Shared
 Window money, not a dependency bump, and nothing automated will ever move it for you.
@@ -103,6 +112,19 @@ reason: unlike Claude Code's, moving it invalidates no measurement, so nothing w
 for drift. The real binary is at `/usr/local/lib/roma/gh`, deliberately **off `PATH`** —
 what answers to `gh` is roma's Credential Shim, which mints a token and hands it to the
 one child process it starts.
+
+It carries **no cloud CLI** — no `gcloud`, no `aws`, no `az`, and no second image tag to put
+one in. Measured, and the measurement decided it: Google's CLI alone is 439 MiB unpacked
+against a slim runtime, and it buys no capability, because roma *is* a Node program and Node
+alone signs the credential and speaks HTTPS. What ships instead is `roma-cloud-token`, three
+lines of shell in front of a module already in `dist/`: it prints an hour-long Cloud Token
+on stdout, or `--json` for the token, its expiry and the account. ADR-0015 is why, and it
+names its own reversal trigger — if writing the API calls by hand costs more in Turns than
+439 MiB was worth in bytes, the CLI comes back.
+
+That command is installed on **every** image, including the ones whose deployment has no
+Cloud Reach, where it exits non-zero saying so. Omitting it would be `command not found`,
+which a model reads as a broken `PATH` and spends a Turn investigating.
 
 The image is `node:22-slim`, `linux/amd64`, non-root, with `git`, `gh`, `curl`,
 `ca-certificates` and `tini` and nothing else. roma's agent runs arbitrary shell commands, so that list is a
@@ -148,7 +170,8 @@ Terraform cannot do, in the order they have to happen.
 | `ROMA_SHIM_DIR` | **Required**, and **defaulted in the image** to `/run/roma`. Where the Credential Shim socket and the gitconfig every Session runs under live. Holds nothing that outlives a boot, which is why it has a default at all — and it is deliberately not under `ROMA_WORK_ROOT`, whose weekly reclaim would take the socket with it. Set it when running from source; `/run` is not writable on a developer's machine. |
 | `ROMA_PUBSUB_PROJECT_ID` | **Required.** The project the subscription lives in. |
 | `ROMA_PUBSUB_SUBSCRIPTION` | **Required.** The subscription's name. Read, never created. |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Google's own, not roma's: a service account key file, or nothing at all on a Google host with a metadata server. |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Google's own, not roma's: a service account key file, or nothing at all on a Google host with a metadata server. This is the identity **roma** runs as — not the agent's. |
+| `ROMA_CLOUD_KEY_FILE` | A path to a service account key file, and the whole of what gives the agent a **Cloud Reach**. Unset — the usual case — roma starts normally, announces nothing about the cloud, and `roma-cloud-token` says this deployment has none. Set, roma reads the key at boot **by exactly that path**, mints one token with it and throws it away, and refuses to start if any of that fails; it never falls back to another identity, because the fallback on a Google host is roma's own. The roles on that identity are the entire boundary — every Conversation reaches all of it, and so does everyone who can message roma. It must not be the identity above. `infra/README.md` has the steps and says which project to put it in. **Mount it read-only, and know what it is not:** roma is the only thing that reads it, but the agent shares the container and the uid, so a shell can read it too — the same gap `ROMA_GITHUB_PRIVATE_KEY_FILE` has. |
 | `ROMA_OVERFLOW_API_KEY` | Metered billing. Absent, roma has no Overflow and never offers it. |
 | `ROMA_OVERFLOW_MONTHLY_CAP_USD` | Required **whenever** the line above is set, and vice versa. There is no default: how much of your money roma may spend is not roma's to decide. |
 | `ROMA_MODEL` | Overrides the pinned model. The self-check asserts on whatever this resolves to. |
