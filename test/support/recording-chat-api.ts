@@ -20,9 +20,34 @@ export interface RecordedMessage {
 export class RecordingChatApi implements ChatApi {
   readonly messages: RecordedMessage[] = []
   /** Every call in order, so a test can assert that an edit was not a new post. */
-  readonly calls: ('post' | 'edit')[] = []
+  readonly calls: ('post' | 'edit' | 'download')[] = []
+  /** Every resource name a download was asked for, in order. */
+  readonly downloads: string[] = []
 
   #failNextPost: Error | null = null
+  /** What `download` hands back, keyed by resource name. */
+  readonly #content = new Map<string, Uint8Array>()
+
+  /** Give a resource name some bytes, so a test can send an Enclosure. */
+  holds(resourceName: string, content: Uint8Array | string): void {
+    this.#content.set(
+      resourceName,
+      typeof content === 'string' ? new TextEncoder().encode(content) : content,
+    )
+  }
+
+  download(resourceName: string): Promise<Uint8Array> {
+    this.calls.push('download')
+    this.downloads.push(resourceName)
+    const content = this.#content.get(resourceName)
+    // Rejecting rather than handing back nothing: an attachment Chat has no
+    // bytes for is the shape of every real failure here — a resource that
+    // expired, a scope roma does not hold — and a zero-length file would make
+    // that look like a success.
+    return content === undefined
+      ? Promise.reject(new Error(`no content for ${resourceName}`))
+      : Promise.resolve(content)
+  }
 
   /** Make the next `post` reject, the way a Chat outage or a quota rejection does. */
   failNextPost(error: Error): void {

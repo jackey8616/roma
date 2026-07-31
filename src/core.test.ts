@@ -1,5 +1,6 @@
-import { readdirSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, sep } from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuditLog, monthOf } from './audit-log.js'
 import { Core, type CoreLogRecord } from './core.js'
@@ -8,6 +9,7 @@ import type {
   ChannelCapabilities,
   IngressMessage,
   OutboundInstruction,
+  PendingEnclosure,
 } from './channel-adapter.js'
 import { PINNED_MODEL } from './claude-session.js'
 import type { RetryBudget } from './config.js'
@@ -256,7 +258,7 @@ function ingress(
   conversationKey = KEY,
   who: { caller: string; callerName: string | null } = { caller: 'users/17', callerName: 'Ada' },
 ): IngressMessage {
-  return { conversationKey, ...who, text }
+  return { conversationKey, ...who, text, enclosures: [] }
 }
 
 /** The other person in the same thread, for the tests about telling them apart. */
@@ -2580,5 +2582,123 @@ describe('relaying a Readout', () => {
     await say('/context', { events: READOUT_DRIFTED })
 
     expect(audit.totalFor(MONTH)).toMatchObject({ tasks: 0, readouts: 1, costUsd: 0.0549 })
+  })
+})
+
+describe('what somebody sent along with a message', () => {
+  /** One Enclosure, on a message that is otherwise ordinary. */
+  const withEnclosures = (
+    text: string,
+    enclosures: readonly PendingEnclosure[],
+  ): IngressMessage => ({ ...ingress(text), enclosures })
+
+  const sent = (name: string, content: string): PendingEnclosure => ({
+    name,
+    redeem: () => Promise.resolve(new TextEncoder().encode(content)),
+  })
+
+  /**
+   * Wait until the Session serving `KEY` has been spawned.
+   *
+   * Every other test here spawns within one `flush`, because nothing stands
+   * between the message arriving and the Turn. An Enclosure does: it is written
+   * to disk first, and that is real filesystem work.
+   *
+   * Waited on with real elapsed time rather than by counting `flush`es. A count
+   * of event-loop turns is not a duration — under a loaded machine the turns run
+   * out long before the write lands, which is a test that passes alone and fails
+   * in the suite. `node:timers/promises` is used because `vi.useFakeTimers`
+   * above fakes the global `setTimeout` and this has to be a real wait.
+   */
+  const spawned = async (procFor: (key: string) => FakeClaudeProcess) => {
+    for (let waited = 0; waited < 5_000; waited += 5) {
+      await flush()
+      try {
+        return procFor(KEY)
+      } catch {
+        await sleep(5)
+      }
+    }
+    throw new Error('nothing was spawned')
+  }
+
+  /** The text of a `user` frame, out of the NDJSON the Session wrote. */
+  const textOf = (frame: Record<string, unknown> | undefined): string => {
+    const message = frame?.['message'] as { content?: { text?: string }[] } | undefined
+    return message?.content?.[0]?.text ?? ''
+  }
+
+  it('writes it into the Session’s Working Directory and names it to the agent', async () => {
+    const { core, procFor, workRoot } = newCore()
+
+    const task = core.handle(withEnclosures('what is this?', [sent('screenshot.png', 'PNG')]))
+    const proc = await spawned(procFor)
+    feed(proc, OK)
+    await task
+
+    const cwd = join(workRoot, sessionIdFor(KEY))
+    const [file] = readdirSync(join(cwd, '.enclosures'))
+    expect(readFileSync(join(cwd, '.enclosures', file!), 'utf8')).toBe('PNG')
+    // Named to the agent by the path roma minted, with what the sender called it
+    // beside it — and what the sender called it is not what the file is called.
+    expect(file).not.toContain('screenshot')
+    expect(textOf(proc.sent.at(0))).toContain(
+      `<enclosure path="./.enclosures/${file}" name="screenshot.png" />`,
+    )
+  })
+
+  // The whole of ADR-0011's argument for redeeming late: the bytes are fetched
+  // once, at the moment the Turn is about to run, and not when the message was
+  // read.
+  it('redeems it once, and not before the Session is known', async () => {
+    const { core, procFor } = newCore()
+    let redemptions = 0
+    const counted: PendingEnclosure = {
+      name: 'a.png',
+      redeem: () => {
+        redemptions += 1
+        return Promise.resolve(new Uint8Array([1]))
+      },
+    }
+
+    const message = withEnclosures('look', [counted])
+    expect(redemptions).toBe(0)
+
+    const task = core.handle(message)
+    feed(await spawned(procFor), OK)
+    await task
+
+    expect(redemptions).toBe(1)
+  })
+
+  // No new instruction kind: `failure` already means "no result, and here is
+  // why". For a Channel with a class of attachment it cannot reach — Chat's
+  // `driveDataRef` — this is the normal path rather than an edge case, which is
+  // why the reason has to reach the Conversation intact.
+  it('fails the Task, with the reason, when one cannot be fetched', async () => {
+    const { core, adapter } = newCore()
+    const unreachable: PendingEnclosure = {
+      name: 'design.fig',
+      redeem: () => Promise.reject(new Error('roma has no Drive scope')),
+    }
+
+    await core.handle(withEnclosures('review this', [unreachable]))
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      kind: 'failure',
+      reason: expect.stringContaining('no Drive scope'),
+    })
+  })
+
+  it('spawns nothing for a Task whose Enclosure could not be fetched', async () => {
+    const { core, claude } = newCore()
+    const unreachable: PendingEnclosure = {
+      name: 'design.fig',
+      redeem: () => Promise.reject(new Error('gone')),
+    }
+
+    await core.handle(withEnclosures('review this', [unreachable]))
+
+    expect(claude.spawns).toHaveLength(0)
   })
 })

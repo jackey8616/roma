@@ -1,4 +1,31 @@
-import type { IngressMessage } from '../../channel-adapter.js'
+import type { IngressMessage, PendingEnclosure } from '../../channel-adapter.js'
+import type { OperatorLog } from '../../operator-log.js'
+
+/** Fetch the bytes of one thing Chat holds, by the resource name Chat gave it. */
+export type DownloadAttachment = (resourceName: string) => Promise<Uint8Array>
+
+/** What reading an event can tell an operator that a Conversation cannot. */
+export type ChatEventLogRecord = {
+  /**
+   * An event carried something attachment-shaped and roma read no Enclosure
+   * out of it.
+   *
+   * The one line standing between "roma cannot read this payload" and the bug
+   * it was built to fix. Everything in this file was written from Google's
+   * documentation rather than from a capture, and the envelope depends on how
+   * an event was delivered — roma is on Pub/Sub, not an HTTP webhook — so the
+   * shape below is a guess until a real message proves it. A wrong guess
+   * produces `null` and falls through: no throw, no reply, roma silently
+   * ignoring images, which is indistinguishable from the fault this whole area
+   * exists to remove. This is what makes it distinguishable.
+   *
+   * `keys` rather than the payload, because an attachment's metadata is
+   * somebody's filename and roma writes an Operator Log it does not otherwise
+   * put user content in. The keys are enough to say which shape arrived.
+   */
+  readonly event: 'attachment-unread'
+  readonly keys: readonly string[]
+}
 
 /**
  * One event as Google Chat delivers it.
@@ -43,7 +70,10 @@ const DM = 'DM'
  * anything an app said. Chat marks app messages `type: "BOT"`, and answering
  * them is how two bots in one space talk to each other until somebody notices.
  */
-export function readIngressMessage(event: ChatEvent): IngressMessage | null {
+export function readIngressMessage(
+  event: ChatEvent,
+  { download, log }: ReadOptions = {},
+): IngressMessage | null {
   if (asString(event['type']) !== 'MESSAGE') return null
 
   const message = asRecord(event['message'])
@@ -81,9 +111,16 @@ export function readIngressMessage(event: ChatEvent): IngressMessage | null {
   // Claude Code should see: the mention is how Chat addresses roma, not part of
   // what was asked.
   const text = (asString(message['argumentText']) ?? asString(message['text']) ?? '').trim()
-  // A bare @-mention with nothing after it is not a request. Answering it would
-  // spend a Turn asking Claude Code what to make of an empty message.
-  if (text === '') return null
+  const enclosures = readEnclosures(message, download, log)
+  // A message with *nothing* in it is not a request — a bare @-mention with
+  // nothing after it, say, where answering would spend a Turn asking Claude Code
+  // what to make of an empty message.
+  //
+  // Nothing in it, rather than no text in it. That distinction did not exist
+  // when this rule was written, because text was all a message could carry; a
+  // pasted screenshot with no words is the most ordinary thing there is to do in
+  // a chat window and carries more than most one-line messages (ADR-0011).
+  if (text === '' && enclosures.length === 0) return null
 
   // The Conversation Key doubles as the address a reply goes to, which is what
   // lets this Adapter store nothing: `spaces/{space}/threads/{thread}` is a
@@ -94,7 +131,87 @@ export function readIngressMessage(event: ChatEvent): IngressMessage | null {
     caller,
     callerName,
     text,
+    enclosures,
   }
+}
+
+/** What reading an event needs beyond the event. */
+export interface ReadOptions {
+  /**
+   * How to fetch an attachment's bytes, or absent where roma cannot.
+   *
+   * Optional so that reading an event stays a pure function in the tests that
+   * only care about keys and text. A read with no downloader produces no
+   * Enclosures, which is what a deployment with no Chat credentials should do.
+   */
+  readonly download?: DownloadAttachment
+  readonly log?: OperatorLog<ChatEventLogRecord>
+}
+
+/**
+ * Chat's two ways of attaching something, and roma's reach into each.
+ *
+ * `attachmentDataRef` is Chat's own storage and is fetched with the app's
+ * credentials. `driveDataRef` names a file in the **sender's** Drive, which roma
+ * has no scope for and no consent to read — so an Enclosure is still made for
+ * one, and it fails when redeemed. Made rather than dropped deliberately: the
+ * Task then ends with a reason the person can read, where dropping it silently
+ * would put roma back to ignoring what somebody sent.
+ *
+ * Both are read, and neither is assumed, for the reason every other pair in this
+ * file is read that way — `spaceType`/`type`, `event.space`/`message.space`,
+ * `common.parameters`/`action.parameters`. The envelope depends on how the event
+ * was delivered, and nothing here has ever seen a real one.
+ */
+function readEnclosures(
+  message: Readonly<Record<string, unknown>>,
+  download: DownloadAttachment | undefined,
+  log: OperatorLog<ChatEventLogRecord> | undefined,
+): readonly PendingEnclosure[] {
+  const attachments = message['attachment'] ?? message['attachments']
+  if (!Array.isArray(attachments) || attachments.length === 0) return []
+
+  const enclosures: PendingEnclosure[] = []
+  for (const entry of attachments) {
+    const attachment = asRecord(entry)
+    if (attachment === null) continue
+    // Chat's own name for the file, which roma prints and never makes into a
+    // path — see `PendingEnclosure`. `contentName` is the documented field;
+    // falling back to the resource name keeps an Enclosure readable rather than
+    // nameless where it is missing.
+    const name = asString(attachment['contentName']) ?? asString(attachment['name']) ?? 'attachment'
+
+    const resourceName = asString(asRecord(attachment['attachmentDataRef'])?.['resourceName'])
+    if (resourceName !== null && download !== undefined) {
+      enclosures.push({ name, redeem: () => download(resourceName) })
+      continue
+    }
+
+    const driveFileId = asString(asRecord(attachment['driveDataRef'])?.['driveFileId'])
+    if (driveFileId !== null) {
+      enclosures.push({
+        name,
+        redeem: () =>
+          Promise.reject(
+            new Error(
+              `${name} is a Google Drive file, and roma can only read files uploaded to the conversation`,
+            ),
+          ),
+      })
+    }
+  }
+
+  // Nothing understood out of something that was plainly there. See
+  // `ChatEventLogRecord`: this is the difference between a payload roma cannot
+  // read and a roma that ignores images, and without it they look the same.
+  if (enclosures.length === 0) {
+    log?.({
+      event: 'attachment-unread',
+      keys: [...new Set(attachments.flatMap((entry) => Object.keys(asRecord(entry) ?? {})))],
+    })
+  }
+
+  return enclosures
 }
 
 /**

@@ -13,8 +13,14 @@ import type { PoolLogRecord } from '../../session-pool.js'
 import type { ShimLogRecord } from '../../shim-server.js'
 import type { StartupSelfCheckReport } from '../../startup-self-check.js'
 import { readChatEnv } from './env-config.js'
+import type { ChatEventLogRecord } from './chat-events.js'
 import { GoogleChatAdapter } from './google-chat-adapter.js'
-import { CHAT_SCOPE, HttpChatApi, type SendChatRequest } from './http-chat-api.js'
+import {
+  CHAT_SCOPE,
+  HttpChatApi,
+  type DownloadChatMedia,
+  type SendChatRequest,
+} from './http-chat-api.js'
 import { PubSubTransport, type PubSubLogRecord } from './pubsub-transport.js'
 
 /**
@@ -58,6 +64,7 @@ type RomaLog = OperatorLog<
   | IngressLogRecord
   | ShimLogRecord
   | PubSubLogRecord
+  | ChatEventLogRecord
   | ProcessLogRecord
 >
 
@@ -86,6 +93,13 @@ export async function startGoogleChatRoma(
     const response = await client.request({ url, method, data: body })
     return response.data
   }
+  // `arraybuffer` because the response is a file rather than JSON, and the
+  // default would have the library parse it as one — which for a PNG means a
+  // throw at best and a mangled string at worst.
+  const download: DownloadChatMedia = async (url) => {
+    const response = await client.request({ url, method: 'GET', responseType: 'arraybuffer' })
+    return new Uint8Array(response.data as ArrayBuffer)
+  }
 
   // The subscription is opened, not created. Chat publishes to a topic somebody
   // provisioned and roma reads a subscription somebody provisioned — see
@@ -111,7 +125,7 @@ export async function startGoogleChatRoma(
       gitConfig: gitConfig(),
       announce,
     },
-    channel: new GoogleChatAdapter({ api: new HttpChatApi({ send }) }),
+    channel: new GoogleChatAdapter({ api: new HttpChatApi({ send, download }), log }),
     transport: new PubSubTransport({ subscription, log }),
     log,
   })

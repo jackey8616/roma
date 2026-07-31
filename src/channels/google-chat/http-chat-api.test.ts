@@ -24,6 +24,7 @@ function recording(answer: unknown = { name: POSTED }) {
       requests.push(request)
       return Promise.resolve(answer)
     },
+    download: () => Promise.reject(new Error('no download in this test')),
   })
   return { api, requests, last: () => requests.at(-1) }
 }
@@ -87,7 +88,10 @@ describe('posting a message', () => {
   // Core does not absorb. Swallowed here it would become a Task that answered
   // nobody and reported success.
   it('lets an API failure through', async () => {
-    const api = new HttpChatApi({ send: () => Promise.reject(new Error('403 permission denied')) })
+    const api = new HttpChatApi({
+      send: () => Promise.reject(new Error('403 permission denied')),
+      download: () => Promise.reject(new Error('no download in this test')),
+    })
 
     await expect(api.post({ space: SPACE, thread: null, text: 'hi' })).rejects.toThrow(/403/)
   })
@@ -184,7 +188,10 @@ describe('editing a message', () => {
   })
 
   it('lets an API failure through', async () => {
-    const api = new HttpChatApi({ send: () => Promise.reject(new Error('404 not found')) })
+    const api = new HttpChatApi({
+      send: () => Promise.reject(new Error('404 not found')),
+      download: () => Promise.reject(new Error('no download in this test')),
+    })
 
     await expect(api.edit(POSTED, 'Working…')).rejects.toThrow(/404/)
   })

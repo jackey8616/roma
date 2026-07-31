@@ -11,7 +11,9 @@ import {
   TASK_ID_PARAMETER,
   TAKE_OVERFLOW,
   type ChatEvent,
+  type ChatEventLogRecord,
 } from './chat-events.js'
+import type { OperatorLog } from '../../operator-log.js'
 import { OVERFLOW_BUTTON, outcomeMessages, progressText } from './render.js'
 
 /** Chat's own name for the option that makes a reply establish a thread. */
@@ -33,6 +35,15 @@ function named(segment: string | undefined): segment is string {
 
 export interface GoogleChatAdapterOptions {
   readonly api: ChatApi
+  /**
+   * Where to say that an event carried something attachment-shaped roma could
+   * not read.
+   *
+   * Optional the way every other log in this repo is, and the one place that
+   * being absent costs something: see `ChatEventLogRecord`. A deployment that
+   * drops it gets a roma whose failure to understand a payload is silent.
+   */
+  readonly log?: OperatorLog<ChatEventLogRecord>
 }
 
 /**
@@ -80,8 +91,11 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
    */
   readonly #acknowledgements = new Map<string, Promise<string>>()
 
-  constructor({ api }: GoogleChatAdapterOptions) {
+  readonly #log: OperatorLog<ChatEventLogRecord> | undefined
+
+  constructor({ api, log }: GoogleChatAdapterOptions) {
     this.#api = api
+    this.#log = log
   }
 
   /**
@@ -93,7 +107,13 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
    * sender and an @-mention have become a key, a Caller and some text.
    */
   toIngress(event: ChatEvent): IngressMessage | null {
-    return readIngressMessage(event)
+    return readIngressMessage(event, {
+      // Bound rather than called: `toIngress` stays synchronous, and what an
+      // Enclosure costs is paid once the Core knows the Session and knows the
+      // bytes are wanted (ADR-0011).
+      download: (resourceName) => this.#api.download(resourceName),
+      ...(this.#log === undefined ? {} : { log: this.#log }),
+    })
   }
 
   /**

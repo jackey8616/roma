@@ -1,4 +1,5 @@
 import type { IngressMessage } from './channel-adapter.js'
+import type { WrittenEnclosure } from './enclosures.js'
 
 /**
  * The marker's two halves.
@@ -29,14 +30,66 @@ const CLOSE = '</from>'
  * Token; the Caller changes between Turns of that one process, so the per-Turn
  * channel — the line written to stdin — is the only one there is.
  *
- * **Only the first line is roma's.** Anybody who can message roma can type
- * something that looks like a marker, and roma's own goes above whatever they
- * sent. That is a rule about the agent not being confused rather than a
- * privilege boundary: ADR-0008 already establishes that everyone who can reach
- * roma reaches the whole Installation, so there is no privilege here to forge.
+ * **roma's part is the tagged prefix, and it comes first.** Anybody who can
+ * message roma can type something that looks like a marker, and roma's own goes
+ * above whatever they sent. That is a rule about the agent not being confused
+ * rather than a privilege boundary: ADR-0008 already establishes that everyone
+ * who can reach roma reaches the whole Installation, so there is no privilege
+ * here to forge.
+ *
+ * Said as the tagged prefix rather than as the first line, which is how it read
+ * until Enclosures gave the prefix a second tag (ADR-0011). The rule did not
+ * weaken — the tags were always what bounded roma's part, and counting lines
+ * was shorthand that happened to be exact while there was only one.
  */
-export function attributed({ caller, callerName, text }: IngressMessage): string {
-  return `${OPEN}${named(caller, callerName)}${CLOSE}\n\n${text}`
+export function attributed(
+  { caller, callerName, text }: IngressMessage,
+  enclosures: readonly WrittenEnclosure[] = [],
+): string {
+  return `${OPEN}${named(caller, callerName)}${CLOSE}${enclosed(enclosures)}\n\n${text}`
+}
+
+/**
+ * The Enclosures on a message, named to the agent one tag to a line.
+ *
+ * Under the Caller Marker and above what was typed, which is what makes the
+ * rule statable: roma's part of the frame is the tagged prefix and comes first.
+ * That was always what "only the first line is roma's" meant — see `attributed`
+ * — and a second tag is what stops the shorthand being usable, not what stops
+ * it being true. Anybody can type a line that looks like one of these, and it
+ * buys them nothing: everyone sharing a Conversation shares one Session and one
+ * Working Directory, so a forged tag names a file they could have asked for in
+ * prose (ADR-0008, ADR-0011).
+ *
+ * The written Enclosures rather than the pending ones, because by here the
+ * bytes are on disk and the path is the only thing worth saying.
+ */
+function enclosed(enclosures: readonly WrittenEnclosure[]): string {
+  return enclosures
+    .map(({ path, name }) => `\n<enclosure path="${path}" name="${attribute(name)}" />`)
+    .join('')
+}
+
+/**
+ * One attribute value, escaped enough to stay one.
+ *
+ * The sender chose this string and a filename may contain a quote, so an
+ * unescaped one would end the attribute early and leave the rest of somebody's
+ * filename reading as markup roma wrote. Not a privilege boundary — there is
+ * none here to cross — but a tag that parses as what it is costs four
+ * replacements, and a mangled one is a frame the agent has to guess at.
+ *
+ * `callerName` is deliberately not escaped this way: it comes from the
+ * Channel's own directory of people rather than from an upload, and ADR-0009
+ * settled its shape. Escaping is applied where the string was chosen by whoever
+ * sent the message.
+ */
+function attribute(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
 }
 
 /**
