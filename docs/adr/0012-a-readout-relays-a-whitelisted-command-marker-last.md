@@ -4,7 +4,8 @@ Date: 2026-07-31
 
 ## Status
 
-Accepted. Nothing implements it yet.
+Accepted, and implemented: `src/readouts.ts` holds the list,
+`attributedReadout` places the marker, and `Core.#runReadout` relays it.
 
 Corrects a claim ADR-0003 makes about Commands — that Claude Code's own slash
 commands are passed through as work — without disturbing the decision that claim
@@ -59,8 +60,23 @@ naming it is cheaper than someone later discovering it.
 **Not verified — any build but this one.** Every measurement here is a fact about
 2.1.220. That is the whole reason the list is a list rather than a rule.
 
-**Not verified — that the concurrency exemption below can be had without
-disturbing the Task Queue.** It is a claim about code that does not exist yet.
+**Verified since — the concurrency exemption.** It was written down here as a
+claim about code that did not exist. It does now: `TaskQueue` counts the cap over
+capped entries only, and `src/task-queue.test.ts` holds a Readout admitted past a
+full cap, a Readout still waiting for its own Session, and a Readout admitted
+from the queue while the cap stays full throughout.
+
+**Verified since — that a Readout does not disturb the running cost total.**
+This was not asked before it was built, and it should have been: a Readout's
+terminal event carries `total_cost_usd`, `ClaudeSession` differences that field
+to price a Turn, and rebases its baseline on every terminal event. Measured on
+one process serving a Turn and then a Readout, the total is repeated unchanged —
+`0.211943` before, `0.211943` after — so the Readout prices at exactly zero and
+the baseline does not move. Had it reported zero instead, every Readout would
+have recorded a negative cost and handed the next Task the whole of the process's
+prior spend as its own. `readout-context.jsonl` was captured on a fresh process
+and does say zero, which is why the test that runs a Task first rewrites it with
+`withTotalCostUsd`.
 
 ## Context
 
@@ -284,6 +300,14 @@ marker's rejected alternative could.
 - A Readout leaves nothing in the Operator Log on the happy path and, on a warm
   Session, causes no `spawn` or `evict` either. Its only trace is the Audit
   Record.
+- **`/stop` does not reach a Readout.** The Core tracks Tasks in flight so that
+  `/stop` can mark them, and a Readout is not one — so `/stop` in a Conversation
+  whose only work in flight is a Readout says there was nothing to stop, and the
+  Readout then answers. What that costs is a stale context reading posted after
+  the Task it queued behind, for no money. Closing it means giving a Readout the
+  shape of a running Task, with Attempts it does not have and a park it can never
+  take; that was judged wider than the fault this ADR was written for, and is
+  recorded here rather than left for somebody to find.
 - `/context` output is mostly Markdown tables, and Google Chat is not a Markdown
   renderer. `render.ts` splits at `MAX_TEXT = 4096` rather than truncating, so a
   long one arrives whole across several messages. How it *reads* is the Channel's

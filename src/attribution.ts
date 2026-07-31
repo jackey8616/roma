@@ -40,6 +40,38 @@ export function attributed({ caller, callerName, text }: IngressMessage): string
 }
 
 /**
+ * A Readout with the Caller named *below* it, as Claude Code is given it.
+ *
+ * The one place the marker does not come first, and the exception is the whole
+ * of why roma can relay one of Claude Code's own commands at all. Claude Code
+ * recognises a slash command only when the message begins with the slash, so a
+ * marker written above one turns it into prose: measured on the pinned build,
+ * `<from>…</from>\n\n/context` drives a real Turn and answers with the model's
+ * guess about the command, where the same message the other way round returns
+ * the command's output for nothing. That is the fault ADR-0012 exists to fix,
+ * and it is the reason `attributed` cannot be used here.
+ *
+ * **Safe only because `readReadout` demands an exact whole-message match.** The
+ * rule the marker's placement enforces — see above — is about what follows it
+ * being something a person typed. Here nothing follows it and nothing was
+ * typed: `command` comes from roma's own table, and a message that was not
+ * exactly one of those entries never reaches this function. There is no Caller
+ * text for a forged marker to hide in, so being second costs nothing.
+ *
+ * Attribution is not traded away for it. Claude Code carries what follows the
+ * command into the Transcript as the command's arguments —
+ * `<command-args><from>…</from></command-args>`, measured — so the Caller is
+ * recorded on a Readout exactly as on a Turn. What moves is where the marker
+ * sits in the frame, not whether it is kept.
+ */
+export function attributedReadout(
+  { caller, callerName }: Pick<IngressMessage, 'caller' | 'callerName'>,
+  command: string,
+): string {
+  return `${command}\n\n${OPEN}${named(caller, callerName)}${CLOSE}`
+}
+
+/**
  * Who the marker says asked.
  *
  * A blank name is no name. A Channel is entitled to hand over one — Chat's own

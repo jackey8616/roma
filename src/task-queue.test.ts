@@ -431,3 +431,124 @@ describe('which Task a Session is running', () => {
     await running
   })
 })
+
+describe('running a Readout past the cap', () => {
+  // The cap is argued entirely in terms of model work — retry storms, a bad
+  // credential holding a slot for three minutes. A Readout drives no Turn, so
+  // three people asking what is going on must not be able to stop the work they
+  // are asking about.
+  it('admits an uncapped entry while the cap is full', async () => {
+    const queue = new TaskQueue({ maxConcurrent: 2 })
+    const first = pending()
+    const second = pending()
+    const readout = pending()
+
+    const running = [queue.run(A, first.run), queue.run(B, second.run)]
+    await flush()
+    expect(queue.running).toBe(2)
+
+    const relayed = queue.run(C, readout.run, { uncapped: true })
+    await flush()
+
+    expect(readout.started()).toBe(true)
+
+    readout.finish()
+    first.finish()
+    second.finish()
+    await Promise.all([...running, relayed])
+  })
+
+  // Serialisation is not a choice and does not bend for a Readout: two processes
+  // on one Session's transcript corrupt it, whether or not either drives a Turn.
+  it('still waits for its own Session', async () => {
+    const queue = new TaskQueue()
+    const task = pending()
+    const readout = pending()
+
+    const running = queue.run(A, task.run)
+    await flush()
+
+    const relayed = queue.run(A, readout.run, { uncapped: true })
+    await flush()
+
+    expect(readout.started()).toBe(false)
+
+    task.finish()
+    await running
+    await flush()
+    expect(readout.started()).toBe(true)
+
+    readout.finish()
+    await relayed
+  })
+
+  // What the cap counts is what `running` reports, so a Readout in flight must
+  // not make a Task look like it is using a slot.
+  it('is not counted as a Task while it runs', async () => {
+    const queue = new TaskQueue({ maxConcurrent: 1 })
+    const readout = pending()
+    const task = pending()
+
+    const relayed = queue.run(A, readout.run, { uncapped: true })
+    await flush()
+    expect(queue.running).toBe(0)
+
+    // And the slot it did not take is still there for real work.
+    const running = queue.run(B, task.run)
+    await flush()
+    expect(task.started()).toBe(true)
+    expect(queue.running).toBe(1)
+
+    readout.finish()
+    task.finish()
+    await Promise.all([relayed, running])
+  })
+
+  // A Readout that had to wait for its Session is admitted the moment that
+  // Session frees, even though the cap is still full and stays full. This is
+  // what `#pump` walking its whole waiting list buys: stopping at the cap would
+  // hold every Readout hostage to exactly the busy period they exist to ask
+  // about.
+  //
+  // The Session is occupied by another Readout rather than by a Task, so that
+  // freeing it releases no capped slot and the cap is provably still full when
+  // the waiting one is admitted.
+  it('is admitted while the cap stays full throughout', async () => {
+    const queue = new TaskQueue({ maxConcurrent: 1 })
+    const task = pending()
+    const holdingA = pending()
+    const waitingOnA = pending()
+    const wantsASlot = pending()
+
+    // The cap is full, and nothing in this test ever frees it.
+    const running = queue.run(B, task.run)
+    const held = queue.run(A, holdingA.run, { uncapped: true })
+    await flush()
+    expect(queue.running).toBe(1)
+
+    // One Readout behind a busy Session, and one Task behind a full cap.
+    const waiting = queue.run(A, waitingOnA.run, { uncapped: true })
+    const denied = queue.run(C, wantsASlot.run)
+    await flush()
+    expect(waitingOnA.started()).toBe(false)
+    expect(wantsASlot.started()).toBe(false)
+
+    holdingA.finish()
+    await held
+    await flush()
+
+    expect(waitingOnA.started()).toBe(true)
+    // Still full, and the Task behind it is still waiting — the Readout was
+    // admitted past the cap rather than into a slot that had come free.
+    expect(queue.running).toBe(1)
+    expect(wantsASlot.started()).toBe(false)
+
+    waitingOnA.finish()
+    await waiting
+    task.finish()
+    await running
+    await flush()
+    wantsASlot.finish()
+    await denied
+  })
+})

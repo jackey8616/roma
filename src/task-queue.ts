@@ -43,12 +43,33 @@ export interface About {
    * a question only the queue can answer honestly.
    */
   readonly taskId?: string
+  /**
+   * Serialise this against its key, but do not count it against the cap.
+   *
+   * For a Readout (ADR-0012), and the two halves are answered differently
+   * because they are different rules. Serialisation is forced — two processes
+   * writing one Session file corrupt it, and a Readout needs that Session's
+   * process like anything else — so a Readout queues behind the Session's work
+   * and there is no way around it.
+   *
+   * The cap is a choice, and ADR-0003 argues it entirely in terms of model
+   * work: retry storms holding a slot for three minutes, one bad credential
+   * reaching "bot halted" on its own. A Readout drives no Turn, spends nothing
+   * and cannot storm. Counted, three people asking what is going on could stop
+   * the work they are asking about.
+   *
+   * It does not let processes multiply either: what bounds those is the Session
+   * Pool's `MAX_RESIDENT`, whatever this says.
+   */
+  readonly uncapped?: boolean
 }
 
 interface Waiting {
   readonly key: string
   /** What to record as running under this key once it is admitted. */
   readonly taskId: string | null
+  /** Whether admitting this one is allowed to exceed the cap. */
+  readonly uncapped: boolean
   /**
    * Called once the slot has already been claimed on this Task's behalf, or
    * null while its caller is still being told it is waiting.
@@ -80,16 +101,19 @@ interface Waiting {
 export class TaskQueue {
   readonly #maxConcurrent: number
   /**
-   * The keys with a Task running, and which Task each one is running. Its size
-   * is the number of running Tasks, because a key never holds more than one.
+   * The keys with something running, and what each one is running.
    *
-   * The value is what makes `taskFor` possible, and it is null wherever a caller
+   * Its size is **not** the number of running Tasks any more: a Readout holds a
+   * key without being one (ADR-0012). `running` counts what the cap counts, and
+   * this counts what serialisation counts, which is everything.
+   *
+   * `taskId` is what makes `taskFor` possible, and it is null wherever a caller
    * did not name a Task. Kept here rather than anywhere else because this is the
-   * only thing in roma that already knows a key has exactly one Task at a time —
+   * only thing in roma that already knows a key has exactly one thing at a time —
    * that is the serialisation rule, and asking any other component would mean
    * building a second answer that could disagree with this one.
    */
-  readonly #busy = new Map<string, string | null>()
+  readonly #busy = new Map<string, { readonly taskId: string | null; readonly capped: boolean }>()
   /** In arrival order, which is the order admission considers them in. */
   readonly #waiting: Waiting[] = []
 
@@ -98,9 +122,16 @@ export class TaskQueue {
     this.#maxConcurrent = maxConcurrent
   }
 
-  /** Tasks running right now. */
+  /**
+   * Tasks running right now — what the cap counts, so Readouts are not in it.
+   *
+   * Derived rather than kept as a counter beside the map. The map holds at most
+   * the cap plus however many Readouts are in flight, so counting it is free,
+   * and a counter is one more thing that can drift out of step with the truth it
+   * is describing.
+   */
   get running(): number {
-    return this.#busy.size
+    return [...this.#busy.values()].filter((busy) => busy.capped).length
   }
 
   /** Tasks admitted to the queue and not yet started. */
@@ -119,7 +150,7 @@ export class TaskQueue {
    * same rule the Audit Record applies when it writes a Turn down as unpriced.
    */
   taskFor(key: string): string | null {
-    return this.#busy.get(key) ?? null
+    return this.#busy.get(key)?.taskId ?? null
   }
 
   /**
@@ -134,12 +165,12 @@ export class TaskQueue {
    * should not have to write `undefined` for the first.
    */
   async run<T>(key: string, task: () => Promise<T>, about: About = {}): Promise<T> {
-    const { notice, taskId = null } = about
-    if (!this.#claim(key, taskId)) {
+    const { notice, taskId = null, uncapped = false } = about
+    if (!this.#claim(key, taskId, !uncapped)) {
       // The place in the queue is taken first and the caller told second. The
       // other way round, two Tasks arriving together would each be told they
       // were first, because neither is in the queue yet for the other to count.
-      const entry: Waiting = { key, taskId, admit: null }
+      const entry: Waiting = { key, taskId, uncapped, admit: null }
       this.#waiting.push(entry)
       try {
         await notice?.(this.#waiting.length)
@@ -164,11 +195,17 @@ export class TaskQueue {
     }
   }
 
-  /** Take a slot for `key`, or report that there is not one to take. */
-  #claim(key: string, taskId: string | null): boolean {
-    if (this.#busy.size >= this.#maxConcurrent) return false
+  /**
+   * Take a slot for `key`, or report that there is not one to take.
+   *
+   * The serialisation check applies to everything and the cap check does not:
+   * an uncapped entry still cannot join a key that is busy, because that rule is
+   * about a file two processes must not both write.
+   */
+  #claim(key: string, taskId: string | null, capped: boolean): boolean {
+    if (capped && this.running >= this.#maxConcurrent) return false
     if (this.#busy.has(key)) return false
-    this.#busy.set(key, taskId)
+    this.#busy.set(key, { taskId, capped })
     return true
   }
 
@@ -181,11 +218,17 @@ export class TaskQueue {
    *
    * The slot is claimed here rather than by the Task itself, so that two
    * admissions in one pass cannot both take the last one.
+   *
+   * The whole list is walked rather than stopping once the cap is full: an
+   * uncapped entry behind a full cap is still admissible, and a loop that
+   * stopped there would hold every Readout hostage to exactly the busy period
+   * they exist to ask about. `#claim` is where the two rules are applied, so
+   * this only has to stop deciding for it.
    */
   #pump(): void {
-    for (let i = 0; i < this.#waiting.length && this.#busy.size < this.#maxConcurrent; ) {
+    for (let i = 0; i < this.#waiting.length; ) {
       const next = this.#waiting[i]
-      if (next?.admit == null || !this.#claim(next.key, next.taskId)) {
+      if (next?.admit == null || !this.#claim(next.key, next.taskId, !next.uncapped)) {
         i += 1
         continue
       }

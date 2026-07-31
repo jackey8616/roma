@@ -39,6 +39,14 @@ export interface Turn {
   readonly subtype: string
   readonly stopReason: string | null
   readonly terminalReason: string | null
+  /**
+   * How many model Turns this drove, or null where the event did not say.
+   *
+   * Zero for a message Claude Code answered locally, which is what every entry
+   * on the Readout list does on the pinned build. The Core reads it to notice
+   * when one of them has stopped doing that — see ADR-0012.
+   */
+  readonly turns: number | null
   /** The raw terminal event, for anything this interface does not name. */
   readonly result: ClaudeEvent
 }
@@ -441,6 +449,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
       subtype: result.subtype,
       stopReason: result.stopReason,
       terminalReason: result.terminalReason,
+      turns: result.turns,
       result: event,
     }
 

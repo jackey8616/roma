@@ -24,6 +24,20 @@ export interface TerminalResult {
   readonly cumulativeCostUsd: number | null
   readonly stopReason: string | null
   readonly terminalReason: string | null
+  /**
+   * How many model Turns the message drove — `num_turns`, and zero for a local
+   * command that answered without one.
+   *
+   * Read for the Readout drift check (ADR-0012) and for nothing else. Every
+   * entry on the Readout list answers locally on the pinned build, measured, so
+   * anything above zero means the pin has moved and an entry has quietly become
+   * something that spends money.
+   *
+   * Null where the event carried no count. Not folded into zero: "it drove no
+   * Turn" and "this build does not say" are different facts, and only the first
+   * of them is the one being asserted.
+   */
+  readonly turns: number | null
 }
 
 /** The `system/init` event, reduced to what the startup self-check reads. */
@@ -163,6 +177,7 @@ export function readTerminalResult(event: ClaudeEvent): TerminalResult | null {
     cumulativeCostUsd: asNumber(event['total_cost_usd']),
     stopReason: asString(event['stop_reason']),
     terminalReason: asString(event['terminal_reason']),
+    turns: asNumber(event['num_turns']),
   }
 }
 
