@@ -173,9 +173,19 @@ export function progressText(caller: string, progress: TaskProgress): string {
  *
  * The budget is passed in rather than read off `MAX_TEXT` for the reason `split`
  * gives below — the mention is already spent out of the limit.
+ *
+ * What it promises is exactly `result.length <= budget`, for every budget. Which
+ * is worth stating because the obvious implementation does not: an ellipsis
+ * costs a character, so a budget of nothing answered with `…` is one character
+ * over the one thing this function is for. It cannot make the *message* fit
+ * when the mention alone has spent the limit — nothing here can, and that is the
+ * mention's problem — but it can decline to add to it.
  */
 export function fitted(text: string, budget: number): string {
   if (text.length <= budget) return text
+  // A budget that cannot even hold the ellipsis is answered with nothing rather
+  // than with the ellipsis, so that the promise above holds at both ends.
+  if (budget < 1) return ''
   // Clamped because a negative length reads from the *end* in JavaScript, which
   // is the one input that would turn this from a trim into its own opposite.
   return `${text.slice(0, Math.max(0, budget - 1))}…`
@@ -194,6 +204,12 @@ export function fitted(text: string, budget: number): string {
  * Its distance from `MAX_TEXT` is the point rather than an accident. The two
  * bounds answer different questions: this one asks what can be read at a
  * glance, and `fitted` asks what Chat will accept.
+ *
+ * They count differently for the same reason. `fitted` spends the ellipsis out
+ * of its budget, because that budget is a hard limit somebody else set and one
+ * character over is a message refused. This is a limit roma set for its own
+ * reading, so it counts the command alone and the phrase around it comes to 129
+ * — there is nothing to be one character over.
  */
 const MAX_TOOL_CHARS = 120
 
