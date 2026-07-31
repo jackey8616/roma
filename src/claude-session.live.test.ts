@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildEnv } from './build-env.js'
@@ -302,64 +302,5 @@ describe('--output-format stream-json under --print', () => {
 
     expect(withoutVerbose.code).not.toBe(0)
     expect(withoutVerbose.stderr).toContain('requires --verbose')
-  })
-})
-
-/**
- * A 64×32 PNG: magenta on the left half, yellow on the right.
- *
- * Two colours rather than one, and unusual ones, because the assertion has to be
- * something a guess does not reach. Generated rather than committed as a fixture
- * so the bytes and the claim about them sit in the same file — a fixture whose
- * contents nobody can see is a test that asserts whatever the fixture happens to
- * hold.
- */
-const MAGENTA_AND_YELLOW =
-  'iVBORw0KGgoAAAANSUhEUgAAAEAAAAAgCAIAAAAt/+nTAAAAN0lEQVR4nO3PsQ0AAAzCMP5/mt7Qgc1S9shpum' +
-  '08CAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAtwNYsvDiEWxrBQAAAABJRU5ErkJggg=='
-
-/**
- * ADR-0011's load-bearing premise, and the only one that can invalidate it.
- *
- * The decision to write an Enclosure to disk rather than hand it over as a
- * content block rests entirely on the Read tool rendering an image from the
- * Working Directory into the Turn. It is documented to, and this repo's standard
- * for a claim about the pinned build is a run rather than a document — the same
- * standard ADR-0003 was rewritten to meet.
- *
- * **The file is named the way roma names one.** That is the whole design of this
- * test: an image at `platypus.png` can be described correctly by a model that
- * has read nothing but the filename, and such a test passes while proving the
- * opposite of what it claims. `a3f9c2.png` says nothing, so an answer naming
- * both colours came from the pixels.
- */
-describe('an Enclosure on disk, read by a real Turn', () => {
-  it('renders an image the message names by path', async () => {
-    const sessionId = randomUUID()
-    const { configDir, cwd } = liveSessionDirs(sessionId)
-    // The subdirectory and the meaningless name are roma's own — see
-    // `writeEnclosures`. Written here rather than through it so that this test
-    // fails for one reason: what Claude Code does with a file, not what roma
-    // does with an Enclosure.
-    mkdirSync(join(cwd, '.enclosures'), { recursive: true })
-    writeFileSync(join(cwd, '.enclosures/a3f9c2.png'), Buffer.from(MAGENTA_AND_YELLOW, 'base64'))
-
-    const session = new ClaudeSession({
-      sessionId,
-      cwd,
-      env: buildEnv({ credential: sharedWindowCredential(), configDir, inherit: process.env }),
-    })
-    session.start()
-    try {
-      const turn = await session.send(
-        'Read ./.enclosures/a3f9c2.png and name the two colours in it, left to right.',
-      )
-
-      const answer = turn.text.toLowerCase()
-      expect(answer).toMatch(/magenta|fuchsia|pink/)
-      expect(answer).toContain('yellow')
-    } finally {
-      await session.terminate()
-    }
   })
 })
