@@ -324,13 +324,18 @@ see Shared Window and Overflow), Repository Token (it is scoped to the whole
 Installation and a name should not claim otherwise), GitHub token, PAT, secret
 
 **Minter**:
-The only thing that holds the App's private key, and therefore the only thing
-that can produce an Installation Token. Named because it carries the one
-absolute rule in this area — the private key never enters the space the agent
-can reach — and a term that is the whole of a security property should be a
-term. The Core sees a port for obtaining a credential and nothing else.
+The only thing that holds a long-lived key, and therefore the only thing that can
+produce something short-lived from one: the App's private key and an Installation
+Token, and — where a deployment has a Cloud Reach — the service account key and a
+Cloud Token. Named because it carries the one absolute rule in this area — a
+long-lived key never enters the space the agent can reach — and a term that is the
+whole of a security property should be a term. One term for both because it is one
+rule; what differs is which provider is on the other end, and that is the Minter's
+business and nobody else's. The Core sees a port for obtaining a credential and
+nothing else.
 _Avoid_: token service, credential provider, GitHub client (it is not a general
-client for the product; it does this and nothing else)
+client for the product; it does this and nothing else), and naming one of the two
+keys as *the* private key now that there are two
 
 **Credential Shim**:
 The thin client in the agent's userland that asks the Minter for an Installation
@@ -355,29 +360,43 @@ refused by Google and never by roma. Named here for the reason an Installation
 is: a term that is the whole of a security property should be a term.
 Deliberately **not** the identity roma itself runs on — one that could reach
 roma's own ingress could end roma quietly, and a deployment where those two are
-the same has no boundary at all (ADR-0016). Most deployments have none, and one
-with none has no `gcloud` either: the tool ships in an image of its own
-(ADR-0015), and roma refuses to start holding one without the other.
-_Avoid_: Installation (that is GitHub's, and it is minted against; this one is
-handed over), project (a Reach may span several, and need not include roma's
-own), service account (what it is made of, not what it bounds), permissions,
-scope
+the same has no boundary at all (ADR-0016). Most deployments have none, and a
+deployment with none has no Cloud Shortcut either: the Reach is what there is to
+reach, so without one there is nothing to be handed.
+_Avoid_: Installation (that is GitHub's; the two are the same idea on two
+providers, and saying either for the other hides which one a sentence is about),
+project (a Reach may span several, and need not include roma's own), service
+account (what it is made of, not what it bounds), permissions, scope
 
-**Cloud Key**:
-The credential a Cloud Reach is exercised with, put into the agent's own
-environment rather than kept in roma's. The opposite of an Installation Token in
-every property that one was argued for — static rather than minted, unexpiring
-rather than an hour long, and in an environment the agent can read rather than
-never entering one — and opposite on purpose rather than by oversight. What pays
-for that is the Cloud Reach: nothing bounds what this key is worth except the
-roles behind it, which is why the boundary and not the credential is the term
-that carries the security property (ADR-0016). roma proves it is live once, at boot, and
-then never uses it again — so what a Task did with it is the one thing an Audit
-Record cannot say.
-_Avoid_: Installation Token (the two sit in the same place and are contraries;
-saying either for the other loses the whole trade), Credential (that word is the
-Shared Window's and Overflow's), service account key (Google's name for the
-file, not roma's name for what it hands over), secret
+**Cloud Token**:
+The hour-long credential roma mints so that a Session's work can reach the Cloud
+Reach. The Installation Token's opposite number, and deliberately the same in
+every property that one was argued for: minted at the moment something needs one,
+never put in a process environment — which is fixed at spawn and would be stale
+within the hour — and never written anywhere that outlives the command it was
+made for. What it is minted *from* is the Minter's alone and the agent never sees
+it (ADR-0016). Enough to do the work and not enough to keep: an hour after it
+escapes it is worth nothing.
+_Avoid_: Cloud Key (there is no such term — the thing it is minted from belongs
+to the Minter's definition and to nothing else), Installation Token (that one is
+the other provider's), access token (Google's word for the wire format, not
+roma's for what it hands over), credential (that word is the Shared Window's and
+Overflow's)
+
+**Cloud Shortcut**:
+The one command roma provides for getting a Cloud Token, so that reaching the
+Cloud Reach costs nobody a Turn. Named for what it is rather than for what it
+does: there is a long way round — everything needed to sign a credential and
+exchange it is already in the image, because roma is a Node program (ADR-0015) —
+and this is the short one. It therefore does not have to be complete, and is not: where it
+does not go far enough the agent builds what it needs, which is a use of it
+working as intended rather than a gap in it. Not a Credential Shim: a Shim
+occupies the name of somebody else's tool so that the ordinary path is the
+correct one without anybody choosing it, and this is a command that can simply go
+unused. Like a Shim, it is **not** a boundary — it saves money, and nothing else.
+_Avoid_: Credential Shim (see above), helper (that is `git`'s word, and the
+Shims' to refuse), SDK, client library, wrapper, and describing it as how an
+agent reaches the cloud — it is one way, and the cheap one
 
 ### Paying for it
 
