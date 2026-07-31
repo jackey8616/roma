@@ -142,14 +142,9 @@ as the Operator Log, which is roma's and says something else entirely)
 
 **Working Directory**:
 Where a Session does its work — created empty, and roma still checks nothing out
-into it: the agent clones what it was asked about (ADR-0008). Two things roma
-does put there, and they are different in kind. An Enclosure is somebody else's
-file, which roma only lands (ADR-0011). The other is roma's own words — the
-`CLAUDE.md` naming a Cloud Shortcut where a deployment has one (ADR-0015) — and
-it is the only place roma writes *to* the agent rather than passing on what
-somebody said to it. Written here rather than into the message frame because a
-fact that changes once per Session should not be repeated on every message.
-roma's, unlike the Transcript: roma makes it and
+into it: the agent clones what it was asked about (ADR-0008). The one thing roma
+does put there is an Enclosure, which is not code and came from a person rather
+than from GitHub (ADR-0011). roma's, unlike the Transcript: roma makes it and
 ADR-0003 reclaims it after seven idle days. It is
 named here because it is the Transcript's opposite number and the two are easily
 mistaken for one kind of thing — they sit side by side and have opposite
