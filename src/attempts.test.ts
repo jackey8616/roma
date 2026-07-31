@@ -6,9 +6,14 @@ import { readSharedWindow, type SharedWindow } from './stream-events.js'
 
 /** The real event every capture carries, on a window with room in it. */
 const ALLOWED = readSharedWindow(quotaEvent())!
-/** The same event with its status changed — see `spentUntil` for why this is a guess. */
+/**
+ * The same event with its status changed to the one that means spent.
+ *
+ * `"rejected"`, which is the provider's own word — see `BLOCKED` in
+ * `recorded-stream.ts` for what the invented `"blocked"` this used to say cost.
+ */
 const spent = (fields: Record<string, unknown> = {}): SharedWindow =>
-  readSharedWindow(quotaEvent({ status: 'blocked', ...fields }))!
+  readSharedWindow(quotaEvent({ status: 'rejected', ...fields }))!
 /** When the window in these captures comes back, as its own event reports it. */
 const RESETS_AT = 1785271200
 /** A clock an hour before that, so a park waits on the window rather than on the floor. */

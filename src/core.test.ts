@@ -21,6 +21,7 @@ import { romaFixture, teardownRoma, type RomaFixture } from '../test/support/rom
 import {
   BLOCKED,
   BLOCKED_WITH_OVERAGE,
+  NEARLY_SPENT,
   FAILED,
   FAILED_OUTRIGHT,
   feed,
@@ -1502,6 +1503,34 @@ describe('when the Shared Window is spent', () => {
     leftParked(task)
   })
 
+  // The `allowed_warning` bug, from the Conversation's side. A window that is
+  // close to spent is still serving, so a Turn that failed while it was in
+  // warning failed for its own reasons — and the person is owed that reason
+  // rather than an outage that is not happening, a reset time they will wait
+  // for, and two more silent re-runs of work that is going to fail again.
+  it('reports the real failure when the window was only close to spent', async () => {
+    const { adapter, start } = newCore()
+
+    const { task, proc } = await start('hello')
+    feed(proc, NEARLY_SPENT)
+    await task
+
+    expect(adapter.instructions.filter(({ kind }) => kind === 'blocked')).toEqual([])
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'failure' })
+  })
+
+  // And it is over. Parked, it would have held the Task for the whole window and
+  // run it twice more; the Attempt that failed is the Task's last.
+  it('does not run the Task again when the window was only close to spent', async () => {
+    const { claude, start } = newCore()
+
+    const { task, proc } = await start('hello')
+    feed(proc, NEARLY_SPENT)
+    await task
+
+    expect(claude.process.sent.filter((frame) => frame['type'] === 'user')).toHaveLength(1)
+  })
+
   // Queued rather than dropped, and holding nothing while it waits: a Task
   // parked for three hours that kept its concurrency slot would halt roma with
   // two more like it.
@@ -1574,7 +1603,7 @@ describe('when the Shared Window is spent', () => {
     const { adapter, start } = newCore()
 
     const { task, proc } = await start('hello')
-    feed(proc, [quotaEvent({ status: 'blocked', resetsAt: null }), ...FAILED_OUTRIGHT])
+    feed(proc, [quotaEvent({ status: 'rejected', resetsAt: null }), ...FAILED_OUTRIGHT])
     await task
 
     expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'failure' })
