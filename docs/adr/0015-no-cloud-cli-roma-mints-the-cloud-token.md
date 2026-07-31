@@ -242,29 +242,38 @@ second route to a Cloud Token, because of §3.
 **It is not a boundary.** The agent has a shell and can ignore it. Like a
 Credential Shim (ADR-0008), what it does is make the cheap path the ordinary one.
 
-### 7. The agent learns the Shortcut exists from a `CLAUDE.md` roma writes
+### 7. The agent is told, in the announcement roma already makes
 
 Discovery has to be free, or the tool defeats itself: a `--help` is a Turn, and a
 Session remembers nothing, so it would be a Turn paid once per Session to save
 Turns.
 
-So roma writes a `CLAUDE.md` into the Session's Working Directory naming the
-command and its flags. Claude Code reads it from the working directory and its
-parents automatically, so it survives the agent cloning a repository and working
-inside it, and it costs zero output tokens — it is input, not something the model
-must produce. It is per-Session and dies with the Working Directory, unlike a
-system prompt, and it never touches the message frame that ADR-0009 and ADR-0012
-were spent getting right.
+roma already solves this problem, for the other provider, and the solution says
+so in its own first line — `src/github/announce.ts`:
 
-**Only when there is something to say.** No Cloud Reach, no section, and with
-nothing else to write, no file: an empty `CLAUDE.md` would still be roma putting
-something into a Working Directory, which is an exception that has to be earned.
+> **A capability nobody knows about is a capability nobody has.** Claude Code in
+> an empty directory has no reason to believe it can clone anything, and an agent
+> that explains it has no access instead of trying is the failure this text exists
+> to prevent.
 
-**This is the second thing roma puts there**, and unlike the first it is roma's
-own words. An Enclosure (ADR-0011) is somebody else's file that roma only lands;
-this is roma speaking to the agent directly, and `CONTEXT.md`'s Working Directory
-entry has to say so. The agent may edit or delete it, which is fine for the same
-reason nothing else here is a boundary.
+That text is appended to every Session's system prompt at `startup.ts`, and it
+tells the agent that credentials are present, what they reach, and that there is
+nothing for it to renew or handle. A Cloud Reach needs those same three
+sentences, so it goes in the same place: a sibling announcement, appended when a
+deployment has one and absent when it has not.
+
+**Amended.** This section first decided that roma would write a `CLAUDE.md` into
+the Session's Working Directory, and rejected the system prompt on the grounds
+that it is global where a file could vary per Session. That was written without
+reading `announce.ts`, and it is wrong twice over: the mechanism already exists,
+and a Cloud Reach *is* global — one per deployment, fixed at boot, identical in
+every Session, which is the Installation's shape exactly. Nothing here needed a
+new mechanism, and inventing one would have opened a second exception to
+ADR-0008's "roma checks nothing out" for a fact that does not vary.
+
+What that also buys is a thing that cannot be deleted. A file in the Working
+Directory can be removed by the agent, after which the capability is invisible
+again; the announcement cannot.
 
 ### 8. The key is proved live at boot, by using it
 
@@ -289,7 +298,7 @@ will need, so permission-denied still surfaces inside a Turn.
 ### 9. A Cloud Reach is optional, and its absence is answered rather than refused
 
 No key, no Cloud Reach: roma starts normally, says so once in the Operator Log,
-and writes no Shortcut section into any `CLAUDE.md`. The command is still
+and announces nothing about the cloud to any Session. The command is still
 installed, and answers that this deployment has no Cloud Reach.
 
 Installed rather than omitted because the alternative is `command not found`,
@@ -371,8 +380,9 @@ that misleads forever.
   Conversation cannot have its own, and there is no per-Caller scoping — an
   Installation's property, worth stating because a fresh Session reads like a
   fresh everything.
-- roma now writes into a Working Directory for a second reason, and for the first
-  time writes its own words there rather than landing somebody else's file.
+- Nothing new is put into a Working Directory. An Enclosure remains the only
+  thing roma lands there, and ADR-0008's "roma checks nothing out" keeps its one
+  exception rather than gaining a second.
 - Renaming the deployment identity is a real operation for anybody already
   running roma: a destroyed and recreated service account, re-bound grants, a
   reissued key. Pinning `service_account_id` avoids all of it.
@@ -414,12 +424,16 @@ agent that genuinely wants less a way to have it.
 the cost it was invented to remove: the same signer and the same exchange, paid
 for out of the Shared Window, once per Task that needs Google Cloud.
 
-**Tell the agent about the Shortcut in every message, or in the system prompt.**
-Rejected. ADR-0009 and ADR-0012 fixed the order of what sits above a message and
-what a Readout may carry; adding standing tool documentation to that frame repeats
-it on every message for a fact that changes once per Session. A system prompt is
-better and still global, where a `CLAUDE.md` can differ per deployment and per
-Session and is reclaimed with the Working Directory.
+**Tell the agent about the Shortcut in every message.** Rejected. ADR-0009 and
+ADR-0012 fixed the order of what sits above a message and what a Readout may
+carry; adding standing tool documentation to that frame repeats it on every
+message for a fact that never changes within a deployment at all.
+
+**Write it into a `CLAUDE.md` in the Working Directory.** This section's first
+decision, amended in §7. Rejected once `announce.ts` was read: it invents a
+mechanism roma already has, opens a second exception to ADR-0008's "roma checks
+nothing out", and produces a notice the agent can delete — all to make a
+deployment-wide constant vary per Session.
 
 **Have `infra/` create the Cloud Reach with no roles bound**, as a named
 placeholder. Rejected: it puts the agent's identity in the project holding roma's
