@@ -72,15 +72,30 @@ Turn), author, requester, owner (a Task has no owner — it has somebody who ask
 The line roma writes above every message Claude Code is given, naming that
 message's Caller. Two rules and no others: it is never absent — a message without
 one reads as the same person again, which is the misattribution it exists to
-prevent — and only the first line is roma's, because the rest is what somebody
-typed and anybody can type something that looks like this.
+prevent — and roma's part is the tagged prefix and comes first, because the rest
+is what somebody typed and anybody can type something that looks like this. Said
+as "the tagged prefix" rather than "the first line" because an Enclosure adds a
+second tag above the same message, and a rule counting lines would have to be
+restated every time one is added.
 _Avoid_: prefix, header, tag, and using this for the @-mention in a reply — that
 one is the Channel's way of addressing a person and is not this
 
 **Ingress Message**:
-What an Adapter hands the Core: a Conversation Key, a Caller, and the text.
-Everything else the Channel knew is gone by this point.
+What an Adapter hands the Core: a Conversation Key, a Caller, the text, and any
+Enclosures. Everything else the Channel knew is gone by this point.
 _Avoid_: event, payload, request
+
+**Enclosure**:
+Something sent along with a message rather than typed into it — a pasted
+screenshot, a log file. roma writes it into the Working Directory under a name
+roma chose and tells the agent where it is; what the sender called it travels
+beside the path as a string and is never made into one, which is the whole of why
+a filename nobody vetted is safe to carry (ADR-0011). A message with one is a
+request whether or not it has any text: what is not a request is a message with
+nothing in it at all.
+_Avoid_: attachment (that is the Channel's word for the thing upstream, and the
+two are not the same object — an Enclosure is named by roma and the Channel's is
+not), file (so is everything else in a Working Directory), upload, payload
 
 **Outbound Instruction**:
 What the Core hands back to an Adapter — the result of a Task, why there isn't
@@ -126,9 +141,11 @@ _Avoid_: history, session file, event log, and the bare word "log" (that reads
 as the Operator Log, which is roma's and says something else entirely)
 
 **Working Directory**:
-Where a Session does its work — created empty, because roma checks nothing out
-into it: the agent clones what it was asked about (ADR-0008). roma's, unlike the
-Transcript: roma makes it and ADR-0003 reclaims it after seven idle days. It is
+Where a Session does its work — created empty, and roma still checks nothing out
+into it: the agent clones what it was asked about (ADR-0008). The one thing roma
+does put there is an Enclosure, which is not code and came from a person rather
+than from GitHub (ADR-0011). roma's, unlike the Transcript: roma makes it and
+ADR-0003 reclaims it after seven idle days. It is
 named here because it is the Transcript's opposite number and the two are easily
 mistaken for one kind of thing — they sit side by side and have opposite
 lifetimes, because losing the other destroys the only account there is of what an
