@@ -1,6 +1,17 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { MENU } from './model-menu.js'
 import { sessionIdFor } from './session-id.js'
+
+/**
+ * The two things roma remembers about a Conversation, in one place.
+ *
+ * Which Session it is on, and — since ADR-0014 — which model that Session runs
+ * on. They are here together because they are the same trick and share the same
+ * three rules: a record in the work root, a file rather than a directory, and a
+ * missing one meaning "almost every Conversation" rather than "something is
+ * wrong". Everything else roma knows is derived or is Claude Code's.
+ */
 
 /**
  * What a record of a Conversation's generation is called, next to the working
@@ -15,8 +26,34 @@ import { sessionIdFor } from './session-id.js'
  */
 const SUFFIX = '.generation'
 
+/**
+ * What a record of a Session's Chosen Model is called, beside the generations.
+ *
+ * A file for the same reason, and the stakes are the same shape: reclaimed, a
+ * Conversation that went quiet for seven days would come back on the Pinned Model
+ * having asked for something else, at a moment nobody can observe.
+ */
+const MODEL_SUFFIX = '.model'
+
 /** A generation as it is written down: a whole count and nothing else. */
 const COUNT = /^\d+$/
+
+/**
+ * Every model a record may name: the Menu's own, and nothing else.
+ *
+ * A membership test rather than a pattern, and for one reason now rather than
+ * two. It used to also stand in for a torn line — what a machine that lost power
+ * mid-write leaves — and `writeRecord` has since made that state unreachable
+ * rather than detected. What is left is the reason this could never have been a
+ * pattern anyway: a name roma has *stopped* offering. Removing a Menu entry
+ * should be a change somebody notices, and a record quietly passed through to
+ * `--model` would let a Session go on running on something the Menu no longer
+ * stands behind.
+ *
+ * Nothing else can get in here: the only thing that writes a record is a `/model`
+ * whose argument was on the Menu.
+ */
+const OFFERED = new Set(Object.values(MENU))
 
 /**
  * Whether a read failed because there is nothing there, rather than because
@@ -28,6 +65,35 @@ const COUNT = /^\d+$/
  */
 function isMissing(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT'
+}
+
+/**
+ * Write one record so that nothing can ever read half of it.
+ *
+ * Both readers here refuse a record they cannot make sense of rather than
+ * guessing at one — a generation that is not a count, a model that is not on the
+ * Menu — and both are right to. That is not the same as the state being
+ * unreachable: a `writeFileSync` onto the live name leaves a third thing a
+ * reader can observe besides the old contents and the new, and a machine that
+ * loses power mid-write is what produces it. What the Conversation gets is a
+ * thread that stops working for a write nobody got wrong.
+ *
+ * A rename within one directory is atomic, so a reader sees the old record or
+ * the new one and never a part of either. The temporary name is in that same
+ * directory for exactly that reason: across filesystems a rename is a copy, and
+ * a copy is the thing being avoided.
+ *
+ * What it can leave behind is a `.pending` file, where the power went between
+ * the write and the rename. It is bounded — one per record, overwritten by the
+ * next attempt — and it is not a record: nothing reads that name, and the
+ * reclaim sweep steps over files as it does over the records themselves. Litter
+ * of the same kind ADR-0014 already accepts, in exchange for a state no reader
+ * has to be defended against.
+ */
+function writeRecord(path: string, contents: string): void {
+  const pending = `${path}.pending`
+  writeFileSync(pending, contents, 'utf8')
+  renameSync(pending, path)
 }
 
 export interface SessionGenerationsOptions {
@@ -89,7 +155,7 @@ export class SessionGenerations {
     // Session for is refused before anything is written down.
     const sessionId = sessionIdFor(conversationKey, generation)
     mkdirSync(this.#workRoot, { recursive: true })
-    writeFileSync(this.#recordFor(conversationKey), String(generation), 'utf8')
+    writeRecord(this.#recordFor(conversationKey), String(generation))
     return sessionId
   }
 
@@ -137,5 +203,168 @@ export class SessionGenerations {
    */
   #recordFor(conversationKey: string): string {
     return join(this.#workRoot, `${sessionIdFor(conversationKey)}${SUFFIX}`)
+  }
+}
+
+/**
+ * A Session's Chosen Model record names something roma does not offer.
+ *
+ * Its own type because this is the one failure here a *Caller* can clear, and
+ * they can only do it if somebody tells them how. Refusing to guess is right —
+ * see `OFFERED` — but a refusal that surfaces as "roma could not run this Task"
+ * on every message is loud in the log and silent in the thread, which is not
+ * what story 38 asked for when it asked that removing a Menu entry be noticed.
+ *
+ * `/model default` is the way out and does not read the record at all, so the
+ * sentence the Core builds from this can promise it. Clearing the Conversation
+ * works too, by moving the Session id past the record entirely.
+ */
+export class ChosenModelNotOffered extends Error {
+  constructor(readonly model: string) {
+    super(`the Chosen Model for this Session is not one roma offers: ${model}`)
+    this.name = 'ChosenModelNotOffered'
+  }
+}
+
+export interface ChosenModelsOptions {
+  /** The same directory the generations are kept in, for the same reasons. */
+  readonly workRoot: string
+  /**
+   * What a Session runs on when nobody has said otherwise — whatever `ROMA_MODEL`
+   * resolved to for this deployment.
+   *
+   * Held here rather than looked up by each caller, so that "which model is this
+   * Session on" has one answer and `/model default` returns to what the
+   * deployment actually pinned rather than to a name written down somewhere else.
+   */
+  readonly pinnedModel: string
+}
+
+/**
+ * Which model each Session runs on, and how somebody changes it.
+ *
+ * roma's rather than the process's, and that is the whole decision (ADR-0014). A
+ * model handed to a process lives and dies with it: `--model` is fixed at spawn,
+ * and processes end for reasons — Eviction, Reaping, a deploy — that `CONTEXT.md`
+ * defines as unobservable to the person using the Session. A choice kept there
+ * would be a setting that reverts at a moment nobody can see.
+ *
+ * **Keyed by the Session id, not by the Conversation Key**, and the difference is
+ * how reverting works. The Session id derives from the Conversation Key and the
+ * Session Generation, and the reset Command moves the generation — so a cleared
+ * Conversation asks about a Session id that has no record and is on the Pinned
+ * Model, without anything being deleted. Reverting is arithmetic rather than an
+ * action somebody has to remember to perform, and forgetting that action is
+ * exactly the failure this feature exists to prevent: the context cleared and the
+ * model still Opus.
+ *
+ * The price is litter. Every reset leaves a record under a Session id nothing
+ * will use again, and records are never reclaimed — which is what keeps
+ * generations safe — so this accumulates at tens of bytes per reset forever.
+ * Accepted over a deletion that has to be remembered.
+ *
+ * Not in the Working Directory: the agent clones into it and runs `git add -A`
+ * there (ADR-0008), and it is reclaimed after seven idle days. Either one is
+ * disqualifying on its own.
+ */
+export class ChosenModels {
+  readonly #workRoot: string
+  readonly #pinnedModel: string
+
+  constructor({ workRoot, pinnedModel }: ChosenModelsOptions) {
+    this.#workRoot = workRoot
+    this.#pinnedModel = pinnedModel
+  }
+
+  /** What a Session runs on when nobody has chosen anything. */
+  get pinnedModel(): string {
+    return this.#pinnedModel
+  }
+
+  /**
+   * The model this Session runs on: its Chosen Model, or the Pinned Model.
+   *
+   * The Pinned Model for almost every Session, and that is not written down — a
+   * Session nobody has moved is one that has left no record, so the answer stands
+   * on its own for everybody who never asked for anything else.
+   *
+   * Anything else on disk is an error rather than a reason to fall back, for the
+   * reason a generation's is: falling back means running on a model nobody chose
+   * and billing the Shared Window for it, with the only evidence being answers
+   * that read as if they came from somewhere else.
+   */
+  modelFor(sessionId: string): string {
+    return this.chosenFor(sessionId) ?? this.#pinnedModel
+  }
+
+  /**
+   * The model this Session was moved to, or null where nobody moved it.
+   *
+   * The distinction `modelFor` collapses, kept because saying which model a
+   * Session is on needs it and running a Turn does not. A Session with no record
+   * *follows* the Pinned Model; a Session whose record happens to name the same
+   * model does not follow anything. They are one string today and two the moment
+   * an operator moves `ROMA_MODEL`, and a report that called both of them
+   * "default" would be telling somebody who typed `/model sonnet` that they are
+   * on whatever the deployment picks next.
+   */
+  chosenFor(sessionId: string): string | null {
+    let record: string
+    try {
+      record = readFileSync(this.#recordFor(sessionId), 'utf8')
+    } catch (error) {
+      // Only "there is no record" — which is almost every Session. Every other
+      // way a read fails describes a record that may well exist and cannot be
+      // read, and answering the Pinned Model to those is a Chosen Model
+      // disappearing silently.
+      if (isMissing(error)) return null
+      throw error
+    }
+    const written = record.trim()
+    if (!OFFERED.has(written)) throw new ChosenModelNotOffered(written)
+    return written
+  }
+
+  /**
+   * Put this Session on one of the Menu's models.
+   *
+   * Nothing is torn down and nothing is checked against a running process: this
+   * is aimed at what the *next* message reaches, and the Session Pool is what
+   * maintains the invariant that a Turn runs on the model its Session is on.
+   */
+  choose(sessionId: string, model: string): void {
+    mkdirSync(this.#workRoot, { recursive: true })
+    writeRecord(this.#recordFor(sessionId), model)
+  }
+
+  /**
+   * Put this Session back on the Pinned Model.
+   *
+   * Forgetting the record rather than writing the pinned name into it, and the
+   * difference shows the day a deployment moves `ROMA_MODEL`: a Session that
+   * asked for "default" must follow that move, and one carrying a literal would
+   * be stranded on the model roma used to run.
+   *
+   * The same state a fresh Session is in, which is the point — `/model default`
+   * and the reset Command leave a Conversation in exactly one place.
+   */
+  usePinnedModel(sessionId: string): void {
+    // `force` for the Session nobody ever moved, where there is nothing to
+    // delete and that is the state being asked for. Deliberately not
+    // `recursive`: a directory where the record should be is something roma did
+    // not put there and cannot read, so this throws rather than quietly removing
+    // it — and the Command answers that it failed instead of saying it moved a
+    // Session it did not.
+    rmSync(this.#recordFor(sessionId), { force: true })
+  }
+
+  /**
+   * Where a Session's Chosen Model is written, named after the Session itself.
+   *
+   * Beside the generation records, so everything roma remembers about a
+   * Conversation is in one directory a deployment has to mount.
+   */
+  #recordFor(sessionId: string): string {
+    return join(this.#workRoot, `${sessionId}${MODEL_SUFFIX}`)
   }
 }

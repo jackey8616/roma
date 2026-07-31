@@ -8,6 +8,15 @@
  * defined by one build's behaviour is a term that turns false on somebody else's
  * release, and `shared-window.ts` is already a case of that.
  *
+ * **This list is a person's judgement about Claude Code 2.1.220** — the ADR-0007
+ * pin, and the build every entry below was measured on. The version is named here
+ * so the drift report's working-tree sweep lists this file under what rests on
+ * the pin, which is what ADR-0012 left open: "roma now has a list that must be
+ * re-audited whenever the ADR-0007 pin moves. Nothing enforces that." It still
+ * does not enforce it. What changes is that the re-audit list stops being
+ * something somebody has to remember and becomes something the report prints.
+ * `src/model-menu.ts` carries the same line for the same reason.
+ *
  * **The membership rule: read-only, non-interactive, drives no Turn, changes no
  * state of the Session or of Claude Code.** Applied by a person, and re-applied
  * whenever the ADR-0007 pin moves — nothing in the stream marks a command as
@@ -24,11 +33,14 @@
  * that does not work until somebody puts it here. It fails closed. The pool a
  * denylist would have to keep up with is populated and dangerous — `/clear`
  * moves Claude Code to a session roma does not know about, `/model` takes a
- * Session off the pinned model, `/config` sets anything at all — and every one
- * of those is free and non-interactive on the pinned build.
+ * Session off the model roma believes it is on, `/config` sets anything at all —
+ * and every one of those is free and non-interactive on the pinned build.
  *
- * `/clear` is out of reach twice over since ADR-0013: it is one of roma's own
- * Commands now, and the Core reads a Command before it consults this list.
+ * `/clear` is out of reach twice over since ADR-0013, and `/model` since
+ * ADR-0014: both are roma's own Commands now, and the Core reads a Command before
+ * it consults this list. `/model` is the sharper of the two — relayed, the choice
+ * would live in a process that ends at Eviction, so what a Caller would get is a
+ * setting that reverts at a moment they cannot see rather than model switching.
  */
 const READOUTS: readonly string[] = [
   // Show current context usage: how full this Session's context window is.
