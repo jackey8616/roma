@@ -4,7 +4,7 @@ Date: 2026-07-30
 
 ## Status
 
-Accepted. Nothing implements it yet; #73 is the work.
+Accepted, and implemented in #92. What is still unverified is #93.
 
 Extends ADR-0003's inbound contract, which reduced a Channel event to "a key, an
 identity, and some text". The reduction stands; what changes is that *some text*
@@ -19,7 +19,7 @@ fetched from GitHub; it is what somebody sent.
 
 ### Verification status
 
-One premise is verified and two are not, and the difference matters enough to
+Two premises are verified and one is not, and the difference matters enough to
 say before the decision rather than after it.
 
 **Verified**: everything this ADR claims about roma. `toIngress` is synchronous
@@ -28,10 +28,13 @@ Session id is the Core's (`session-pool.ts:507`), the text handed to Claude Code
 is one `text` content block (`claude-session.ts:313`), and a message whose text
 is empty is dropped without an answer (`chat-events.ts:86`).
 
-**Not verified**: that Claude Code's Read tool renders an image from disk into
-the Turn. It is documented to and the whole decision rests on it, so it belongs
-in `src/claude-session.live.test.ts` — the seam 2 tests exist for claims about
-the pinned build that cannot be settled by reading.
+**Verified**: that Claude Code's Read tool renders an image from disk into the
+Turn — measured on the pinned build, not read in the documentation
+(`docs/enclosure-read-verification.md`, Claude Code v2.1.220). It is
+`src/claude-session.live.test.ts` rather than a capture, so it re-runs when the
+pin moves. The run also settled something this ADR argued for rather than
+measured: given the marker and no instruction to open anything, the agent went
+and read the file.
 
 **Not verified**: that roma can obtain the bytes from Google Chat at all. An
 attachment arrives as one of two things, and they are not equally reachable —
@@ -77,8 +80,9 @@ Working Directory, under a name roma chose.**
 Claude Code's stream-json input takes content blocks, so an image could be handed
 over as one and never touch a disk. It is not, because a content block serves
 images and nothing else. A 40MB log cannot be one; a file can be, and Claude
-Code's Read tool renders an image as readily as it reads text. One mechanism
-covers what people actually send.
+Code's Read tool renders an image as readily as it reads text — measured, on the
+pinned build (`docs/enclosure-read-verification.md`). One mechanism covers what
+people actually send.
 
 The second reason is that a file can be worked on. An image in a content block
 can be looked at. An Enclosure on disk can be cropped, diffed, grepped, and fed
@@ -208,7 +212,8 @@ Caller is told, in the Conversation, with the reason.
 images and not the log file that is the next thing somebody sends, and it leaves
 the agent able to look and not to work. It also rests on an unverified property
 of the pinned build — that stream-json input accepts image blocks — where the
-file route rests on the Read tool, which is at least documented to do this.
+file route rests on the Read tool, which is now measured to do this
+(`docs/enclosure-read-verification.md`).
 
 **Let the Adapter write the file and put a path in `text`, changing no Core
 type.** Rejected on a fact: the Working Directory is `join(workRoot, sessionId)`,
