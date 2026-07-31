@@ -1093,10 +1093,16 @@ describe('the two Commands roma answers itself', () => {
     })
   })
 
-  // Claude Code's own slash commands are work, and there are more of them every
-  // release. roma interpreting anything beyond its two would quietly swallow one
-  // of them — and the person would never find out which.
-  it('interprets no command string but those two', async () => {
+  // Claude Code's own slash commands are work unless they are on the Readout
+  // list, and `/clear` is deliberately not: it would move Claude Code to a
+  // session roma does not know about, leaving the next `--resume` pointed at one
+  // roma believes in and Claude Code has left. `/new` is how a Conversation
+  // makes that move, through the one piece of state that records it.
+  //
+  // So this still goes through as work, marker first — which is also what it
+  // looks like when a Readout is *not* recognised, and is the fault ADR-0012
+  // describes. For `/clear` that outcome is the intended one.
+  it('interprets no command string but its own two and the Readout list', async () => {
     const { adapter, claude, say } = newCore()
 
     await say('/clear')
@@ -1969,3 +1975,175 @@ const CHANNEL_SPECIFIC = [
 function coreSources(): Source[] {
   return sources().filter(({ file }) => !file.split(sep).includes('channels'))
 }
+
+/**
+ * A real relayed `/context`, captured on the pinned build.
+ *
+ * `num_turns: 0` and `total_cost_usd: 0` — the command answered locally and the
+ * model was never called. See the fixture README for how it was taken.
+ */
+const READOUT = recordedStream('readout-context').turn(1)
+
+/**
+ * What `OK` — one recorded Turn — leaves on its process's running total.
+ *
+ * Read off the capture rather than written down beside it. The recorded value is
+ * `0.010312900000000002`, and a transcribed `0.0103129` is a different double:
+ * the difference turns up as a Readout that cost -1.7e-18.
+ *
+ * Its own reading of the field rather than `readTerminalResult`'s, for the
+ * reason `kindOf` gives: a test that located its fixtures with the code under
+ * test would agree with it about the field names by construction.
+ */
+const TASK_COST = totalCostOf(OK)
+
+function totalCostOf(events: readonly ClaudeEvent[]): number {
+  const total = events.at(-1)?.['total_cost_usd']
+  if (typeof total !== 'number') throw new Error('that capture does not end on a priced result')
+  return total
+}
+
+/** The same, if the pinned version moved and the command started driving a Turn. */
+const READOUT_DRIFTED = READOUT.map((event) =>
+  event.type === 'result' ? { ...event, num_turns: 1, total_cost_usd: 0.0549 } : event,
+)
+
+describe('relaying a Readout', () => {
+  // The fault ADR-0012 exists to fix, from the other side. With the marker on
+  // top the frame does not begin with a slash, Claude Code sees prose, and the
+  // Caller is billed for the model's guess about what the command would say.
+  it('sends the command first and the Caller after it', async () => {
+    const { claude, say } = newCore()
+
+    await say('/context', { events: READOUT })
+
+    expect(claude.process.sent.at(-1)).toMatchObject({
+      type: 'user',
+      message: { content: [{ text: '/context\n\n<from>Ada (users/17)</from>' }] },
+    })
+  })
+
+  it('sends the spelling roma chose, not the one that was typed', async () => {
+    const { claude, say } = newCore()
+
+    await say('  /CONTEXT ', { events: READOUT })
+
+    expect(claude.process.sent.at(-1)).toMatchObject({
+      message: { content: [{ text: '/context\n\n<from>Ada (users/17)</from>' }] },
+    })
+  })
+
+  // What the Caller asked for: Claude Code's own reading, relayed. Posted as its
+  // own message like any result, because that is what it is.
+  it('posts what Claude Code said', async () => {
+    const { adapter, say } = newCore()
+
+    await say('/context', { events: READOUT })
+
+    const last = posted(adapter.instructions).at(-1)
+    expect(last).toMatchObject({ kind: 'result', conversationKey: KEY })
+    expect((last as { text: string }).text).toContain('Context Usage')
+  })
+
+  // Recorded because the list it came from is a person's judgement and can be
+  // wrong. Told apart from a Task because "how much work did this month ask
+  // for" and "how many messages were sent" are different questions.
+  it('is written down, as a Readout rather than as a Task', async () => {
+    const { audit, say } = newCore()
+
+    await say('hello')
+    // The capture was taken on a fresh process, so its terminal event reports a
+    // Session total of 0 — and this Readout is the second thing its process has
+    // served. Measured on the pinned build, a Readout repeats the total it was
+    // given rather than resetting it (0.211943 before, 0.211943 after), because
+    // it spends nothing. Left at the capture's own 0 the delta would come out
+    // negative, which is the splice showing rather than anything roma does.
+    await say('/context', { events: withTotalCostUsd(READOUT, TASK_COST) })
+
+    const records = recordsIn(audit)
+    expect(records.map((record) => record.kind)).toEqual([undefined, 'readout'])
+    expect(records.at(-1)).toMatchObject({
+      kind: 'readout',
+      caller: 'users/17',
+      callerName: 'Ada',
+      outcome: 'result',
+      costUsd: 0,
+      credential: 'shared-window',
+    })
+    expect(audit.totalFor(MONTH)).toMatchObject({ tasks: 1, readouts: 1 })
+  })
+
+  // ADR-0010's rule, applied to something that answers in milliseconds: an
+  // acknowledgement here would be posted and superseded in the same breath.
+  it('says nothing first when the Session already has a process', async () => {
+    const { adapter, say } = newCore()
+
+    await say('hello')
+    const before = progressOf(adapter).length
+
+    await say('/context', { events: READOUT })
+
+    expect(progressOf(adapter).length).toBe(before)
+  })
+
+  // The other half of the same rule. A Readout is serialised against its
+  // Session — forced, because two processes on one transcript corrupt it — so it
+  // can wait behind a five-minute Task, and ADR-0003's case for the cap is that
+  // unacknowledged waiting makes people resend.
+  it('says it is waiting when the Session is busy', async () => {
+    const { adapter, procFor, start, core, claude } = newCore()
+
+    const { task } = await start('a long one')
+
+    const readout = core.handle(ingress('/context'))
+    await flush()
+
+    expect(queuedIn(adapter)).toHaveLength(1)
+
+    feed(procFor(KEY), OK)
+    await task
+    await flush()
+    feed(claude.process, READOUT)
+    await readout
+  })
+
+  // The drift check. Nothing on the list may drive a Turn, and one that did
+  // means the ADR-0007 pin has moved under roma and the entry is now spending
+  // money. Said where an operator looks, not to the Caller — they asked a
+  // question and got an answer; what is wrong is roma's list.
+  it('tells an operator when a Readout drove a Turn', async () => {
+    const { adapter, log, say } = newCore()
+
+    await say('/context', { events: READOUT_DRIFTED })
+
+    expect(log).toEqual([
+      {
+        event: 'readout-drove-turn',
+        taskId: expect.any(String),
+        command: '/context',
+        turns: 1,
+        costUsd: 0.0549,
+      },
+    ])
+    // Still answered. The Caller is not made to care about roma's bookkeeping.
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'result' })
+  })
+
+  it('says nothing to an operator about a Readout that behaved', async () => {
+    const { log, say } = newCore()
+
+    await say('/context', { events: READOUT })
+
+    expect(log).toEqual([])
+  })
+
+  // And the money lands in the month either way, which is what recording it was
+  // insurance for.
+  it('puts a drifted Readout’s cost into the month', async () => {
+    const { audit, say } = newCore()
+
+    await say('/context', { events: READOUT_DRIFTED })
+
+    expect(audit.totalFor(MONTH)).toMatchObject({ tasks: 0, readouts: 1, costUsd: 0.0549 })
+  })
+})

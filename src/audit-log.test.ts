@@ -56,6 +56,7 @@ describe('what a Task leaves behind', () => {
     expect(new AuditLog({ auditRoot: dir }).totalFor(MONTH)).toEqual({
       month: MONTH,
       tasks: 1,
+      readouts: 0,
       costUsd: 0.0103129,
       unpriced: 0,
       unreadable: 0,
@@ -123,6 +124,7 @@ describe('adding a calendar month up', () => {
     expect(log.totalFor('2019-04')).toEqual({
       month: '2019-04',
       tasks: 0,
+      readouts: 0,
       costUsd: 0,
       unpriced: 0,
       unreadable: 0,
@@ -281,6 +283,74 @@ describe('a record that cannot be written', () => {
     expect(JSON.parse(written[0] ?? '')).toMatchObject({
       event: 'audit-write-failed',
       record: { taskId: 'task-one' },
+    })
+  })
+})
+
+describe('telling a Readout from a Task', () => {
+  // The reason the field exists. Folded into `tasks`, a Conversation where
+  // somebody checked `/context` forty times reads as forty Tasks.
+  it('counts them apart', () => {
+    const log = new AuditLog({ auditRoot: newDir() })
+
+    log.record(entry())
+    log.record(entry({ kind: 'readout', taskId: 'readout-one', costUsd: 0 }))
+    log.record(entry({ kind: 'readout', taskId: 'readout-two', costUsd: 0 }))
+
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, readouts: 2 })
+  })
+
+  // A record written before ADR-0012 has no kind and can only ever have been a
+  // Task. It must still be readable: `readRecord` drops what it cannot read, and
+  // a dropped line leaves the month the Overflow cap is enforced against.
+  it('reads a record with no kind as a Task', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry())
+
+    const [record] = log.readMonth(MONTH)
+    expect(record?.kind).toBeUndefined()
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, readouts: 0, unreadable: 0 })
+  })
+
+  it('keeps the kind across a restart', () => {
+    const dir = newDir()
+    new AuditLog({ auditRoot: dir }).record(entry({ kind: 'readout', costUsd: 0 }))
+
+    const [record] = new AuditLog({ auditRoot: dir }).readMonth(MONTH)
+    expect(record?.kind).toBe('readout')
+  })
+
+  // A kind this version cannot name is unreadable rather than assumed to be a
+  // Task. Guessing would defeat the whole point of the field — one kind read as
+  // the other is exactly what it exists to prevent — and an unreadable line is
+  // reported, where a wrong one is not.
+  it('refuses a kind it does not know', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry())
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), kind: 'something-later', at: new Date().toISOString() })}\n`,
+    )
+
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, readouts: 0, unreadable: 1 })
+  })
+
+  // What the record is insurance against. Nothing on the Readout list spends
+  // money on the pinned build, but the list is a person's judgement — so a cost
+  // that turns up on one is summed like any other, into the figure the Overflow
+  // cap is enforced on.
+  it('puts what a Readout spent into the month, if it ever spends anything', () => {
+    const log = new AuditLog({ auditRoot: newDir() })
+
+    log.record(entry({ costUsd: 0.01 }))
+    log.record(entry({ kind: 'readout', taskId: 'drifted', costUsd: 0.05 }))
+
+    expect(log.totalFor(MONTH)).toMatchObject({
+      tasks: 1,
+      readouts: 1,
+      costUsd: 0.060000000000000005,
     })
   })
 })

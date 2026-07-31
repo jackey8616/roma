@@ -25,11 +25,28 @@ are computed from it.
 | `generation-partial-messages.jsonl` | `q5-A-gen-flag-on-96264fb0.jsonl` | `q5.mjs` | A 72-second pure-generation Turn with `--include-partial-messages` on: 209 events, worst gap 2641ms, and the complete 17706-character answer arriving *again* as its own `assistant` event before the terminal result. |
 | `generation-no-partial-messages.jsonl` | `q5-B-gen-flag-off-06bce022.jsonl` | `q5.mjs` | The control for the above, same prompt with the flag off: 6 events, the whole answer after 66747ms of dead stream. |
 | `tool-use-partial-messages.jsonl` | `q5-C-tool-flag-on-c2ac815b.jsonl` | `q5.mjs` | A tool-using Turn with the flag on — 25339ms of silence while the tool ran, against a largest generating gap of 208ms. |
+| `readout-context.jsonl` | captured for ADR-0012 | — | A Readout: `/context` with the Caller Marker written *after* it, relayed exactly as roma relays one. `num_turns: 0` and `total_cost_usd: 0` — the command answered locally and the model was never called — with the command's own output as `result`. What the marker-first version does instead is a real Turn at $0.0549, which is the fault ADR-0012 exists to fix. |
 
 `tool-use-turn.jsonl` and `generation-no-partial-messages.jsonl` are not
 exercised by any test. They are the flag-off world, which roma does not run in —
 kept as the control the flag-on captures are read against, and because
 regenerating them means spending the Shared Window again.
+
+`readout-context.jsonl` is the one capture that did **not** come from the
+prototype's mac. It was taken in a Claude Code cloud container on the same
+pinned build, driving the same invocation roma spawns — `-p --input-format
+stream-json --output-format stream-json --verbose --include-partial-messages
+--replay-user-messages --session-id`, with the message written to stdin as a
+`{type:'user'}` frame — and it is unedited like the rest. Two consequences worth
+knowing before reading it: it carries no `_t`, because that field was the
+prototype driver's and this was captured by piping stdout; and its
+`system/commands_changed` event is 15KB of *that container's* skills and MCP
+tools, which roma's own container does not have. Nothing roma reads comes from
+either, and it is left in because editing a capture is how a fixture stops being
+evidence.
+
+This is also the only capture that cost nothing to take, which is the whole
+point of it: a Readout drives no Turn.
 
 Behaviour is version-specific. A capture is evidence about v2.1.220 and nothing
 else; re-verify before the pinned version moves.

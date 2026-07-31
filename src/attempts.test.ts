@@ -29,6 +29,7 @@ function turn(fields: Partial<Turn> = {}): Turn {
     subtype: 'success',
     stopReason: null,
     terminalReason: null,
+    turns: 1,
     result: { type: 'result' },
     ...fields,
   }

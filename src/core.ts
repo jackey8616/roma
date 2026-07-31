@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Attempts, waitMsUntil } from './attempts.js'
 import { monthOf, type AuditLog, type TaskOutcome } from './audit-log.js'
 import type { CredentialKind } from './build-env.js'
-import { attributed } from './attribution.js'
+import { attributed, attributedReadout } from './attribution.js'
 import type {
   ChannelAdapter,
   IngressMessage,
@@ -11,6 +11,7 @@ import type {
 } from './channel-adapter.js'
 import { TurnFailedError, wasInterrupted, type Turn } from './claude-session.js'
 import { readCommand, type Command } from './commands.js'
+import { readReadout } from './readouts.js'
 import { ProgressReporter } from './progress-reporter.js'
 import type { SessionGenerations } from './session-generation.js'
 import { writeToStderr, type OperatorLog } from './operator-log.js'
@@ -35,27 +36,51 @@ export interface OverflowOptions {
 }
 
 /** One thing the Core did that an operator, rather than a Conversation, needs. */
-export type CoreLogRecord = {
-  /**
-   * Overflow was asked for and the monthly cap refused it.
-   *
-   * How the owner finds out, and the only place the numbers behind the refusal
-   * are written down: the person who asked is told they were refused, but a
-   * month that has spent its budget is not theirs to act on.
-   */
-  readonly event: 'overflow-refused'
-  readonly taskId: string
-  readonly month: string
-  readonly capUsd: number
-  readonly spentUsd: number
-  /**
-   * How much of that month's total is a floor rather than a figure — Tasks
-   * nothing priced, and records that could not be read. Above zero, roma refused
-   * on a number it knows to be an understatement.
-   */
-  readonly unpriced: number
-  readonly unreadable: number
-}
+export type CoreLogRecord =
+  | {
+      /**
+       * Overflow was asked for and the monthly cap refused it.
+       *
+       * How the owner finds out, and the only place the numbers behind the
+       * refusal are written down: the person who asked is told they were
+       * refused, but a month that has spent its budget is not theirs to act on.
+       */
+      readonly event: 'overflow-refused'
+      readonly taskId: string
+      readonly month: string
+      readonly capUsd: number
+      readonly spentUsd: number
+      /**
+       * How much of that month's total is a floor rather than a figure — Tasks
+       * nothing priced, and records that could not be read. Above zero, roma
+       * refused on a number it knows to be an understatement.
+       */
+      readonly unpriced: number
+      readonly unreadable: number
+    }
+  | {
+      /**
+       * A Readout drove a model Turn, which no entry on its list may.
+       *
+       * The drift check ADR-0012 built the Readout list around. Membership is a
+       * person's judgement about a specific Claude Code build, and the container
+       * image pin moves — so this is what says the judgement has expired, in the
+       * one way a machine can see: an entry that used to answer locally is now
+       * spending money and returning the model's opinion instead of the
+       * command's output.
+       *
+       * An anomaly rather than traffic, which is why a Readout that behaves is
+       * not logged here at all. The Operator Log is what roma decided and what
+       * surprised it; a record per Readout would make it a traffic log, which
+       * its own definition rejects.
+       */
+      readonly event: 'readout-drove-turn'
+      readonly taskId: string
+      readonly command: string
+      readonly turns: number
+      /** What that Turn cost, or null where nothing priced it. */
+      readonly costUsd: number | null
+    }
 
 export type CoreLog = OperatorLog<CoreLogRecord>
 
@@ -241,12 +266,18 @@ export class Core {
   }
 
   /**
-   * Take one message: a Command roma answers itself, or a Task.
+   * Take one message: a Command roma answers itself, a Readout it relays, or a
+   * Task.
    *
-   * The two are told apart here rather than in an Adapter, so that `/stop` means
-   * the same thing on every Channel and a Channel cannot invent a third
-   * Command. Everything that is not one of the two is work, including every
-   * slash command Claude Code has of its own.
+   * All three are told apart here rather than in an Adapter, so that `/stop`
+   * means the same thing on every Channel and a Channel cannot invent a fourth
+   * kind of message. Everything that is none of them is work.
+   *
+   * Order matters, and only in one direction: a Command is checked first so
+   * that roma's own two can never be shadowed by something added to the Readout
+   * list. Nothing is on both lists today and this is what keeps that from
+   * mattering — Claude Code has a `/stop` of its own, and roma's is the one that
+   * must win.
    *
    * Resolves when the Conversation has been told how it went. It rejects only
    * if the Channel could not be told at all — a failed Task is an outcome, not
@@ -255,7 +286,122 @@ export class Core {
   async handle(message: IngressMessage): Promise<void> {
     const command = readCommand(message.text)
     if (command !== null) return await this.#runCommand(command, message)
+    const readout = readReadout(message.text)
+    if (readout !== null) return await this.#runReadout(readout, message)
     return await this.#runTask(message)
+  }
+
+  /**
+   * Relay one of Claude Code's own commands and post what it said.
+   *
+   * Deliberately not `#runTask`, and the difference is not tidiness. A Readout
+   * drives no Turn, so none of what makes a Task a Task applies to it: there are
+   * no Attempts, because there is no credential decision to make and nothing to
+   * park; there is no Shared Window reading, because no API call is made; there
+   * is no Overflow, because there is nothing to spend. Reusing `#runTask` would
+   * mean carrying all of that machinery through a path where every branch of it
+   * is dead, and the dead branches are where a later reader looks for meaning
+   * that is not there.
+   *
+   * What it does share is the two things a Readout genuinely has in common with
+   * work: it is serialised against its Session, because two processes on one
+   * transcript corrupt it, and it is written down, because the list it came from
+   * is a person's judgement and can be wrong.
+   */
+  async #runReadout(command: string, message: IngressMessage): Promise<void> {
+    const { conversationKey } = message
+    const address = addressOf({ ...message, taskId: randomUUID() })
+    const { taskId } = address
+    const startedAt = Date.now()
+
+    const reporter = new ProgressReporter({
+      updates: this.#channel.capabilities.messageMutation,
+      deliver: (progress) => this.#channel.deliver({ kind: 'progress', ...address, progress }),
+    })
+
+    let instruction: OutboundInstruction
+    let sessionId: string | null = null
+    let turn: Turn | null = null
+    try {
+      sessionId = this.#sessions.sessionFor(conversationKey)
+      // Acknowledged only where it cannot be answered at once, which is the
+      // whole of ADR-0012's rule about this. A Readout on a Session with a live
+      // process comes back in milliseconds, and an acknowledgement there would
+      // be posted and superseded in the same breath — two messages for one
+      // event, which is what ADR-0010 exists to prevent. The other two cases are
+      // the ones where silence is what makes people resend: a cold start, said
+      // here, and waiting for the Session's own work, said by the queue's notice
+      // below.
+      //
+      // Computed rather than remembered. The Caller Marker is unconditional
+      // precisely because a rule needing memory is lost across a restart; this
+      // condition is read at the moment of asking, so there is nothing to lose.
+      if (!this.#pool.residents.includes(sessionId)) reporter.update({ phase: 'working' })
+
+      turn = await this.#queue.run(
+        sessionId,
+        () => this.#pool.send(sessionId as string, attributedReadout(message, command), this.#credential),
+        {
+          notice: (position) => reporter.update({ phase: 'queued', position }),
+          // Serialised against the Session like anything else, and outside the
+          // cap of three. See `About.uncapped` for why those are two answers
+          // rather than one.
+          uncapped: true,
+          taskId,
+        },
+      )
+      // Relayed as a `result`, which is what it is: text to be posted as its own
+      // message in the Conversation. No instruction kind of its own, because an
+      // Adapter has nothing to do differently with one — and a fifth kind would
+      // be a concept every Channel had to learn for no change in behaviour.
+      instruction = { kind: 'result', ...address, text: turn.text }
+    } catch (error) {
+      // A Readout that failed carries whatever the Turn said, exactly as a Task
+      // does. `Unknown command: /x` arrives as a *successful* Turn rather than
+      // here — an entry that has been removed from a later build answers, for
+      // nothing, and telling the Caller what Claude Code said is more use than
+      // roma paraphrasing it.
+      if (error instanceof TurnFailedError) turn = error.turn
+      instruction = { kind: 'failure', ...address, reason: reasonFor(error) }
+    }
+
+    // The drift check. Nothing on the Readout list may drive a Turn, and one
+    // that did means the pin has moved under roma — so it is said out loud,
+    // once, where an operator looks. Not said to the Caller: they asked a
+    // question and got an answer, and what is wrong is roma's list rather than
+    // anything they did.
+    if (turn !== null && turn.turns !== null && turn.turns > 0) {
+      this.#log({
+        event: 'readout-drove-turn',
+        taskId,
+        command,
+        turns: turn.turns,
+        costUsd: turn.costUsd,
+      })
+    }
+
+    // Written whatever it cost, including nothing — see `AuditRecord.kind`. A
+    // Readout has one credential and no Attempts, so there is no second record
+    // and no question of which one paid.
+    this.#audit.record({
+      kind: 'readout',
+      taskId,
+      caller: message.caller,
+      callerName: message.callerName,
+      sessionId,
+      outcome: outcomeOf(instruction),
+      // Zero rather than null where no Turn ran at all: a Readout that never
+      // reached Claude Code spent nothing, and that is a fact rather than an
+      // absence. Null is reserved for a Turn that began and nothing priced.
+      costUsd: turn === null ? 0 : turn.costUsd,
+      durationMs: Date.now() - startedAt,
+      turnMs: turn?.durationMs ?? null,
+      credential: this.#credential,
+      apiKeySource: null,
+    })
+
+    reporter.stop()
+    await this.#channel.deliver(instruction)
   }
 
   /**

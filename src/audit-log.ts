@@ -17,11 +17,34 @@ function isCost(value: unknown): boolean {
   return value === null || (typeof value === 'number' && Number.isFinite(value))
 }
 
-/** One Task, written down. */
+/** What kind of work one record describes. */
+export type AuditKind = 'task' | 'readout'
+
+/** The same, for reading a record back off disk. */
+const KINDS: readonly AuditKind[] = ['task', 'readout']
+
+/** One Task — or one Readout — written down. */
 export interface AuditRecord {
   /** When the Task ended, ISO-8601 in UTC. */
   readonly at: string
   readonly taskId: string
+  /**
+   * Whether this was a Task or a Readout (ADR-0012).
+   *
+   * Optional, and **absent means `task`**. Every record roma wrote before
+   * Readouts existed lacks it, and `readRecord` drops a line it cannot read —
+   * so requiring this would make all of them unreadable at once, silently
+   * emptying the month the Overflow cap is enforced against. That is the
+   * reasoning `callerName` already carries, and it is the same failure.
+   *
+   * A Readout is recorded at all because the list it comes from is maintained by
+   * a person and can be wrong. Nothing on it spends money on the pinned build,
+   * but "ought to be free" is an assumption, and writing no record would bake
+   * that assumption into the ledger — the one place that has to survive it being
+   * false. On the day an entry becomes a model Turn, the money lands here
+   * instead of nowhere.
+   */
+  readonly kind?: AuditKind
   /**
    * Whoever sent the message, named however the Channel names people.
    *
@@ -116,7 +139,26 @@ export type UnstampedRecord = Omit<AuditRecord, 'at'>
  */
 export interface AuditTotal {
   readonly month: string
+  /**
+   * Tasks in the month. Readouts are **not** counted here.
+   *
+   * Kept apart because this number is read as "how much work did this month
+   * ask for", and folding Readouts in would quietly turn it into "how many
+   * messages were sent" — a Conversation where somebody checked `/context`
+   * forty times would read as forty Tasks. Their cost is another matter and is
+   * in `costUsd` below.
+   */
   readonly tasks: number
+  /** Readouts in the month, counted separately for the reason above. */
+  readonly readouts: number
+  /**
+   * What the month spent, Readouts included.
+   *
+   * Everything that cost anything, whatever kind of thing it was. A Readout is
+   * expected to cost nothing and is summed anyway: the moment one does not, the
+   * cap this feeds is the thing that has to know, and a total that filtered by
+   * kind would be enforcing against a figure it had chosen not to see.
+   */
   readonly costUsd: number
   /**
    * Tasks in the total whose cost was never reported, and which are therefore in
@@ -290,6 +332,7 @@ export class AuditLog {
    */
   totalFor(month: string, credential?: CredentialKind): AuditTotal {
     let tasks = 0
+    let readouts = 0
     let costUsd = 0
     let unpriced = 0
     let unreadable = 0
@@ -302,15 +345,18 @@ export class AuditLog {
         continue
       }
       if (credential !== undefined && record.credential !== credential) continue
-      tasks += 1
-      // Counted as a Task and left out of the money, which is the only honest
-      // pair of answers: it happened, and what it cost is not knowable.
+      // A record written before Readouts existed carries no kind and is a Task,
+      // which is the only thing it can have been.
+      if (record.kind === 'readout') readouts += 1
+      else tasks += 1
+      // Counted as having happened and left out of the money, which is the only
+      // honest pair of answers: it happened, and what it cost is not knowable.
       if (record.costUsd === null) unpriced += 1
       else costUsd += record.costUsd
       if (!paidAsIntended(record)) mismatched += 1
     }
 
-    return { month, tasks, costUsd, unpriced, unreadable, mismatched }
+    return { month, tasks, readouts, costUsd, unpriced, unreadable, mismatched }
   }
 
   /** A month nothing was written in reads as a month with nothing in it. */
@@ -378,6 +424,11 @@ function readRecord(line: string): AuditRecord | null {
   if (typeof record['caller'] !== 'string') return null
   if (!OUTCOMES.includes(record['outcome'] as TaskOutcome)) return null
   if (!isCost(record['costUsd'])) return null
+  // Absent is a Task, which is what every record written before ADR-0012 is.
+  // Present and unrecognised is not readable: a kind this cannot name would be
+  // counted as a Task, and the whole reason the field exists is to stop one kind
+  // being read as the other.
+  if (record['kind'] !== undefined && !KINDS.includes(record['kind'] as AuditKind)) return null
   if (record['credential'] !== 'shared-window' && record['credential'] !== 'overflow') return null
   return record as unknown as AuditRecord
 }
