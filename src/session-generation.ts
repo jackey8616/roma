@@ -176,6 +176,26 @@ export class SessionGenerations {
   }
 }
 
+/**
+ * A Session's Chosen Model record names something roma does not offer.
+ *
+ * Its own type because this is the one failure here a *Caller* can clear, and
+ * they can only do it if somebody tells them how. Refusing to guess is right —
+ * see `OFFERED` — but a refusal that surfaces as "roma could not run this Task"
+ * on every message is loud in the log and silent in the thread, which is not
+ * what story 38 asked for when it asked that removing a Menu entry be noticed.
+ *
+ * `/model default` is the way out and does not read the record at all, so the
+ * sentence the Core builds from this can promise it. Clearing the Conversation
+ * works too, by moving the Session id past the record entirely.
+ */
+export class ChosenModelNotOffered extends Error {
+  constructor(readonly model: string) {
+    super(`the Chosen Model for this Session is not one roma offers: ${model}`)
+    this.name = 'ChosenModelNotOffered'
+  }
+}
+
 export interface ChosenModelsOptions {
   /** The same directory the generations are kept in, for the same reasons. */
   readonly workRoot: string
@@ -244,6 +264,21 @@ export class ChosenModels {
    * that read as if they came from somewhere else.
    */
   modelFor(sessionId: string): string {
+    return this.chosenFor(sessionId) ?? this.#pinnedModel
+  }
+
+  /**
+   * The model this Session was moved to, or null where nobody moved it.
+   *
+   * The distinction `modelFor` collapses, kept because saying which model a
+   * Session is on needs it and running a Turn does not. A Session with no record
+   * *follows* the Pinned Model; a Session whose record happens to name the same
+   * model does not follow anything. They are one string today and two the moment
+   * an operator moves `ROMA_MODEL`, and a report that called both of them
+   * "default" would be telling somebody who typed `/model sonnet` that they are
+   * on whatever the deployment picks next.
+   */
+  chosenFor(sessionId: string): string | null {
     let record: string
     try {
       record = readFileSync(this.#recordFor(sessionId), 'utf8')
@@ -252,13 +287,11 @@ export class ChosenModels {
       // way a read fails describes a record that may well exist and cannot be
       // read, and answering the Pinned Model to those is a Chosen Model
       // disappearing silently.
-      if (isMissing(error)) return this.#pinnedModel
+      if (isMissing(error)) return null
       throw error
     }
     const written = record.trim()
-    if (!OFFERED.has(written)) {
-      throw new Error(`the Chosen Model for this Session is not one roma offers: ${written}`)
-    }
+    if (!OFFERED.has(written)) throw new ChosenModelNotOffered(written)
     return written
   }
 

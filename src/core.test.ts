@@ -1289,6 +1289,52 @@ describe('the model a Conversation runs on', () => {
     })
   })
 
+  // Choosing the model the deployment already pins is not the same as never
+  // having chosen, and this is the only place the difference is visible before
+  // it matters. It matters the day an operator moves `ROMA_MODEL`: a Session
+  // with no record follows them and this one does not, so reporting it as
+  // "default" would promise the opposite of what its record guarantees.
+  it('reports a Session moved to the Pinned Model by the name that was typed', async () => {
+    const { adapter, core } = newCore()
+
+    // `sonnet` is what `PINNED_MODEL` resolves to, which is what makes this the
+    // awkward case rather than a contrived one.
+    await core.handle(ingress('/model sonnet'))
+    await core.handle(ingress('/model'))
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      text: expect.stringContaining(`sonnet (${PINNED_MODEL})`),
+    })
+    expect(posted(adapter.instructions).at(-1)).not.toMatchObject({
+      text: expect.stringContaining('default ('),
+    })
+  })
+
+  // A Task that has not started is not a Task that started under the old model.
+  // The Core reads the model again immediately before each Attempt is sent, and
+  // this is the case that separates the two: the Task in flight finishes where
+  // it began, and the one behind it in the queue does not.
+  it('moves a Task that was still queued when somebody chose', async () => {
+    const { audit, claude, core, procFor, start } = newCore()
+    const { task: running, proc } = await start('a long job')
+    const queued = core.handle(ingress('and this one after it'))
+    await flush()
+
+    await core.handle(ingress('/model opus'))
+    feed(proc, OK)
+    await running
+    await flush()
+    feed(procFor(KEY), OK)
+    await queued
+
+    expect(claude.lastSpawn.args).toContain(OPUS)
+    // The half the pool would not have got right on its own. The pool reads the
+    // record at every spawn, so the process above would be on Opus whatever the
+    // Core believed; what says the Core kept up is the ledger, which is written
+    // from what the Core read and is the only place the two can disagree.
+    expect(recordsIn(audit).map((record) => record.model)).toEqual([PINNED_MODEL, OPUS])
+  })
+
   // Back to whatever `ROMA_MODEL` resolved to rather than to a name written down
   // somewhere, and without clearing anything the Conversation has said — which is
   // the difference between this and the reset.
@@ -1414,6 +1460,95 @@ describe('the model a Conversation runs on', () => {
       conversationKey: KEY,
       text: 'ok',
     })
+  })
+})
+
+/**
+ * What a Conversation is told when its Chosen Model is one roma has stopped
+ * offering.
+ *
+ * The state story 38 asked to fail loudly. The record is refused rather than
+ * passed through, because running on a model the Menu no longer stands behind is
+ * the thing that must not happen — but the refusal falls on every message the
+ * Conversation sends, so where it is *said* decides whether "loud" reaches
+ * anybody. An operator who removed a Menu entry reads a log; the person whose
+ * thread stopped working reads the thread.
+ *
+ * Driven by writing the record directly, which these tests otherwise refuse to
+ * do. There is no other way in: the Menu is a constant, so a test cannot remove
+ * an entry from it, and this state is exactly what a *later* roma finds after
+ * somebody did.
+ */
+describe('a Chosen Model roma no longer offers', () => {
+  /** On the Menu once, by construction — nothing else could have written it. */
+  const WITHDRAWN = 'claude-opus-4-5'
+
+  function withWithdrawnModel() {
+    const core = newCore()
+    writeFileSync(join(core.workRoot, `${sessionIdFor(KEY)}.model`), WITHDRAWN)
+    return core
+  }
+
+  it('tells the Conversation what happened and how to undo it', async () => {
+    const { adapter, core } = withWithdrawnModel()
+
+    await core.handle(ingress('hello'))
+
+    expect(posted(adapter.instructions)).toEqual([
+      {
+        kind: 'failure',
+        conversationKey: KEY,
+        reason: expect.stringContaining('/model default'),
+      },
+    ])
+    expect(posted(adapter.instructions)[0]).toMatchObject({
+      reason: expect.stringContaining(WITHDRAWN),
+    })
+  })
+
+  // The Command path has its own catch and its own generic sentence, so it would
+  // otherwise answer "roma could not carry out that command" to the person
+  // asking the one question this state makes urgent.
+  it('says the same when asked which model it is on', async () => {
+    const { adapter, core } = withWithdrawnModel()
+
+    await core.handle(ingress('/model'))
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      reason: expect.stringContaining('/model default'),
+    })
+  })
+
+  // The promise that sentence makes, kept. `/model default` forgets the record
+  // without reading it, which is what lets it work here at all — and the
+  // Conversation keeps everything it has said, which is what makes it the answer
+  // rather than the reset.
+  it('is cleared by the /model default it recommends', async () => {
+    const { adapter, claude, core, say } = withWithdrawnModel()
+
+    await core.handle(ingress('/model default'))
+    await say('hello')
+
+    expect(claude.lastSpawn.args).toContain(PINNED_MODEL)
+    expect(posted(adapter.instructions).at(-1)).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: 'ok',
+    })
+  })
+
+  // The other way out, and the one somebody reaches for without being told. It
+  // works for a different reason — the reset moves the Session id past the
+  // record rather than removing it — which is the arithmetic ADR-0014 chose the
+  // Session id key for.
+  it('is cleared by the reset as well, without the record being deleted', async () => {
+    const { claude, core, say, workRoot } = withWithdrawnModel()
+
+    await core.handle(ingress('/clear'))
+    await say('hello', { session: sessionIdFor(KEY, 1) })
+
+    expect(claude.lastSpawn.args).toContain(PINNED_MODEL)
+    expect(readdirSync(workRoot)).toContain(`${sessionIdFor(KEY)}.model`)
   })
 })
 

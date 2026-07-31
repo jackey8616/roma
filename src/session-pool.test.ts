@@ -1042,4 +1042,35 @@ describe('running a Turn on the other credential', () => {
 
     expect(log.filter(({ event }) => event === 'swap')).toEqual([])
   })
+
+  // Both at once, which is what an Overflow retry on a Session somebody moved in
+  // between looks like. One record rather than two, because it is one event —
+  // the next Turn's terms are not the ones this process was started for — and
+  // the model is what it names, because the credential is on the `spawn` that
+  // follows and the model would otherwise appear nowhere. An operator reading
+  // an unexplained respawn gets both halves; neither is silent.
+  it('names the model when the credential moved too, and leaves the credential to the spawn', async () => {
+    const chosen = new Map<string, string>()
+    const { log, send } = newPool({
+      models: { modelFor: (sessionId) => chosen.get(sessionId) ?? 'claude-sonnet-5' },
+    })
+    await send(A, 'first', OK)
+
+    chosen.set(A, 'claude-opus-5')
+    await send(A, 'and again', OK, 'overflow')
+
+    expect(log.filter(({ event }) => event === 'swap')).toEqual([
+      {
+        event: 'swap',
+        sessionId: A,
+        reason: 'model',
+        from: 'claude-sonnet-5',
+        to: 'claude-opus-5',
+      },
+    ])
+    expect(log.filter(({ event }) => event === 'spawn').at(-1)).toMatchObject({
+      credential: 'overflow',
+      model: 'claude-opus-5',
+    })
+  })
 })

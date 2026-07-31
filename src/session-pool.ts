@@ -224,11 +224,13 @@ export interface SessionPoolOptions {
   /** One environment per credential a Turn may run on. */
   readonly envs: CredentialEnvs
   /**
-   * The model a Session runs on when nothing else says otherwise.
+   * The model every Session runs on, for a pool built without `models`.
    *
-   * The fallback rather than the answer since ADR-0014: where `models` is given
-   * it is what decides, and this is what a pool built without one runs
-   * everything on.
+   * No longer how roma runs: `startup.ts` always supplies `models`, which
+   * answers per Session and makes this unreachable in production. It is kept for
+   * the tests that are about something else and want one model for the whole
+   * pool, and saying so is the point — a reader who found it described as "the
+   * fallback" would go looking for the deployment that takes it.
    */
   readonly model?: string
   /**

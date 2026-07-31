@@ -20,7 +20,11 @@ import {
 } from './model-menu.js'
 import { readReadout } from './readouts.js'
 import { ProgressReporter } from './progress-reporter.js'
-import type { ChosenModels, SessionGenerations } from './session-generation.js'
+import {
+  ChosenModelNotOffered,
+  type ChosenModels,
+  type SessionGenerations,
+} from './session-generation.js'
 import { writeToStderr, type OperatorLog } from './operator-log.js'
 import { RetryStormError, type SessionPool } from './session-pool.js'
 import { readSharedWindow, readSystemInit, type ClaudeEvent } from './stream-events.js'
@@ -125,11 +129,13 @@ export interface CoreOptions {
   /**
    * Which model each Session runs on, and what the deployment pinned.
    *
-   * Shared with the Session Pool rather than kept apart from it, which is what
-   * makes `/model` mean anything: the Core writes what somebody chose and the
-   * pool reads it at the next spawn. Required for the reason `sessions` is — a
-   * Core that made its own would answer `/model` correctly and change nothing
-   * about what the next process runs on.
+   * Given to the Session Pool as well, which is what makes `/model` mean
+   * anything: the Core writes what somebody chose and the pool reads it at the
+   * next spawn. What the two have to agree on is the work root rather than the
+   * object — nothing here is held between calls — and handing one instance to
+   * both is how that agreement is made rather than assumed. A pool built without
+   * it is the failure with no symptom: `/model` answers, the record is written,
+   * and every Turn runs on the Pinned Model.
    */
   readonly models: ChosenModels
   /**
@@ -489,13 +495,13 @@ export class Core {
               command: request.command,
               carriedOut: this.#carryOut(request.command, conversationKey),
             }
-    } catch {
+    } catch (error) {
       // Silence is not an outcome here either. Nothing routine reaches this —
       // it takes a generation record roma cannot read, or a Conversation Key an
       // Adapter emptied — and either way the person is owed the difference
       // between a Command that did nothing because there was nothing to do and
       // one that did nothing because roma is broken.
-      instruction = { kind: 'failure', ...address, reason: ROMA_FAILED_COMMAND }
+      instruction = { kind: 'failure', ...address, reason: commandReasonFor(error) }
     }
 
     await this.#channel.deliver(instruction)
@@ -578,8 +584,16 @@ export class Core {
    * a list nothing in the sentence above it belonged to.
    */
   #modelReport(sessionId: string): string {
-    const model = this.#models.modelFor(sessionId)
-    const name = model === this.#models.pinnedModel ? PINNED_NAME : menuNameFor(model)
+    // `chosenFor` rather than `modelFor`, because the two states that answer the
+    // same string are not the same answer. A Session nobody moved *follows* the
+    // Pinned Model and is named for it; one that was moved to the model the
+    // deployment happens to pin follows nothing, and calling it "default" would
+    // tell somebody who typed `/model sonnet` that an operator moving
+    // `ROMA_MODEL` will take them along — which is the one thing their record
+    // guarantees will not happen.
+    const chosen = this.#models.chosenFor(sessionId)
+    const model = chosen ?? this.#models.pinnedModel
+    const name = chosen === null ? PINNED_NAME : menuNameFor(chosen)
     return (
       `This conversation is on ${named(name, model)}. ` + `You can choose: ${MENU_LIST}.`
     )
@@ -1209,8 +1223,39 @@ function wasStopped(error: unknown): boolean {
  */
 function reasonFor(error: unknown): string {
   if (error instanceof RetryStormError) return retryStormReason(error)
+  if (error instanceof ChosenModelNotOffered) return chosenModelGoneReason(error)
   if (error instanceof TurnFailedError && error.turn.text !== '') return error.turn.text
   return ROMA_FAILED
+}
+
+/** The same, for a Command, whose generic failure is its own sentence. */
+function commandReasonFor(error: unknown): string {
+  return error instanceof ChosenModelNotOffered
+    ? chosenModelGoneReason(error)
+    : ROMA_FAILED_COMMAND
+}
+
+/**
+ * What to say to a Conversation whose Chosen Model roma has stopped offering.
+ *
+ * Named for `retryStormReason`'s reason and one better: this is a failure roma
+ * decided on, the person can act on it, and unlike a 401 they can act on it
+ * *themselves* — which is why the sentence carries the way out rather than
+ * describing the fault.
+ *
+ * It has to, because the fault is total. Every message in this Conversation
+ * fails until the record goes, so a Caller who is not told `/model default`
+ * fixes it has a thread that is simply broken, with the reason legible only to
+ * whoever removed the Menu entry. Story 38 asked that removing one be noticed;
+ * `ROMA_FAILED` on every message is noticed everywhere except where somebody
+ * could do something about it.
+ */
+function chosenModelGoneReason({ model }: ChosenModelNotOffered): string {
+  return (
+    `This conversation is on ${model}, which roma no longer offers. ` +
+    `Send “/model ${PINNED_NAME}” to put it back on the Pinned Model, ` +
+    `keeping everything it has said.`
+  )
 }
 
 /**

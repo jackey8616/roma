@@ -115,6 +115,42 @@ describe('starting roma', () => {
     )
   })
 
+  // The ADR-0014 half of that wiring. The Core writes a Chosen Model down and
+  // the pool reads it at the next spawn, so `/model` means something only if
+  // `startRoma` hands the record to the pool at all. Left out, roma answers
+  // `/model` perfectly, writes a perfect file, and runs every Turn on the Pinned
+  // Model — a failure with no symptom at either end taken on its own.
+  //
+  // What this does not catch, said so that nobody reads more into it:
+  // `ChosenModels` holds nothing between calls, so a second instance beside the
+  // first is the same object in every way that matters, and one built over the
+  // *wrong* work root is invisible here because the Core and the pool would
+  // agree about the wrong place. That the record lands beside the generations is
+  // `session-pool.test.ts`'s reclaim test.
+  it('lets a Conversation move the model its next Turn runs on', async () => {
+    const roma = boot()
+    await roma.answerProbe()
+    const { core } = await roma.starting
+
+    await core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: '/model opus',
+    })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+    })
+    await flush()
+    feed(roma.procFor(KEY), OK)
+    await handled
+
+    expect(roma.claude.lastSpawn.args).toContain('claude-opus-5')
+  })
+
   // The other half of that wiring, and the half nothing else would notice was
   // missing: a roma whose audit log was not connected answers every message
   // perfectly and records nobody's spending, which cannot be reconstructed

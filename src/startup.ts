@@ -269,10 +269,12 @@ export async function startRoma({
     ...(overflow === undefined ? {} : { overflow: sessionEnv(overflow.credential) }),
   }
 
-  // Beside the generations, and shared by the pool and the Core for the reason
-  // everything else here is: the Core is what writes a Chosen Model down and the
-  // pool is what makes the next process run on it, and two copies would be a
-  // `/model` that answered correctly and changed nothing.
+  // Beside the generations, and handed to both the pool and the Core. What has
+  // to be one thing is the *work root* rather than the object — `ChosenModels`
+  // keeps nothing between calls, it reads and writes files — and passing one
+  // instance to both is how that is made true rather than hoped for. What must
+  // not happen is the pool being built without it: roma would answer `/model`
+  // perfectly, write a perfect record, and run every Turn on the Pinned Model.
   const models = new ChosenModels({ workRoot, pinnedModel })
 
   const pool = new SessionPool({
