@@ -386,11 +386,14 @@ Overflow's)
 **Cloud Shortcut**:
 The one command roma provides for getting a Cloud Token, so that reaching the
 Cloud Reach costs nobody a Turn. Named for what it is rather than for what it
-does: there is a long way round — everything needed to sign a credential and
-exchange it is already in the image, because roma is a Node program (ADR-0015) —
-and this is the short one. It therefore does not have to be complete, and is not: where it
-does not go far enough the agent builds what it needs, which is a use of it
-working as intended rather than a gap in it. Not a Credential Shim: a Shim
+does: there is a long way round — writing the call by hand against Google's own
+API, with what is already in the image because roma is a Node program (ADR-0015)
+— and this is the short one. It therefore does not have to be complete, and is
+not: where it does not go far enough the agent writes that call itself, which is
+a use of it working as intended rather than a gap in it. What the long way round
+is *not* is a second way to obtain a Cloud Token: minting needs the key, the key
+is the Minter's, and the agent can narrow what it was given but never widen it.
+Not a Credential Shim: a Shim
 occupies the name of somebody else's tool so that the ordinary path is the
 correct one without anybody choosing it, and this is a command that can simply go
 unused. Like a Shim, it is **not** a boundary — it saves money, and nothing else.
