@@ -343,6 +343,41 @@ _Avoid_: helper (that is `git`'s word for one of the two, and using it for both
 hides the other), wrapper, proxy (a proxy sees the traffic; this fetches one
 string), adapter (that word is a Channel's)
 
+### Reaching the cloud
+
+**Cloud Reach**:
+What the agent can touch in Google Cloud at all. One identity somebody decided
+on, and the roles they gave it are the whole of the boundary — every
+Conversation reaches all of it, and so does everyone who can message roma. roma
+neither sets it nor can check it: it is told which identity to hand over and
+nothing about what that identity may do, so work refused for want of a role is
+refused by Google and never by roma. Named here for the reason an Installation
+is: a term that is the whole of a security property should be a term.
+Deliberately **not** the identity roma itself runs on — one that could reach
+roma's own ingress could end roma quietly, and a deployment where those two are
+the same has no boundary at all. Most deployments have none, and one with none
+has no `gcloud` either: the tool and the Reach arrive together or neither does.
+_Avoid_: Installation (that is GitHub's, and it is minted against; this one is
+handed over), project (a Reach may span several, and need not include roma's
+own), service account (what it is made of, not what it bounds), permissions,
+scope
+
+**Cloud Key**:
+The credential a Cloud Reach is exercised with, put into the agent's own
+environment rather than kept in roma's. The opposite of an Installation Token in
+every property that one was argued for — static rather than minted, unexpiring
+rather than an hour long, and in an environment the agent can read rather than
+never entering one — and opposite on purpose rather than by oversight. What pays
+for that is the Cloud Reach: nothing bounds what this key is worth except the
+roles behind it, which is why the boundary and not the credential is the term
+that carries the security property. roma proves it is live once, at boot, and
+then never uses it again — so what a Task did with it is the one thing an Audit
+Record cannot say.
+_Avoid_: Installation Token (the two sit in the same place and are contraries;
+saying either for the other loses the whole trade), Credential (that word is the
+Shared Window's and Overflow's), service account key (Google's name for the
+file, not roma's name for what it hands over), secret
+
 ### Paying for it
 
 **Shared Window**:
