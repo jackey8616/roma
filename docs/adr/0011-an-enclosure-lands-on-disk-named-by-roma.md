@@ -4,7 +4,7 @@ Date: 2026-07-30
 
 ## Status
 
-Accepted. Nothing implements it yet; #73 is the work.
+Accepted, and implemented in #92. What is still unverified is #93.
 
 Extends ADR-0003's inbound contract, which reduced a Channel event to "a key, an
 identity, and some text". The reduction stands; what changes is that *some text*
