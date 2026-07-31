@@ -111,12 +111,10 @@ outgrows it, which reads as a hang.
   the gap is inherited rather than introduced.~~ Written down because a length
   budget disappearing from the code otherwise reads as a guard that was removed.
 
-  **Amended — the gap is closed (#75), and the guard is somewhere else.** The
-  finished phrase is cut to what the mention leaves of the limit, rather than any
-  one phase carrying a budget of its own, so the next phase somebody adds cannot
-  forget it. Its **end** goes, which is the opposite end from the trimming this
-  decision removed: a command is identified by how it starts, where a partial
-  answer was alive by how it ended.
+  **Amended — the gap is closed (#75).** Every phase is bounded again. Where the
+  bounds sit, how many of them there are, and which end of a command goes are
+  `render.ts`'s business rather than this decision's; what belongs here is only
+  that the Consequence stopped being true.
 - A second Channel that *can* show prose cheaply no longer gets it from
   `TaskProgress`. That is the intended trade: `channel-adapter.ts` says to expect
   the second Channel to change the interface and to prefer changing it then to

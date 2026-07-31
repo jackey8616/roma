@@ -3,7 +3,7 @@ import type { OutboundInstruction } from '../../channel-adapter.js'
 import { sessionIdFor } from '../../session-id.js'
 import { GoogleChatAdapter } from './google-chat-adapter.js'
 import type { ChatEvent } from './chat-events.js'
-import { MAX_TEXT } from './render.js'
+import { fitted, MAX_TEXT } from './render.js'
 import { RecordingChatApi } from '../../../test/support/recording-chat-api.js'
 
 // SEAM 3 — the Chat Adapter on its own. A Chat event goes in and an ingress
@@ -379,12 +379,16 @@ describe('the acknowledgement', () => {
   })
 
   // The one phase whose length roma does not control: a tool is named by Claude
-  // Code's own description of it, which is the command itself. Over Chat's limit
-  // the message is refused rather than trimmed, and a refused *post* is worse
-  // than a refused edit — it is the first update for that Task, so the
-  // Conversation would be left with no acknowledgement at all, which is the
-  // silence that makes people send their message again.
-  it('fits Chat even when a tool is named by a command of any length', async () => {
+  // Code's own description of it, which is the command itself. It is cut to
+  // something that can be read at a glance, well before Chat's limit is in
+  // question — a message edited every few seconds is not where a thousand
+  // characters of shell belongs.
+  //
+  // Driven through the Adapter as its own first instruction on purpose. The
+  // Core sends `working` before it reads a single stream event, so a `tool`
+  // phase never in fact arrives first; the Adapter is a separate component and
+  // does not get to assume that.
+  it('quotes only as much of a tool command as can be read at a glance', async () => {
     const { adapter, api } = newAdapter()
     const tool = `awk ${'-v x=1 '.repeat(1000)}`
 
@@ -392,7 +396,8 @@ describe('the acknowledgement', () => {
 
     const text = api.texts[0] ?? ''
     expect(api.calls).toEqual(['post'])
-    expect(text.length).toBeLessThanOrEqual(MAX_TEXT)
+    // The mention, `Running `, 120 characters of command, and the ellipsis.
+    expect(text.length).toBe(TO.length + 'Running '.length + 120 + '…'.length)
     // The beginning is what names the command, so it is the end that goes — the
     // opposite end from the partial answer this replaces, where the tail moving
     // was the whole point.
@@ -666,5 +671,32 @@ describe('addressing the person who asked', () => {
     await adapter.deliver(to(DM, { kind: 'result', text: 'the answer' }))
 
     expect(api.texts).toEqual([`<${SENDER}> the answer`])
+  })
+})
+
+// Reached through the Adapter this cannot be made to fire: every phase is
+// already bounded where it is written, so the longest phrase it is ever handed
+// is around 129 characters against a budget of roughly 4077. The tests above
+// exercise that bound and would stay green if this function were deleted, which
+// is exactly why these are here — it guards the phase nobody has written yet,
+// and #75 is what the last unguarded one cost.
+describe('fitting a phrase to Chat', () => {
+  it('leaves a phrase inside the budget exactly as it is', () => {
+    expect(fitted('Working…', 4077)).toBe('Working…')
+  })
+
+  it('takes the end of one that is over, and says so', () => {
+    const text = fitted('x'.repeat(5000), 4077)
+
+    expect(text.length).toBe(4077)
+    expect(text.endsWith('…')).toBe(true)
+  })
+
+  // The one input that would turn a trim into its own opposite: a negative
+  // length reads from the *end* in JavaScript, so an unclamped slice would
+  // answer a budget of nothing with the tail of the command.
+  it('gives back no command rather than its end when there is no budget', () => {
+    expect(fitted('rm -rf /home/user/project', 0)).toBe('…')
+    expect(fitted('rm -rf /home/user/project', 1)).toBe('…')
   })
 })
