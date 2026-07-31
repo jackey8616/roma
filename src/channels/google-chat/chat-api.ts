@@ -91,4 +91,20 @@ export interface ChatApi {
 
   /** Replace the text of a message roma posted, named as `post` returned it. */
   edit(name: string, text: string): Promise<void>
+
+  /**
+   * Fetch the bytes of something attached to a message, by Chat's resource name
+   * for it.
+   *
+   * A third call rather than two, and the first that reads rather than writes.
+   * It is here because an Enclosure has to come from somewhere and only the
+   * Chat app's own credentials can reach Chat's storage — the same authenticated
+   * client `post` and `edit` already use.
+   *
+   * Only ever called for an `attachmentDataRef`, which is content uploaded into
+   * the conversation. A `driveDataRef` names a file in the sender's Drive and
+   * never reaches this method: roma has no Drive scope and no consent from that
+   * person, so there is nothing for an implementation to try.
+   */
+  download(resourceName: string): Promise<Uint8Array>
 }

@@ -105,7 +105,7 @@ describe('starting roma', () => {
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello' })
+    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [] })
     await flush()
     feed(roma.procFor(KEY), OK)
     await handled
@@ -137,12 +137,14 @@ describe('starting roma', () => {
       caller: 'someone',
       callerName: 'Someone',
       text: '/model opus',
+      enclosures: [],
     })
     const handled = core.handle({
       conversationKey: KEY,
       caller: 'someone',
       callerName: 'Someone',
       text: 'hello',
+      enclosures: [],
     })
     await flush()
     feed(roma.procFor(KEY), OK)
@@ -160,7 +162,7 @@ describe('starting roma', () => {
     await roma.answerProbe()
     const { core, audit } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello' })
+    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [] })
     await flush()
     feed(roma.procFor(KEY), OK)
     await handled
@@ -232,7 +234,7 @@ describe('putting a credential in front of a Session’s tools', () => {
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello' })
+    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [] })
     await flush()
     const spawn = roma.claude.lastSpawn
     feed(roma.procFor(KEY), OK)
@@ -247,7 +249,7 @@ describe('putting a credential in front of a Session’s tools', () => {
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello' })
+    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [] })
     await flush()
     const { env } = roma.claude.lastSpawn
     feed(roma.procFor(KEY), OK)
@@ -282,7 +284,7 @@ describe('putting a credential in front of a Session’s tools', () => {
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello' })
+    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [] })
     await flush()
     const { env } = roma.claude.lastSpawn
     feed(roma.procFor(KEY), OK)

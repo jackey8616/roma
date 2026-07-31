@@ -1,11 +1,54 @@
 import type { Command } from './commands.js'
 
 /**
+ * Something sent along with a message, before anybody has fetched it.
+ *
+ * The one member of the inbound contract that is not yet a value. An Enclosure
+ * can be tens of megabytes and is sized by whoever sent it, so fetching it when
+ * the message is *read* would buffer it across queueing, across Parking — which
+ * CONTEXT.md defines as holding no process — and across a `/stop` that means
+ * nobody ever wanted it. `redeem` is therefore called once, by the Core, after
+ * the Session is known and immediately before the bytes are written to disk
+ * (ADR-0011).
+ *
+ * A named type rather than a bare `() => Promise<…>` on `IngressMessage`, so
+ * that a reader can see that something here has not happened yet: everything
+ * else on that interface is a value, and a function hidden among strings reads
+ * as one until it throws.
+ */
+export interface PendingEnclosure {
+  /**
+   * What the Channel says the sender called it.
+   *
+   * Printed and never interpreted — it is put in front of the agent so a log
+   * can be told from a screenshot, and it is **never** made into a path.
+   * `contentName` is chosen by whoever sent the message, so using it to address
+   * a file means defending traversal, collision and whatever a filesystem does
+   * with 200 characters of Unicode, all at once. roma mints the path instead
+   * (ADR-0011), which leaves this a string like any other the Channel supplies:
+   * untrusted, and harmless because nothing decides anything by it.
+   */
+  readonly name: string
+  /**
+   * Obtain the bytes.
+   *
+   * Called at most once per Task, and allowed to reject: a Channel that cannot
+   * reach what it was told about — Chat's `driveDataRef` points into the
+   * *sender's* Drive, which roma has no scope for — says so here, and the Task
+   * ends as a failure with the reason. That is the whole of the failure path,
+   * and for a Channel where a whole class of attachment is unreachable it is
+   * the normal one rather than an edge case.
+   */
+  redeem(): Promise<Uint8Array>
+}
+
+/**
  * One message from one person, on its way into the Core.
  *
  * The Channel it came from is gone by this point: whatever the Adapter knew
  * about spaces, rooms, threads, or users has been reduced to a key, an identity,
- * and some text. That reduction is the whole of the inbound contract.
+ * some text, and whatever was sent alongside it. That reduction is the whole of
+ * the inbound contract.
  */
 export interface IngressMessage {
   /**
@@ -40,6 +83,16 @@ export interface IngressMessage {
    */
   readonly callerName: string | null
   readonly text: string
+  /**
+   * What was sent alongside the text, in the order the Channel gave them.
+   *
+   * Required rather than optional, and empty where there are none — the same
+   * argument `callerName` makes: a Channel that has something to hand over and
+   * forgets to is indistinguishable from one that had nothing, and the failure
+   * is silent. Silence is the fault this whole area exists to fix, so the type
+   * makes every Channel answer the question.
+   */
+  readonly enclosures: readonly PendingEnclosure[]
 }
 
 /**

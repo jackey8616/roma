@@ -38,8 +38,20 @@ export interface ChatRequest {
  */
 export type SendChatRequest = (request: ChatRequest) => Promise<unknown>
 
+/**
+ * Whatever puts a token on a request and reads bytes back.
+ *
+ * Beside `SendChatRequest` rather than folded into it, because the two are
+ * different in the one way that matters at this seam: everything above returns
+ * JSON that a caller parses, and this returns a file. Overloading the existing
+ * type would make its `Promise<unknown>` mean two things and leave every caller
+ * casting to find out which.
+ */
+export type DownloadChatMedia = (url: string) => Promise<Uint8Array>
+
 export interface HttpChatApiOptions {
   readonly send: SendChatRequest
+  readonly download: DownloadChatMedia
 }
 
 /**
@@ -57,9 +69,11 @@ export interface HttpChatApiOptions {
  */
 export class HttpChatApi implements ChatApi {
   readonly #send: SendChatRequest
+  readonly #download: DownloadChatMedia
 
-  constructor({ send }: HttpChatApiOptions) {
+  constructor({ send, download }: HttpChatApiOptions) {
     this.#send = send
+    this.#download = download
   }
 
   /**
@@ -106,6 +120,22 @@ export class HttpChatApi implements ChatApi {
       url: `${CHAT_API}/${name}?updateMask=text`,
       body: { text },
     })
+  }
+
+  /**
+   * Fetch an attachment's bytes.
+   *
+   * **Written from Google's documentation and never run against Chat** —
+   * `media.download` is `GET /v1/media/{resourceName}?alt=media`, and
+   * `alt=media` is what asks for the file rather than a JSON description of it.
+   * That is the same standard of evidence every other read in this Channel was
+   * built on, and it is called out here because this one is new enough that
+   * nobody has seen it work. Getting the URL wrong surfaces as a failed Task
+   * with the HTTP error in it, which is at least loud.
+   * https://developers.google.com/workspace/chat/api/reference/rest/v1/media/download
+   */
+  async download(resourceName: string): Promise<Uint8Array> {
+    return await this.#download(`${CHAT_API}/media/${resourceName}?alt=media`)
   }
 }
 

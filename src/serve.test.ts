@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Credential } from './build-env.js'
+import type { IngressMessage } from './channel-adapter.js'
 import { serve, type Serving } from './serve.js'
 import { StartupSelfCheckFailed } from './startup-self-check.js'
 import { flush } from '../test/support/fake-claude.js'
@@ -26,9 +27,16 @@ const OAUTH: Credential = { kind: 'shared-window', oauthToken: 'oauth-token' }
 const METERED: Credential = { kind: 'overflow', apiKey: 'metered-key' }
 const KEY = 'conversation-one'
 
-/** One ingress message, as the recording Channel's events already are. */
-function said(text: string, conversationKey = KEY) {
-  return { conversationKey, caller: 'ada', callerName: 'Ada', text }
+/**
+ * One ingress message, as the recording Channel's events already are.
+ *
+ * Annotated rather than inferred, which is not decoration: an unannotated
+ * literal here type-checks against nothing, so a field added to
+ * `IngressMessage` is missing at runtime in every test in this file and in
+ * none of the compiler's output.
+ */
+function said(text: string, conversationKey = KEY): IngressMessage {
+  return { conversationKey, caller: 'ada', callerName: 'Ada', text, enclosures: [] }
 }
 
 let running: Serving[] = []

@@ -11,6 +11,7 @@ import type {
 } from './channel-adapter.js'
 import { TurnFailedError, wasInterrupted, type Turn } from './claude-session.js'
 import { readCommand, type Command, type CommandRequest } from './commands.js'
+import { EnclosureUnreadable, writeEnclosures } from './enclosures.js'
 import {
   MENU_NAMES,
   menuNameFor,
@@ -707,16 +708,33 @@ export class Core {
       running = task
       this.#running.add(task)
 
+      // Redeemed here and nowhere earlier, which is the whole of ADR-0011's
+      // argument: the bytes are sized by whoever sent the message, and this is
+      // the first moment roma knows they are wanted and knows the Working
+      // Directory to put them in. A Task that was stopped, or parked until the
+      // window came back, never reaches this line and never pays for them.
+      // Guarded rather than left to `writeEnclosures` to no-op, so that a
+      // message with nothing attached — nearly all of them — reaches the Turn
+      // exactly as it did before Enclosures existed, touching no filesystem and
+      // waiting on nothing.
+      const enclosures =
+        message.enclosures.length === 0
+          ? []
+          : await writeEnclosures(message.enclosures, this.#pool.cwdFor(sessionId))
+
       // Named above what they said rather than handed over beside it, because
       // the line written to stdin is the only per-Turn channel there is — see
       // `attributed`. Composed here rather than in an Adapter because an Adapter
       // that prefixed the text would turn `/stop` into something `readCommand`
       // no longer recognises, and CONTEXT.md has Commands read in the Core and
       // nowhere else.
-      instruction = await this.#drive(task, attributed(message), reporter)
+      instruction = await this.#drive(task, attributed(message, enclosures), reporter)
     } catch (error) {
-      // Reached only where roma could not work out which Session the Conversation
-      // is on, since everything after that is an ending `#drive` describes.
+      // Two ways here: roma could not work out which Session the Conversation is
+      // on, or an Enclosure could not be fetched. Everything after that is an
+      // ending `#drive` describes. The second is not exotic — a Channel with a
+      // class of attachment it cannot reach, which Chat's `driveDataRef` may
+      // well be, arrives here every time somebody sends one.
       instruction = { kind: 'failure', ...address, reason: reasonFor(error) }
     } finally {
       if (running !== null) this.#running.delete(running)
@@ -1223,6 +1241,12 @@ function wasStopped(error: unknown): boolean {
  */
 function reasonFor(error: unknown): string {
   if (error instanceof RetryStormError) return retryStormReason(error)
+  // Said rather than swallowed, unlike everything this function does not name.
+  // What failed belongs to whoever sent it, they are the only person who can
+  // act on it, and the Adapter that could not fetch it wrote the half of this
+  // sentence that knows why — a Channel with an unreachable class of attachment
+  // has its explanation here and nowhere else.
+  if (error instanceof EnclosureUnreadable) return `roma could not read ${error.message}`
   if (error instanceof ChosenModelNotOffered) return chosenModelGoneReason(error)
   if (error instanceof TurnFailedError && error.turn.text !== '') return error.turn.text
   return ROMA_FAILED

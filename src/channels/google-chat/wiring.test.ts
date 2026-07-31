@@ -74,6 +74,7 @@ async function boot() {
       posted += 1
       return Promise.resolve({ name: `${SPACE}/messages/posted-${posted}` })
     },
+    download: () => Promise.reject(new Error('no download in this test')),
   })
 
   const subscription = new FakeSubscription()

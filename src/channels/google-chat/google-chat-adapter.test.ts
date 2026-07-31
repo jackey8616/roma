@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { OutboundInstruction } from '../../channel-adapter.js'
 import { sessionIdFor } from '../../session-id.js'
 import { GoogleChatAdapter } from './google-chat-adapter.js'
-import type { ChatEvent } from './chat-events.js'
+import type { ChatEvent, ChatEventLogRecord } from './chat-events.js'
 import { MAX_TEXT } from './render.js'
 import { RecordingChatApi } from '../../../test/support/recording-chat-api.js'
 
@@ -82,7 +82,29 @@ function inDm(text = 'hello', overrides: Record<string, unknown> = {}): ChatEven
 
 function newAdapter() {
   const api = new RecordingChatApi()
-  return { api, adapter: new GoogleChatAdapter({ api }) }
+  const logged: ChatEventLogRecord[] = []
+  return {
+    api,
+    logged,
+    adapter: new GoogleChatAdapter({ api, log: (entry) => logged.push(entry) }),
+  }
+}
+
+/** An attachment as Chat documents an uploaded one, with roma's own reach into it. */
+const UPLOADED = {
+  name: `${SPACE}/messages/msg-1/attachments/att-1`,
+  contentName: 'screenshot.png',
+  contentType: 'image/png',
+  source: 'UPLOADED_CONTENT',
+  attachmentDataRef: { resourceName: 'attachments/att-1' },
+}
+
+/** The other kind, which lives in the sender's Drive and is not roma's to read. */
+const IN_DRIVE = {
+  name: `${SPACE}/messages/msg-1/attachments/att-2`,
+  contentName: 'design.fig',
+  source: 'DRIVE_FILE',
+  driveDataRef: { driveFileId: 'drive-file-1' },
 }
 
 /**
@@ -245,6 +267,95 @@ describe('what roma does not answer', () => {
     const { adapter } = newAdapter()
 
     expect(adapter.toIngress(inSpace('', { argumentText: '   ' }))).toBeNull()
+  })
+
+  // The rule restated for Enclosures: what is not a request is a message with
+  // nothing in it, and a pasted screenshot is not nothing (ADR-0011). Before
+  // this, an image with no words got no answer and no acknowledgement — silence
+  // that reads as roma being broken.
+  it('answers an @-mention whose only content is an image', () => {
+    const { adapter } = newAdapter()
+
+    const message = adapter.toIngress(inSpace('', { argumentText: '  ', attachment: [UPLOADED] }))
+
+    expect(message?.text).toBe('')
+    expect(message?.enclosures.map(({ name }) => name)).toEqual(['screenshot.png'])
+  })
+})
+
+describe('what somebody sent along with a message', () => {
+  it('carries an uploaded attachment as an Enclosure, unfetched', async () => {
+    const { adapter, api } = newAdapter()
+    api.holds('attachments/att-1', 'PNG')
+
+    const message = adapter.toIngress(inSpace('what is this?', { attachment: [UPLOADED] }))
+
+    // Reading the event fetches nothing: the bytes are sized by whoever sent
+    // them, and ADR-0011 pays for them once the Session is known.
+    expect(api.downloads).toEqual([])
+    expect(await message?.enclosures[0]?.redeem()).toEqual(new TextEncoder().encode('PNG'))
+    expect(api.downloads).toEqual(['attachments/att-1'])
+  })
+
+  // Both shapes are read, because the envelope depends on how the event was
+  // delivered and roma is on Pub/Sub rather than an HTTP webhook — the same
+  // reason `spaceType`/`type` and `common`/`action` are both read.
+  it('reads the attachment list under either name', () => {
+    const { adapter } = newAdapter()
+
+    expect(adapter.toIngress(inSpace('x', { attachments: [UPLOADED] }))?.enclosures).toHaveLength(1)
+  })
+
+  // Made rather than dropped. roma has no Drive scope and no consent from the
+  // sender, so this cannot be fetched — and a Task that fails with a reason is
+  // the whole point, because dropping it silently is the fault being fixed.
+  it('makes an Enclosure for a Drive file that fails when redeemed', async () => {
+    const { adapter } = newAdapter()
+
+    const message = adapter.toIngress(inSpace('review this', { attachment: [IN_DRIVE] }))
+
+    expect(message?.enclosures).toHaveLength(1)
+    await expect(message?.enclosures[0]?.redeem()).rejects.toThrow(/Drive/)
+  })
+
+  it('carries several, in the order they arrived', () => {
+    const { adapter } = newAdapter()
+
+    const message = adapter.toIngress(inSpace('both', { attachment: [UPLOADED, IN_DRIVE] }))
+
+    expect(message?.enclosures.map(({ name }) => name)).toEqual(['screenshot.png', 'design.fig'])
+  })
+
+  it('says nothing to an operator when it understood what arrived', () => {
+    const { adapter, logged } = newAdapter()
+
+    adapter.toIngress(inSpace('fine', { attachment: [UPLOADED] }))
+
+    expect(logged).toEqual([])
+  })
+
+  // The line standing between "roma cannot read this payload" and the bug this
+  // whole area exists to remove. Everything in this Channel was written from
+  // documentation; a wrong guess produces null and falls through, and roma
+  // silently ignoring images is exactly what it looked like before.
+  it('says so when something attachment-shaped arrived and nothing was read', () => {
+    const { adapter, logged } = newAdapter()
+
+    const unknownShape = { contentName: 'mystery.png', someFutureRef: { id: 'x' } }
+    const message = adapter.toIngress(inSpace('look', { attachment: [unknownShape] }))
+
+    expect(message?.enclosures).toEqual([])
+    expect(logged).toEqual([
+      { event: 'attachment-unread', keys: ['contentName', 'someFutureRef'] },
+    ])
+  })
+
+  it('says nothing about a message that carried no attachments at all', () => {
+    const { adapter, logged } = newAdapter()
+
+    adapter.toIngress(inSpace('just words'))
+
+    expect(logged).toEqual([])
   })
 })
 
