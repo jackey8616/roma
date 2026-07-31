@@ -514,6 +514,21 @@ roma's, and would swallow more of them with every Claude Code release. Neither o
 roma's two takes an argument, so nothing meant for roma is turned away by that
 rule.
 
+**Amended — the decision stands; "passed through as work" was never true.** roma
+passes the *text* of a Claude Code slash command, not the command. The Caller
+Marker is written above every message (`attribution.ts:39`), so the frame reaching
+stdin begins with `<from>` rather than with a slash, and Claude Code parses a
+command only when the message starts with one. Measured on 2.1.220:
+`<from>…</from>\n\n/context` returns `num_turns: 1` at `$0.0549`, and the result
+is the model's prose about the command instead of the command's output — where
+the same message without the marker returns `num_turns: 0` at no cost. So the
+prefix-match objection above was guarding against roma swallowing Claude Code's
+commands while roma was already swallowing all of them, by a mechanism the
+sentence was not looking at. What the guard protects is real and is kept: `/new`
+and `/stop` are still matched whole and nothing is matched by prefix. ADR-0012
+takes the other half — a short whitelist relayed with the marker moved after it,
+which is the only way any of Claude Code's own commands reaches it.
+
 A command is not a task: it drives no turn, is not queued, and does not count
 against the concurrency cap. That is forced rather than tidy — tasks of one
 session are serialised, so a queued `/stop` would wait for the very task it was
