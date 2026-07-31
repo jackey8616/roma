@@ -8,6 +8,11 @@ Accepted and implemented. `src/model-menu.ts` holds the Menu, `ChosenModels` in
 `src/session-generation.ts` holds the record, and `src/session-pool.ts` maintains
 the invariant on the swap it already had.
 
+**Amended 2026-07-31**, to the evidence rather than to the decision, and marked
+inline the way ADR-0002, ADR-0003 and ADR-0007 mark theirs. `yn()` was recorded
+here as not readable statically; it is readable, and knowing so retires one of the
+two jobs the seam 2 Menu check was given. Nothing that was built changes.
+
 Builds on ADR-0013, which decides which string puts a Conversation back on the
 Pinned Model by clearing it.
 
@@ -64,8 +69,8 @@ to be understood as the same model.
 The bundle declares `{type:"local", name:"model", supportsNonInteractive:!0,
 argumentHint:"<model>", isEnabled:()=>yn()}` and a second `{type:"local-jsx",
 name:"model", …}`; the first takes an argument non-interactively, the second is a
-picker a Channel could not show, and which wins depends on `yn()`, which is not
-readable statically. Relayed to a real `claude -p`, the first is what answers:
+picker a Channel could not show, and which wins depends on `yn()`. Relayed to a
+real `claude -p`, the first is what answers:
 
 ```
 /model      → "Current model: Sonnet 5
@@ -75,6 +80,29 @@ readable statically. Relayed to a real `claude -p`, the first is what answers:
 ```
 
 both at `turns=0, cost=0`.
+
+**Amended 2026-07-31 — `yn()` is readable after all, and it is a construction
+rather than a result.** This section said it was not readable statically, and that
+was a failure to look rather than a fact. It is:
+
+```js
+function _n(){ return !Mt.isInteractive }
+```
+
+So under `-p` it is true, and the plain `local` descriptor is the one that answers
+— by construction, on any build carrying this definition, rather than on the day
+the probe above was run. Found while measuring #98, which needed the same function
+for `/autocompact`.
+
+Nothing built changes: roma never relays `/model`, so which descriptor would have
+answered is not on roma's path. What it retires is one of the two jobs the seam 2
+Menu check below was given. It had to prove each Menu entry resolves *and* settle
+`yn()`; the second is now free, and the check only has to do the first.
+
+The general lesson is worth more than the fact. "Not readable statically" was
+asserted about a minified bundle after one search that did not find it, and it
+survived into an accepted ADR. `grep` failing to find something is evidence about
+the search.
 
 **This does not reopen the decision; it sharpens the reason for it.** A relayed
 `/model` is not expensive — it is free, and it works. What ADR-0012 measured at
@@ -302,7 +330,9 @@ the two things it has to say are different in kind: that the **id** roma sends i
 accepted and echoed, which is roma's own invariant and is asserted as equality,
 and that the **alias** a Caller types still means that model, which is a fact
 about a build roma does not control and is asserted only as the id or a dated
-snapshot of it. It also settles `yn()`, which cannot be read statically.
+snapshot of it. ~~It also settles `yn()`, which cannot be read statically.~~ —
+struck 2026-07-31: `yn()` is `!Mt.isInteractive`, so it is settled by reading and
+this check no longer carries that second job. See the amendment above.
 
 Run once against 2.1.220, which is what the verification section above now
 reports. That run is also where the one-spawn version of this check earned its
