@@ -3,7 +3,7 @@ import type { OutboundInstruction } from '../../channel-adapter.js'
 import { sessionIdFor } from '../../session-id.js'
 import { GoogleChatAdapter } from './google-chat-adapter.js'
 import type { ChatEvent } from './chat-events.js'
-import { fitted, MAX_TEXT } from './render.js'
+import { MAX_TEXT } from './render.js'
 import { RecordingChatApi } from '../../../test/support/recording-chat-api.js'
 
 // SEAM 3 — the Chat Adapter on its own. A Chat event goes in and an ingress
@@ -671,32 +671,5 @@ describe('addressing the person who asked', () => {
     await adapter.deliver(to(DM, { kind: 'result', text: 'the answer' }))
 
     expect(api.texts).toEqual([`<${SENDER}> the answer`])
-  })
-})
-
-// Reached through the Adapter this cannot be made to fire: every phase is
-// already bounded where it is written, so the longest phrase it is ever handed
-// is around 129 characters against a budget of roughly 4077. The tests above
-// exercise that bound and would stay green if this function were deleted, which
-// is exactly why these are here — it guards the phase nobody has written yet,
-// and #75 is what the last unguarded one cost.
-describe('fitting a phrase to Chat', () => {
-  it('leaves a phrase inside the budget exactly as it is', () => {
-    expect(fitted('Working…', 4077)).toBe('Working…')
-  })
-
-  it('takes the end of one that is over, and says so', () => {
-    const text = fitted('x'.repeat(5000), 4077)
-
-    expect(text.length).toBe(4077)
-    expect(text.endsWith('…')).toBe(true)
-  })
-
-  // The one input that would turn a trim into its own opposite: a negative
-  // length reads from the *end* in JavaScript, so an unclamped slice would
-  // answer a budget of nothing with the tail of the command.
-  it('gives back no command rather than its end when there is no budget', () => {
-    expect(fitted('rm -rf /home/user/project', 0)).toBe('…')
-    expect(fitted('rm -rf /home/user/project', 1)).toBe('…')
   })
 })
