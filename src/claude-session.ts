@@ -179,6 +179,19 @@ export interface ClaudeSessionOptions {
   readonly resume?: boolean
   readonly model?: string
   /**
+   * How hard the model is asked to think, passed on every spawn including the
+   * Sessions nobody has touched.
+   *
+   * Always sent, and that is what closes the shared settings file: the config dir
+   * is one per deployment, and precedence was measured as
+   * `CLAUDE_CODE_EFFORT_LEVEL` > `--effort` > `settings.effortLevel` — so an
+   * `effortLevel` left in that file would otherwise set the effort for every
+   * Session in roma, invisibly. The environment variable above it is closed by
+   * `buildEnv`'s allowlist, which is why that allowlist is now load-bearing for
+   * something other than credentials (ADR-0016).
+   */
+  readonly effort?: string
+  /**
    * What this Session is told about itself on top of Claude Code's own prompt.
    *
    * A capability nobody knows about is a capability nobody has: an agent in an
@@ -220,6 +233,24 @@ interface PendingTurn {
  * why that check and this constant have to name the same model.
  */
 export const PINNED_MODEL = 'claude-sonnet-5'
+
+/**
+ * The effort every Session runs at, pinned rather than left to a settings file.
+ *
+ * `high` rather than anything else because the point of pinning is **visibility,
+ * not change**: `high` was measured as what this build already falls back to when
+ * nothing says otherwise, so a deployment that adopts this runs exactly as it ran
+ * yesterday and gains the ability to say so. Choosing `medium` would have
+ * smuggled a quiet downgrade into the same commit, at a moment when the Audit
+ * Record has no effort history to notice it with. If a deployment should think
+ * less, that is an operator reading their own ledger and moving `ROMA_EFFORT`
+ * (ADR-0016).
+ *
+ * Unlike the model, nothing downstream can assert this: `system/init` carries no
+ * effort field, so the startup self-check has to ask the process in prose. See
+ * `startup-self-check.ts`.
+ */
+export const PINNED_EFFORT = 'high'
 const COMMAND = 'claude'
 
 /**
@@ -248,6 +279,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
   readonly #env: Readonly<Record<string, string>>
   readonly #resume: boolean
   readonly #model: string
+  readonly #effort: string
   readonly #appendSystemPrompt: string | undefined
   readonly #spawn: SpawnClaudeProcess
 
@@ -275,6 +307,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     this.#env = options.env
     this.#resume = options.resume ?? false
     this.#model = options.model ?? PINNED_MODEL
+    this.#effort = options.effort ?? PINNED_EFFORT
     this.#appendSystemPrompt = options.appendSystemPrompt
     this.#spawn = options.spawn ?? spawnClaudeProcess
   }
@@ -315,6 +348,14 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
       'bypassPermissions',
       '--model',
       this.#model,
+      // Unconditional, like `--model` and for a stronger reason: omitting it does
+      // not fall back to nothing, it falls back to the deployment-wide settings
+      // file roma neither writes nor reads. An unrecognised value here does not
+      // fail the spawn either — it warns on stderr and the process starts on the
+      // build's own default — which is why `ROMA_EFFORT` is validated locally at
+      // boot rather than left for Claude Code to refuse.
+      '--effort',
+      this.#effort,
       ...(this.#appendSystemPrompt === undefined
         ? []
         : ['--append-system-prompt', this.#appendSystemPrompt]),

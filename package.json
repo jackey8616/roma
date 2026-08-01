@@ -15,7 +15,8 @@
     "test:watch": "vitest",
     "test:seam2": "vitest run --config vitest.seam2.config.ts",
     "check:adr-collision": "tsx scripts/check-adr-collision.ts",
-    "check:claude-code-drift": "tsx scripts/check-claude-code-drift.ts"
+    "check:claude-code-drift": "tsx scripts/check-claude-code-drift.ts",
+    "check:claude-code-effort-matrix": "tsx scripts/check-claude-code-effort-matrix.ts"
   },
   "devDependencies": {
     "@types/node": "^22.18.13",

@@ -12,6 +12,7 @@ const HOST = {
   LANG: 'en_GB.UTF-8',
   TMPDIR: '/tmp/host',
   ANTHROPIC_API_KEY: 'a-key-that-happened-to-be-exported',
+  CLAUDE_CODE_EFFORT_LEVEL: 'low',
   CLAUDE_CODE_OAUTH_TOKEN: 'a-token-that-happened-to-be-exported',
   AWS_SECRET_ACCESS_KEY: 'nothing-to-do-with-claude',
 }
@@ -66,6 +67,31 @@ describe('buildEnv', () => {
     expect(env['HOME']).toBe('/home/roma')
     expect(env['LANG']).toBe('en_GB.UTF-8')
     expect('AWS_SECRET_ACCESS_KEY' in env).toBe(false)
+  })
+
+  /**
+   * The allowlist stopped being only about credentials at ADR-0016, and this is
+   * the test that says so.
+   *
+   * Precedence was measured as `CLAUDE_CODE_EFFORT_LEVEL` > `--effort` >
+   * `settings.effortLevel`, so a host that exports this beats every `--effort`
+   * roma passes — and roma would go on reporting, and recording, the level it
+   * asked for. Nothing else in roma stands between the host environment and the
+   * effort of every Session it serves.
+   *
+   * It already passes, because `PASSTHROUGH` is an allowlist and this was never
+   * on it. That is the point: the property is free and load-bearing, so
+   * narrowing that list is now a decision about effort as well as about
+   * credentials, and this is where somebody finds that out.
+   */
+  it('keeps a host CLAUDE_CODE_EFFORT_LEVEL out, which would otherwise beat --effort', () => {
+    const env = buildEnv({
+      credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
+      inherit: HOST,
+      configDir: CONFIG_DIR,
+    })
+
+    expect('CLAUDE_CODE_EFFORT_LEVEL' in env).toBe(false)
   })
 
   it('omits a passthrough variable the host does not define', () => {

@@ -11,9 +11,10 @@ import type {
   OutboundInstruction,
   PendingEnclosure,
 } from './channel-adapter.js'
-import { PINNED_MODEL } from './claude-session.js'
+import { PINNED_EFFORT, PINNED_MODEL } from './claude-session.js'
+import { EFFORT_NOT_APPLIED } from './effort-menu.js'
 import type { RetryBudget } from './config.js'
-import { ChosenModels, SessionGenerations } from './session-generation.js'
+import { ChosenEfforts, ChosenModels, SessionGenerations } from './session-generation.js'
 import { sessionIdFor } from './session-id.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
 import type { ClaudeEvent } from './stream-events.js'
@@ -100,10 +101,14 @@ function newCore({
   // Shared by the pool and the Core, which is what makes `/model` observable: the
   // Core writes what somebody chose and the pool reads it at the next spawn.
   const models = new ChosenModels({ workRoot, pinnedModel: PINNED_MODEL })
+  // The same instance to both, for the same reason: the Core writes what somebody
+  // chose and the pool reads it at the next spawn.
+  const efforts = new ChosenEfforts({ workRoot, pinnedEffort: PINNED_EFFORT })
   const poolLog: PoolLogRecord[] = []
   const pool = new SessionPool({
     workRoot,
     models,
+    efforts,
     envs: {
       // A function of the Session, because two of the variables a real one
       // carries are the Session's own. Nothing here needs them, so the Session
@@ -137,6 +142,7 @@ function newCore({
     queue,
     sessions,
     models,
+    efforts,
     audit,
     credential: 'shared-window',
     log: (record) => log.push(record),
@@ -187,6 +193,7 @@ function newCore({
     audit,
     claude,
     core,
+    efforts,
     log,
     models,
     pool,
@@ -240,6 +247,7 @@ function coreOver(shared: ReturnType<typeof newCore>, channel: ChannelAdapter): 
     queue: shared.queue,
     sessions: shared.sessions,
     models: shared.models,
+    efforts: shared.efforts,
     audit: shared.audit,
     credential: 'shared-window',
   })
@@ -1516,6 +1524,346 @@ describe('the model a Conversation runs on', () => {
  * an entry from it, and this state is exactly what a *later* roma finds after
  * somebody did.
  */
+/**
+ * `/effort`, driven through the Core the way `/model` is, and asserted the same
+ * way: through the spawn arguments rather than through the record on disk.
+ *
+ * An `/effort` that wrote a perfect file and changed nothing about the next Turn
+ * is exactly the failure this is built to prevent, and it is a worse failure
+ * here than for the model — `system/init` carries no effort field, so nothing
+ * anywhere in roma would ever contradict it. A test that read the file would
+ * pass straight through that.
+ */
+describe('the effort a Conversation runs at', () => {
+  /** What the spawn was actually told to think at. */
+  const effortOf = (spawn: { args: readonly string[] }): string | undefined =>
+    spawn.args[spawn.args.indexOf('--effort') + 1]
+
+  it('runs the next Task at the effort somebody chose, and says so from that message on', async () => {
+    const { adapter, claude, core, say } = newCore()
+
+    await core.handle(ingress('/effort max'))
+    await say('hello')
+
+    expect(effortOf(claude.lastSpawn)).toBe('max')
+    expect(posted(adapter.instructions)[0]).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: expect.stringContaining('from your next message'),
+    })
+  })
+
+  // Every Session, including the ones nobody has touched — which is what closes
+  // the settings file under the config dir every Session in the deployment
+  // shares.
+  it('spawns at the Pinned Effort where nobody has chosen anything', async () => {
+    const { claude, say } = newCore()
+
+    await say('hello')
+
+    expect(effortOf(claude.lastSpawn)).toBe(PINNED_EFFORT)
+  })
+
+  // Aimed at what the next message reaches, never backwards into work somebody
+  // is waiting on. `--effort` is fixed at spawn, so the alternative is a Task
+  // answered half at one depth and half at another.
+  it('leaves a Task that is already running at the effort it started at', async () => {
+    const { claude, core, say, start } = newCore()
+    const { task, proc } = await start('a long job')
+
+    await core.handle(ingress('/effort max'))
+    feed(proc, OK)
+    await task
+
+    expect(effortOf(claude.lastSpawn)).toBe(PINNED_EFFORT)
+
+    await say('and now')
+    expect(effortOf(claude.lastSpawn)).toBe('max')
+  })
+
+  it('refuses a level it does not offer, by name, and moves nothing', async () => {
+    const { adapter, claude, core, say } = newCore()
+
+    await core.handle(ingress('/effort ludicrous'))
+    await say('hello')
+
+    expect(posted(adapter.instructions)[0]).toEqual({
+      kind: 'failure',
+      conversationKey: KEY,
+      reason: expect.stringContaining('ludicrous'),
+    })
+    expect(effortOf(claude.lastSpawn)).toBe(PINNED_EFFORT)
+    // Refused as a Command rather than falling through to a Task: the only Turn
+    // driven here is the "hello" that followed it.
+    expect(claude.process.sent.filter((frame) => frame['type'] === 'user')).toHaveLength(1)
+  })
+
+  // Off the Menu and reachable only through `ROMA_EFFORT`. It is `xhigh` plus
+  // dynamic workflow orchestration — one Task becoming a fleet, on a window
+  // everybody shares, in a thread where one person's choice is paid for by the
+  // others.
+  it('refuses ultracode from a Caller, like any other name it does not offer', async () => {
+    const { adapter, claude, core } = newCore()
+
+    await core.handle(ingress('/effort ultracode'))
+
+    expect(posted(adapter.instructions)[0]).toMatchObject({ kind: 'failure' })
+    expect(claude.processes).toHaveLength(0)
+  })
+
+  it('reports the current effort and the Menu, without a process or a Turn', async () => {
+    const { adapter, claude, core } = newCore()
+
+    await core.handle(ingress('/effort'))
+
+    expect(claude.processes).toHaveLength(0)
+    const [reported] = posted(adapter.instructions)
+    expect(reported).toMatchObject({ kind: 'result' })
+    for (const name of ['low', 'medium', 'high', 'xhigh', 'max', 'default']) {
+      expect(reported).toMatchObject({ text: expect.stringContaining(name) })
+    }
+  })
+
+  // Choosing the level the deployment already pins is not the same as never
+  // having chosen, and this is the only place the difference is visible before
+  // it matters — the day an operator moves `ROMA_EFFORT`.
+  it('reports a Session moved to the Pinned Effort by the name that was typed', async () => {
+    const { adapter, core } = newCore()
+
+    await core.handle(ingress(`/effort ${PINNED_EFFORT}`))
+    await core.handle(ingress('/effort'))
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      text: expect.stringContaining(`runs at ${PINNED_EFFORT}.`),
+    })
+  })
+
+  it('reports a Session nobody moved as following the Pinned Effort', async () => {
+    const { adapter, core } = newCore()
+
+    await core.handle(ingress('/effort'))
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      text: expect.stringContaining(`default (${PINNED_EFFORT})`),
+    })
+  })
+
+  it('goes back to the Pinned Effort on /effort default, keeping the context', async () => {
+    const { claude, core, say } = newCore()
+    await core.handle(ingress('/effort max'))
+    await say('hello')
+
+    await core.handle(ingress('/effort default'))
+    await say('and now')
+
+    expect(effortOf(claude.lastSpawn)).toBe(PINNED_EFFORT)
+    // The same Session throughout: `/effort default` moves the effort and
+    // nothing else.
+    expect(claude.lastSpawn.args).toContain(sessionIdFor(KEY))
+  })
+
+  // Reverting is arithmetic rather than an action somebody has to remember: a
+  // Chosen Effort is keyed by the Session id, the reset moves the generation,
+  // and the new Session has no record. Nothing is deleted.
+  it('goes back to the Pinned Effort when the Conversation is cleared, deleting nothing', async () => {
+    const { claude, core, efforts, say, workRoot } = newCore()
+    await core.handle(ingress('/effort max'))
+    await say('hello')
+
+    await core.handle(ingress('/clear'))
+    await say('and now', { session: sessionIdFor(KEY, 1) })
+
+    expect(effortOf(claude.lastSpawn)).toBe(PINNED_EFFORT)
+    expect(readdirSync(workRoot)).toContain(`${sessionIdFor(KEY)}.effort`)
+    expect(efforts.effortFor(sessionIdFor(KEY))).toBe('max')
+  })
+
+  it('treats a message that merely begins with /effort as work', async () => {
+    const { claude, say } = newCore()
+
+    await say('/effort to make the deploy faster')
+
+    expect(claude.process.sent.filter((frame) => frame['type'] === 'user')).toHaveLength(1)
+  })
+})
+
+/**
+ * The Effort Matrix, used the only two ways ADR-0016 allows: roma says something,
+ * and roma records something. It refuses nothing.
+ *
+ * Setting `max` on a model that strips the effort costs no more than `low` does,
+ * so there is no spending boundary to enforce and the whole harm is a false
+ * belief — which a sentence fixes. Refusing would also hand a reading of a
+ * minified binary, one that has already been wrong once, the authority to turn
+ * away something a Caller asked for.
+ */
+describe('an effort the model will not use', () => {
+  const HAIKU = 'claude-haiku-4-5'
+
+  it('lets the Caller set it, and says it will not apply', async () => {
+    const { adapter, core } = newCore()
+    await core.handle(ingress('/model haiku'))
+
+    await core.handle(ingress('/effort max'))
+
+    const [reply] = posted(adapter.instructions).slice(-1)
+    expect(reply).toMatchObject({ kind: 'result', text: expect.stringContaining(HAIKU) })
+    expect(reply).toMatchObject({ text: expect.stringContaining('takes none') })
+  })
+
+  // Set, not refused. The record is written and applies again the moment the
+  // Session goes back onto a model that takes one.
+  it('writes the record anyway, so it applies again on a model that takes one', async () => {
+    const { claude, core, say } = newCore()
+    await core.handle(ingress('/model haiku'))
+    await core.handle(ingress('/effort max'))
+
+    await core.handle(ingress('/model opus'))
+    await say('hello')
+
+    const { args } = claude.lastSpawn
+    expect(args[args.indexOf('--effort') + 1]).toBe('max')
+  })
+
+  // The same fact said from the other side: a `/model` onto such a model, from a
+  // Session that has chosen an effort, is the message where the setting goes
+  // inert.
+  it('says so on the /model that made it inert', async () => {
+    const { adapter, core } = newCore()
+    await core.handle(ingress('/effort max'))
+
+    await core.handle(ingress('/model haiku'))
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      text: expect.stringContaining('does not apply'),
+    })
+  })
+
+  // Only where there is a Chosen Effort to strand. A Session running at the
+  // Pinned Effort has chosen nothing, so telling its Caller a level will not
+  // apply would answer a question they did not ask about a setting they did not
+  // make.
+  it('says nothing extra on a /model from a Session that chose no effort', async () => {
+    const { adapter, core } = newCore()
+
+    await core.handle(ingress('/model haiku'))
+
+    expect(posted(adapter.instructions).at(-1)).not.toMatchObject({
+      text: expect.stringContaining('does not apply'),
+    })
+  })
+
+  // Recorded rather than named: a level nothing ran at would be the ledger
+  // asserting the opposite of what roma has read.
+  it('records that the effort did not apply, rather than naming a level', async () => {
+    const { audit, core, say } = newCore()
+    await core.handle(ingress('/model haiku'))
+    await core.handle(ingress('/effort max'))
+
+    await say('hello')
+
+    expect(recordsIn(audit).at(-1)).toMatchObject({
+      model: HAIKU,
+      effort: EFFORT_NOT_APPLIED,
+    })
+  })
+})
+
+/**
+ * `/config`, which is two more spellings that used to cost a Turn to answer
+ * nothing (ADR-0017).
+ *
+ * ADR-0013's rule applied twice more — a spelling roma leaves unclaimed is one
+ * somebody is billed for — and ADR-0014's test applied to decide what the
+ * claimed spelling should *do*. Claude Code's no-argument `/config` is a
+ * settings panel, a panel has no form in a chat message, and *show me what this
+ * conversation is set to* is what that gesture can honestly mean in one.
+ */
+describe('what this Conversation is set to', () => {
+  it('reports the model and the effort, without a process or a Turn', async () => {
+    const { adapter, claude, core } = newCore()
+
+    await core.handle(ingress('/config'))
+
+    expect(claude.processes).toHaveLength(0)
+    const [reported] = posted(adapter.instructions)
+    expect(reported).toMatchObject({ kind: 'result', text: expect.stringContaining(PINNED_MODEL) })
+    expect(reported).toMatchObject({ text: expect.stringContaining(PINNED_EFFORT) })
+  })
+
+  it('answers to /settings, which is Claude Code’s own alias', async () => {
+    const { adapter, core } = newCore()
+
+    await core.handle(ingress('/settings'))
+
+    expect(posted(adapter.instructions)[0]).toMatchObject({ kind: 'result' })
+  })
+
+  it('reports what the Conversation was moved to', async () => {
+    const { adapter, core } = newCore()
+    await core.handle(ingress('/model opus'))
+    await core.handle(ingress('/effort max'))
+
+    await core.handle(ingress('/config'))
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      text: expect.stringContaining('opus (claude-opus-5)'),
+    })
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      text: expect.stringContaining('max'),
+    })
+  })
+
+  /**
+   * Refused rather than honoured, and rather than passed on.
+   *
+   * Honouring it means one Conversation reconfiguring every Session in the
+   * deployment: roma passes one `CLAUDE_CONFIG_DIR` to every spawn, so a
+   * settings write from one thread persists for everybody across restarts. And
+   * the keys are not cosmetic — `model=…|sonnet[1m]|opusplan` is a second door
+   * onto exactly what the Model Menu bounds, and `workflows` is the switch the
+   * Effort Menu keeps `ultracode` away from Callers for.
+   */
+  it('refuses to set anything, and names what it does let you set', async () => {
+    const { adapter, claude, core } = newCore()
+
+    await core.handle(ingress('/config model=opusplan'))
+
+    expect(claude.processes).toHaveLength(0)
+    expect(posted(adapter.instructions)[0]).toEqual({
+      kind: 'failure',
+      conversationKey: KEY,
+      reason: expect.stringContaining('/model'),
+    })
+    expect(posted(adapter.instructions)[0]).toMatchObject({
+      reason: expect.stringContaining('/effort'),
+    })
+  })
+
+  // Refused as a Command rather than left to fall through, which is the fault
+  // ADR-0017 exists to fix: the Caller is billed for a sentence about their
+  // settings change, and the settings change does not happen.
+  it('drives no Turn for a settings change it will not make', async () => {
+    const { claude, core } = newCore()
+
+    await core.handle(ingress('/config theme=dark'))
+
+    expect(claude.processes).toHaveLength(0)
+  })
+
+  // `readCommand` treats two words after the head as a sentence, so this is the
+  // same opening `/clear foo` has had since ADR-0013. Left open deliberately:
+  // closing it means deciding what a multi-word argument would mean to roma, and
+  // it would mean nothing.
+  it('leaves a /config of two words as work, which ADR-0017 records rather than fixes', async () => {
+    const { claude, say } = newCore()
+
+    await say('/config foo bar')
+
+    expect(claude.process.sent.filter((frame) => frame['type'] === 'user')).toHaveLength(1)
+  })
+})
+
 describe('a Chosen Model roma no longer offers', () => {
   /** On the Menu once, by construction — nothing else could have written it. */
   const WITHDRAWN = 'claude-opus-4-5'
@@ -1741,6 +2089,12 @@ describe('the record every Task leaves behind', () => {
         // spending can be read against what it was spent on with no blank rows
         // in it (ADR-0014).
         model: PINNED_MODEL,
+        // And what it was asked to think at, which for a Conversation that has
+        // chosen nothing is the Pinned Effort. Weaker evidence than the model
+        // above it and spelled the same way regardless — it is what roma *sent*,
+        // since `system/init` carries no effort field to check it against
+        // (ADR-0016).
+        effort: PINNED_EFFORT,
         // Whether this Task obtained a Cloud Token — a yes or a no rather than
         // a count, since one token does unlimited API calls for an hour
         // (ADR-0015 §10). No, here: this Core was built with nothing to ask,

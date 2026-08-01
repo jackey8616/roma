@@ -127,6 +127,36 @@ export interface AuditRecord {
    */
   readonly model?: string
   /**
+   * What effort roma ran this Task at: the Session's Chosen Effort, the Pinned
+   * Effort, or `EFFORT_NOT_APPLIED` where the Effort Matrix says the model takes
+   * none.
+   *
+   * Here because ADR-0014's argument requires it: a decision whose justification
+   * is that nobody can see afterwards what spent the shared window does not get
+   * to leave that unrecorded, and a Chosen Effort is a Caller moving the shared
+   * bill exactly as a Chosen Model is.
+   *
+   * **It is weaker evidence than the model beside it and must not be spelled as
+   * though it were.** The model on a record was echoed by the process that ran
+   * the Turn; the effort is what roma *sent*, boot-verified once, and interpreted
+   * through a Matrix read off a binary — `system/init` carries no effort field at
+   * all. Where that Matrix says the model takes no effort, this says so rather
+   * than naming a level nothing ran at, because naming one would be the ledger
+   * asserting something roma has read the opposite of.
+   *
+   * Optional, and **absent reads as unknown rather than as the Pinned Effort** —
+   * which is the one place this differs from `model`. A record written before
+   * this field ran on whatever the shared settings file happened to say, and roma
+   * genuinely does not know what that was; labelling those retroactively would be
+   * inventing a fact, which is the discipline `costUsd` already keeps by
+   * distinguishing free from unpriced.
+   *
+   * Optional for the reason `callerName` and `kind` are, too: `readRecord` drops
+   * a line it cannot parse, a dropped line leaves the month's total, and the
+   * month's total is what the Overflow cap is enforced against.
+   */
+  readonly effort?: string
+  /**
    * Whether this Task obtained a Cloud Token.
    *
    * A yes or a no, and deliberately **not a count** (ADR-0015 §10). One token
@@ -479,6 +509,11 @@ function readRecord(line: string): AuditRecord | null {
   // model spent the shared window, and a line that answers it with a number
   // answers it wrongly.
   if (record['model'] !== undefined && typeof record['model'] !== 'string') return null
+  // Absent is *unknown* rather than the Pinned Effort — see the field. Present
+  // and not a name is a torn line for `model`'s reason: the question this field
+  // answers is what a Turn was asked to think at, and a line answering it with a
+  // number answers it wrongly.
+  if (record['effort'] !== undefined && typeof record['effort'] !== 'string') return null
   // Absent is a no, which is what every record written before there were Cloud
   // Reaches means. Present and not a boolean is a torn line rather than a record
   // with a hole in it: the one question this field answers is yes or no, and a

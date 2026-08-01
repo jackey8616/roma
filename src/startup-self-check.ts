@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { apiKeySourceFor, type Credential } from './build-env.js'
 import type { SpawnClaudeProcess } from './claude-process.js'
-import { ClaudeSession, PINNED_MODEL, TurnFailedError } from './claude-session.js'
+import { ClaudeSession, PINNED_EFFORT, PINNED_MODEL, TurnFailedError } from './claude-session.js'
+import { writeToStderr, type OperatorLog } from './operator-log.js'
 import { readSystemInit, type SystemInit } from './stream-events.js'
 
 /**
@@ -13,6 +14,35 @@ import { readSystemInit, type SystemInit } from './stream-events.js'
  * is the exact blind spot `claude auth status` is rejected for.
  */
 const PROBE = 'Reply with OK and nothing else. Do not use any tools.'
+
+/**
+ * The command roma relays to the probe once the Turn has passed.
+ *
+ * Claude Code's own `/effort`, sent as itself rather than as prose. It is the
+ * only place in roma that asks a process about effort, and it is asked once per
+ * deployment rather than once per spawn — measured at `num_turns: 0`,
+ * `total_cost_usd: 0`, and answered with no credential at all.
+ *
+ * **Deliberately not named a Readout.** CONTEXT.md's entry for that term lists
+ * `/effort` under what it must never be used for: a Readout is something roma
+ * relays *on a Caller's behalf, to their Session*, and `/effort` is roma's own
+ * Command precisely so that it never reaches one. This is a boot probe asking a
+ * throwaway process about itself, with no Caller, no Session anybody is on and
+ * no Task — which is why `relayCommand` describes itself by subtraction.
+ */
+const EFFORT_QUESTION = '/effort current'
+
+/**
+ * The word roma's Pinned Effort is never allowed to be, however the sentence is
+ * worded around it.
+ *
+ * The build says `Effort level: auto (currently high)` when nothing pinned one —
+ * which contains `high`, and would therefore satisfy a bare level-word match on
+ * the default deployment. Since roma always passes `--effort`, an `auto` in the
+ * answer is the wiring failure this check exists to catch, wearing the level's
+ * own clothes.
+ */
+const UNPINNED = 'auto'
 
 /**
  * How long roma will wait for the probe Turn before refusing to start.
@@ -28,6 +58,33 @@ const DEFAULT_TIMEOUT_MS = 60_000
 
 /** Which of the check's conditions was not met. */
 export type SelfCheckCondition = 'credential' | 'model' | 'turn' | 'init' | 'timeout'
+
+/**
+ * The one thing this check notices and does not refuse over.
+ *
+ * Every other condition here reads a structured field — `apiKeySource`, `model`,
+ * `num_turns`. This one reads English prose in at least three shapes, one of
+ * which embeds a description table, and none of it is in `system/init` because
+ * `system/init` carries no effort field at all. Making a deployment refuse to
+ * start on a sentence a release could reword is paying with an outage to catch a
+ * fault whose worst outcome is thinking at the wrong depth (ADR-0016).
+ *
+ * So it goes to the Operator Log, which is where an anomaly goes — ADR-0012's
+ * drift check already writes a misbehaving Readout there for the same reason. And
+ * the match is loose so the line fires on a changed *level* rather than on
+ * changed *prose*, because a check people learn to ignore has stopped watching.
+ *
+ * `reported` is what the process said, whole, and null where it said nothing at
+ * all — a relay that failed is a disagreement roma cannot resolve rather than an
+ * agreement it may assume.
+ */
+export type SelfCheckLogRecord = {
+  readonly event: 'effort-unverified'
+  readonly pinned: string
+  readonly reported: string | null
+}
+
+export type SelfCheckLog = OperatorLog<SelfCheckLogRecord>
 
 /**
  * One condition that failed, and what to go and look at.
@@ -95,8 +152,23 @@ export interface StartupSelfCheckOptions {
   readonly cwd: string
   /** The model roma pins. Defaults to the one every Session runs on. */
   readonly model?: string
+  /**
+   * The effort roma pins. Defaults to the one every Session runs at.
+   *
+   * Spawned with, and then asked about — which is the whole of what this proves.
+   * It is **roma's own wiring** under test rather than Claude Code's: that
+   * `--effort` really is in the spawn arguments, and that `ROMA_EFFORT` really
+   * resolved to what roma thinks. Per-spawn verification was decided and then
+   * withdrawn once the precedence measurements came in, since `--effort` beats
+   * the settings file and `buildEnv` blocks the environment variable, leaving a
+   * per-spawn echo nothing to catch but a server-side ceiling nobody has ever
+   * observed (ADR-0016).
+   */
+  readonly effort?: string
   readonly spawn?: SpawnClaudeProcess
   readonly timeoutMs?: number
+  /** Where a disagreement about the effort goes. Boot continues either way. */
+  readonly log?: SelfCheckLog
 }
 
 /**
@@ -117,6 +189,20 @@ export interface StartupSelfCheckReport {
    * changed underneath it.
    */
   readonly claudeCodeVersion: string | null
+  /**
+   * What the process said when asked what effort it is at, and whether roma
+   * believes it.
+   *
+   * Reported rather than asserted, and typed as the two facts rather than as one
+   * boolean, because a boot log that said only "disagreed" would send an operator
+   * to read a sentence that is no longer anywhere. `reported` is null where the
+   * relay itself did not answer.
+   */
+  readonly effort: {
+    readonly pinned: string
+    readonly reported: string | null
+    readonly agrees: boolean
+  }
   readonly durationMs: number
   /**
    * What proving this cost. Small, and it is spent on every boot.
@@ -161,8 +247,10 @@ export async function startupSelfCheck({
   env,
   cwd,
   model = PINNED_MODEL,
+  effort = PINNED_EFFORT,
   spawn,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  log = writeToStderr,
 }: StartupSelfCheckOptions): Promise<StartupSelfCheckReport> {
   const session = new ClaudeSession({
     // Its own Session, used once and never resumed. Nothing roma serves is on
@@ -171,6 +259,9 @@ export async function startupSelfCheck({
     cwd,
     env,
     model,
+    // Spawned exactly as roma spawns, which is what makes the relay below a
+    // question about roma's real arguments rather than about a probe's.
+    effort,
     ...(spawn === undefined ? {} : { spawn }),
   })
 
@@ -213,10 +304,34 @@ export async function startupSelfCheck({
     // by having checked nothing.
     const { init } = reported
     if (init === null) throw new StartupSelfCheckFailed([noInit()])
+    // Last, and after both assertions, because it is the only condition here
+    // that does not block. Everything that can refuse the boot has refused by
+    // now, so nothing below can turn a disagreement about prose into an outage.
+    //
+    // Under the same deadline the Turn was, and spending it differently. `send`
+    // settles on a stream result or on the process dying, so a probe that
+    // answered the Turn and then never answers this would hold the boot open for
+    // ever — the one condition designed never to block would be the only one
+    // outside the timeout, and a check that exists to stop a hang would have
+    // become one. It must not *refuse* on the deadline either, so the deadline
+    // resolves this to null, which reads as a disagreement roma cannot resolve
+    // exactly as a failed relay does. Whatever the Turn left of the budget is
+    // what this gets, which is the right way round: the deadline is how long roma
+    // will spend booting, not how long each exchange may take.
+    const reportedEffort = await Promise.race([
+      relayCommand(session, EFFORT_QUESTION),
+      expired.then<null, null>(
+        () => null,
+        () => null,
+      ),
+    ])
+    const agrees = reportedEffort !== null && reportsEffort(reportedEffort, effort)
+    if (!agrees) log({ event: 'effort-unverified', pinned: effort, reported: reportedEffort })
     return {
       apiKeySource: init.apiKeySource,
       model: init.model,
       claudeCodeVersion: init.claudeCodeVersion,
+      effort: { pinned: effort, reported: reportedEffort, agrees },
       durationMs: Date.now() - startedAt,
       costUsd: turn.costUsd,
     }
@@ -236,6 +351,82 @@ export async function startupSelfCheck({
     // turn the check that exists to stop a hang into one.
     await session.terminateOrKill()
   }
+}
+
+/**
+ * Relay one of Claude Code's own commands to a process and hand back what it
+ * said, or null if it did not say anything.
+ *
+ * The gesture `Core.#runReadout` makes, with everything that makes a Readout a
+ * Readout taken away: no Caller, so no Caller Marker; no Task, so no queue, no
+ * concurrency slot and no acknowledgement; no Audit Record, because nobody was
+ * billed and nobody asked. What is left is the primitive itself — one command
+ * onto stdin as itself, one Turn's worth of waiting, and the text back.
+ *
+ * A named function rather than four lines inline, so that the second caller —
+ * whenever there is one — finds this rather than reinventing it beside it. There
+ * is no second caller today, and that is worth saying out loud: it is written as
+ * a primitive on the strength of what it is, not on the strength of a plan.
+ *
+ * **Null rather than a throw**, because the only caller must not fail on it. A
+ * process that cannot answer a free local command has something wrong with it, and
+ * saying so in the Operator Log is the whole of what roma does about that.
+ */
+export async function relayCommand(
+  session: ClaudeSession,
+  command: string,
+): Promise<string | null> {
+  try {
+    const turn = await session.send(command)
+    return turn.text
+  } catch (error) {
+    // A failed Turn still carries whatever the process managed to say, which is
+    // more use to whoever reads the log than roma paraphrasing the failure.
+    if (error instanceof TurnFailedError && error.turn.text !== '') return error.turn.text
+    return null
+  }
+}
+
+/**
+ * Whether an answer names the effort roma pinned, read loosely.
+ *
+ * The level word anywhere in the message, case-insensitively, rather than the
+ * sentence's shape — which is the point: the build answers this in at least
+ * three shapes (`Current effort level: high`, `Effort level: auto (currently
+ * high)`, and `ultracode`'s, which embeds a parenthetical description), and a
+ * check that matched one of them would fire on a release that reworded it. What
+ * it must fire on is a changed *level*.
+ *
+ * Word boundaries rather than a substring, because `high` is inside `xhigh` and
+ * a bare `includes` would have a Session pinned at `high` accept an answer of
+ * `xhigh`.
+ *
+ * **`auto` disagrees with everything, and that is stricter than ADR-0016 wrote
+ * down.** The ADR asks for the level word anywhere in the message; this adds one
+ * word that vetoes. It is here because the loose rule alone proves nothing for
+ * the commonest deployment there is: `Effort level: auto (currently high)` is
+ * what the build says when nothing pinned an effort, it contains `high`, and
+ * `high` is the Pinned Effort of everybody who has not set `ROMA_EFFORT` — so a
+ * bare level-word match would pass in exactly the case the check exists to catch,
+ * `--effort` missing from the spawn arguments altogether.
+ *
+ * The cost is a false disagreement if a release ever writes something like
+ * `Current effort level: high (auto-selected)`, which is the prose-brittleness
+ * the loose match was chosen to avoid. Taken deliberately, because the two
+ * mistakes are not the same size: a false disagreement is one line in the
+ * Operator Log on a boot that continues, and a false agreement is roma believing
+ * it verified its own wiring when it verified nothing.
+ */
+export function reportsEffort(message: string, effort: string): boolean {
+  if (names(message, UNPINNED)) return false
+  return names(message, effort)
+}
+
+/** Whether a word appears in a message, on its own and in any casing. */
+function names(message: string, word: string): boolean {
+  // Escaped because a level is a plain word today and a regular expression is
+  // not the place to assume that stays true.
+  return new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(message)
 }
 
 function checkInit(

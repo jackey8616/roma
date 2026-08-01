@@ -58,6 +58,12 @@ function boot({
     started.push(roma)
     return roma
   })
+  // Attached now rather than by whichever test awaits it. Answering the probe
+  // takes two exchanges since ADR-0016 — the Turn, then the relayed `/effort
+  // current` — so a boot that refuses on the first one rejects while the fixture
+  // is still between them, and every test of a refusal would otherwise report an
+  // unhandled rejection alongside its perfectly good assertion.
+  starting.catch(() => {})
 
   return {
     claude: fixture.claude,

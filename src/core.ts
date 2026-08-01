@@ -11,6 +11,14 @@ import type {
 } from './channel-adapter.js'
 import { TranscriptNotFound, TurnFailedError, wasInterrupted, type Turn } from './claude-session.js'
 import { readCommand, type Command, type CommandRequest } from './commands.js'
+import {
+  EFFORT_NAMES,
+  EFFORT_NOT_APPLIED,
+  PINNED_EFFORT_NAME,
+  readEffortRequest,
+  takesEffort,
+  type EffortRequest,
+} from './effort-menu.js'
 import { EnclosureUnreadable, writeEnclosures } from './enclosures.js'
 import {
   MENU_NAMES,
@@ -22,7 +30,9 @@ import {
 import { readReadout } from './readouts.js'
 import { ProgressReporter } from './progress-reporter.js'
 import {
+  ChosenEffortNotOffered,
   ChosenModelNotOffered,
+  type ChosenEfforts,
   type ChosenModels,
   type SessionGenerations,
 } from './session-generation.js'
@@ -140,6 +150,16 @@ export interface CoreOptions {
    */
   readonly models: ChosenModels
   /**
+   * What effort each Session runs at, and what the deployment pinned.
+   *
+   * Given to the Session Pool as well, for exactly the reason `models` is: the
+   * Core writes what somebody chose and the pool reads it at the next spawn, and
+   * a pool built without it is the failure with no symptom — `/effort` answers,
+   * the record is written, and every Turn runs at the Pinned Effort. Sharper here
+   * than for the model, because nothing in the stream would ever contradict it.
+   */
+  readonly efforts: ChosenEfforts
+  /**
    * Where every Task is written down, and shared like everything else here.
    *
    * Required rather than optional, though an optional one would be easy: a Core
@@ -212,6 +232,15 @@ interface RunningTask extends TaskAddress {
    * the Core being told how the pool works.
    */
   model: string
+  /**
+   * What effort this Task ran at, for its Audit Record.
+   *
+   * Read and re-read exactly where the model is, for the same reason: a Task
+   * that waited behind three others is one somebody may have moved the effort
+   * under, and the ledger has to say what was actually sent rather than what was
+   * true when it arrived.
+   */
+  effort: string
   /** Set by `/stop`, and read at each point the Task can still be stopped. */
   stopped: boolean
   /**
@@ -268,6 +297,7 @@ export class Core {
   readonly #queue: TaskQueue
   readonly #sessions: SessionGenerations
   readonly #models: ChosenModels
+  readonly #efforts: ChosenEfforts
   readonly #audit: AuditLog
   readonly #credential: CredentialKind
   readonly #overflow: OverflowOptions | null
@@ -289,6 +319,7 @@ export class Core {
     queue,
     sessions,
     models,
+    efforts,
     audit,
     credential,
     overflow,
@@ -310,6 +341,7 @@ export class Core {
     this.#queue = queue
     this.#sessions = sessions
     this.#models = models
+    this.#efforts = efforts
     this.#audit = audit
     this.#credential = credential
     this.#overflow = overflow ?? null
@@ -388,14 +420,16 @@ export class Core {
     // the one failure that happens before there is one: a Conversation whose
     // Session roma could not work out.
     let session: string | null = null
-    // The same, for the model: a Readout runs on whatever process its Session
-    // has, so its record names one for the same reason a Task's does.
+    // The same, for the model and the effort: a Readout runs on whatever process
+    // its Session has, so its record names both for the reason a Task's does.
     let model: string | null = null
+    let effort: string | null = null
     let turn: Turn | null = null
     try {
       const sessionId = this.#sessions.sessionFor(conversationKey)
       session = sessionId
       model = this.#models.modelFor(sessionId)
+      effort = this.#efforts.effortFor(sessionId)
       // Acknowledged only where it cannot be answered at once, which is the
       // whole of ADR-0012's rule about this. A Readout on a Session with a live
       // process comes back in milliseconds, and an acknowledgement there would
@@ -470,6 +504,7 @@ export class Core {
       turnMs: turn?.durationMs ?? null,
       credential: this.#credential,
       model: model ?? this.#models.pinnedModel,
+      effort: effortOn(model ?? this.#models.pinnedModel, effort ?? this.#efforts.pinnedEffort),
       // Asked rather than assumed false. A Readout drives no Turn so nothing it
       // does can mint, but the answer is read-and-forget and a hard `false` here
       // would be roma writing down a fact it declined to check.
@@ -504,15 +539,23 @@ export class Core {
 
     let instruction: OutboundInstruction
     try {
+      // The three that answer with prose and the two that answer with an
+      // outcome, told apart here rather than inside `#carryOut` — "it was carried
+      // out" is not what any of the first three say, and `#carryOut`'s type is
+      // what stops a sixth Command being added without this deciding which it is.
       instruction =
         request.command === 'model'
           ? this.#answerModel(readModelRequest(request.argument), conversationKey, address)
-          : {
-              kind: 'command-outcome',
-              ...address,
-              command: request.command,
-              carriedOut: this.#carryOut(request.command, conversationKey),
-            }
+          : request.command === 'effort'
+            ? this.#answerEffort(readEffortRequest(request.argument), conversationKey, address)
+            : request.command === 'config'
+              ? this.#answerConfig(request.argument, conversationKey, address)
+              : {
+                  kind: 'command-outcome',
+                  ...address,
+                  command: request.command,
+                  carriedOut: this.#carryOut(request.command, conversationKey),
+                }
     } catch (error) {
       // Silence is not an outcome here either. Nothing routine reaches this —
       // it takes a generation record roma cannot read, or a Conversation Key an
@@ -580,15 +623,193 @@ export class Core {
         return {
           kind: 'result',
           ...address,
-          text: fromNextMessage(PINNED_NAME, this.#models.pinnedModel),
+          text:
+            fromNextMessage(PINNED_NAME, this.#models.pinnedModel) +
+            this.#effortStranded(sessionId, this.#models.pinnedModel),
         }
       case 'chosen':
         this.#models.choose(sessionId, request.model)
         return {
           kind: 'result',
           ...address,
-          text: fromNextMessage(request.name, request.model),
+          text:
+            fromNextMessage(request.name, request.model) +
+            this.#effortStranded(sessionId, request.model),
         }
+    }
+  }
+
+  /**
+   * The sentence a `/model` owes when it has just made a Chosen Effort inert, or
+   * nothing.
+   *
+   * Only where there is a Chosen Effort to strand: a Session running at the
+   * Pinned Effort has chosen nothing, so telling its Caller that a level will not
+   * apply would be answering a question they did not ask about a setting they did
+   * not make. And only where the Matrix positively says the model takes none —
+   * `takesEffort` returns null for a model it has never been read about, and
+   * roma says nothing rather than asserting either way.
+   *
+   * Said at all because the Matrix's whole licence is to speak rather than
+   * refuse. Nothing here prevents the move, and nothing rewrites the record: the
+   * Chosen Effort survives, inert, and applies again the moment the Session goes
+   * back onto a model that takes one.
+   */
+  #effortStranded(sessionId: string, model: string): string {
+    if (takesEffort(model) !== false) return ''
+    const chosen = this.#efforts.chosenFor(sessionId)
+    return chosen === null ? '' : ` ${takesNoEffort(model, chosen)}`
+  }
+
+  /**
+   * Say what effort this Conversation runs at, or move it, and say so.
+   *
+   * `#answerModel`'s twin, and answered here rather than relayed for a reason the
+   * build states from its own side: `Set effort level to max (this session
+   * only)`. A session is a process, and processes end at Eviction, at Reaping and
+   * at a deploy — moments `CONTEXT.md` defines as unobservable to the person
+   * using the Session. Relayed, `/effort` is not a setting; it is a setting that
+   * reverts at a time nobody can see (ADR-0016).
+   *
+   * Sharper than the model's, in one way that does not show here and shows
+   * everywhere else: `--model` is echoed in `system/init` and `--effort` is
+   * echoed nowhere at all. So this reply is not roma reporting an observation. It
+   * is roma saying what it will send, which is why the Audit Record spells the
+   * effort as weaker evidence than the model beside it.
+   */
+  #answerEffort(
+    request: EffortRequest,
+    conversationKey: string,
+    address: TaskAddress,
+  ): OutboundInstruction {
+    // Which Session, not which Conversation — a Chosen Effort belongs to a
+    // Session, which is what makes `/clear` return it to the Pinned Effort
+    // without anything being deleted.
+    const sessionId = this.#sessions.sessionFor(conversationKey)
+
+    switch (request.kind) {
+      case 'unknown':
+        // Nothing is written, so a typo — or `ultracode`, which is the
+        // operator's — cannot move a Session somebody shares with other people.
+        return { kind: 'failure', ...address, reason: unknownEffortReason(request.name) }
+      case 'report':
+        return { kind: 'result', ...address, text: this.#effortReport(sessionId) }
+      case 'default':
+        this.#efforts.usePinnedEffort(sessionId)
+        return {
+          kind: 'result',
+          ...address,
+          text:
+            atNextMessage(PINNED_EFFORT_NAME, this.#efforts.pinnedEffort) +
+            this.#modelTakesNone(sessionId),
+        }
+      case 'chosen':
+        this.#efforts.choose(sessionId, request.level)
+        return {
+          kind: 'result',
+          ...address,
+          // Said on the way in as well as on a `/model` later, because this is
+          // the message where somebody has just asked for something that will not
+          // happen, and a bare acknowledgement would let them believe it did.
+          text: atNextMessage(request.level, request.level) + this.#modelTakesNone(sessionId),
+        }
+    }
+  }
+
+  /**
+   * What effort this Session runs at, and what else it may run at.
+   *
+   * `#modelReport`'s shape, minus its two spellings: a level is a level, and the
+   * name a Caller types is the string roma passes to `--effort`. What it keeps is
+   * the distinction between choosing and following — a Session with no record
+   * *follows* the Pinned Effort, and one whose record names the same level does
+   * not, which is one string today and two the moment an operator moves
+   * `ROMA_EFFORT`.
+   */
+  #effortReport(sessionId: string): string {
+    return (
+      `This conversation runs at ${this.#effortNamed(sessionId)}. ` +
+      `You can choose: ${EFFORT_LIST}.` +
+      this.#modelTakesNone(sessionId)
+    )
+  }
+
+  /**
+   * This Session's effort as a person would say it back.
+   *
+   * `chosenFor` rather than `effortFor`, because the two states that answer the
+   * same string are not the same answer: a Session nobody moved *follows* the
+   * Pinned Effort and is named for it, and one moved to the level the deployment
+   * happens to pin follows nothing. Calling the second "default" would tell
+   * somebody who typed `/effort high` that an operator moving `ROMA_EFFORT` will
+   * take them along — which is the one thing their record guarantees will not
+   * happen.
+   *
+   * Its own method because two sentences need it and they must not come to
+   * describe different Sessions: `/effort` reports it alone, and `/config`
+   * reports it beside the model.
+   */
+  #effortNamed(sessionId: string): string {
+    const chosen = this.#efforts.chosenFor(sessionId)
+    return chosen ?? `${PINNED_EFFORT_NAME} (${this.#efforts.pinnedEffort})`
+  }
+
+  /**
+   * The sentence an `/effort` owes when this Session's model takes none, or
+   * nothing.
+   *
+   * `#effortStranded` pointing the other way, and it does not ask whether
+   * anything was chosen: somebody who just typed `/effort max` is owed the
+   * sentence whether or not the record already existed, and somebody who typed
+   * `/effort` to ask is owed it because the answer is otherwise misleading.
+   */
+  #modelTakesNone(sessionId: string): string {
+    const model = this.#models.modelFor(sessionId)
+    return takesEffort(model) === false ? ` ${takesNoEffort(model)}` : ''
+  }
+
+  /**
+   * Say what this Session is set to, and refuse to set anything else.
+   *
+   * Claimed rather than left to fall through, on ADR-0013's rule applied to two
+   * more spellings: a spelling roma leaves unclaimed is one somebody is billed
+   * for. Answered rather than merely refused, on ADR-0014's test: Claude Code's
+   * own no-argument `/config` is a settings panel, a panel has no form in a chat
+   * message, and *show me what this conversation is set to* is what that gesture
+   * can honestly mean in one — which roma owns the answer to, with no process, no
+   * Turn and no money (ADR-0017).
+   *
+   * **An argument is refused rather than honoured, and rather than passed on.**
+   * Honouring it means one Conversation reconfiguring every Session in the
+   * deployment: roma passes one `CLAUDE_CONFIG_DIR` to every spawn, so a settings
+   * write from one thread persists for everybody across restarts — and the key
+   * list is not cosmetic, since `model=…|sonnet[1m]|opusplan` is a second door
+   * onto exactly what the Model Menu bounds and `workflows` is the switch the
+   * Effort Menu keeps `ultracode` away from Callers for. Passing it on is the
+   * fault this exists to fix. So the refusal names what roma *does* let a
+   * Conversation set, which is the two Commands that own those two facts.
+   */
+  #answerConfig(
+    argument: string | null,
+    conversationKey: string,
+    address: TaskAddress,
+  ): OutboundInstruction {
+    if (argument !== null) {
+      return { kind: 'failure', ...address, reason: CONFIG_SETS_NOTHING }
+    }
+    const sessionId = this.#sessions.sessionFor(conversationKey)
+    // Built from the same two methods `/model` and `/effort` report with, rather
+    // than from the records again. Three spellings over two roma-owned facts, not
+    // three sources of truth — and a second reading here is exactly how three
+    // spellings would come to answer differently.
+    return {
+      kind: 'result',
+      ...address,
+      text:
+        `This conversation is on ${this.#modelNamed(sessionId)}, ` +
+        `at ${this.#effortNamed(sessionId)}. ` +
+        `Change either with “/model” or “/effort”.` +
+        this.#modelTakesNone(sessionId),
     }
   }
 
@@ -602,23 +823,37 @@ export class Core {
    * a list nothing in the sentence above it belonged to.
    */
   #modelReport(sessionId: string): string {
-    // `chosenFor` rather than `modelFor`, because the two states that answer the
-    // same string are not the same answer. A Session nobody moved *follows* the
-    // Pinned Model and is named for it; one that was moved to the model the
-    // deployment happens to pin follows nothing, and calling it "default" would
-    // tell somebody who typed `/model sonnet` that an operator moving
-    // `ROMA_MODEL` will take them along — which is the one thing their record
-    // guarantees will not happen.
+    return `This conversation is on ${this.#modelNamed(sessionId)}. You can choose: ${MENU_LIST}.`
+  }
+
+  /**
+   * This Session's model in both spellings, or the id alone where the Menu has
+   * no name for it.
+   *
+   * `chosenFor` rather than `modelFor`, because the two states that answer the
+   * same string are not the same answer. A Session nobody moved *follows* the
+   * Pinned Model and is named for it; one that was moved to the model the
+   * deployment happens to pin follows nothing, and calling it "default" would
+   * tell somebody who typed `/model sonnet` that an operator moving `ROMA_MODEL`
+   * will take them along — which is the one thing their record guarantees will
+   * not happen.
+   *
+   * Its own method for `#effortNamed`'s reason: `/model` and `/config` both say
+   * it, and two readings of one record are two things that can disagree.
+   */
+  #modelNamed(sessionId: string): string {
     const chosen = this.#models.chosenFor(sessionId)
-    const model = chosen ?? this.#models.pinnedModel
-    const name = chosen === null ? PINNED_NAME : menuNameFor(chosen)
-    return (
-      `This conversation is on ${named(name, model)}. ` + `You can choose: ${MENU_LIST}.`
+    return named(
+      chosen === null ? PINNED_NAME : menuNameFor(chosen),
+      chosen ?? this.#models.pinnedModel,
     )
   }
 
   /** Do what the Command asks, and say whether there was anything to do. */
-  #carryOut(command: Exclude<Command, 'model'>, conversationKey: string): boolean {
+  #carryOut(
+    command: Exclude<Command, 'model' | 'effort' | 'config'>,
+    conversationKey: string,
+  ): boolean {
     if (command === 'clear') {
       // Nothing is torn down. `/clear` is aimed at what the *next* message
       // reaches: a Task already running in the old Session finishes and still
@@ -718,6 +953,7 @@ export class Core {
         ...address,
         sessionId,
         model: this.#models.modelFor(sessionId),
+        effort: this.#efforts.effortFor(sessionId),
         stopped: false,
         attempts,
         parked: null,
@@ -804,6 +1040,13 @@ export class Core {
         // `sessionId` null — because a row that says nothing is a row the month's
         // spending cannot be read against.
         model: running?.model ?? this.#models.pinnedModel,
+        // And what it was asked to think at, said as weakly as roma knows it:
+        // where the Matrix says the model takes no effort, the record says that
+        // rather than naming a level nothing ran at.
+        effort: effortOn(
+          running?.model ?? this.#models.pinnedModel,
+          running?.effort ?? this.#efforts.pinnedEffort,
+        ),
         cloudReach,
         apiKeySource: attempts.apiKeySource(),
       })
@@ -1079,6 +1322,7 @@ export class Core {
     // it was on if this Task queued behind another one and somebody chose in
     // between.
     task.model = this.#models.modelFor(sessionId)
+    task.effort = this.#efforts.effortFor(sessionId)
     reporter.update({ phase: 'working' })
     const onEvent = (id: string, event: ClaudeEvent): void => {
       if (id !== sessionId) return
@@ -1162,12 +1406,90 @@ const ROMA_FAILED_COMMAND = 'roma could not carry out that command.'
  */
 const MENU_LIST = MENU_NAMES.join(', ')
 
+/** The Effort Menu as a sentence names it, held once for `MENU_LIST`'s reason. */
+const EFFORT_LIST = EFFORT_NAMES.join(', ')
+
 function fromNextMessage(name: string, model: string): string {
   return (
     `This conversation runs on ${named(name, model)} from your next message. ` +
     `Anything already running finishes on the model it started under.`
   )
 }
+
+/**
+ * The same, for the effort.
+ *
+ * Its own sentence rather than a parameterised one, because the two differ in
+ * the half that matters: a model has two spellings and an effort has one, and
+ * "the model it started under" is not a phrase about effort. What it must not
+ * leave out is the same thing — *when* — because `/effort` is aimed at what the
+ * next message reaches, and a bare acknowledgement sent while a Task is running
+ * would be read as having changed that Task.
+ */
+function atNextMessage(name: string, effort: string): string {
+  return (
+    `This conversation runs at ${name === effort ? name : `${name} (${effort})`} ` +
+    `from your next message. Anything already running finishes at the effort it started at.`
+  )
+}
+
+/**
+ * What roma says where the Effort Matrix says this model takes no effort.
+ *
+ * The whole of what the Matrix is for on this side: it says so, and it refuses
+ * nothing. Setting `max` on a model that strips it costs no more than `low`
+ * does, so the harm is a false belief and a false belief is answered with a
+ * sentence.
+ *
+ * It says what roma *read*, not what roma watched. Nothing observable
+ * contradicts a level on such a model — the build echoes back every level on
+ * every model identically — so the only account of this is a reading of a
+ * minified binary, and one that has already been wrong once. The sentence
+ * promises no more than that, and it names the way out rather than describing
+ * the fault.
+ */
+function takesNoEffort(model: string, chosen?: string): string {
+  const setting = chosen === undefined ? 'Effort' : `The effort this conversation is at (${chosen})`
+  return (
+    `${setting} does not apply on ${model}, which takes none — ` +
+    `it applies again on a model that does.`
+  )
+}
+
+/**
+ * What roma says about a level it does not offer.
+ *
+ * `unknownModelReason`'s shape and its reasons: named back so it can be
+ * corrected in the next message, the Menu quoted so the correction needs no
+ * looking up, and "nothing has changed" said out loud because a Conversation is
+ * shared and the people in it are owed the difference between an effort that
+ * moved and a typo that did not move one.
+ *
+ * `ultracode` arrives here like any other unknown name, and is answered like
+ * one. Explaining that it exists and is the operator's would be roma advertising
+ * something no Caller can have.
+ */
+function unknownEffortReason(name: string): string {
+  return (
+    `roma does not offer an effort called “${name}”. ` +
+    `Choose one of: ${EFFORT_LIST}. Nothing has changed.`
+  )
+}
+
+/**
+ * What roma says to a `/config key=value`.
+ *
+ * A refusal that names the alternatives rather than a bare no, because the
+ * person typing it knows the tool and is reaching for something real: Claude
+ * Code's `/config` sets 35 keys. What they cannot have is any of them, and the
+ * reason is worth one clause — roma passes one config dir to every spawn, so
+ * that write would be a write for every Session in the deployment, persisting
+ * across restarts.
+ */
+const CONFIG_SETS_NOTHING =
+  'roma does not set Claude Code settings — every Session in this deployment shares one ' +
+  'configuration, so a change here would be a change for everybody, permanently. ' +
+  'What you can set for this conversation is “/model” and “/effort”. Nothing has changed.'
 
 /**
  * One model, in both spellings a person needs.
@@ -1228,6 +1550,23 @@ function addressOf({ taskId, conversationKey, caller, callerName }: TaskAddress)
 }
 
 /**
+ * What the Audit Record says a Turn was asked to think at.
+ *
+ * The level roma sent, unless the Effort Matrix says this model takes none — in
+ * which case the record says *that*, because naming a level nothing ran at would
+ * be the ledger asserting the opposite of what roma has read. Only a positive
+ * `false` changes the answer: a model the Matrix has never been read about gets
+ * the level, since roma has no ground to claim otherwise.
+ *
+ * The ADR-0016 line this keeps: what is written down here is what roma *sent*,
+ * boot-verified once, interpreted through a reading of a binary. It is not an
+ * observation, and nothing anywhere in roma can make it one.
+ */
+function effortOn(model: string, effort: string): string {
+  return takesEffort(model) === false ? EFFORT_NOT_APPLIED : effort
+}
+
+/**
  * How a Task ended, as the audit record names it.
  *
  * Taken from the instruction the Conversation is about to be given rather than
@@ -1271,6 +1610,7 @@ function reasonFor(error: unknown): string {
   // has its explanation here and nowhere else.
   if (error instanceof EnclosureUnreadable) return `roma could not read ${error.message}`
   if (error instanceof ChosenModelNotOffered) return chosenModelGoneReason(error)
+  if (error instanceof ChosenEffortNotOffered) return chosenEffortGoneReason(error)
   // Before the general failed Turn, which this is a kind of: it carries no text
   // at all, so left to that line it falls through to `ROMA_FAILED` — which is
   // what a whole Conversation was told, message after message, in #105.
@@ -1281,9 +1621,9 @@ function reasonFor(error: unknown): string {
 
 /** The same, for a Command, whose generic failure is its own sentence. */
 function commandReasonFor(error: unknown): string {
-  return error instanceof ChosenModelNotOffered
-    ? chosenModelGoneReason(error)
-    : ROMA_FAILED_COMMAND
+  if (error instanceof ChosenModelNotOffered) return chosenModelGoneReason(error)
+  if (error instanceof ChosenEffortNotOffered) return chosenEffortGoneReason(error)
+  return ROMA_FAILED_COMMAND
 }
 
 /**
@@ -1305,6 +1645,23 @@ function chosenModelGoneReason({ model }: ChosenModelNotOffered): string {
   return (
     `This conversation is on ${model}, which roma no longer offers. ` +
     `Send “/model ${PINNED_NAME}” to put it back on the Pinned Model, ` +
+    `keeping everything it has said.`
+  )
+}
+
+/**
+ * The same, for a Chosen Effort roma has stopped offering.
+ *
+ * A narrower hole than the model's, because the Effort Menu holds every level
+ * the build has — so the only way here is roma removing one, which is exactly
+ * what this sentence exists to make noticeable. The fault is total in the same
+ * way and is answered the same way: the way out, rather than a description of
+ * the fault, because `/effort default` does not read the record at all.
+ */
+function chosenEffortGoneReason({ effort }: ChosenEffortNotOffered): string {
+  return (
+    `This conversation runs at ${effort}, which roma no longer offers. ` +
+    `Send “/effort ${PINNED_EFFORT_NAME}” to put it back at the Pinned Effort, ` +
     `keeping everything it has said.`
   )
 }

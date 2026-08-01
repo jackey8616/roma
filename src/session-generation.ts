@@ -1,16 +1,18 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { EFFORT_MENU } from './effort-menu.js'
 import { MENU } from './model-menu.js'
 import { sessionIdFor } from './session-id.js'
 
 /**
- * The two things roma remembers about a Conversation, in one place.
+ * The three things roma remembers about a Conversation, in one place.
  *
- * Which Session it is on, and — since ADR-0014 — which model that Session runs
- * on. They are here together because they are the same trick and share the same
- * three rules: a record in the work root, a file rather than a directory, and a
- * missing one meaning "almost every Conversation" rather than "something is
- * wrong". Everything else roma knows is derived or is Claude Code's.
+ * Which Session it is on, since ADR-0014 which model that Session runs on, and
+ * since ADR-0016 what effort it runs at. They are here together because they are
+ * the same trick and share the same three rules: a record in the work root, a
+ * file rather than a directory, and a missing one meaning "almost every
+ * Conversation" rather than "something is wrong". Everything else roma knows is
+ * derived or is Claude Code's.
  */
 
 /**
@@ -35,6 +37,17 @@ const SUFFIX = '.generation'
  */
 const MODEL_SUFFIX = '.model'
 
+/**
+ * What a record of a Session's Chosen Effort is called, beside the models.
+ *
+ * A file for the same reason and at the same stakes: reclaimed, a Conversation
+ * that went quiet for seven days would come back at the Pinned Effort having
+ * asked for something else, at a moment nobody can observe — and unlike the
+ * model, nothing in the stream would say so afterwards, because `system/init`
+ * carries no effort field at all (ADR-0016).
+ */
+const EFFORT_SUFFIX = '.effort'
+
 /** A generation as it is written down: a whole count and nothing else. */
 const COUNT = /^\d+$/
 
@@ -54,6 +67,16 @@ const COUNT = /^\d+$/
  * whose argument was on the Menu.
  */
 const OFFERED = new Set(Object.values(MENU))
+
+/**
+ * Every effort a record may name: the Effort Menu's own, and nothing else.
+ *
+ * `OFFERED`'s reasoning exactly, and it holds the same way round: the only thing
+ * that writes a record is an `/effort` whose argument was on the Menu, so
+ * `ultracode` cannot get in here — a deployment that pinned it did so through
+ * `ROMA_EFFORT`, which writes nothing and is not read here.
+ */
+const OFFERED_EFFORTS = new Set(EFFORT_MENU)
 
 /**
  * Whether a read failed because there is nothing there, rather than because
@@ -366,5 +389,140 @@ export class ChosenModels {
    */
   #recordFor(sessionId: string): string {
     return join(this.#workRoot, `${sessionId}${MODEL_SUFFIX}`)
+  }
+}
+
+/**
+ * A Session's Chosen Effort record names a level roma does not offer.
+ *
+ * `ChosenModelNotOffered`'s twin, and it exists for the same one reason: this is
+ * a failure a *Caller* can clear, and they can only do it if somebody tells them
+ * how. `/effort default` is the way out and does not read the record at all, so
+ * the sentence the Core builds from this can promise it.
+ *
+ * It is a narrower hole than the model's, because the Effort Menu holds every
+ * level the build has — so the only way to arrive here is roma *removing* a
+ * level, which is the case `OFFERED_EFFORTS` exists to make noticeable.
+ */
+export class ChosenEffortNotOffered extends Error {
+  constructor(readonly effort: string) {
+    super(`the Chosen Effort for this Session is not one roma offers: ${effort}`)
+    this.name = 'ChosenEffortNotOffered'
+  }
+}
+
+export interface ChosenEffortsOptions {
+  /** The same directory the generations and the models are kept in. */
+  readonly workRoot: string
+  /**
+   * What a Session runs at when nobody has said otherwise — whatever
+   * `ROMA_EFFORT` resolved to for this deployment.
+   *
+   * Held here rather than looked up by each caller, for `pinnedModel`'s reason:
+   * "what effort is this Session at" has one answer, and `/effort default`
+   * returns to what the deployment actually pinned rather than to a name written
+   * down somewhere else. It may be `ultracode`, which is off the Menu — the same
+   * shape a Pinned Model off the Model Menu has, and handled the same way.
+   */
+  readonly pinnedEffort: string
+}
+
+/**
+ * What effort each Session runs at, and how somebody changes it.
+ *
+ * roma's rather than the process's, and that is the whole decision (ADR-0016).
+ * Claude Code's own `/effort` says it in its own words — `Set effort level to max
+ * (this session only)` — and a session is a process. Eviction, Reaping and a
+ * deploy all end processes at moments `CONTEXT.md` defines as unobservable to
+ * the person using the Session, so a choice kept there would not be effort
+ * switching; it would be a setting that reverts at a time nobody can see.
+ *
+ * Sharper here than for the model, because there is no second opinion to fall
+ * back on: `--model` is echoed in `system/init` and the startup self-check
+ * asserts on it, and `--effort` is echoed nowhere at all. What roma wrote down is
+ * the only account there is of what a Session was asked to run at.
+ *
+ * **Keyed by the Session id, not by the Conversation Key**, and every word of
+ * `ChosenModels`' argument for that holds unchanged: the reset Command moves the
+ * generation, so a cleared Conversation asks about a Session id that has no
+ * record and is at the Pinned Effort, without anything being deleted. Reverting
+ * is arithmetic rather than an action somebody has to remember. The price is the
+ * same litter, at tens of bytes per reset forever, accepted for the same reason.
+ */
+export class ChosenEfforts {
+  readonly #workRoot: string
+  readonly #pinnedEffort: string
+
+  constructor({ workRoot, pinnedEffort }: ChosenEffortsOptions) {
+    this.#workRoot = workRoot
+    this.#pinnedEffort = pinnedEffort
+  }
+
+  /** What a Session runs at when nobody has chosen anything. */
+  get pinnedEffort(): string {
+    return this.#pinnedEffort
+  }
+
+  /**
+   * The effort this Session runs at: its Chosen Effort, or the Pinned Effort.
+   *
+   * The Pinned Effort for almost every Session, and that is not written down.
+   * Anything else on disk is an error rather than a reason to fall back, for
+   * `modelFor`'s reason: falling back means running at an effort nobody chose and
+   * billing the Shared Window for it, with no evidence anywhere that it happened.
+   */
+  effortFor(sessionId: string): string {
+    return this.chosenFor(sessionId) ?? this.#pinnedEffort
+  }
+
+  /**
+   * The effort this Session was moved to, or null where nobody moved it.
+   *
+   * The distinction `effortFor` collapses, kept for `ChosenModels.chosenFor`'s
+   * reason: a Session with no record *follows* the Pinned Effort and a Session
+   * whose record names the same level does not, and they are one string today and
+   * two the moment an operator moves `ROMA_EFFORT`.
+   */
+  chosenFor(sessionId: string): string | null {
+    let record: string
+    try {
+      record = readFileSync(this.#recordFor(sessionId), 'utf8')
+    } catch (error) {
+      if (isMissing(error)) return null
+      throw error
+    }
+    const written = record.trim()
+    if (!OFFERED_EFFORTS.has(written)) throw new ChosenEffortNotOffered(written)
+    return written
+  }
+
+  /**
+   * Put this Session at one of the Menu's levels.
+   *
+   * Nothing is torn down and nothing is checked against a running process, and
+   * nothing is checked against the Session's model either: the Effort Matrix
+   * reports and never refuses, so a `max` on a model that takes none is written
+   * down and answered with a sentence rather than turned away.
+   */
+  choose(sessionId: string, effort: string): void {
+    mkdirSync(this.#workRoot, { recursive: true })
+    writeRecord(this.#recordFor(sessionId), effort)
+  }
+
+  /**
+   * Put this Session back at the Pinned Effort.
+   *
+   * Forgetting the record rather than writing the pinned level into it, for
+   * `usePinnedModel`'s reason: a Session that asked for "default" must follow a
+   * deployment that moves `ROMA_EFFORT`, and one carrying a literal would be
+   * stranded at the effort roma used to run at.
+   */
+  usePinnedEffort(sessionId: string): void {
+    rmSync(this.#recordFor(sessionId), { force: true })
+  }
+
+  /** Where a Session's Chosen Effort is written, beside its Chosen Model. */
+  #recordFor(sessionId: string): string {
+    return join(this.#workRoot, `${sessionId}${EFFORT_SUFFIX}`)
   }
 }

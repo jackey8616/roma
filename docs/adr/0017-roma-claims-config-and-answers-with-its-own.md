@@ -4,8 +4,10 @@ Date: 2026-08-01
 
 ## Status
 
-Accepted. Not yet implemented, and follows ADR-0016 — the report it gives has
-nothing to say until a Session has an effort to report.
+Accepted and implemented, following ADR-0016 — the report it gives had nothing to
+say until a Session had an effort to report. `src/commands.ts` maps `/config` and
+`/settings` to the one `config` Command, and `Core.#answerConfig` is what reports
+and what refuses.
 
 Applies ADR-0013's rule to two more spellings: `a spelling roma leaves unclaimed
 is one somebody is billed for`. Applies ADR-0014's test to decide what the
