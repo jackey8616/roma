@@ -53,6 +53,15 @@ Two facts sized the choice, both measured rather than assumed:
   and not a Transcript, so an order of magnitude and nothing finer. The decision
   is untouched: this is the argument's own direction, only further along. Nobody
   has yet measured the artefact that actually matters, which is #41.
+
+  **Amended again 2026-08-01 — the artefact has now been measured, and the
+  analogue was about 50% high.** Two tool-using Turns on one Session
+  (`docs/transcript-growth-verification.md`, the pinned build) put a Turn at
+  **27,822 bytes** and a Session's one-off records at **7,721** — about
+  **1.02 GB a year** at the same hundred Tasks, plus 7.7 kB for every Session
+  ever started. Per message rather than per delta is now measured rather than
+  inferred: 99 stdout events produced 23 transcript lines. The direction holds a
+  third time and volume is still not the objection.
 - **`ROMA_CLAUDE_CONFIG_DIR` was optional.** Unset, `CLAUDE_CONFIG_DIR` is not set
   at all and `HOME` is on `buildEnv`'s passthrough list, so the Transcripts of
   every Session land in the host user's `~/.claude/projects/`, interleaved with
