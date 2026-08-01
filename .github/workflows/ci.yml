@@ -60,6 +60,52 @@ jobs:
             exit 1
           fi
 
+  # The one check here that reads a commit other than this one — the tree the merge
+  # would make, rather than the tree in front of it. What that is for is in
+  # `scripts/adr-collision.ts`, along with what it deliberately does not close.
+  #
+  # Its own job rather than a fourth step above, for two reasons that are both
+  # about not making the other checks pay. It needs `fetch-depth: 0`, which the
+  # other three have no use for; and it is the only check here that does not apply
+  # to a push to main, where the union *is* main and there is nothing to compare
+  # against. Keeping it separate also leaves the name of the job above alone, which
+  # is the name a branch protection rule requires — and this job's own name is not
+  # on that list, so a red run here is visible rather than blocking until somebody
+  # adds it, which is a repository setting and not a change to this file.
+  adr-numbers:
+    name: no two ADRs take one number
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # A shallow clone has no merge base to find, and this check would then
+          # read every ADR on the base branch as one this branch adds — plausible
+          # output computed from a tree that is not there. It refuses rather than
+          # reports that, so the depth is what keeps it able to answer at all. The
+          # repository is small enough that the whole history costs less than
+          # working out a depth that holds.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # For `tsx`, which is what runs the check. The same trade `claude-code-drift.yml`
+      # makes: the comparison written inline here would put the union somewhere the
+      # free run cannot reach it, and what this check most plausibly dies of is a
+      # union computed slightly wrong, reporting nothing, forever green.
+      - run: npm ci
+
+      # The branch's own head, not the merge commit GitHub composes for the
+      # checkout — that one already contains the base, so every collision would
+      # look like it was on both sides of the merge and none would be the branch's
+      # to fix.
+      - run: npm run check:adr-collision
+        env:
+          ADR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
   # Built on every pull request, pushed on none.
   #
   # A Dockerfile only exercised at tag time breaks at the most expensive moment —
