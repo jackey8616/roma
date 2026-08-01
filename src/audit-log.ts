@@ -2,6 +2,7 @@ import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync
 import { join } from 'node:path'
 import { apiKeySourceFor, type CredentialKind } from './build-env.js'
 import { writeToStderr } from './operator-log.js'
+import type { Compaction } from './stream-events.js'
 
 /** How a Task ended, in the three ways a Conversation is ever told about. */
 export type TaskOutcome = 'result' | 'failure' | 'stopped'
@@ -10,11 +11,34 @@ export type TaskOutcome = 'result' | 'failure' | 'stopped'
 const OUTCOMES: readonly TaskOutcome[] = ['result', 'failure', 'stopped']
 
 /**
- * Whether a written cost is one this can be read back: a finite number, or the
- * null that says a Turn began and nothing ever priced it.
+ * Whether a written figure is one this can be read back: a finite number, or the
+ * null that says nothing reported one.
+ *
+ * Named for the shape rather than for the field, because two of them have it and
+ * the null means something different in each — a Turn that began and was never
+ * priced, and a Compaction the stream said no token count for.
  */
-function isCost(value: unknown): boolean {
+function isFigure(value: unknown): boolean {
   return value === null || (typeof value === 'number' && Number.isFinite(value))
+}
+
+/**
+ * Whether a written Compaction is one this can be read back.
+ *
+ * Every field of it is nullable on the way in — the stream is not roma's and a
+ * version that stopped reporting the trigger would still have compacted — so
+ * what is checked is the *shape*, which is the part a torn line loses. A record
+ * saying a Compaction happened and nothing about it is still the answer to why
+ * this Task cost five times its neighbours.
+ */
+function isCompaction(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  const { trigger, preTokens, postTokens } = value as Record<string, unknown>
+  return (
+    (trigger === null || typeof trigger === 'string') &&
+    isFigure(preTokens) &&
+    isFigure(postTokens)
+  )
 }
 
 /** What kind of work one record describes. */
@@ -181,6 +205,45 @@ export interface AuditRecord {
    * against.
    */
   readonly cloudReach?: boolean
+  /**
+   * The Compaction that happened inside this Task, where one did.
+   *
+   * Here because it is the largest unexplained variation there is in what a Task
+   * costs. Measured on byte-identical messages in one Session: $0.0917 against
+   * $0.0186 — **4.9 times** — and twelve times the wall clock, and nothing on the
+   * record told the two apart. That is the exact question an Audit Record exists
+   * to answer, and it was being answered wrongly with no way to tell, because a
+   * Compaction happens *inside* a Turn and a Conversation is many people sharing
+   * one Session: whoever sent the message that crossed the threshold pays for
+   * compacting a context the whole thread filled.
+   *
+   * It is a **cost fact and not an operational event**, which is why it is here
+   * and not in the Operator Log. That log is what roma decided — an Eviction, a
+   * Reaping, a refusal — and a successful Compaction prompts no decision at all:
+   * roma cannot prevent it, delay it, or react to it.
+   *
+   * `trigger` is what makes it answer *who asked*, together with `kind` beside
+   * it: a Task that compacted automatically is somebody's bad luck, and a
+   * relayed `/compact` is somebody's choice (ADR-0018). No field is invented for
+   * the question, which is why `/compact` needs no schema decision of its own.
+   *
+   * The token figures are `pre_tokens` and `post_tokens` and deliberately not
+   * `cumulative_dropped_tokens`: that one is cumulative for the process the way
+   * `total_cost_usd` is, so recording it would file every Compaction the Session
+   * has ever had under this Task.
+   *
+   * Optional, and **absent means no Compaction happened** — which is what every
+   * record roma wrote before it could see one says, since nothing could have
+   * written it. That is `cloudReach`'s reasoning exactly: `readRecord` drops a
+   * line it cannot read, a dropped line leaves the month's total, and the month's
+   * total is what the Overflow cap is enforced against — so a required field
+   * would silently reset the month across the deploy that added it.
+   *
+   * The stream's own reduction rather than a shape of the ledger's own, because
+   * there is nothing here the ledger knows that the reader does not, and two
+   * identical interfaces are two things to keep in step.
+   */
+  readonly compaction?: Compaction
   /**
    * What Claude Code said its credential resolved to — `apiKeySource` off
    * `system/init`, and null where no Turn reached that point.
@@ -497,7 +560,7 @@ function readRecord(line: string): AuditRecord | null {
   if (typeof record['at'] !== 'string' || typeof record['taskId'] !== 'string') return null
   if (typeof record['caller'] !== 'string') return null
   if (!OUTCOMES.includes(record['outcome'] as TaskOutcome)) return null
-  if (!isCost(record['costUsd'])) return null
+  if (!isFigure(record['costUsd'])) return null
   // Absent is a Task, which is what every record written before ADR-0012 is.
   // Present and unrecognised is not readable: a kind this cannot name would be
   // counted as a Task, and the whole reason the field exists is to stop one kind
@@ -520,6 +583,12 @@ function readRecord(line: string): AuditRecord | null {
   // line that answers it with a number is answering a different question — the
   // count ADR-0015 refused.
   if (record['cloudReach'] !== undefined && typeof record['cloudReach'] !== 'boolean') return null
+  // Absent is no Compaction, which is what every record written before roma
+  // could see one says. Present and not readable as one is a torn line rather
+  // than a record with a hole in it, for `cloudReach`'s reason: this field is the
+  // whole account of why a Task cost several times what its neighbours did, and a
+  // line that answers that with a string answers it wrongly.
+  if (record['compaction'] !== undefined && !isCompaction(record['compaction'])) return null
   if (record['credential'] !== 'shared-window' && record['credential'] !== 'overflow') return null
   return record as unknown as AuditRecord
 }

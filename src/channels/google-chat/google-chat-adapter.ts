@@ -151,8 +151,8 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
       return
     }
 
-    // Only where the Task is actually over. `blocked` and `overflow-refused`
-    // are messages about a Task that is still going: forgetting its
+    // Only where the Task is actually over. `blocked`, `overflow-refused` and
+    // `context-full` are messages about a Task that is still going: forgetting its
     // acknowledgement there would strand the one the person is watching on
     // "Working…" for as long as the window takes, and post a second one when the
     // Task started again. Dropped before the messages are posted rather than

@@ -152,6 +152,31 @@ export function quotaEvent(info: Record<string, unknown> = {}): ClaudeEvent {
 }
 
 /**
+ * The same recorded Turn with a different code on its failed Compaction.
+ *
+ * `quotaEvent`'s discipline for the other measurement roma cannot afford to
+ * take: `exhausted` means a context that genuinely cannot be reduced below the
+ * limit, and provoking one means filling a real context — the expensive path
+ * #98's whole measurement was designed to avoid. So the `system/status` event is
+ * the real one, its `compact_result: "failed"` is real, and the code is the only
+ * thing changed.
+ *
+ * What that leaves unproven is stated rather than hidden: the codes come off one
+ * switch in the pinned build (#98's second comment quotes it whole), and that
+ * `exhausted` reaches `compact_error` with that spelling on the *auto* path is
+ * read rather than measured. What is measured is that a code survives the trip
+ * unchanged, which is what `too_few_groups` did.
+ */
+export function withCompactionError(
+  events: readonly ClaudeEvent[],
+  code: string,
+): ClaudeEvent[] {
+  return events.map((event) =>
+    event['compact_result'] === 'failed' ? { ...event, compact_error: code } : event,
+  )
+}
+
+/**
  * Push events at a fake process as NDJSON bytes.
  *
  * `chunkSize` decides where the chunk boundaries fall. The default sends each
@@ -304,6 +329,33 @@ export const GENERATING: readonly ClaudeEvent[] = recordedStream(
  * and it is the right base for any other one.
  */
 export const READOUT: readonly ClaudeEvent[] = recordedStream('readout-context').turn(1)
+
+/**
+ * The Turn an auto-Compaction happened inside, exactly as captured.
+ *
+ * `system/status` going `compacting` then `success`, then the
+ * `system/compact_boundary` itself — `trigger: "auto"`, 61486 tokens in and 1375
+ * out over 19487ms — and `num_turns: 2` on the terminal event, because the
+ * Compaction is a Turn of its own inside the one somebody sent.
+ *
+ * The money is the point: the Turn before it in the same capture is a
+ * byte-identical message that cost $0.0186, and this one cost $0.0917. What both
+ * of them say on an Audit Record is what #98 is about.
+ */
+export const COMPACTED: readonly ClaudeEvent[] = recordedStream('compaction-auto').turn(4)
+
+/**
+ * A Turn a Compaction was attempted inside and did not happen — `too_few_groups`.
+ *
+ * The capture that corrected the issue this was built for. #98 was written
+ * believing a failed Compaction meant a Session that could not serve another
+ * Turn; this one stayed healthy, answered, and its Session served the next Turn
+ * normally at $0.0104. `withCompactionError` is how a test reaches the codes that
+ * mean the other thing.
+ */
+export const COMPACTION_FAILED: readonly ClaudeEvent[] = recordedStream(
+  'compaction-failed',
+).turn(2)
 
 /**
  * The same recorded Turn saying something else.

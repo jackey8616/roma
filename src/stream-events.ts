@@ -151,8 +151,7 @@ export interface SharedWindow {
  */
 export function readSharedWindow(event: ClaudeEvent): SharedWindow | null {
   if (event.type !== 'rate_limit_event') return null
-  const info = event['rate_limit_info']
-  const fields = (typeof info === 'object' && info !== null ? info : {}) as Record<string, unknown>
+  const fields = fieldsOf(event['rate_limit_info'])
   return {
     status: asString(fields['status']),
     resetsAt: asNumber(fields['resetsAt']),
@@ -160,6 +159,96 @@ export function readSharedWindow(event: ClaudeEvent): SharedWindow | null {
     overageStatus: asString(fields['overageStatus']),
     isUsingOverage: typeof fields['isUsingOverage'] === 'boolean' ? fields['isUsingOverage'] : null,
   }
+}
+
+/**
+ * One Compaction that happened, off `system/compact_boundary`.
+ *
+ * Claude Code replacing a Session's conversation with a summary so that it still
+ * fits. roma neither asks for it nor can prevent it — what it can do is say that
+ * it happened, because a Turn carrying one cost 4.9 times the same Turn without
+ * one and nothing else in roma would ever explain the difference.
+ */
+export interface Compaction {
+  /**
+   * Why it happened: `"auto"` where the context filled, `"manual"` where
+   * somebody asked.
+   *
+   * Claude Code's own two values — `enum(["manual","auto"])` in the wire schema —
+   * kept as the string rather than turned into a boolean, because the pair is
+   * what answers "who paid for this and did they choose it". Only `auto` has been
+   * observed; the other half arrives with ADR-0018's `/compact`.
+   *
+   * Null where the event carried none. Not folded into `"auto"`: a Compaction
+   * roma cannot attribute is a different fact from one it can, and the Audit
+   * Record is the last place to start guessing.
+   */
+  readonly trigger: string | null
+  /** How much context there was before it, in tokens, or null where unsaid. */
+  readonly preTokens: number | null
+  /** And after — the pair is how much context the money bought. */
+  readonly postTokens: number | null
+}
+
+/**
+ * Read a `system/compact_boundary`, or null if this is not one.
+ *
+ * **`compact_metadata`, snake_case.** The camelCase `compactMetadata` that #98
+ * was written against is Claude Code's *transcript* spelling; the stream carries
+ * it through a mapper on the way out. A reader written from the transcript finds
+ * `undefined`, reports every Compaction as no Compaction, and looks like it
+ * works — which is the whole reason #100 measured this before anything was built
+ * on it. `compaction-auto.jsonl` is the capture.
+ *
+ * `cumulative_dropped_tokens` is deliberately not read. It is cumulative for the
+ * process the way `total_cost_usd` is, so a Task that reported it would be
+ * describing every Compaction the Session has ever had as its own.
+ */
+export function readCompaction(event: ClaudeEvent): Compaction | null {
+  if (event.type !== 'system' || event['subtype'] !== 'compact_boundary') return null
+  const fields = fieldsOf(event['compact_metadata'])
+  return {
+    trigger: asString(fields['trigger']),
+    preTokens: asNumber(fields['pre_tokens']),
+    postTokens: asNumber(fields['post_tokens']),
+  }
+}
+
+/**
+ * A Compaction that was attempted and did not happen, off `system/status`.
+ *
+ * Not a `compact_boundary` at all — there is no boundary, because nothing was
+ * replaced. It arrives on the same event that carries ordinary progress
+ * (`status: "requesting"`, `status: "compacting"`), marked only by
+ * `compact_result` being present.
+ */
+export interface CompactionFailure {
+  /**
+   * Claude Code's own name for what went wrong — `too_few_groups`, `exhausted`.
+   *
+   * **A code rather than a sentence**, which is what makes reading it at all
+   * acceptable: #98 rejected matching on the error *text* as the mistake
+   * `shared-window.ts` already made once, and that rejection turns out to cost
+   * nothing. What the codes mean is `src/compaction.ts`, and nothing else in roma
+   * may decide it.
+   *
+   * Null where the event named none, which no capture roma holds does.
+   */
+  readonly code: string | null
+}
+
+/**
+ * Read a failed Compaction, or null if this event is not one.
+ *
+ * Only the failure. Success is announced by the `compact_boundary` above — a
+ * `compact_result: "success"` arrives just before one and says strictly less, so
+ * reading both would be two answers to one question with a moment in between
+ * where they disagree.
+ */
+export function readCompactionFailure(event: ClaudeEvent): CompactionFailure | null {
+  if (event.type !== 'system' || event['subtype'] !== 'status') return null
+  if (event['compact_result'] !== 'failed') return null
+  return { code: asString(event['compact_error']) }
 }
 
 export function parseEvent(line: string): ClaudeEvent | null {
@@ -292,6 +381,20 @@ function streamDelta(event: ClaudeEvent): Record<string, unknown> | null {
   if (type !== 'content_block_delta') return null
   if (typeof delta !== 'object' || delta === null) return null
   return delta as Record<string, unknown>
+}
+
+/**
+ * The fields of an object an event nests inside itself, or `{}` where it carries
+ * none.
+ *
+ * Several of these events keep what roma reads one level down —
+ * `rate_limit_info`, `compact_metadata` — and the reading is the same each time:
+ * absent, null, or not an object all mean the same thing, which is that every
+ * field below is missing. Written once so that a reader added later gets the
+ * three-way coercion right by not having to write it.
+ */
+function fieldsOf(value: unknown): Record<string, unknown> {
+  return (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>
 }
 
 function asString(value: unknown): string | null {

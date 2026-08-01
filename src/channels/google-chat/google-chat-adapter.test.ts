@@ -685,6 +685,41 @@ describe('a Task the Shared Window has blocked', () => {
     ).toBeNull()
   })
 
+  // The one place roma knows an exit the person cannot guess. A Session whose
+  // context cannot be reduced will not take another message, and the remedy is a
+  // Command they can type — so the sentence names it, and says what it costs,
+  // because `/clear` discards and somebody who found that out afterwards would
+  // have been right to expect a warning.
+  //
+  // The consequence and not the cause: two codes arrive here and only one of them
+  // is a thread that got too long, so a sentence about length would be false for
+  // the other and acted on anyway.
+  it('names /clear when the context cannot be reduced any further', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, { kind: 'context-full' }))
+
+    expect(api.texts).toEqual([
+      `${TO}Claude cannot shorten this conversation any further, so it cannot take another ` +
+        'message. Send /clear to start a fresh session — nothing from this one carries over.',
+    ])
+  })
+
+  // Not an ending, the way a block is not: it arrives mid-Task and the Task goes
+  // on to whatever ending it has. Forgetting the acknowledgement here would
+  // strand the message the person is watching and post a second one under it.
+  it('keeps the acknowledgement it was mutating', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, { kind: 'progress', progress: { phase: 'working' } }))
+    await adapter.deliver(to(THREAD, { kind: 'context-full' }))
+    await adapter.deliver(
+      to(THREAD, { kind: 'progress', progress: { phase: 'writing', characters: 14 } }),
+    )
+
+    expect(api.calls).toEqual(['post', 'post', 'edit'])
+  })
+
   it('says what the cap was when Overflow is refused, and that the Task waits on', async () => {
     const { adapter, api } = newAdapter()
 

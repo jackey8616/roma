@@ -192,7 +192,12 @@ context outright, a Compaction stays in the same Session and keeps a summary. A
 failed one is a third thing again, and how serious it is depends on why: too
 little conversation to summarise is benign and is the common one, while a context
 that cannot be reduced below the limit is a Session that will not serve another
-Turn.
+Turn. Claude Code says which by a code rather than a sentence, and roma answers it
+three ways rather than two: **benign** is told to nobody, **unreducible** goes to
+the Operator Log and to the Caller with `/clear` named, and **unexplained** — a
+code roma has never seen — goes to the operator and no further, because telling
+somebody their thread is finished is a sentence roma has to be able to stand
+behind (ADR-0019).
 _Avoid_: clearing (that is `/clear`, and it is roma's), summarising (that is how
 it works, not what it is), truncation (nothing is cut off — older messages are
 replaced), and using this for anything that happens to the Transcript, which loses
@@ -561,6 +566,9 @@ record, telemetry
 The running commentary roma writes for whoever is running it: an Eviction, a
 Reaping, a credential or model swap, a refusal. What roma decided and why, as it happens —
 never what an agent did, which is the Transcript's, and never the account of the
-money, which is the Audit Records'. Nothing is totalled from it.
+money, which is the Audit Records'. Nothing is totalled from it. A *failed*
+Compaction is in here and a successful one is not, which is the rule rather than
+an exception to it: the first can mean a Session that will not serve another
+Turn, which roma has a repair for, and the second is somebody's bill (ADR-0019).
 _Avoid_: audit log (that is the Audit Records), event log (that is nearer the
 Transcript), telemetry, metrics

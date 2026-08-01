@@ -11,6 +11,7 @@ import type {
 } from './channel-adapter.js'
 import { TranscriptNotFound, TurnFailedError, wasInterrupted, type Turn } from './claude-session.js'
 import { readCommand, type Command, type CommandRequest } from './commands.js'
+import { severityOf, type CompactionSeverity } from './compaction.js'
 import {
   EFFORT_NAMES,
   EFFORT_NOT_APPLIED,
@@ -38,7 +39,13 @@ import {
 } from './session-generation.js'
 import { writeToStderr, type OperatorLog } from './operator-log.js'
 import { RetryStormError, type SessionPool } from './session-pool.js'
-import { readSharedWindow, readSystemInit, type ClaudeEvent } from './stream-events.js'
+import {
+  readCompaction,
+  readCompactionFailure,
+  readSharedWindow,
+  readSystemInit,
+  type ClaudeEvent,
+} from './stream-events.js'
 import type { TaskQueue } from './task-queue.js'
 
 /**
@@ -102,6 +109,39 @@ export type CoreLogRecord =
       readonly turns: number
       /** What that Turn cost, or null where nothing priced it. */
       readonly costUsd: number | null
+    }
+  | {
+      /**
+       * A Compaction was attempted inside a Task and did not happen.
+       *
+       * Here and not on the Audit Record, which is the split #98 argues: a
+       * Compaction that *worked* is a cost fact and prompts no decision, while
+       * one that failed can mean a Session that will not serve another Turn —
+       * which is squarely what an operator needs to know, and what roma has a
+       * repair for.
+       *
+       * A benign failure is **not** written here. `too_few_groups` was measured
+       * inside a Turn that cost two cents and answered normally, and a log line
+       * per one of those would make this a traffic log rather than the record of
+       * what surprised roma.
+       */
+      readonly event: 'compaction-failed'
+      readonly taskId: string
+      readonly sessionId: string
+      /**
+       * Claude Code's own code for it — a code and never the sentence, so an
+       * operator grepping for one is not grepping for a build's error text.
+       */
+      readonly code: string | null
+      /**
+       * What roma made of that code, which is also what it decided to say.
+       *
+       * `unreducible` means the Caller was told their thread is full and that
+       * `/clear` is the way out; `unexplained` means a code roma cannot read, so
+       * this line is the only place it appears and nobody in the Conversation was
+       * told anything. Never `benign` — those are not written at all.
+       */
+      readonly severity: Exclude<CompactionSeverity, 'benign'>
     }
 
 export type CoreLog = OperatorLog<CoreLogRecord>
@@ -243,6 +283,19 @@ interface RunningTask extends TaskAddress {
   effort: string
   /** Set by `/stop`, and read at each point the Task can still be stopped. */
   stopped: boolean
+  /**
+   * Whether this Task has already told its Caller the Session cannot be reduced.
+   *
+   * Once per Task and not once per failure, because ADR-0010's bar is about how
+   * many messages land in a Conversation rather than about how many times Claude
+   * Code said the same thing. A Session that cannot be reduced fails every
+   * Attempt for the same reason, so a Task that parked and reran on Overflow
+   * would otherwise say it twice and a Turn that retried compaction three times.
+   *
+   * Deliberately not applied to the Operator Log line beside it: that is a
+   * running commentary, and each occurrence really did occur.
+   */
+  toldContextFull: boolean
   /**
    * Every try this Task has made, and what may be tried next.
    *
@@ -955,6 +1008,7 @@ export class Core {
         model: this.#models.modelFor(sessionId),
         effort: this.#efforts.effortFor(sessionId),
         stopped: false,
+        toldContextFull: false,
         attempts,
         parked: null,
       }
@@ -1017,7 +1071,14 @@ export class Core {
       // it on Overflow. Folded into one record it would be money filed under a
       // credential that did not spend it; left out it would be money nobody can
       // account for. Both records name the same Task.
-      if (credential !== answeredOn && !paid.costUsd) continue
+      //
+      // A Compaction keeps that second record alive on its own, and it has to: a
+      // Compaction on an Attempt nothing priced is the "unpriced rather than
+      // free" case with the largest known price tag there is, and a blocked
+      // Attempt reran on Overflow is exactly the shape the field was put on the
+      // Attempt for. Dropped here, the one Attempt that compacted leaves no trace
+      // that it did.
+      if (credential !== answeredOn && !paid.costUsd && paid.compaction === null) continue
       this.#audit.record({
         taskId,
         caller: message.caller,
@@ -1048,6 +1109,11 @@ export class Core {
           running?.effort ?? this.#efforts.pinnedEffort,
         ),
         cloudReach,
+        // Only where one happened, which is what "absent means no Compaction"
+        // asks of the writer. On the record of the credential that paid for it:
+        // a Task blocked on the Shared Window and rerun on Overflow spent that
+        // money on one of the two bills, not on both.
+        ...(paid.compaction === null ? {} : { compaction: paid.compaction }),
         apiKeySource: attempts.apiKeySource(),
       })
     }
@@ -1278,6 +1344,46 @@ export class Core {
   }
 
   /**
+   * A Compaction inside this Task failed, and roma decides what that is worth.
+   *
+   * The whole judgement is `severityOf`, and this is only what follows from it.
+   * Three answers rather than the one #98 was written with, because the
+   * measurement contradicted the issue: a failed Compaction is *usually* fine,
+   * and built as specified roma would have told a Caller their thread was full
+   * in the middle of a Turn that cost two cents and worked.
+   *
+   * The Caller is told only for `unreducible`, and only once per Task, and that
+   * is the whole of what makes this worth saying at all: they are watching Tasks
+   * fail, roma knows the remedy, and the remedy is a Command they can type. The
+   * operator hears about `unexplained` too, and hears about every occurrence,
+   * because a code roma cannot read is exactly the thing an operator should see
+   * before it becomes a rule.
+   *
+   * **roma does not `/clear` it.** ADR-0002's precedent: Overflow is *offered*
+   * at the moment of blocking rather than taken on somebody's behalf, and
+   * auto-clearing is roma deciding to discard a person's context unbidden.
+   *
+   * Not awaited, because this arrives on a stream listener in the middle of a
+   * Turn and the Turn is what everything else is waiting for. `#tell` absorbs
+   * its own failures, so there is nothing here for a rejection to reach.
+   */
+  #compactionFailed(task: RunningTask, code: string | null): void {
+    const severity = severityOf(code)
+    if (severity === 'benign') return
+
+    this.#log({
+      event: 'compaction-failed',
+      taskId: task.taskId,
+      sessionId: task.sessionId,
+      code,
+      severity,
+    })
+    if (severity !== 'unreducible' || task.toldContextFull) return
+    task.toldContextFull = true
+    void this.#tell({ kind: 'context-full', ...addressOf(task) })
+  }
+
+  /**
    * Tell the Channel something the Task's ending does not depend on.
    *
    * Absorbed rather than propagated, the same as progress: these are messages
@@ -1336,6 +1442,14 @@ export class Core {
       // and reading it in two places is how the two would come to disagree.
       const window = readSharedWindow(event)
       if (window !== null) attempts.saw(window)
+      // What this Attempt's money went on, where several times the ordinary
+      // amount of it went on replacing a context nobody asked to have replaced.
+      // Kept on the Attempt rather than on the Task, because the Attempt is what
+      // one credential paid for.
+      const compaction = readCompaction(event)
+      if (compaction !== null) attempts.compacted(compaction)
+      const failed = readCompactionFailure(event)
+      if (failed !== null) this.#compactionFailed(task, failed.code)
       reporter.observe(event)
     }
     // The window a `/stop` cannot act on by itself: from here until Claude Code
