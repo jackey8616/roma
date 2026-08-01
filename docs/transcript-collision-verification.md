@@ -35,7 +35,25 @@ The directory name is the Session's **working directory path**, slugified —
 Session's Transcript needs its cwd, which roma has, but the mapping is Claude
 Code's own and undocumented.
 
+> **Corrected 2026-08-01 — it is the *physical* cwd that is slugified.** The path
+> this run handed the process contained no symlink, so "absolute cwd" and
+> "resolved cwd" were the same string and this document could not tell them
+> apart. `docs/transcript-growth-verification.md` found the Transcript under a
+> slug of `getcwd` *after* the `chdir`, where the path passed in was a `/var`
+> symlink to it. The mapping above holds; what it takes is the resolved path.
+> This matters only to code that computes the directory rather than searching for
+> the file, and such code looking under the unresolved path finds no directory at
+> all and concludes there is no Transcript.
+
 One `Reply with OK and nothing else` Turn produced **14,089 bytes over 7 lines**.
+
+> **Amended 2026-08-01 — that is mostly a Session's fixed cost, not a Turn's.**
+> Two tool-using Turns on one Session put the per-Turn delta at **27,822 bytes**
+> and the per-Session one-off records at **7,721**
+> (`docs/transcript-growth-verification.md`), so this trivial Turn's own marginal
+> cost was around 6.4 kB and a real Task is roughly twice this whole file. The
+> measurement is unchanged; what moves is what may be extrapolated from it, which
+> ADR-0005 and #41 both did.
 
 ## Q2 — `--session-id` at an id that already has a Transcript is refused outright
 
