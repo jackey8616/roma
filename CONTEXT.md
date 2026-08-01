@@ -72,11 +72,16 @@ Turn), author, requester, owner (a Task has no owner — it has somebody who ask
 The line roma writes above every message Claude Code is given, naming that
 message's Caller. Two rules and no others: it is never absent — a message without
 one reads as the same person again, which is the misattribution it exists to
-prevent — and roma's part is the tagged prefix and comes first, because the rest
-is what somebody typed and anybody can type something that looks like this. Said
-as "the tagged prefix" rather than "the first line" because an Enclosure adds a
-second tag above the same message, and a rule counting lines would have to be
-restated every time one is added.
+prevent — and roma's part is tagged and comes **before anything the Caller
+typed**, because the rest is what somebody typed and anybody can type something
+that looks like this. Said as "tagged" rather than "the first line" because an
+Enclosure adds a second tag above the same message, and a rule counting lines
+would have to be restated every time one is added — and because a Relay has to
+begin with a slash, so the marker is not first there without ever being out of
+order. A Relay taking no argument carries it after the command, which is safe only
+because the Caller supplied no text at all (ADR-0012); a Relay taking one carries
+it between the command and the Caller's text, which is this rule in its original
+shape rather than a second exception to it (ADR-0018).
 _Avoid_: prefix, header, tag, and using this for the @-mention in a reply — that
 one is the Channel's way of addressing a person and is not this
 
@@ -170,6 +175,29 @@ down, because a restart that forgot it would resume the context `/clear` was use
 to drop.
 _Avoid_: reset, epoch, version, session number
 
+**Compaction**:
+Claude Code replacing a Session's accumulated conversation with a summary so that
+it still fits. Claude Code's mechanism whichever way it starts, and it starts two
+ways: on its own when the context fills, which is the default and which roma
+neither times nor prevents — leaving it on is roma's decision rather than a
+condition roma is under (ADR-0018) — or because somebody asked, with `/compact`,
+which roma carries as a Relay and which is the only version where anybody chooses
+the moment or says what should survive it. Named here for the money: a Compaction
+happens *inside* a Turn and costs several times what that Turn otherwise would, so
+the automatic kind lands on the Audit Record of whoever happened to send the
+message that crossed the threshold — and a Conversation is many people sharing one
+Session. The asked-for kind lands on the person who asked. Adjacent to `/clear`
+and not the same: `/clear` gives the Conversation a new Session and drops the
+context outright, a Compaction stays in the same Session and keeps a summary. A
+failed one is a third thing again, and how serious it is depends on why: too
+little conversation to summarise is benign and is the common one, while a context
+that cannot be reduced below the limit is a Session that will not serve another
+Turn.
+_Avoid_: clearing (that is `/clear`, and it is roma's), summarising (that is how
+it works, not what it is), truncation (nothing is cut off — older messages are
+replaced), and using this for anything that happens to the Transcript, which loses
+nothing because roma never deletes it
+
 **Resident Session**:
 A Session whose Claude Code process is currently alive, so the next message
 skips cold start.
@@ -200,7 +228,7 @@ still starting — `/clear` gives the Conversation a fresh Session, `/model` set
 its Chosen Model, `/effort` sets its Chosen Effort, and `/config` says what this
 Session is set to and refuses to set anything else. Recognised in the Core, never
 in a Channel Adapter, and only when the whole message is one of them — everything
-else is work, apart from the few Claude Code commands a Readout relays. `/clear`
+else is work, apart from the few Claude Code commands a Relay carries. `/clear`
 answers to `/reset` and `/new`, and `/config` to `/settings`, because those are
 Claude Code's own spellings and a spelling roma leaves unclaimed is one somebody
 is billed for (ADR-0013, ADR-0017). Three of the five take an argument, and only
@@ -210,34 +238,47 @@ entries rather than one, so "a named list does not grow on its own" has become a
 thing somebody has to keep true rather than an observation. A Command is not a
 Task: it drives no Turn, is not queued, and is not counted against the
 concurrency cap.
-_Avoid_: slash command (those are Claude Code's, and a Readout is the only way
+_Avoid_: slash command (those are Claude Code's, and a Relay is the only way
 any of them reaches it), instruction (that is an Outbound Instruction)
 
-**Readout**:
+**Relay**:
 A message roma hands to the Session's process as itself rather than as something
-for the model to read — one of a short list of Claude Code's own commands, and
-only when the whole message is one of them. Named by what roma does with it
-rather than by what it costs: the list holds nothing that spends money, but that
-is the rule for what may go on it and not what the word means, because a term
-defined by one build's behaviour is a term that turns false on somebody else's
-release (ADR-0012). Neither of the two things it sits between: not a Command,
-because it needs the Session's process and therefore queues; not a Task, because
-no Turn is driven and the model never sees it. The Caller Marker goes *after* a
-Readout, which is safe only because the whole message is the command and the
-Caller supplied no text to hide behind it.
-_Avoid_: passthrough, relay, slash command (that is Claude Code's name for what a
-Readout carries, not for the carrying), and using this for `/stop`, `/clear`,
-`/model`, `/effort` or `/config` — those are roma's own and are Commands. The
-last two are the sharpest case for the membership rule, because both are free and
+for the model to read — one of a short list of Claude Code's own commands. Named
+by what roma does with it rather than by what it costs, because a term defined by
+one build's behaviour is a term that turns false on somebody else's release
+(ADR-0012). It was called a Readout while every member read a value out, and that
+name stopped being true of the list the moment one of them summarised instead
+(ADR-0018). Not a Command: it needs the Session's process, so it queues. Whether
+it is a Task is the wrong question, and asking it that way is what made `/compact`
+look like a fourth kind of message — a Relay names the **shape a message takes on
+the wire**, a Task names **what governs it**, and those are different axes. A
+Relay that drives a Turn is governed exactly as a Task is: queued, counted against
+the cap, stoppable, Parkable, audited. One that drives none is free of all of it.
+The membership rule is that **a Relay changes nothing roma holds a belief about** —
+which session id a Conversation resumes to, which model and effort it runs on,
+what the settings file every Session shares says, that auto-compaction is on. roma
+holds no belief about what is in a context, which is the whole of why `/compact`
+may be relayed and `/clear`, `/model`, `/effort`, `/config` and `/autocompact` may
+not.
+_Avoid_: Readout (the retired name, and wrong for a member that writes rather than
+reads), passthrough, slash command (that is Claude Code's name for what a Relay
+carries, not for the carrying), and using this for `/stop`, `/clear`, `/model`,
+`/effort` or `/config` — those are roma's own and are Commands. The last two are
+the sharpest case for the membership rule, because both are free and
 non-interactive on the pinned build and neither may be relayed: `/effort` sets a
 value that lives in the process and dies with it, and `/config` writes a settings
 file every Session in the deployment shares (ADR-0016, ADR-0017)
 
 **Task**:
-One message from one person, from arrival to final result. The unit that is
-queued, counted against the concurrency cap, stopped, and audited — and the unit
-a Caller belongs to, since one Conversation's two Tasks can belong to two people.
-_Avoid_: job, request, run
+One message from one person, from arrival to final result, given to the model to
+read. The unit a Caller belongs to, since one Conversation's two Tasks can belong
+to two people. It is queued, counted against the concurrency cap, stopped and
+audited — and that list stopped *identifying* it at ADR-0018, which governs a
+Relay that drives a Turn in exactly the same way. What tells the two apart is what
+reaches Claude Code: a Task arrives as prose with the Caller Marker above it, a
+Relay arrives as a command.
+_Avoid_: job, request, run, and identifying this by the governance alone — a Relay
+that costs money shares every part of it
 
 **Task Queue**:
 What decides which Tasks may run right now: Tasks of one Session are serialised,
@@ -312,7 +353,7 @@ would take — it accepts arbitrary model ids, so no list roma held could ever b
 complete check, which makes this an offer rather than a filter. Named for the
 reason an Installation is: a term that is the whole of a security property should
 be a term.
-_Avoid_: whitelist, allowlist (that is its shape, and the word is the Readouts'),
+_Avoid_: whitelist, allowlist (that is its shape, and the word is the Relays'),
 supported models (roma is not saying the rest do not work), model list
 
 **Pinned Effort**:
@@ -484,7 +525,7 @@ _Avoid_: paused, retrying, backing off, queued (that word is the Task Queue's)
 **Audit Record**:
 The line roma writes when a Task ends: the Caller, which Session ran it, how long
 they waited, what it cost, which credential paid, which model ran it, what effort
-it ran at, which
+it ran at, whether a Compaction happened inside it and who asked for that, which
 repositories it minted an Installation Token for, and whether it used the Cloud
 Reach. The model is here because a
 Chosen Model is a Caller moving the shared bill and nothing else would remember
@@ -492,7 +533,12 @@ which Task did (ADR-0014). The effort is here for the same reason and is weaker
 evidence, and says so: it is what roma sent and what the Effort Matrix says the
 model does with it, rather than anything roma watched — and where the Matrix says
 the model takes no effort at all, the record says that instead of naming a level
-nobody ran at (ADR-0016). The repositories are what roma can honestly know:
+nobody ran at (ADR-0016). The Compaction is here because it is the largest
+unexplained variation there is in what a Task costs — measured at 4.9 times a
+quiet Turn — and because the same field says whether that money was somebody's
+choice or somebody's bad luck: an automatic one is a bill for a thread the whole
+Conversation filled, an asked-for one is a bill for a `/compact` (ADR-0018). The
+repositories are what roma can honestly know:
 git names the repository every time it asks for a credential, so what a Task
 reached for is free — and what it did once it got there is not, since learning
 that would mean reading the Transcript. The Cloud Reach is a yes or a no and
