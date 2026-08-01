@@ -1,12 +1,22 @@
 import { EventEmitter } from 'node:events'
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, utimesSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { spawnClaudeProcess, type SpawnClaudeProcess } from './claude-process.js'
 import {
   ClaudeExitedError,
   ClaudeSession,
+  NO_CONVERSATION,
   PINNED_MODEL,
   TERMINATE_GRACE_MS,
+  TranscriptNotFound,
   type Turn,
 } from './claude-session.js'
 import type { CredentialKind } from './build-env.js'
@@ -22,11 +32,32 @@ const IDLE_REAP_MS = 15 * 60_000
 const WORK_DIR_TTL_MS = 7 * 24 * 60 * 60_000
 const RECLAIM_INTERVAL_MS = 60 * 60_000
 /**
- * What `claude --resume` says when the transcript it was pointed at is not there.
- * Measured, not assumed — seam 2 runs `--resume` at an unknown id and gets
- * "No conversation found with session ID: …" (`claude-session.live.test.ts`).
+ * The file that says this Session has been spawned before.
+ *
+ * The Working Directory used to answer that by existing, and it stopped being
+ * able to the moment anything else could create it: ADR-0011 has an Enclosure
+ * written before the Turn, so a first message carrying an attachment made the
+ * directory and the next line read it as a Session that already existed. Every
+ * message in that Conversation then resumed a Transcript nobody had written
+ * (#105).
+ *
+ * On disk rather than in memory for the reason the directory was: the rule has
+ * to hold across a restart of roma, where every Session is one that already
+ * exists and nothing is remembered. Inside the Working Directory rather than
+ * beside it so the seven-day reclaim takes it along with everything else — a
+ * Session whose directory was reclaimed must go on being spawned as new and
+ * recovered by `transcript-survived`, which is measured working.
+ *
+ * Dot-prefixed for `.enclosures`' reason: the root of that directory is the
+ * agent's, and roma's own bookkeeping should stay out of a listing.
+ *
+ * A directory left by a version that predates this file reads as a Session that
+ * has never been spawned, so its next message goes out as `--session-id` at an
+ * id Claude Code still holds a Transcript for — refused, and recovered by
+ * `transcript-survived`. One wasted spawn, once per Conversation, on the path
+ * that exists for exactly that refusal.
  */
-const NO_CONVERSATION = /no conversation found/i
+const SPAWN_FILE = '.roma-session'
 /**
  * What `claude --session-id` says when a transcript for that id already exists.
  * Measured, not assumed — `docs/transcript-collision-verification.md` Q2 and Q3
@@ -136,7 +167,19 @@ export type PoolLogRecord =
        */
       readonly event: 'resume-lost' | 'transcript-survived'
       readonly sessionId: string
-      readonly stderr: string
+      /**
+       * How the CLI refused, in its own words.
+       *
+       * Called this rather than `stderr`, which is what it was: the refusal roma
+       * meets in production arrives on *stdout* as a terminal event, and it can
+       * settle the Turn before the matching stderr chunk is delivered — separate
+       * pipes. So the record is written from the process's stderr where it
+       * delivered any and from the ending's own reason where it did not, and a
+       * field named for one pipe would be a lie in the case this record was
+       * added for. Never empty either way, because this is the one line an
+       * operator has to read.
+       */
+      readonly refusal: string
       /** The flag the Turn was retried with, so the recovery reads as one record. */
       readonly retryWith: '--resume' | '--session-id'
     }
@@ -146,6 +189,22 @@ export type PoolLogRecord =
       readonly cwd: string
       readonly idleMs: number
     }
+
+/**
+ * A spawn that guessed wrong about whether the Session exists, and what to do.
+ *
+ * `reason` is carried rather than read off the process when the record is
+ * written, because the two are not always the same thing: the refusal roma
+ * meets in production settles the Turn from a terminal event, and whether the
+ * process's stderr has been delivered by then is not guaranteed — separate
+ * pipes. Without this, the one record added for that case is blank in it.
+ */
+interface Correction {
+  readonly event: 'resume-lost' | 'transcript-survived'
+  readonly resume: boolean
+  /** Whatever said so, in Claude Code's words. */
+  readonly reason: string
+}
 
 export type PoolLog = OperatorLog<PoolLogRecord>
 
@@ -526,10 +585,19 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       this.#log({
         event: correction.event,
         sessionId: resident.sessionId,
-        stderr: resident.stderr,
+        refusal: refusalOf(resident.stderr, correction.reason),
         retryWith: correction.resume ? '--resume' : '--session-id',
       })
-      this.#forget(resident)
+      // Ended rather than merely dropped, and awaited before the replacement is
+      // named. A refusal that arrives as a terminal event leaves the process
+      // running as far as the pool knows — where a `ClaudeExitedError` is by
+      // definition a process that has already gone — and two processes on one
+      // transcript is the corruption the whole serialisation rule exists to
+      // prevent. It is also the only thing that would ever end this one: a
+      // resident nobody holds gets no reap timer. Measured to exit in 1–3s on
+      // its own (#105), so this is nearly always a process that is already gone.
+      this.#leave(resident)
+      await this.#terminate(resident)
       return await this.#turn(
         // On the model the Turn began under rather than whatever the Session is
         // on now: this is one Turn being served twice, and a `/model` that landed
@@ -620,11 +688,18 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     await this.#makeRoom()
 
     const cwd = join(this.#workRoot, sessionId)
-    // The working directory is the Session's record that it exists. Reading it
-    // from the filesystem rather than from memory is what keeps the rule right
-    // across a restart of roma, where every Session is one that already exists.
-    const resuming = resume ?? existsSync(cwd)
+    // This file is the Session's record that it exists. Read from the filesystem
+    // rather than from memory, which is what keeps the rule right across a
+    // restart of roma, where every Session is one that already exists — and read
+    // off the file rather than the directory, which the agent shares with
+    // anything that writes into it before the Turn (#105).
+    const spawnFile = join(cwd, SPAWN_FILE)
+    const resuming = resume ?? existsSync(spawnFile)
     mkdirSync(cwd, { recursive: true })
+    // Written on every spawn rather than only the first, so that a directory
+    // from before this file existed — or one somebody removed it from — starts
+    // recording again after a single recovery.
+    writeFileSync(spawnFile, '')
     this.#touch(cwd)
 
     const session = new ClaudeSession({
@@ -910,16 +985,44 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * Claude Code's to change, and ADR-0006 keeps the pool from knowing the config
    * directory at all. A wasted spawn costs a process that exits immediately.
    */
-  #wrongFlag(
-    resident: Resident,
-    error: unknown,
-  ): { readonly event: 'resume-lost' | 'transcript-survived'; readonly resume: boolean } | null {
+  #wrongFlag(resident: Resident, error: unknown): Correction | null {
+    // The shape production actually produces, and the branch that fires in a
+    // deployment: under `--output-format stream-json` the refusal is a terminal
+    // `result` on stdout, and it settles the Turn as this before the process's
+    // exit ever reaches the pool. The two below are for a stream that carried no
+    // terminal event, which is what plain `claude -p` does.
+    //
+    // Keyed on the ending rather than on what is inside it. The Session layer is
+    // where a stream becomes one of roma's endings and it has already made this
+    // judgement; re-deriving it here would put Claude Code's event shape in a
+    // module whose job is choosing a flag.
+    if (error instanceof TranscriptNotFound) {
+      return resident.resumed ? { event: 'resume-lost', resume: false, reason: error.reason } : null
+    }
     if (!(error instanceof ClaudeExitedError)) return null
     if (resident.resumed) {
-      return NO_CONVERSATION.test(resident.stderr) ? { event: 'resume-lost', resume: false } : null
+      return NO_CONVERSATION.test(resident.stderr)
+        ? { event: 'resume-lost', resume: false, reason: resident.stderr }
+        : null
     }
     return ALREADY_IN_USE.test(resident.stderr)
-      ? { event: 'transcript-survived', resume: true }
+      ? { event: 'transcript-survived', resume: true, reason: resident.stderr }
       : null
   }
+}
+
+/**
+ * How the CLI refused, for the Operator Log: everything it wrote, plus the
+ * reason where that is not already in it.
+ *
+ * Both halves, rather than one or the other. Preferring stderr loses the reason
+ * the moment the process writes anything else first — a warning is enough, and
+ * then the record is a line about something unrelated in exactly the case it was
+ * added for. Preferring the reason throws away whatever else the process had to
+ * say, which for a refusal nobody has met yet is the only clue there is.
+ */
+function refusalOf(stderr: string, reason: string): string {
+  if (stderr.includes(reason)) return stderr
+  if (stderr === '') return reason
+  return `${stderr.trimEnd()}\n${reason}`
 }

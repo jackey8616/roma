@@ -9,7 +9,7 @@ import type {
   OutboundInstruction,
   TaskAddress,
 } from './channel-adapter.js'
-import { TurnFailedError, wasInterrupted, type Turn } from './claude-session.js'
+import { TranscriptNotFound, TurnFailedError, wasInterrupted, type Turn } from './claude-session.js'
 import { readCommand, type Command, type CommandRequest } from './commands.js'
 import { EnclosureUnreadable, writeEnclosures } from './enclosures.js'
 import {
@@ -1271,6 +1271,10 @@ function reasonFor(error: unknown): string {
   // has its explanation here and nowhere else.
   if (error instanceof EnclosureUnreadable) return `roma could not read ${error.message}`
   if (error instanceof ChosenModelNotOffered) return chosenModelGoneReason(error)
+  // Before the general failed Turn, which this is a kind of: it carries no text
+  // at all, so left to that line it falls through to `ROMA_FAILED` — which is
+  // what a whole Conversation was told, message after message, in #105.
+  if (error instanceof TranscriptNotFound) return transcriptLostReason()
   if (error instanceof TurnFailedError && error.turn.text !== '') return error.turn.text
   return ROMA_FAILED
 }
@@ -1302,6 +1306,29 @@ function chosenModelGoneReason({ model }: ChosenModelNotOffered): string {
     `This conversation is on ${model}, which roma no longer offers. ` +
     `Send “/model ${PINNED_NAME}” to put it back on the Pinned Model, ` +
     `keeping everything it has said.`
+  )
+}
+
+/**
+ * What to say to a Conversation whose Session could not be opened at all.
+ *
+ * Reached only once the pool's own recovery has been tried and refused too — it
+ * respawns naming a fresh Session, and this is the Turn that would not have
+ * that either. So the sentence cannot promise that sending the message again
+ * will work, and it does not: it names the way out, for `chosenModelGoneReason`'s
+ * reason. The fault is total until somebody acts, because the Session id is
+ * derived from the Conversation Key and never moves on its own, and `/clear` is
+ * the one thing that moves it.
+ *
+ * Claude Code's own sentence is deliberately not quoted. "No conversation found
+ * with session ID: 64b3f99a…" is true and useless to whoever is in the
+ * Conversation — the id is roma's, derived from a key they have never seen —
+ * and it is on the `resume-lost` record for the operator who wants it.
+ */
+function transcriptLostReason(): string {
+  return (
+    'roma could not open this conversation’s session, and starting a fresh one ' +
+    'did not work either. Send “/clear” to move the conversation to a new session.'
   )
 }
 

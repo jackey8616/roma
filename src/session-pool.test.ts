@@ -15,6 +15,7 @@ import {
   feed,
   OK,
   recordedStream,
+  RESUME_LOST,
   RETRIES,
   THREE_TURNS,
   withTotalCostUsd,
@@ -31,6 +32,20 @@ function sessionId(n: number): string {
 
 const A = sessionId(1)
 const B = sessionId(2)
+
+/**
+ * Leave behind what a Session that has been spawned before leaves behind.
+ *
+ * Written here rather than by making the directory, because the two stopped
+ * being the same thing in #105: anything may create a Working Directory — an
+ * Enclosure written before the Turn does — and only the pool writes this. A test
+ * that still said `mkdirSync` would be asserting against the invariant that
+ * broke.
+ */
+function spawnedBefore(workRoot: string, id: string): void {
+  mkdirSync(join(workRoot, id), { recursive: true })
+  writeFileSync(join(workRoot, id, '.roma-session'), '')
+}
 
 let pools: SessionPool[] = []
 let workRoots: string[] = []
@@ -153,12 +168,13 @@ describe('naming a Session versus reaching it again', () => {
     expect(claude.spawns[1]?.args).not.toContain('--session-id')
   })
 
-  // The working directory is the Session's record that it exists, which is what
-  // makes the rule survive a restart of roma itself. An in-memory flag would
-  // send --session-id at an id that already has a transcript.
+  // What the pool left in the working directory is the Session's record that it
+  // exists, which is what makes the rule survive a restart of roma itself. An
+  // in-memory flag would send --session-id at an id that already has a
+  // transcript.
   it('resumes a Session whose working directory outlived the pool', async () => {
     const { workRoot } = newPool()
-    mkdirSync(join(workRoot, A), { recursive: true })
+    spawnedBefore(workRoot, A)
     const { claude, send } = newPool({ workRoot })
 
     await send(A, 'after a restart', OK)
@@ -166,12 +182,13 @@ describe('naming a Session versus reaching it again', () => {
     expect(claude.lastSpawn.args).toContain('--resume')
   })
 
-  // The gap in reading the directory as the record: it is created before the
-  // first spawn, so a Session that died before Claude Code wrote its transcript
-  // looks created and is not. Left alone, that Conversation is poisoned for good.
+  // The record can still be ahead of the Transcript, whatever it is read off:
+  // roma writes it at the spawn, and a process that died before Claude Code
+  // wrote its transcript leaves a Session that looks created and is not. Left
+  // alone, that Conversation is poisoned for good.
   it('starts a fresh Session when the transcript the resume wanted is gone', async () => {
     const { claude, pool, workRoot, processFor, log } = newPool()
-    mkdirSync(join(workRoot, A), { recursive: true })
+    spawnedBefore(workRoot, A)
 
     const turn = pool.send(A, 'hello')
     await flush()
@@ -191,9 +208,115 @@ describe('naming a Session versus reaching it again', () => {
     expect(log).toContainEqual({
       event: 'resume-lost',
       sessionId: A,
-      stderr: expect.stringContaining('No conversation found'),
+      refusal: expect.stringContaining('No conversation found'),
       retryWith: '--session-id',
     })
+  })
+
+  // The same loss, in the shape production actually produces it — and the shape
+  // the sibling above cannot reach. That test drives stderr and an exit, which
+  // is what `claude -p` does; every measurement of this failure was taken that
+  // way (`claude-session.live.test.ts` runs `-p` alone). Under the invocation
+  // roma really spawns, `--output-format stream-json` puts a terminal `result`
+  // with `is_error` on *stdout* as well, and it settles the Turn first — so the
+  // pool is handed a `TurnFailedError`, `#wrongFlag` refuses it for not being a
+  // `ClaudeExitedError`, and the stderr it would have recognised is never read.
+  //
+  // The correction cannot simply widen to `TurnFailedError`: the sibling below
+  // feeds a real 401 at a Session whose directory exists and requires one spawn.
+  // What tells them apart is in the events — a lost resume carries `errors` and
+  // no `result` text, a failed Turn carries the text and no `errors`.
+  it('starts a fresh Session when the refused resume arrives as a result event', async () => {
+    const { claude, pool, workRoot, processFor, log } = newPool()
+    spawnedBefore(workRoot, A)
+
+    const turn = pool.send(A, 'hello')
+    await flush()
+    const resumed = processFor(A)
+    feed(resumed, RESUME_LOST)
+    resumed.emitStderr(`No conversation found with session ID: ${A}\n`)
+    resumed.emitExit({ code: 1, signal: null })
+    await flush()
+    feed(processFor(A), OK)
+
+    expect((await turn).text).toBe('ok')
+    expect(claude.spawns[0]?.args).toContain('--resume')
+    expect(claude.spawns[1]?.args).toContain('--session-id')
+    expect(log).toContainEqual({
+      event: 'resume-lost',
+      sessionId: A,
+      refusal: expect.stringContaining('No conversation found'),
+      retryWith: '--session-id',
+    })
+  })
+
+  // The ordering the sibling above does not have to face, and production does.
+  // The terminal event settles the Turn the moment it is parsed; whether the
+  // matching stderr chunk has been delivered by then is not guaranteed, because
+  // they are separate pipes. So the one record an operator has to read is
+  // written at a moment the buffer may still be empty — which is exactly the
+  // case it was added for. It carries the ending's own reason instead.
+  it('says why it recovered even when no stderr was ever delivered', async () => {
+    const { pool, workRoot, processFor, log } = newPool()
+    spawnedBefore(workRoot, A)
+
+    const turn = pool.send(A, 'hello')
+    await flush()
+    // The whole refusal, on stdout, and nothing on stderr at all.
+    feed(processFor(A), RESUME_LOST)
+    await flush()
+    feed(processFor(A), OK)
+    await turn
+
+    expect(log).toContainEqual({
+      event: 'resume-lost',
+      sessionId: A,
+      refusal: expect.stringContaining('No conversation found'),
+      retryWith: '--session-id',
+    })
+  })
+
+  // The other thing the terminal-event ordering changes, and the one nothing
+  // else would catch. A `ClaudeExitedError` correction is by definition a
+  // process that has already gone; this one is a process the pool has heard
+  // nothing from, so dropping it and spawning the replacement would put two
+  // processes on one transcript — the corruption `#acquire` serialises to
+  // prevent — and leave the first one with no reap timer to end it later.
+  it('ends the refused process before it names the replacement', async () => {
+    const { pool, workRoot, processFor, log } = newPool()
+    spawnedBefore(workRoot, A)
+
+    const turn = pool.send(A, 'hello')
+    await flush()
+    const refused = processFor(A)
+    feed(refused, RESUME_LOST)
+    await flush()
+    feed(processFor(A), OK)
+    await turn
+
+    expect(refused.signals).toContain('SIGTERM')
+    // Its ending is the pool's doing, so it is not news an operator has to read.
+    expect(log).not.toContainEqual(expect.objectContaining({ event: 'exit' }))
+  })
+
+  // Defect A of #105, at the seam that decides it. Anything may create a Working
+  // Directory — ADR-0011 has an Enclosure written into one before the Turn — and
+  // a pool that reads the directory as the Session's record answers a first
+  // message with `--resume` at a Transcript nobody has written. Every message in
+  // that Conversation then fails, for free, because the Session id is derived
+  // from the Conversation Key and never moves.
+  it('creates the Session when something else made its working directory first', async () => {
+    const { claude, workRoot, send } = newPool()
+    // What `writeEnclosures` leaves behind, and all of it: the directory, with
+    // an Enclosure in it, and nothing the pool put there.
+    mkdirSync(join(workRoot, A, '.enclosures'), { recursive: true })
+    writeFileSync(join(workRoot, A, '.enclosures', 'a.webp'), 'PNG')
+
+    await send(A, 'what is this?', OK)
+
+    expect(claude.spawns).toHaveLength(1)
+    expect(claude.lastSpawn.args).toContain('--session-id')
+    expect(claude.lastSpawn.args).not.toContain('--resume')
   })
 
   // The mirror of the gap above, and the one ADR-0003 left unmeasured. Nothing
@@ -222,7 +345,7 @@ describe('naming a Session versus reaching it again', () => {
     expect(log).toContainEqual({
       event: 'transcript-survived',
       sessionId: A,
-      stderr: expect.stringContaining('is already in use'),
+      refusal: expect.stringContaining('is already in use'),
       retryWith: '--resume',
     })
   })
@@ -291,7 +414,7 @@ describe('naming a Session versus reaching it again', () => {
   // the next message recovering all over again.
   it('leaves the recovered process resident, not the one it replaced', async () => {
     const { claude, pool, workRoot, processFor } = newPool()
-    mkdirSync(join(workRoot, A), { recursive: true })
+    spawnedBefore(workRoot, A)
 
     const turn = pool.send(A, 'hello')
     await flush()
@@ -313,7 +436,7 @@ describe('naming a Session versus reaching it again', () => {
 
   it('does not mistake a failing Turn for a lost transcript', async () => {
     const { claude, pool, workRoot, processFor } = newPool()
-    mkdirSync(join(workRoot, A), { recursive: true })
+    spawnedBefore(workRoot, A)
     const failing = recordedStream('auth-failure')
 
     const turn = pool.send(A, 'hello')

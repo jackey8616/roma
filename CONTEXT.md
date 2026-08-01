@@ -142,10 +142,16 @@ as the Operator Log, which is roma's and says something else entirely)
 
 **Working Directory**:
 Where a Session does its work — created empty, and roma still checks nothing out
-into it: the agent clones what it was asked about (ADR-0008). The one thing roma
-does put there is an Enclosure, which is not code and came from a person rather
-than from GitHub (ADR-0011). roma's, unlike the Transcript: roma makes it and
-ADR-0003 reclaims it after seven idle days. It is
+into it: the agent clones what it was asked about (ADR-0008). Two things roma
+does put there: an Enclosure, which is not code and came from a person rather
+than from GitHub (ADR-0011), and a file the Session Pool writes at every spawn,
+which is how it tells creating a Session from reaching it again. That file rather
+than the directory's own existence *because* of the Enclosure — writing one
+creates the directory, so for as long as existence was the record, a first
+message carrying an attachment was reached for as a Session that had never been
+written. roma's, unlike the Transcript: roma makes it and ADR-0003 reclaims it
+after seven idle days — spawn file and all, which is what keeps a reclaimed
+Session being spawned as new and recovered by resuming. It is
 named here because it is the Transcript's opposite number and the two are easily
 mistaken for one kind of thing — they sit side by side and have opposite
 lifetimes, because losing the other destroys the only account there is of what an
