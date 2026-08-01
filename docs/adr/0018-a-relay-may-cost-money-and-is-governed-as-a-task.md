@@ -62,31 +62,48 @@ switch (p.reason) {
 }
 ```
 
-**Read off 2.1.42, which is not the pinned build.** A copy of Claude Code
-2.1.42 was to hand and was read; every line below is evidence about *that*
-build and must be re-read on 2.1.220 before the implementation rests on it. It
-is recorded because two of the three correct a claim in #89.
+**Read off the pinned build (2.1.220), the whole descriptor:**
 
 ```
 {type:"local", name:"compact",
- description:"Clear conversation history but keep a summary in context.
-              Optional: /compact [instructions for summarization]",
- isEnabled:()=>!$6(process.env.DISABLE_COMPACT),
+ description:"Free up context by summarizing the conversation so far",
+ isEnabled:()=>!Z.DISABLE_COMPACT,
  supportsNonInteractive:!0,
- argumentHint:"<optional custom summarization instructions>"}
+ argumentHint:"<optional custom summarization instructions>",
+ thinClientDispatch:"post-text"}
 ```
 
-- **`/compact` takes an argument.** #89's body quotes `argumentHint:""` and
-  #89's own later comment quotes the string above. 2.1.42 agrees with the
-  comment. The decision below rests on this and it is the line most worth
-  re-reading on the pin.
+- **`/compact` takes an argument, and this is the pin saying so.** #89's body
+  quotes `argumentHint:""` and #89's own later comment quotes the string above.
+  The body is simply wrong; the comment is right. The argument decision below
+  is the one that rests on this line, and it now rests on a reading of the build
+  roma ships.
+- **There is exactly one descriptor.** `name:"compact"` occurs once in the
+  build. `/model` has two — a `local` and a `local-jsx`, with `_n()` deciding
+  which answers (ADR-0014) — and `/compact` has no such question to settle.
 - **No feature gate.** `isEnabled` reads one environment variable `buildEnv`
-  owns. It is not fenced behind the remote experiment flag that `/autocompact`
-  sits behind (`p2d()` → `tengu_amber_redwood2`), which is what left #98's rung
-  1 untried.
+  owns. It is not fenced behind the remote experiment flag `/autocompact` sits
+  behind (`p2d()` → `tengu_amber_redwood2`), which is what left #98's rung 1
+  untried.
 - **No aliases.** The descriptor carries none, so `/compact` is one spelling.
   ADR-0013's fault — a spelling roma leaves unclaimed is one somebody is billed
   for — has nothing to bite on here.
+
+Re-read on the pin at the same time, because this ADR leans on all three and
+each was previously somebody else's reading: the manual path's failure switch
+(`case"too_few_groups":throw Error(Chr)`, the same identifier #98 quotes), the
+`enum(["manual","auto"])` that makes an asked-for Compaction expressible at all,
+and the snake_case mapper on the way out (`compact_metadata:Zvr(r.compactMetadata)`).
+All three are present and say what #98 said they say.
+
+**How to re-read it when the pin moves**, because it is no longer the `cli.js`
+grep the earlier ADRs describe. 2.1.220 publishes `@anthropic-ai/claude-code` as
+a stub — `bin/claude.exe` plus per-platform optional dependencies — so the
+readable artefact is the platform package: `npm pack
+@anthropic-ai/claude-code-linux-x64@<version>` and `grep -a` the `claude` binary
+inside it. Costs nothing and reaches no API. Minified identifiers differ from
+run to run and between readers (#98's `QEr` is `Zvr` here), so quote the shape
+and not the name.
 
 **Not verified — the manual path, in any respect.** Every measurement above is
 of an *auto* Compaction. What a relayed `/compact` puts on stdout, whether
