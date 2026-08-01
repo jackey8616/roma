@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ClaudeExitedError,
   ClaudeSession,
+  TranscriptNotFound,
   TurnFailedError,
   wasInterrupted,
   type Turn,
@@ -210,6 +211,47 @@ describe('reporting failure', () => {
     claude.process.emitExit({ code: null, signal: 'SIGTERM' })
 
     await expect(turn).rejects.toBeInstanceOf(ClaudeExitedError)
+  })
+
+  // The fourth ending, and the one that is barely a Turn: nothing ran and
+  // nothing was spent, because the CLI refused before it called anything. Named
+  // here rather than worked out by whoever catches it — the pool wants it so it
+  // can spawn under the other flag and the Core wants it so it can say something
+  // better than "roma could not run this Task.", and neither can be the one that
+  // knows.
+  it('names a refused resume for the Transcript that is missing', async () => {
+    const { claude, session } = newSession({ resume: true })
+    session.start()
+
+    const turn = session.send('hello')
+    feed(claude.process, recordedStream('resume-lost').turn(1))
+
+    await expect(turn).rejects.toBeInstanceOf(TranscriptNotFound)
+    await turn.catch((error: TranscriptNotFound) => {
+      // Carried in the error rather than looked up when somebody wants it. The
+      // terminal event settles the Turn as it is parsed, and the matching stderr
+      // line is on another pipe that may not have been delivered yet.
+      expect(error.reason).toContain('No conversation found')
+      // The Turn is still there to be audited, and it is why this ending needs a
+      // name at all: it carries no text whatsoever, so anything reading a failed
+      // Turn's own words about itself gets nothing.
+      expect(error.turn.text).toBe('')
+      expect(error.turn.costUsd).toBe(0)
+    })
+  })
+
+  // The constraint the fix had to hold: these are two different endings and only
+  // one of them is recoverable by spawning again. A 401 puts its sentence in
+  // `result` and carries no `errors` at all.
+  it('leaves a Turn that genuinely failed as one', async () => {
+    const { claude, session } = newSession({ resume: true })
+    session.start()
+
+    const turn = session.send('are you there')
+    feed(claude.process, recordedStream('auth-failure').turn(1))
+
+    await expect(turn).rejects.toBeInstanceOf(TurnFailedError)
+    await expect(turn).rejects.not.toBeInstanceOf(TranscriptNotFound)
   })
 })
 

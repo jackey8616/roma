@@ -32,6 +32,7 @@ import {
   OK,
   quotaEvent,
   recordedStream,
+  RESUME_LOST,
   RETRIES,
   THREE_TURNS,
   upToFirst,
@@ -406,6 +407,40 @@ describe('what the Channel is asked to post', () => {
       { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
       { kind: 'failure', conversationKey: KEY, reason: 'roma could not run this Task.' },
     ])
+  })
+
+  // The one failure `roma could not run this Task.` is worst for, and the reason
+  // #105 went four days undiagnosed from inside the Conversation: a Session that
+  // cannot be opened fails every message, forever, because the Session id is
+  // derived from the Conversation Key and never moves. The pool has already
+  // tried the other flag by the time this is said, so the sentence cannot say
+  // "send it again" — it says the one thing a person can do themselves.
+  it('tells a Conversation whose Session cannot be opened what to do about it', async () => {
+    const { adapter, claude, core, pool, procFor, say } = newCore()
+    // A Session that really exists, so the next message goes out as a resume.
+    await say('first')
+    await pool.evict(sessionIdFor(KEY))
+
+    const task = core.handle(ingress('hello'))
+    await flush()
+    // Refused as a resume, then refused again at the fresh Session the pool
+    // recovers with — which is where roma runs out of flags to try.
+    feed(procFor(KEY), RESUME_LOST)
+    await flush()
+    feed(procFor(KEY), RESUME_LOST)
+    await task
+
+    // The recovery was tried and used up: the first message, the resume, and the
+    // fresh Session the pool reached for. Without this the test would pass on a
+    // roma that never recovered at all.
+    expect(claude.spawns).toHaveLength(3)
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      kind: 'failure',
+      reason: expect.stringContaining('/clear'),
+    })
+    expect(posted(adapter.instructions).at(-1)).not.toMatchObject({
+      reason: 'roma could not run this Task.',
+    })
   })
 
   // Reporting the failure is the Core's answer to it — a Conversation that has
@@ -2705,5 +2740,33 @@ describe('what somebody sent along with a message', () => {
     await core.handle(withEnclosures('review this', [unreachable]))
 
     expect(claude.spawns).toHaveLength(0)
+  })
+
+  // #105, end to end and from the outside. Writing an Enclosure creates the
+  // Working Directory, and it happens before the spawn — so for as long as the
+  // pool read that directory as the Session's record of itself, the most
+  // ordinary thing there is to do in a chat window (paste a screenshot into a
+  // fresh thread) was answered with `--resume` at a Transcript nobody had
+  // written, and every retry in that thread failed the same way for free.
+  it('creates the Session for a first message that carries one', async () => {
+    const { core, claude, procFor } = newCore()
+
+    const task = core.handle(withEnclosures('what is this?', [sent('shot.webp', 'PNG')]))
+    feed(await spawned(procFor), OK)
+    await task
+
+    expect(claude.spawns).toHaveLength(1)
+    expect(claude.lastSpawn.args).toContain('--session-id')
+    expect(claude.lastSpawn.args).not.toContain('--resume')
+  })
+
+  it('answers that first message rather than failing it', async () => {
+    const { core, adapter, procFor } = newCore()
+
+    const task = core.handle(withEnclosures('what is this?', [sent('shot.webp', 'PNG')]))
+    feed(await spawned(procFor), OK)
+    await task
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'result', text: 'ok' })
   })
 })

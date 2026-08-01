@@ -98,6 +98,58 @@ export class TurnFailedError extends Error {
   }
 }
 
+/**
+ * What Claude Code says when `--resume` is pointed at a Transcript that is not
+ * there.
+ *
+ * Measured, not assumed, and measured twice: seam 2 runs `--resume` at an
+ * unknown id under plain `claude -p` and gets it on stderr
+ * (`claude-session.live.test.ts`), and `resume-lost.jsonl` is the same refusal
+ * under the invocation roma really spawns, where it arrives in the terminal
+ * event's `errors` instead.
+ *
+ * Exported because both readings of the same refusal have to agree on it: this
+ * module reads it off the terminal event, and the pool still reads it off
+ * stderr for a process that died without emitting one. One string, so they
+ * cannot drift apart.
+ */
+export const NO_CONVERSATION = /no conversation found/i
+
+/**
+ * A `--resume` refused because the Session it named has no Transcript.
+ *
+ * The fourth thing a stream can end as, and the one that is barely an ending at
+ * all: nothing ran, nothing was spent, and the CLI exited before it called
+ * anything. Named for the Transcript rather than for the flag, because what is
+ * missing is the Transcript — the flag is only how roma found out.
+ *
+ * Named here rather than derived downstream because two callers want it and
+ * neither can be the one that knows. The pool wants it to respawn under the
+ * other flag; `reasonFor` wants it so a Conversation is told what happened
+ * instead of "roma could not run this Task." Knowledge buried in the pool's
+ * correction is unavailable to the second, and a second reader would have to
+ * learn the stream's shape to get at it.
+ *
+ * A `TurnFailedError` rather than a sibling of one: a terminal event really did
+ * arrive and the Turn really did end in failure, so everything that audits a
+ * failed Turn goes on auditing this one. What it adds is the reason, and the
+ * reason is *carried* rather than looked up — the terminal event settles the
+ * Turn the moment it is parsed, and whether the process's stderr has been
+ * delivered by then is not guaranteed. A recovery that reads the buffer is a
+ * race; one that reads this is not.
+ */
+export class TranscriptNotFound extends TurnFailedError {
+  /** Claude Code's own sentence, out of the terminal event rather than stderr. */
+  readonly reason: string
+
+  constructor(turn: Turn, reason: string) {
+    super(turn)
+    this.name = 'TranscriptNotFound'
+    this.message = `resume refused, the Session has no Transcript: ${reason}`
+    this.reason = reason
+  }
+}
+
 /** The process died with a Turn still in flight. */
 export class ClaudeExitedError extends Error {
   readonly exit: ClaudeProcessExit
@@ -455,8 +507,18 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
 
     this.#pending = null
     this.emit('turn-end', turn)
-    if (turn.isError) pending.fail(new TurnFailedError(turn))
-    else pending.settle(turn)
+    if (!turn.isError) {
+      pending.settle(turn)
+      return
+    }
+    // Which failure this is, decided here and once. `errors` is the field that
+    // separates a Turn that failed from one that never started: a 401 puts its
+    // sentence in `result` and carries no `errors`, and a refused resume carries
+    // `errors` and no `result` text.
+    const lost = result.errors.find((entry) => NO_CONVERSATION.test(entry))
+    pending.fail(
+      lost === undefined ? new TurnFailedError(turn) : new TranscriptNotFound(turn, lost),
+    )
   }
 
   #onExit(exit: ClaudeProcessExit): void {

@@ -232,9 +232,14 @@ export const RETRIES: readonly ClaudeEvent[] = apiRetries('auth-failure')
  * What `--resume` at a Session with no Transcript answers with, on stdout.
  *
  * A whole "Turn" in one event: `error_during_execution`, `is_error: true`,
- * `num_turns: 0`, `total_cost_usd: 0`, and the reason in an `errors` array
- * nothing reads. There is no `result` field, so the Turn roma builds from it has
- * empty text — which is what sends `reasonFor` past every failure it can name.
+ * `num_turns: 0`, `total_cost_usd: 0`, and the reason in an `errors` array. There
+ * is no `result` field beside it, so the Turn roma builds from it has empty text.
+ *
+ * That pairing is the whole discriminator, and `TranscriptNotFound` is what reads
+ * it: a Turn that genuinely failed carries the opposite — its sentence in
+ * `result` and no `errors` at all, which is what `auth-failure` holds. Until
+ * #105 nothing read `errors`, so this arrived as a generic failed Turn with
+ * nothing to say, and `reasonFor` fell past every failure it can name.
  *
  * The half of this refusal the plain-`-p` measurements never saw. Both
  * `claude-session.live.test.ts` and `docs/transcript-collision-verification.md`

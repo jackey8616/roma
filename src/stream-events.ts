@@ -38,6 +38,22 @@ export interface TerminalResult {
    * of them is the one being asserted.
    */
   readonly turns: number | null
+  /**
+   * What went wrong, in Claude Code's own words, or `[]` where it said nothing.
+   *
+   * The field that tells a Turn which *failed* apart from one that never ran. A
+   * 401 arrives as `is_error: true` with the message in `result` and no `errors`
+   * at all; a `--resume` pointed at a Transcript that is not there arrives with
+   * the reason here and no `result` beside it — which is the whole of how
+   * `TranscriptNotFound` is recognised, and why reading it is not optional
+   * detail. `resume-lost.jsonl` and `auth-failure.jsonl` are the two captures,
+   * one each way.
+   *
+   * An array rather than the first entry, because it is an array in the stream
+   * and roma has seen exactly one length of it. Whoever meets a longer one
+   * should see all of it.
+   */
+  readonly errors: readonly string[]
 }
 
 /** The `system/init` event, reduced to what the startup self-check reads. */
@@ -178,6 +194,7 @@ export function readTerminalResult(event: ClaudeEvent): TerminalResult | null {
     stopReason: asString(event['stop_reason']),
     terminalReason: asString(event['terminal_reason']),
     turns: asNumber(event['num_turns']),
+    errors: asStrings(event['errors']),
   }
 }
 
@@ -283,4 +300,10 @@ function asString(value: unknown): string | null {
 
 function asNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+/** The strings of an array field, dropping anything that is not one. */
+function asStrings(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is string => typeof entry === 'string')
 }
