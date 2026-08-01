@@ -39,7 +39,10 @@ coverage/
 # committing one would embed a second copy of the tree in itself.
 .claude/worktrees/
 
-# Local test scratch (seam 2 working dirs, isolated claude config)
+# Local scratch. The seam 2 working dirs and isolated claude config used to live
+# here; they moved to `os.tmpdir()` in #101, because a directory inside the repo
+# is one Claude Code walks up out of. This stays as the home for anything else
+# run by hand.
 .tmp/
 
 # Terraform. `.terraform.lock.hcl` is deliberately not here — it pins the

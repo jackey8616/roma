@@ -42,6 +42,12 @@ the way past rather than re-serialised from parsed events, because a fixture tha
 went through `JSON.parse` is one somebody has to take on trust. They carry no
 `_t`, for the same reason `readout-context.jsonl` does not.
 
+They were also captured **before #101**, when the seam 2 working directory sat
+inside the repository and every live Session read roma's own `CLAUDE.md` and
+project skills. That is roughly 3.5k of context in these files that a Session
+spawned today does not have, and it is why the token figures here sit a little
+above what a re-run should produce. Nothing read out of them depends on it.
+
 One thing to know before reading them: **the auto-compact threshold was shrunk**,
 with `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, from 967k to roughly 40k in one and to
 roughly 10k in the other. A Compaction at a shrunk threshold is a Compaction and
