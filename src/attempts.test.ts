@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { quotaEvent } from '../test/support/recorded-stream.js'
+import { COMPACTED, quotaEvent } from '../test/support/recorded-stream.js'
 import { Attempts, waitMsUntil } from './attempts.js'
 import type { Turn } from './claude-session.js'
-import { readSharedWindow, type SharedWindow } from './stream-events.js'
+import { readCompaction, readSharedWindow, type SharedWindow } from './stream-events.js'
 
 /** The real event every capture carries, on a window with room in it. */
 const ALLOWED = readSharedWindow(quotaEvent())!
@@ -14,6 +14,8 @@ const ALLOWED = readSharedWindow(quotaEvent())!
  */
 const spent = (fields: Record<string, unknown> = {}): SharedWindow =>
   readSharedWindow(quotaEvent({ status: 'rejected', ...fields }))!
+/** The Compaction the capture holds, read the way the Core reads one. */
+const COMPACTION = COMPACTED.flatMap((event) => readCompaction(event) ?? [])[0]!
 /** When the window in these captures comes back, as its own event reports it. */
 const RESETS_AT = 1785271200
 /** A clock an hour before that, so a park waits on the window rather than on the floor. */
@@ -143,6 +145,7 @@ describe('what a Task spent', () => {
     expect(new Attempts('shared-window').spentOn('overflow')).toEqual({
       costUsd: null,
       turnMs: null,
+      compaction: null,
     })
   })
 
@@ -205,6 +208,37 @@ describe('what a Task spent', () => {
     attempted(attempts, null)
 
     expect(attempts.spentOn('shared-window').turnMs).toBe(5_000)
+  })
+
+  // A Compaction is what a credential's money went on, so it is filed the way
+  // the money is. Summed across credentials instead, a metered record would say
+  // it included a Compaction the subscription had already paid for.
+  it('files a Compaction under the credential whose Attempt it happened in', () => {
+    const attempts = new Attempts('shared-window')
+
+    attempts.begins()
+    attempts.sent()
+    attempts.compacted(COMPACTION)
+    attempts.ended(turn())
+    attempts.payWith('overflow')
+    attempted(attempts, turn())
+
+    expect(attempts.spentOn('shared-window').compaction).toEqual(COMPACTION)
+    expect(attempts.spentOn('overflow').compaction).toBeNull()
+  })
+
+  // The field answers whether this Task's cost includes a Compaction and who
+  // asked for it, not how many there were — and `trigger` cannot differ between
+  // two of them within one Task, since what the Task is decides it.
+  it('keeps the first where an Attempt somehow compacted twice', () => {
+    const attempts = new Attempts('shared-window')
+
+    attempts.begins()
+    attempts.compacted(COMPACTION)
+    attempts.compacted({ ...COMPACTION, preTokens: 999 })
+    attempts.ended(turn())
+
+    expect(attempts.spentOn('shared-window').compaction).toEqual(COMPACTION)
   })
 })
 

@@ -99,6 +99,23 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
       return [to + commandText(instruction.command, instruction.carriedOut)]
     case 'blocked':
       return [to + blockedText(instruction.resetsAt)]
+    case 'context-full':
+      // Said as the consequence rather than as the cause, because roma has two
+      // codes that arrive here and they have different causes — a context that
+      // will not shrink, and attached media that cannot be stripped out of one.
+      // "This thread is too long" would be false for the second and the person
+      // would act on it anyway.
+      //
+      // Names the Command, because the remedy is the point of the message: a
+      // sentence that only said the Session was finished would leave somebody
+      // stuck with the same fact and nothing to do about it. What it costs is
+      // said too — `/clear` discards, and somebody who found that out afterwards
+      // would have been right to expect a warning.
+      return [
+        `${to}Claude cannot shorten this conversation any further, so it cannot take ` +
+          `another message. Send /clear to start a fresh session — nothing from this one ` +
+          `carries over.`,
+      ]
     case 'overflow-refused':
       // What they can still do is the point of the sentence: the Task is not
       // over, and telling them only that they were refused would read as one

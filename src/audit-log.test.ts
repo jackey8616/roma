@@ -517,3 +517,67 @@ describe('whether a Task used the Cloud Reach', () => {
     expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
   })
 })
+
+describe('whether a Compaction happened inside a Task', () => {
+  /** As the reader hands one over, off a real `system/compact_boundary`. */
+  const COMPACTION = { trigger: 'auto', preTokens: 61486, postTokens: 1375 } as const
+
+  // The largest unexplained variation there is in what a Task costs — 4.9 times
+  // a quiet Turn, measured — and the record is the only place the question is
+  // answerable afterwards.
+  it('keeps what happened across a restart', () => {
+    const dir = newDir()
+    new AuditLog({ auditRoot: dir }).record(entry({ compaction: COMPACTION }))
+
+    const [record] = new AuditLog({ auditRoot: dir }).readMonth(MONTH)
+    expect(record?.compaction).toEqual(COMPACTION)
+  })
+
+  // Absent is no Compaction, which is what every record written before roma could
+  // see one says. Requiring it would make all of them unreadable at once — a
+  // dropped line leaves the month's total, and the month's total is what the
+  // Overflow cap is enforced against.
+  it('reads a record written before roma could see one', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), at: new Date().toISOString() })}\n`,
+    )
+
+    const [record] = log.readMonth(MONTH)
+    expect(record?.compaction).toBeUndefined()
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 0 })
+  })
+
+  // A torn line rather than a record with a hole in it. This field is the whole
+  // account of why one Task cost several times what its neighbours did, and a
+  // line answering it with a string answers it wrongly.
+  it('refuses a line whose Compaction is not one', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ compaction: COMPACTION }))
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), compaction: 'auto', at: new Date().toISOString() })}\n`,
+    )
+
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+  })
+
+  // The stream is not roma's, and a build that stopped reporting the trigger
+  // would still have compacted. What is checked is the shape, because that is the
+  // part a torn line loses — and "a Compaction happened" is still the answer to
+  // why this Task cost what it did.
+  it('reads one whose fields the stream did not fill in', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ compaction: { trigger: null, preTokens: null, postTokens: null } }))
+
+    expect(log.readMonth(MONTH)[0]?.compaction).toEqual({
+      trigger: null,
+      preTokens: null,
+      postTokens: null,
+    })
+  })
+})

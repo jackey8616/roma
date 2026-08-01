@@ -1,7 +1,7 @@
 import type { CredentialKind } from './build-env.js'
 import type { Turn } from './claude-session.js'
 import { overflowOffer, spentUntil } from './shared-window.js'
-import type { SharedWindow } from './stream-events.js'
+import type { Compaction, SharedWindow } from './stream-events.js'
 
 /**
  * How long a Task may be held waiting for the Shared Window before roma answers
@@ -37,10 +37,25 @@ const MIN_PARK_MS = 60_000
 export interface Spend {
   readonly costUsd: number | null
   readonly turnMs: number | null
+  /**
+   * The Compaction this credential paid for, or null where it paid for none.
+   *
+   * Here rather than on the Task because a Compaction is a cost fact and this is
+   * where a Task's costs are split: a Task blocked on the Shared Window and rerun
+   * on Overflow produces two records, and the Compaction belongs on whichever of
+   * them carries the money it spent. Filed anywhere else it would say a metered
+   * bill included a Compaction the subscription paid for.
+   *
+   * The first one, where an Attempt somehow produced two. The field answers
+   * whether this Task's cost includes a Compaction and who asked for it, not how
+   * many there were — and `trigger` cannot differ between two of them within one
+   * Task, since what a Task is decides it.
+   */
+  readonly compaction: Compaction | null
 }
 
 /** A Task that spent nothing yet, or spent nothing at all. */
-const NOTHING_SPENT: Spend = { costUsd: null, turnMs: null }
+const NOTHING_SPENT: Spend = { costUsd: null, turnMs: null, compaction: null }
 
 /** The terms of one wait on the Shared Window. */
 export interface Park {
@@ -78,6 +93,8 @@ interface Attempt {
   turn: Turn | null
   /** Whether Claude Code was ever given the Task's message on this try. */
   sent: boolean
+  /** The Compaction that happened inside this try's Turn, if one did. */
+  compaction: Compaction | null
 }
 
 /**
@@ -120,7 +137,7 @@ export class Attempts {
    */
   begins(): CredentialKind {
     this.#window = null
-    this.#made.push({ credential: this.#credential, turn: null, sent: false })
+    this.#made.push({ credential: this.#credential, turn: null, sent: false, compaction: null })
     return this.#credential
   }
 
@@ -140,6 +157,21 @@ export class Attempts {
   /** What the stream said about the Shared Window during the Attempt in flight. */
   saw(window: SharedWindow): void {
     this.#window = window
+  }
+
+  /**
+   * A Compaction happened inside the Attempt in flight.
+   *
+   * Kept rather than acted on: a successful Compaction prompts no decision at
+   * all — roma cannot prevent it, delay it, or react to it — so it is a fact
+   * about what this Attempt cost and nothing else. The Operator Log is what roma
+   * decided, and this is not that.
+   *
+   * The first one stands, for the reason `Spend.compaction` gives.
+   */
+  compacted(compaction: Compaction): void {
+    const attempt = this.#current
+    if (attempt !== undefined) attempt.compaction ??= compaction
   }
 
   /**
@@ -218,10 +250,15 @@ export class Attempts {
     // that never sent one would otherwise overwrite an earlier unpriced Attempt
     // and report real tokens as free.
     let sent = false
-    let spend = NOTHING_SPENT
+    // The money alone, because the two are accumulated differently and folding
+    // them together would put a `compaction` in every literal below that neither
+    // reads nor changes.
+    let spend: Omit<Spend, 'compaction'> = NOTHING_SPENT
+    let compaction: Compaction | null = null
     for (const attempt of this.#made) {
       sent ||= attempt.sent
       if (attempt.credential !== credential) continue
+      compaction ??= attempt.compaction
       const turnMs = attempt.turn?.durationMs ?? spend.turnMs
       if (attempt.turn?.costUsd != null) {
         spend = { costUsd: (spend.costUsd ?? 0) + attempt.turn.costUsd, turnMs }
@@ -231,7 +268,7 @@ export class Attempts {
       // is now known to be less than the whole.
       spend = { costUsd: spend.costUsd ?? (sent ? null : 0), turnMs }
     }
-    return spend
+    return { ...spend, compaction }
   }
 
   /** What Claude Code last said its credential resolved to, or null if it never did. */

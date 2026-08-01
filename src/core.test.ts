@@ -25,11 +25,14 @@ import { romaFixture, teardownRoma, type RomaFixture } from '../test/support/rom
 import {
   BLOCKED,
   BLOCKED_WITH_OVERAGE,
+  COMPACTED,
+  COMPACTION_FAILED,
   NEARLY_SPENT,
   FAILED,
   FAILED_OUTRIGHT,
   feed,
   GENERATING,
+  ofKind,
   OK,
   quotaEvent,
   recordedStream,
@@ -38,6 +41,7 @@ import {
   THREE_TURNS,
   upToFirst,
   withApiKeySource,
+  withCompactionError,
   withTotalCostUsd,
 } from '../test/support/recorded-stream.js'
 import { sources, type Source } from '../test/support/sources.js'
@@ -2284,6 +2288,166 @@ describe('the record every Task leaves behind', () => {
   })
 })
 
+describe('a Compaction inside a Task', () => {
+  // The whole of #98 in one assertion. A Compaction happens inside a Turn, so
+  // its cost folds into that Turn's delta and lands on whoever happened to send
+  // the message that crossed the threshold — and a Conversation is many people
+  // sharing one Session. Measured at 4.9 times a quiet Turn, and until this
+  // field there was nothing on the record that told the two apart.
+  it('says on the Audit Record that this Task compacted, and who asked', async () => {
+    const { audit, say } = newCore()
+
+    await say('OK', { events: COMPACTED })
+
+    expect(recordsIn(audit)).toMatchObject([
+      {
+        // Claude Code's own word, and half of the pair that answers who asked:
+        // `task` plus `auto` is somebody's bad luck, and a relayed `/compact`
+        // would be `relay` plus `manual` (ADR-0018).
+        compaction: { trigger: 'auto', preTokens: 61486, postTokens: 1375 },
+      },
+    ])
+  })
+
+  // Absent means no Compaction, which is what every record roma wrote before it
+  // could see one says. A field written on every record would make the ledger's
+  // one interesting row indistinguishable at a glance from the thousands that
+  // are not.
+  it('leaves the field off a Task that did not compact', async () => {
+    const { audit, say } = newCore()
+
+    await say('hello')
+
+    expect(recordsIn(audit).at(0)).not.toHaveProperty('compaction')
+  })
+
+  // A successful Compaction is a cost fact and not an operational event. roma
+  // cannot prevent it, delay it, or react to it, so there is no decision for the
+  // Operator Log to record — and after the fact there is nothing the Caller
+  // could do with the news either, which is ADR-0010's bar.
+  it('tells nobody about one that worked', async () => {
+    const { adapter, log, say } = newCore()
+
+    await say('OK', { events: COMPACTED })
+
+    expect(log).toEqual([])
+    expect(posted(adapter.instructions).map(({ kind }) => kind)).toEqual(['progress', 'result'])
+  })
+})
+
+describe('a Compaction that failed', () => {
+  // The capture that corrected the issue this was built for. #98 was written
+  // believing a failed Compaction meant a Session that could not serve another
+  // Turn, so as specified roma would have written an Operator Log line and told
+  // the Caller their thread was full — during a Turn that cost two cents and
+  // answered normally.
+  it('says nothing at all about the benign one both captures hold', async () => {
+    const { adapter, log, say } = newCore()
+
+    await say('OK', { events: COMPACTION_FAILED })
+
+    expect(log).toEqual([])
+    expect(posted(adapter.instructions).map(({ kind }) => kind)).toEqual(['progress', 'result'])
+  })
+
+  // The failure #98 is actually about: a Session whose context cannot be reduced
+  // below the limit will not serve another Turn, every later message to that
+  // Conversation fails, and roma's repair is a new Session Generation. This is
+  // one of very few places where roma knows an exit the person cannot guess.
+  it('tells the Caller their thread is full when the context cannot be reduced', async () => {
+    const { adapter, say } = newCore()
+
+    await say('OK', { events: withCompactionError(COMPACTION_FAILED, 'exhausted') })
+
+    expect(posted(adapter.instructions)).toContainEqual({
+      kind: 'context-full',
+      conversationKey: KEY,
+    })
+  })
+
+  // Not an ending, the way `blocked` is not: it arrives mid-Turn and the Task
+  // goes on to whatever ending it has. The capture's Turn answers, because it is
+  // a real one with one field changed — what roma does about the code is the
+  // same either way, and a hand-written failing Turn would be asserting against
+  // roma's guess about what `exhausted` does to a Turn rather than against a
+  // build.
+  it('leaves the Task its own ending', async () => {
+    const { adapter, say } = newCore()
+
+    await say('OK', { events: withCompactionError(COMPACTION_FAILED, 'exhausted') })
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'result' })
+  })
+
+  // A Session that will not serve another Turn is squarely what an operator
+  // needs to know, and the code is written down rather than the sentence.
+  it('writes the serious one down for the operator', async () => {
+    const { log, say } = newCore()
+
+    await say('OK', { events: withCompactionError(COMPACTION_FAILED, 'exhausted') })
+
+    expect(log).toEqual([
+      {
+        event: 'compaction-failed',
+        taskId: expect.any(String),
+        sessionId: sessionIdFor(KEY),
+        code: 'exhausted',
+        severity: 'unreducible',
+      },
+    ])
+  })
+
+  // The other unreducible code, and the same answer: attached media that cannot
+  // be stripped is a context that cannot be brought under the limit, so the
+  // Session is finished either way and the remedy is the same one.
+  it('answers media it cannot strip the same way', async () => {
+    const { adapter, log, say } = newCore()
+
+    await say('OK', { events: withCompactionError(COMPACTION_FAILED, 'media_unstrippable') })
+
+    expect(log).toMatchObject([{ code: 'media_unstrippable', severity: 'unreducible' }])
+    expect(posted(adapter.instructions)).toContainEqual({
+      kind: 'context-full',
+      conversationKey: KEY,
+    })
+  })
+
+  // ADR-0010's bar is about how many messages land in a Conversation, not about
+  // how many times Claude Code said the same thing. A Session that cannot be
+  // reduced fails every Attempt for the same reason, so without this a Task that
+  // parked and reran would say it twice — and the operator still gets both lines,
+  // because each occurrence really did occur.
+  it('tells the Caller once however many times the Compaction fails', async () => {
+    const { adapter, log, say } = newCore()
+    const failing = withCompactionError(COMPACTION_FAILED, 'exhausted')
+
+    await say('OK', {
+      events: failing.flatMap((event) =>
+        event['compact_result'] === 'failed' ? [event, event] : [event],
+      ),
+    })
+
+    expect(posted(adapter.instructions).filter(({ kind }) => kind === 'context-full')).toHaveLength(
+      1,
+    )
+    expect(log).toHaveLength(2)
+  })
+
+  // The `shared-window.ts` lesson applied on both axes at once. A code roma has
+  // never seen must not be folded into the answer that means "nothing happened",
+  // so the operator hears about it — and it must not be folded into the answer
+  // that means "this thread is finished" either, because telling somebody to
+  // throw their context away is a sentence roma has to be able to stand behind.
+  it('shows an unknown code to the operator and to nobody else', async () => {
+    const { adapter, log, say } = newCore()
+
+    await say('OK', { events: withCompactionError(COMPACTION_FAILED, 'something_new') })
+
+    expect(log).toMatchObject([{ code: 'something_new', severity: 'unexplained' }])
+    expect(posted(adapter.instructions).map(({ kind }) => kind)).toEqual(['progress', 'result'])
+  })
+})
+
 describe('when the Shared Window is spent', () => {
   // ADR-0002: say plainly that quota is spent, quote the reset time, and keep
   // the Task. The reset time comes off the event rather than being estimated,
@@ -2616,6 +2780,31 @@ describe('what Overflow is taken for', () => {
     // One record, on the subscription. Neither blocked attempt was priced, so
     // Overflow has no spend of its own to account for and earns no second record.
     expect(recordsIn(audit).map((record) => record.credential)).toEqual(['shared-window'])
+  })
+
+  // The reason the Compaction is filed on the Attempt rather than on the Task,
+  // and the case that reason was chosen for. A second record exists only where
+  // that credential really spent something — but a Compaction on an Attempt
+  // nothing priced is the "unpriced rather than free" case with the largest known
+  // price tag there is, so it keeps its own record alive. Dropped, the one
+  // Attempt that compacted would leave no trace that it did.
+  it('keeps the record of a Compaction on an Attempt nothing priced', async () => {
+    const { adapter, audit, core, start, procFor } = newCore()
+
+    const { task, proc } = await start('hello')
+    feed(proc, [...ofKind(COMPACTED, 'system/compact_boundary'), ...BLOCKED_WITH_OVERAGE])
+    await flush()
+    await core.takeOverflow(taskIdOf(adapter))
+    await flush()
+    feed(procFor(KEY), OK)
+    await task
+
+    expect(recordsIn(audit)).toMatchObject([
+      // The credential that answered comes first, and it compacted nothing.
+      { credential: 'overflow' },
+      { credential: 'shared-window', compaction: { trigger: 'auto' } },
+    ])
+    expect(recordsIn(audit).at(0)).not.toHaveProperty('compaction')
   })
 
   // The money the window refused is the subscription's, and it is charged to the

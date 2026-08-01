@@ -293,6 +293,34 @@ export type OutboundInstruction = TaskAddress &
         readonly spentUsd: number
       }
     | {
+        /**
+         * Say that this Conversation's Session cannot be reduced any further, so
+         * it will serve no more Turns, and that `/clear` is the way out.
+         *
+         * The one place roma knows an exit the person cannot guess. Claude Code
+         * tried to compact the context and reported that it could not be brought
+         * below the limit; every message after this fails, roma's repair is a new
+         * Session Generation, and nothing else would ever tell them to ask for
+         * one. Staying silent wastes the only useful thing roma knows here.
+         *
+         * **Not an ending.** It arrives mid-Task, the way `blocked` does, and the
+         * Task goes on to whatever ending it has — usually a failure, since a
+         * Session that cannot be reduced is one that cannot answer. An Adapter
+         * posts it as its own message and keeps the acknowledgement it was
+         * mutating.
+         *
+         * Carries nothing, like `stopped`. There is one fact and one remedy, and
+         * neither the code Claude Code named nor how full the context got is
+         * something the person can act on — those go to the operator.
+         *
+         * Nothing is said about a Compaction that *worked*: the context is
+         * already gone by the time roma could speak, there is nothing to do with
+         * the news, and ADR-0010 sets a high bar for another message in a
+         * Conversation. It goes on the Audit Record instead, where the money is.
+         */
+        readonly kind: 'context-full'
+      }
+    | {
         /** Say that a Task ended without a result, and why. Its own message too. */
         readonly kind: 'failure'
         readonly reason: string
@@ -425,8 +453,8 @@ export interface ChannelAdapter<Event = unknown> {
    * was written without knowing it — a late update finds no acknowledgement to
    * edit and posts a second message, underneath the answer.
    *
-   * `blocked` and `overflow-refused` are **not** endings: they are messages
-   * about a Task that is still going, and updates follow them.
+   * `blocked`, `overflow-refused` and `context-full` are **not** endings: they
+   * are messages about a Task that is still going, and updates follow them.
    */
   deliver(instruction: OutboundInstruction): void | Promise<void>
 }
