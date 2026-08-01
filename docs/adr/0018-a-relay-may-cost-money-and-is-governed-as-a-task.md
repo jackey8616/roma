@@ -431,6 +431,18 @@ request rather than an additional message, and the bar is not in play.
   ADR-0007 pin has to ask a second question of each entry — not only "is this
   still safe" but "does it still cost what the list says".
 - roma gains its first relayed free text. Nothing validates it, and nothing can.
+- **The one machine-checkable half of the membership rule is currently guarding
+  four spellings out of five, and this is the work that has to fix it.** The
+  rule keeps `/clear`, `/model`, `/effort` and `/config` out of the Relay list,
+  and the ordering that makes them unreachable — `readCommand` answers before
+  `readReadout` (`core.ts`) — is asserted by `shares no string with a Command`
+  in `readouts.test.ts`. That test iterates a **hardcoded** copy,
+  `['/stop', '/clear', '/reset', '/new']`, so `/model` is already uncovered and
+  ADR-0016 and ADR-0017 will add three more spellings it will go on not
+  covering, while passing. It must iterate the real `COMMANDS` table. #85 says
+  the same thing and asks for it to be folded into whichever work touches that
+  table; this ADR is what touches it, and the rename walks through both files
+  anyway.
 
 ## Alternatives considered
 
