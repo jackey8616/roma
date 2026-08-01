@@ -29,6 +29,7 @@ npm install
 | `npm run build` | `src` alone to `dist/`, which is what the image runs. |
 | `npm run test:seam2` | **Spends money.** Drives a real `claude -p`. |
 | `npm run check:claude-code-drift` | Is the pinned Claude Code still the published one? Reports; changes nothing. |
+| `npm run check:adr-collision` | Would merging this branch put two ADRs on one number? Reads the pull request's base branch, so it does nothing outside CI. |
 
 ### Seam 2 spends Shared Window quota
 
@@ -136,6 +137,26 @@ children, which a PID 1 that does not reap would leave as zombies.
 Every pull request runs `typecheck`, `test`, `build` and a `docker build` that pushes
 nothing. Pushing a tag equal to `package.json`'s `version` publishes that one image tag to
 GHCR and no other; a tag that disagrees fails before anything is built.
+
+A pull request also runs `check:adr-collision`, which is the only check here that reads a
+commit other than this one. `src/adr-numbering.test.ts` asks whether *this tree* repeats an
+ADR number; the number it cannot see is the one that is not in the tree yet, because two
+branches can each add `0010-`, each pass alone, and the repeat then exists only in the
+union — which is main, after both have merged. So this one builds that union first: base
+and head together, less what either side deleted, which is what keeps a rename from reading
+as a collision with the file it replaced.
+
+**It narrows that window; it does not close it,** and its failure message says so rather
+than letting the next person assume otherwise. It reads main as main is at the moment it
+runs, so two pull requests open at once both pass and the first to merge makes the second's
+green stale. Closing that needs GitHub's *require branches to be up to date before merging*,
+which this repository deliberately does not set: it cannot be limited to the pull requests
+that touch `docs/adr/` — that flag belongs to a ruleset's required status checks, and a
+ruleset's conditions are branch names rather than paths — so it would cost every pull
+request a rebase whenever main moved, against a fault that has happened twice across
+fifteen ADRs and been caught by somebody reading both times. Making the check *block* a
+merge rather than only go red is the same kind of setting: it has to be named in the
+required checks, which is a repository setting and not in this repo's files.
 
 One workflow is not a check. `claude-code-drift` runs weekly rather than on a commit,
 compares the `Dockerfile`'s pin against the published Claude Code, and files a notify-only
