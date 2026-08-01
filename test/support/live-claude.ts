@@ -84,6 +84,27 @@ export function liveWorkRoot(name: string): { configDir: string; workRoot: strin
   return { configDir, workRoot }
 }
 
+/**
+ * Where a live Session's raw stdout is teed, for a run whose job is to produce a
+ * capture rather than only to assert on one.
+ *
+ * Outside the checkout like everything else here, and deliberately **not** in
+ * `test/fixtures/claude-stream/`. A fixture is evidence of one run on one build,
+ * and a test that rewrote one every time somebody ran it would quietly replace
+ * the bytes a verification document quotes. Copying a capture into the fixtures
+ * directory stays a person's decision.
+ *
+ * Truncated rather than appended to: two runs spliced into one file is a stream
+ * that never happened.
+ */
+export function liveCaptureFile(name: string): string {
+  const dir = join(SEAM2_ROOT, 'capture')
+  mkdirSync(dir, { recursive: true })
+  const file = join(dir, `${name}.jsonl`)
+  rmSync(file, { force: true })
+  return file
+}
+
 function liveConfigDir(): string {
   const configDir = join(SEAM2_ROOT, 'claude-home')
   mkdirSync(configDir, { recursive: true })
