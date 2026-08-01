@@ -328,11 +328,22 @@ mechanism with it.
    path already hands roma a sentence written for a person: relay it, and decide
    the Operator Log line on something other than the error.
 
-3. **`<command-args>` is not the mechanism.** The ADR's conclusion is right — the
-   marker is read by the summariser — but nothing on this path builds that tag.
-   The argument reaches the summariser as `Additional Instructions:` in the
-   summarisation prompt. Worth correcting because the sentence names a mechanism
-   somebody will go looking for.
+3. **`<command-args>` is on the Transcript but never on stdout, and the ADR's
+   "therefore" joins two different deliveries.** *(Corrected 2026-08-01. This
+   item first read "`<command-args>` is not the mechanism … nothing on this path
+   builds that tag", which generalised from stdout to the Transcript and was
+   wrong. The tag is built for every `/compact`, argument or none — read off the
+   Transcripts of these Sessions and of 24 more in
+   `docs/compact-frame-survey.md`.)*
+
+   The ADR says the marker "travels into `<command-args>` **and is therefore**
+   read by the summariser". Both halves hold; the join does not. Into
+   `<command-args>` is the Transcript, which is where ADR-0012 observed it and
+   where it survives the Compaction — the entry is a descendant of the
+   compaction summary in the `parentUuid` chain. Read by the summariser is a
+   separate path, `Additional Instructions:` in the summarisation prompt
+   (`Ysd`). Neither causes the other, and nothing roma reads carries either:
+   `<command-args>` does not occur in any of the six stdout captures here.
 
 4. **"A name inside a summarisation instruction does not become another
    instruction" is too comfortable.** See Q5. The risk is not that the marker
@@ -365,7 +376,10 @@ Caller is told on success, roma writes it.
 - **Whether the marker causes the summariser's distrust.** Three of four marked
   Sessions produced injection language and the one unmarked Session did not. n=1
   on the control, and two identical marked Sessions disagreed. Suggestive; not
-  shown.
+  shown. **Followed up in `docs/compact-frame-survey.md`**, 24 Sessions over six
+  frames, which finds the shape to be narrower than this document guesses at: it
+  is an instruction *with a name attached* that draws the suspicion. The marker
+  on its own drew none in three Sessions.
 - **Whether ADR-0018's frame works on an ordinary thread.** It was sent once, on
   the confounded one-word conversation, and the Compaction discarded the
   conversation. Its own Caller text has never been run against a normal one.

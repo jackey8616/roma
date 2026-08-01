@@ -55,6 +55,16 @@ project skills. That is roughly 3.5k of context in these files that a Session
 spawned today does not have, and it is why the token figures here sit a little
 above what a re-run should produce. Nothing read out of them depends on it.
 
+`frame-survey/` is a directory rather than a row because it is one measurement in
+24 Sessions: six candidate frames for a relayed `/compact`, run over one
+conversation to choose between them. `A1`–`A5` … `F1`–`F3` are unedited stdout,
+one file per Session, named for the arm; `docs/compact-frame-survey.md` says what
+each arm sent and what the run found. `readings.jsonl` beside them is the odd one
+out and is labelled as such: it is **derived** — one line per Session, carrying
+the five pre-registered outcome variables — but its `commandArgs` and `summary`
+fields are verbatim, so the table in the document can be audited without the
+Transcripts, which live outside the checkout and do not survive a `/tmp` sweep.
+
 The six `manual-compaction-*.jsonl` captures came from `src/manual-compaction.live.test.ts`
 the same way, and from a world with one thing fixed and one thing different.
 Fixed: they were taken **after** #101, so the working directory is outside the
