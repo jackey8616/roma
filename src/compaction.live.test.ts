@@ -62,6 +62,13 @@ const PCT_OVERRIDE = 'CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'
  * a conversation can grow into; a threshold *below* it is one the conversation
  * can never be reduced under, because a system prompt is not conversation and no
  * Compaction can summarise it away.
+ *
+ * It was measured before #101, with the working directory inside the repository,
+ * so roughly 3.5k of it is roma's own `CLAUDE.md` and project skills that a
+ * Session spawned by this test no longer sees. Kept rather than adjusted: it is
+ * used as a floor for `pre_tokens`, and a real baseline that is *lower* than the
+ * floor only makes the assertion more conservative. The percentages are read
+ * against `/context` at the start of each run, not against this.
  */
 const BASELINE_TOKENS = 29_900
 

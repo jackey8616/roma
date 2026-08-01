@@ -14,9 +14,13 @@ import { defineConfig } from 'vitest/config'
 // the free run covers without widening what it can reach: the exclusion below is on
 // the suffix wherever it appears, so it grew with the include rather than staying
 // pointed at `src/`.
+// `test/` is here for the same reason and one more: the seam 2 support helpers make
+// claims about isolation that only the paying tests exercise, and a broken one makes
+// those tests pass rather than fail (#101). Asserting the claim in the free run is
+// the only place it can be caught for nothing.
 export default defineConfig({
   test: {
-    include: ['src/**/*.test.ts', 'scripts/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'scripts/**/*.test.ts', 'test/**/*.test.ts'],
     exclude: ['**/node_modules/**', '**/*.live.test.ts'],
   },
 })

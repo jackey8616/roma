@@ -232,6 +232,12 @@ which lives in this repo's GitHub issues (`gh issue view 1`).
   same goes for `HttpChatApi`, whose tests assert on the request Google would have
   received, and for `PubSubTransport`, whose subscription is a double.
 
+`test/support/live-claude.test.ts` belongs to none of them. It is the default run
+asserting something about seam 2's *scaffolding* — that the directories handed to a live
+Session sit outside the checkout, so the Session inherits neither roma's `CLAUDE.md` nor
+its project skills. It lives in the free run because seam 2 cannot catch that class of
+bug: the contamination it guards against made those tests pass, expensively (#101).
+
 `src/channels/google-chat/wiring.test.ts` is the one place the seams meet: roma assembled
 out of its real parts, with only Claude Code and the network replaced. A Pub/Sub message
 goes in and the request Google would have received comes out. It exists because every other

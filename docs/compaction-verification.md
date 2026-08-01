@@ -102,11 +102,26 @@ Compaction can summarise away. So `pct=4` (≈40k) is a threshold a conversation
 can grow into, and `pct=1` (≈10k) is one it can never be reduced under. Those are
 the two runs.
 
-*(Noted in passing: this Session picked up the repo's own `CLAUDE.md` and project
-skills, because `liveSessionDirs` puts the working directory at `.tmp/seam2/work/`
-— inside the repo. The comment on that helper says it "keeps the repo's own
-CLAUDE.md out of the Session", and it does not. Harmless here, 3.5k of tokens;
-worth its own issue.)*
+**Which world this was measured in — it is no longer the one seam 2 runs in.**
+This Session picked up the repo's own `CLAUDE.md` (649 tokens) and project skills
+(2.9k), because `liveSessionDirs` put the working directory at `.tmp/seam2/work/`
+— inside the repository, where Claude Code's walk up from the working directory
+finds them. That was #101 and it is fixed: the seam 2 directories now live under
+`os.tmpdir()`, outside the checkout, and `test/support/live-claude.test.ts`
+asserts it for free.
+
+So **the 29.9k above is the contaminated figure**, and the same measurement today
+should come out around 3.5k lower — the Memory files and Skills rows going to
+roughly zero and nothing else moving. The numbers in this document are left as
+they were measured rather than adjusted to a figure nobody has seen; the fixtures
+`compaction-auto.jsonl` and `compaction-failed.jsonl` were captured in that same
+contaminated world too.
+
+Nothing asserted depends on it. `src/compaction.live.test.ts` re-reads `/context`
+at the start of every run instead of trusting the constant, and its
+`BASELINE_TOKENS` is a floor for `pre_tokens` — a floor that a *lower* real
+baseline only makes safer, since the filler Turn is what carries `pre_tokens` past
+it either way.
 
 ## Q1 — Yes. It is on stdout
 
