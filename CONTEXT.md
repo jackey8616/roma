@@ -194,18 +194,22 @@ make room. Distinct from Eviction only in what prompted it.
 _Avoid_: timing out, garbage collection, idling out
 
 **Command**:
-One of the three messages roma answers itself instead of handing to Claude Code:
+One of the five messages roma answers itself instead of handing to Claude Code:
 `/stop` ends the work this Conversation has in flight — running, queued, or
-still starting — `/clear` gives the Conversation a fresh Session, and `/model`
-sets its Chosen Model. Recognised in the Core, never in a Channel Adapter, and
-only when the whole message is one of them — everything else is work, apart from
-the few Claude Code commands a Readout relays. `/clear` answers to `/reset` and
-`/new` as well, because those are Claude Code's own spellings of it and a
-spelling roma leaves unclaimed is one somebody is billed for (ADR-0013). `/model`
-takes an argument and is the only Command that may: a listed head takes one,
-nothing else does, which is what keeps the whole-message rule from widening into
-the prefix match ADR-0003 refused. A Command is not a Task: it drives no
-Turn, is not queued, and is not counted against the concurrency cap.
+still starting — `/clear` gives the Conversation a fresh Session, `/model` sets
+its Chosen Model, `/effort` sets its Chosen Effort, and `/config` says what this
+Session is set to and refuses to set anything else. Recognised in the Core, never
+in a Channel Adapter, and only when the whole message is one of them — everything
+else is work, apart from the few Claude Code commands a Readout relays. `/clear`
+answers to `/reset` and `/new`, and `/config` to `/settings`, because those are
+Claude Code's own spellings and a spelling roma leaves unclaimed is one somebody
+is billed for (ADR-0013, ADR-0017). Three of the five take an argument, and only
+a listed head may: nothing else does, which is what keeps the whole-message rule
+from widening into the prefix match ADR-0003 refused. That list is now three
+entries rather than one, so "a named list does not grow on its own" has become a
+thing somebody has to keep true rather than an observation. A Command is not a
+Task: it drives no Turn, is not queued, and is not counted against the
+concurrency cap.
 _Avoid_: slash command (those are Claude Code's, and a Readout is the only way
 any of them reaches it), instruction (that is an Outbound Instruction)
 
@@ -222,8 +226,12 @@ no Turn is driven and the model never sees it. The Caller Marker goes *after* a
 Readout, which is safe only because the whole message is the command and the
 Caller supplied no text to hide behind it.
 _Avoid_: passthrough, relay, slash command (that is Claude Code's name for what a
-Readout carries, not for the carrying), and using this for `/stop`, `/clear` or `/model` —
-those are roma's own and are Commands
+Readout carries, not for the carrying), and using this for `/stop`, `/clear`,
+`/model`, `/effort` or `/config` — those are roma's own and are Commands. The
+last two are the sharpest case for the membership rule, because both are free and
+non-interactive on the pinned build and neither may be relayed: `/effort` sets a
+value that lives in the process and dies with it, and `/config` writes a settings
+file every Session in the deployment shares (ADR-0016, ADR-0017)
 
 **Task**:
 One message from one person, from arrival to final result. The unit that is
@@ -268,7 +276,11 @@ Task; this bounds retrying, not working)
 **Startup Self-Check**:
 The live Turn roma drives at boot to prove that auth resolves to the credential
 it means to run on, and on the pinned model. Failure blocks startup: nothing that
-could accept an Ingress Message is built until it has passed.
+could accept an Ingress Message is built until it has passed. It also asks the
+probe's own process what effort it is on, and that one does **not** block — it is
+written to the Operator Log and boot continues, because what it reads back is a
+sentence rather than a field, and a reworded sentence should not be able to stop a
+deployment (ADR-0016).
 _Avoid_: health check, preflight, smoke test, and `claude auth status` — that
 reports a token valid right up to the moment it 401s, which is why this is a real
 invocation instead
@@ -302,6 +314,46 @@ reason an Installation is: a term that is the whole of a security property shoul
 be a term.
 _Avoid_: whitelist, allowlist (that is its shape, and the word is the Readouts'),
 supported models (roma is not saying the rest do not work), model list
+
+**Pinned Effort**:
+How hard roma asks the model to think, on every Session that has not been moved.
+The Pinned Model's opposite number and argued the same way: it is a thing that was
+always being set — by a settings file roma neither writes nor reads — and pinning
+it does not change what happens, it makes roma able to say what happens
+(ADR-0016). One per deployment, fixed before boot, and carried on every spawn so
+that no Session runs on an effort nobody chose.
+_Avoid_: default effort (that is the argument `/effort default` takes, not the
+name of the thing it returns to), effort setting, reasoning level
+
+**Chosen Effort**:
+The effort one Session runs on because somebody said so, in place of the Pinned
+Effort. Roma's to keep rather than the process's, for the reason a Chosen Model is
+— Claude Code's own `/effort` says `this session only`, and a session is a process,
+and processes end for reasons nobody using them can observe. Belongs to a Session
+and not to a Conversation, so `/clear` returns it to the Pinned Effort without
+anything being deleted.
+_Avoid_: override, preference, thinking budget (that is the provider's word for
+one mechanism behind this, not roma's word for the choice)
+
+**Effort Menu**:
+The levels a Caller may pick a Chosen Effort from — every level the pinned build
+has, which is what makes it unlike the Model Menu. It is still a spending boundary
+and not a typo filter: what it holds back is not a level but `ultracode`, which is
+not a level at all but a licence for one Task to become a fleet, and which
+therefore reaches roma only through the operator (ADR-0016).
+_Avoid_: effort levels (that is the provider's list; this is roma's offer),
+whitelist, allowlist
+
+**Effort Matrix**:
+Which models take an effort at all, extracted from the pinned build before an
+image ships. It exists because the one thing that would settle the question at
+runtime is invisible: the level a Session was given is echoed back whether or not
+the model will use it, and what the model actually receives is never on the wire
+roma can see. So roma reads it in advance, off the binary it is about to ship,
+and uses it to say something and to record something — never to refuse anything
+(ADR-0016).
+_Avoid_: support table, capability matrix, and calling it measured — it is read
+from a build, and the reading can be wrong in ways only a person notices
 
 ### Reaching the code
 
@@ -431,11 +483,16 @@ _Avoid_: paused, retrying, backing off, queued (that word is the Task Queue's)
 
 **Audit Record**:
 The line roma writes when a Task ends: the Caller, which Session ran it, how long
-they waited, what it cost, which credential paid, which model ran it, which
+they waited, what it cost, which credential paid, which model ran it, what effort
+it ran at, which
 repositories it minted an Installation Token for, and whether it used the Cloud
 Reach. The model is here because a
 Chosen Model is a Caller moving the shared bill and nothing else would remember
-which Task did (ADR-0014). The repositories are what roma can honestly know:
+which Task did (ADR-0014). The effort is here for the same reason and is weaker
+evidence, and says so: it is what roma sent and what the Effort Matrix says the
+model does with it, rather than anything roma watched — and where the Matrix says
+the model takes no effort at all, the record says that instead of naming a level
+nobody ran at (ADR-0016). The repositories are what roma can honestly know:
 git names the repository every time it asks for a credential, so what a Task
 reached for is free — and what it did once it got there is not, since learning
 that would mean reading the Transcript. The Cloud Reach is a yes or a no and
