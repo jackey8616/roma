@@ -15,6 +15,7 @@ import {
   feed,
   OK,
   recordedStream,
+  RESUME_LOST,
   RETRIES,
   THREE_TURNS,
   withTotalCostUsd,
@@ -188,6 +189,43 @@ describe('naming a Session versus reaching it again', () => {
     // flag roma retried with as well as what it found, and `retryWith` is the
     // only part that says what roma *did* — the rest of the trail is two spawn
     // records they would have to pair up themselves.
+    expect(log).toContainEqual({
+      event: 'resume-lost',
+      sessionId: A,
+      stderr: expect.stringContaining('No conversation found'),
+      retryWith: '--session-id',
+    })
+  })
+
+  // The same loss, in the shape production actually produces it — and the shape
+  // the sibling above cannot reach. That test drives stderr and an exit, which
+  // is what `claude -p` does; every measurement of this failure was taken that
+  // way (`claude-session.live.test.ts` runs `-p` alone). Under the invocation
+  // roma really spawns, `--output-format stream-json` puts a terminal `result`
+  // with `is_error` on *stdout* as well, and it settles the Turn first — so the
+  // pool is handed a `TurnFailedError`, `#wrongFlag` refuses it for not being a
+  // `ClaudeExitedError`, and the stderr it would have recognised is never read.
+  //
+  // The correction cannot simply widen to `TurnFailedError`: the sibling below
+  // feeds a real 401 at a Session whose directory exists and requires one spawn.
+  // What tells them apart is in the events — a lost resume carries `errors` and
+  // no `result` text, a failed Turn carries the text and no `errors`.
+  it('starts a fresh Session when the refused resume arrives as a result event', async () => {
+    const { claude, pool, workRoot, processFor, log } = newPool()
+    mkdirSync(join(workRoot, A), { recursive: true })
+
+    const turn = pool.send(A, 'hello')
+    await flush()
+    const resumed = processFor(A)
+    feed(resumed, RESUME_LOST)
+    resumed.emitStderr(`No conversation found with session ID: ${A}\n`)
+    resumed.emitExit({ code: 1, signal: null })
+    await flush()
+    feed(processFor(A), OK)
+
+    expect((await turn).text).toBe('ok')
+    expect(claude.spawns[0]?.args).toContain('--resume')
+    expect(claude.spawns[1]?.args).toContain('--session-id')
     expect(log).toContainEqual({
       event: 'resume-lost',
       sessionId: A,

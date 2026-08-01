@@ -28,6 +28,7 @@ are computed from it.
 | `readout-context.jsonl` | captured for ADR-0012 | — | A Readout: `/context` with the Caller Marker written *after* it, relayed exactly as roma relays one. `num_turns: 0` and `total_cost_usd: 0` — the command answered locally and the model was never called — with the command's own output as `result`. What the marker-first version does instead is a real Turn at $0.0549, which is the fault ADR-0012 exists to fix. |
 | `compaction-auto.jsonl` | captured for #98 | — | An auto-Compaction, on stdout: `system/compact_boundary` with `compact_metadata.trigger: "auto"`, 61486 tokens in and 1375 out over 19487ms. Also the cost claim #98 rests on, in one file — two byte-identical `OK` messages, the quiet one $0.0186 over 1 turn, the one the Compaction landed inside $0.0917 over 2. And a `compact_result: "failed"` (`too_few_groups`) *earlier in the same run*, during a healthy Turn, which is why "failed therefore dead" is not a rule roma can use. |
 | `compaction-failed.jsonl` | captured for #98 | — | The same failure on its own, provoked with the threshold under the floor: `system/status` carrying `compact_result: "failed"` and `compact_error: "too_few_groups"` — a code rather than the error text. The Session then served the next Turn normally at $0.0104. |
+| `resume-lost.jsonl` | captured for #105 | — | What `--resume` at a Session with no Transcript answers with **on stdout**: one terminal `result`, `error_during_execution`, `is_error: true`, `num_turns: 0`, `total_cost_usd: 0`, the reason in an `errors` array, and no `result` field beside it. The same refusal under plain `claude -p` is a line on stderr and an empty stdout, which is how every earlier measurement of it was taken — and why the pool's `resume-lost` recovery has never fired in production. |
 
 `tool-use-turn.jsonl` and `generation-no-partial-messages.jsonl` are not
 exercised by any test. They are the flag-off world, which roma does not run in —
@@ -64,6 +65,18 @@ evidence.
 
 This is also the only capture that cost nothing to take, which is the whole
 point of it: a Readout drives no Turn.
+
+`resume-lost.jsonl` is the second one that cost nothing, for a different reason:
+a `--resume` the CLI cannot honour exits before it calls anything, which is also
+why the failing Session in #105 retried for free. It was taken in a Claude Code
+cloud container on the pinned build, under the invocation roma spawns —
+`--permission-mode bypassPermissions` included, which meant creating a non-root
+user to run it, since the CLI refuses that flag as root. stdout was redirected
+to the file and is unedited; the session id in it is the throwaway uuid the
+capture pointed `--resume` at, and no Transcript for it has ever existed. Its
+stderr is not kept here, but it carried the familiar
+`No conversation found with session ID: …` — the point of the capture is that
+stdout carries the refusal *as well*, which is the half nothing had looked at.
 
 Behaviour is version-specific. A capture is evidence about v2.1.220 and nothing
 else; re-verify before the pinned version moves.
