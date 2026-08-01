@@ -70,20 +70,26 @@ Turn), author, requester, owner (a Task has no owner — it has somebody who ask
 
 **Caller Marker**:
 The line roma writes above every message Claude Code is given, naming that
-message's Caller. Two rules and no others: it is never absent — a message without
-one reads as the same person again, which is the misattribution it exists to
-prevent — and roma's part is tagged and comes **before anything the Caller
-typed**, because the rest is what somebody typed and anybody can type something
-that looks like this. Said as "tagged" rather than "the first line" because an
-Enclosure adds a second tag above the same message, and a rule counting lines
-would have to be restated every time one is added — and because a Relay has to
-begin with a slash, so the marker is not first there without ever being out of
-order. A Relay taking no argument carries it after the command, which is safe only
-because the Caller supplied no text at all (ADR-0012); a Relay taking one carries
-it between the command and the Caller's text, which is this rule in its original
-shape rather than a second exception to it (ADR-0018).
+message's Caller. Two rules: it is present on everything the model reads as
+content — a message without one reads as the same person again, which is the
+misattribution it exists to prevent — and roma's part is tagged and comes
+**before anything the Caller typed**, because the rest is what somebody typed and
+anybody can type something that looks like this. Said as "tagged" rather than
+"the first line" because an Enclosure adds a second tag above the same message,
+and a rule counting lines would have to be restated every time one is added.
+A Relay moves it, and one kind of Relay drops it; both are bounded and argued. A
+Relay that is the whole message carries the marker *after* the command, which is
+safe only because the Caller supplied no text at all (ADR-0012). A Relay carrying
+an **argument** carries no marker — the only message roma writes without one
+(ADR-0018). The reason is that an argument is not content the model attributes to
+anybody: a marker says who sent a message, an argument says what to keep, and what
+to keep legitimately names other people, so inside one string the two are the same
+shape. A summariser given both was measured crediting both. What the marker would
+have bought there is on the Audit Record instead, which carries the Caller already.
 _Avoid_: prefix, header, tag, and using this for the @-mention in a reply — that
-one is the Channel's way of addressing a person and is not this
+one is the Channel's way of addressing a person and is not this. Also: reading a
+`<from>` inside a Relay's argument as one of these — there it is something a
+Caller typed, and nothing tells it apart from one roma wrote
 
 **Ingress Message**:
 What an Adapter hands the Core: a Conversation Key, a Caller, the text, and any
@@ -264,7 +270,10 @@ which session id a Conversation resumes to, which model and effort it runs on,
 what the settings file every Session shares says, that auto-compaction is on. roma
 holds no belief about what is in a context, which is the whole of why `/compact`
 may be relayed and `/clear`, `/model`, `/effort`, `/config` and `/autocompact` may
-not.
+not. Where the Caller Marker sits turns on whether the Caller supplied text: a
+Relay that is the whole message carries it after the command, and one carrying an
+argument carries none at all — the only message roma writes without one, and the
+Caller Marker's entry is where that is argued.
 _Avoid_: Readout (the retired name, and wrong for a member that writes rather than
 reads), passthrough, slash command (that is Claude Code's name for what a Relay
 carries, not for the carrying), and using this for `/stop`, `/clear`, `/model`,
