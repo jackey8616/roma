@@ -14,6 +14,7 @@ import {
   ClaudeExitedError,
   ClaudeSession,
   NO_CONVERSATION,
+  PINNED_EFFORT,
   PINNED_MODEL,
   TERMINATE_GRACE_MS,
   TranscriptNotFound,
@@ -93,6 +94,16 @@ export type PoolLogRecord =
        * they changed to.
        */
       readonly model: string
+      /**
+       * What effort its Turns run at: this Session's Chosen Effort, or the
+       * Pinned Effort.
+       *
+       * Here for the model's reason and with one of its own: `--effort` is
+       * echoed nowhere in the stream, so unlike the model there is no second
+       * account of it anywhere. This line is roma saying what it put in the
+       * spawn arguments, and it is the only such statement per process.
+       */
+      readonly effort: string
       readonly residents: number
     }
   | {
@@ -105,12 +116,14 @@ export type PoolLogRecord =
        * appears as something that happened to a process; what it cost appears
        * on the Task's Audit Record.
        *
-       * Two reasons, one shape — the way `evict` and `reap` already differ only
+       * Three reasons, one shape — the way `evict` and `reap` already differ only
        * in what prompted them. A credential change is money moving between
-       * bills and a model change is money moving between models, and an operator
-       * looking at an unexplained respawn is asking which. Where both differ at
-       * once the model is named, because the credential is on the `spawn` record
-       * that follows and the model would otherwise appear nowhere.
+       * bills, a model change is money moving between models, and an effort
+       * change is money moving between depths of thinking; an operator looking at
+       * an unexplained respawn is asking which. Where more than one differs at
+       * once the model is named first and the effort second, because the
+       * credential is the one of the three that is not on the `spawn` record's
+       * critical line — and because a model change is the larger fact.
        *
        * `from` and `to` say what changed rather than being two fields per
        * reason, and they are typed by the reason so that a model can never land
@@ -123,10 +136,18 @@ export type PoolLogRecord =
       readonly to: CredentialKind
     }
   | {
-      /** The same event, moving between models rather than between bills. */
+      /**
+       * The same event, moving between models or between efforts rather than
+       * between bills.
+       *
+       * One arm for both because they carry the same two strings; the `reason`
+       * is what an operator reads them as. Deliberately not folded in with the
+       * credential above, which is typed to `CredentialKind` so that a model can
+       * never be logged where a bill is expected.
+       */
       readonly event: 'swap'
       readonly sessionId: string
-      readonly reason: 'model'
+      readonly reason: 'model' | 'effort'
       readonly from: string
       readonly to: string
     }
@@ -277,6 +298,38 @@ export interface SessionModels {
   modelFor(sessionId: string): string
 }
 
+/**
+ * What effort a Session runs at, asked afresh at every spawn.
+ *
+ * `SessionModels`' twin, and a port for the same reason: what the pool needs is
+ * one question answered rather than a directory of files, and asking at spawn is
+ * what makes the invariant re-establish itself after a restart of roma.
+ */
+export interface SessionEfforts {
+  effortFor(sessionId: string): string
+}
+
+/**
+ * What a process is started for, and therefore what its Turns run on.
+ *
+ * The three things that are fixed at spawn and cannot be changed under a running
+ * process: which bill its Turns land on, which model answers them, and how hard
+ * that model is asked to think. Named as one thing because they are already one
+ * thing everywhere they are talked about — `#acquire` takes a Session "for a Turn
+ * on these terms", and `#swap` ends a process because "the next Turn's terms are
+ * not the ones it was started for".
+ *
+ * They travel together through acquisition, spawning and the swap between them,
+ * and they were three loose parameters until effort made them four. A tuple that
+ * grows one at a time is one where a caller eventually passes the model where the
+ * effort goes and nothing says so; this cannot be got wrong silently.
+ */
+export interface SpawnTerms {
+  readonly credential: CredentialKind
+  readonly model: string
+  readonly effort: string
+}
+
 export interface SessionPoolOptions {
   /** Working directories live directly under here, one per Session. */
   readonly workRoot: string
@@ -299,6 +352,20 @@ export interface SessionPoolOptions {
    * Conversation could say otherwise.
    */
   readonly models?: SessionModels
+  /**
+   * What effort every Session runs at, for a pool built without `efforts`.
+   *
+   * `model`'s counterpart, kept for the tests that are about something else and
+   * want one effort for the whole pool. `startup.ts` always supplies `efforts`.
+   */
+  readonly effort?: string
+  /**
+   * What effort each Session runs at, where somebody has chosen one.
+   *
+   * Omitted, every Session runs at `effort` — which is what roma did before a
+   * Conversation could say otherwise.
+   */
+  readonly efforts?: SessionEfforts
   /**
    * What every Session is told about itself on top of Claude Code's own prompt.
    *
@@ -360,6 +427,17 @@ interface Resident {
    * cannot reach the process already serving somebody.
    */
   readonly model: string
+  /**
+   * What effort this process was spawned at, and therefore what its Turns run
+   * at.
+   *
+   * Kept for the model's reason — `--effort` is fixed at spawn, so a Session
+   * whose next Turn is to run at a different effort needs a different process —
+   * and it is the only place the answer exists at all: nothing in the stream
+   * echoes the effort back, so a Resident that did not write this down could not
+   * be asked afterwards what it was started at.
+   */
+  readonly effort: string
   readonly session: ClaudeSession
   /** Whether this process was started with `--resume`. */
   readonly resumed: boolean
@@ -402,6 +480,8 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   readonly #envs: CredentialEnvs
   readonly #model: string | undefined
   readonly #models: SessionModels | undefined
+  readonly #effort: string | undefined
+  readonly #efforts: SessionEfforts | undefined
   readonly #appendSystemPrompt: string | undefined
   readonly #maxResident: number
   readonly #retryBudget: RetryBudget
@@ -427,6 +507,8 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     this.#envs = options.envs
     this.#model = options.model
     this.#models = options.models
+    this.#effort = options.effort
+    this.#efforts = options.efforts
     this.#appendSystemPrompt = options.appendSystemPrompt
     this.#maxResident = options.maxResident ?? MAX_RESIDENT
     this.#retryBudget = options.retryBudget ?? defaultConfig.retryBudget
@@ -599,10 +681,12 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       this.#leave(resident)
       await this.#terminate(resident)
       return await this.#turn(
-        // On the model the Turn began under rather than whatever the Session is
-        // on now: this is one Turn being served twice, and a `/model` that landed
-        // in between is aimed at the next message.
-        await this.#spawn(resident.sessionId, resident.credential, resident.model, correction.resume),
+        // On the terms the Turn began under rather than whatever the Session is
+        // on now: this is one Turn being served twice, and a `/model` or
+        // `/effort` that landed in between is aimed at the next message. A
+        // `Resident` already carries all three, which is what makes that
+        // "the same terms" rather than three fields copied by hand.
+        await this.#spawn(resident.sessionId, resident, correction.resume),
         text,
         true,
       )
@@ -628,24 +712,29 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * `/model` writes a record and tears nothing down.
    */
   async #acquire(sessionId: string, credential: CredentialKind): Promise<Resident> {
-    const model = this.#modelFor(sessionId)
+    const terms: SpawnTerms = {
+      credential,
+      model: this.#modelFor(sessionId),
+      effort: this.#effortFor(sessionId),
+    }
     const resident = this.#residents.get(sessionId)
     if (resident !== undefined && resident.session.alive) {
-      if (resident.credential === credential && resident.model === model) {
+      if (sameTerms(resident, terms)) {
         this.#markUsed(resident)
         return resident
       }
       // The Session is resident on terms this Turn is not to run on — the
-      // credential it is not to be paid for by, or the model it is not to run on.
-      // The process goes before the next one starts, not because the old one is
-      // in the way but because two processes on one transcript corrupt it, and
-      // "alive but idle" is not a state anybody has measured as safe. The Session
-      // itself survives, as it does through any eviction.
-      await this.#swap(resident, credential, model)
+      // credential it is not to be paid for by, the model it is not to run on, or
+      // the effort it is not to run at. The process goes before the next one
+      // starts, not because the old one is in the way but because two processes
+      // on one transcript corrupt it, and "alive but idle" is not a state
+      // anybody has measured as safe. The Session itself survives, as it does
+      // through any eviction.
+      await this.#swap(resident, terms)
     } else if (resident !== undefined) {
       this.#forget(resident)
     }
-    return await this.#spawn(sessionId, credential, model)
+    return await this.#spawn(sessionId, terms)
   }
 
   /**
@@ -659,13 +748,13 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     return this.#models?.modelFor(sessionId) ?? this.#model ?? PINNED_MODEL
   }
 
-  async #spawn(
-    sessionId: string,
-    credential: CredentialKind,
-    model: string,
-    resume?: boolean,
-  ): Promise<Resident> {
-    const spawned = this.#spawning.then(() => this.#spawnNow(sessionId, credential, model, resume))
+  /** The effort this Session's next process runs at, read for `#modelFor`'s reason. */
+  #effortFor(sessionId: string): string {
+    return this.#efforts?.effortFor(sessionId) ?? this.#effort ?? PINNED_EFFORT
+  }
+
+  async #spawn(sessionId: string, terms: SpawnTerms, resume?: boolean): Promise<Resident> {
+    const spawned = this.#spawning.then(() => this.#spawnNow(sessionId, terms, resume))
     // The queue itself never carries a rejection onward: a Session that failed
     // to start is that caller's problem, not the next one's.
     this.#spawning = spawned.catch(() => undefined)
@@ -674,8 +763,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
 
   async #spawnNow(
     sessionId: string,
-    credential: CredentialKind,
-    model: string,
+    { credential, model, effort }: SpawnTerms,
     resume?: boolean,
   ): Promise<Resident> {
     const buildEnvFor = this.#envs[credential]
@@ -709,6 +797,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       resume: resuming,
       spawn: this.#spawnProcess,
       model,
+      effort,
       ...(this.#appendSystemPrompt === undefined
         ? {}
         : { appendSystemPrompt: this.#appendSystemPrompt }),
@@ -718,6 +807,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       cwd,
       credential,
       model,
+      effort,
       session,
       resumed: resuming,
       stderr: '',
@@ -758,6 +848,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       cwd,
       credential,
       model,
+      effort,
       residents: this.#residents.size,
     })
     this.#scheduleReap(resident)
@@ -803,13 +894,24 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * two models — and the two are read by different people looking for different
    * things.
    */
-  async #swap(resident: Resident, to: CredentialKind, model: string): Promise<void> {
+  async #swap(resident: Resident, { credential, model, effort }: SpawnTerms): Promise<void> {
     this.#leave(resident)
     const sessionId = resident.sessionId
+    // One record per swap however many terms moved, and the model wins where two
+    // did: it is the larger fact, and the credential is on the `spawn` record
+    // that follows this one either way.
     this.#log(
-      resident.model === model
-        ? { event: 'swap', sessionId, reason: 'credential', from: resident.credential, to }
-        : { event: 'swap', sessionId, reason: 'model', from: resident.model, to: model },
+      resident.model !== model
+        ? { event: 'swap', sessionId, reason: 'model', from: resident.model, to: model }
+        : resident.effort !== effort
+          ? { event: 'swap', sessionId, reason: 'effort', from: resident.effort, to: effort }
+          : {
+              event: 'swap',
+              sessionId,
+              reason: 'credential',
+              from: resident.credential,
+              to: credential,
+            },
     )
     await this.#terminate(resident)
   }
@@ -1009,6 +1111,20 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       ? { event: 'transcript-survived', resume: true, reason: resident.stderr }
       : null
   }
+}
+
+/**
+ * Whether a running process was started for the terms the next Turn needs.
+ *
+ * A function rather than three comparisons inline, so that a fourth term added
+ * to `SpawnTerms` cannot be checked at the spawn and forgotten here — which is
+ * the failure with no symptom: the Session would be served by a process started
+ * for something else, and nothing would say so.
+ */
+function sameTerms(resident: Resident, { credential, model, effort }: SpawnTerms): boolean {
+  return (
+    resident.credential === credential && resident.model === model && resident.effort === effort
+  )
 }
 
 /**

@@ -295,3 +295,51 @@ export const NEARLY_SPENT: readonly ClaudeEvent[] = [
 export const GENERATING: readonly ClaudeEvent[] = recordedStream(
   'generation-partial-messages',
 ).turn(1)
+
+/**
+ * The `/context` Readout, exactly as captured: `num_turns: 0`,
+ * `total_cost_usd: 0`, the command's own output as `result`.
+ *
+ * Named here because it is the only recording of a *relayed* command roma holds,
+ * and it is the right base for any other one.
+ */
+export const READOUT: readonly ClaudeEvent[] = recordedStream('readout-context').turn(1)
+
+/**
+ * The same recorded Turn saying something else.
+ *
+ * For the case no capture can hold without spending the Shared Window again: an
+ * `/effort current` answer. ADR-0016 measured what that command says, in prose,
+ * against the pinned build — every shape is quoted in its verification section —
+ * and this is how those sentences are put on a stream that is otherwise a real
+ * relayed Readout, rather than hand-written from nothing. `withApiKeySource`'s
+ * discipline exactly: the stream is real and the one field under test is the
+ * only thing changed.
+ */
+export function withResultText(events: readonly ClaudeEvent[], text: string): ClaudeEvent[] {
+  return events.map((event) => (event.type === 'result' ? { ...event, result: text } : event))
+}
+
+/**
+ * What `/effort current` answers with, in the three shapes ADR-0016 measured.
+ *
+ * Quoted rather than paraphrased, because the whole reason the startup
+ * self-check compares loosely is that these sentences differ in shape and a
+ * release can reword them. A test that invented its own wording would be
+ * asserting against roma's guess instead of against the build.
+ */
+export const EFFORT_ANSWERS = {
+  /** A level that landed: what `--effort <level>` produces. */
+  at: (level: string): readonly ClaudeEvent[] =>
+    withResultText(READOUT, `Current effort level: ${level}`),
+  /** `ultracode`, which reports itself with its description attached. */
+  ultracode: (): readonly ClaudeEvent[] =>
+    withResultText(
+      READOUT,
+      'Current effort level: ultracode (xhigh + dynamic workflow orchestration; ' +
+        'this session only)',
+    ),
+  /** No `--effort` at all — the sentence that names a level roma never asked for. */
+  unpinned: (currently = 'high'): readonly ClaudeEvent[] =>
+    withResultText(READOUT, `Effort level: auto (currently ${currently})`),
+} as const

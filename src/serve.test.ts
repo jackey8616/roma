@@ -66,6 +66,11 @@ function boot({ overflow = true }: { overflow?: boolean } = {}) {
     running.push(roma)
     return roma
   })
+  // Attached now rather than by whichever test awaits it. Answering the probe
+  // takes two exchanges since ADR-0016 — the Turn, then the relayed `/effort
+  // current` — so a boot that refuses on the first one rejects while the fixture
+  // is still between them.
+  serving.catch(() => {})
 
   return {
     claude: fixture.claude,

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AuditLog } from './audit-log.js'
 import { buildEnv, type Credential } from './build-env.js'
-import { PINNED_MODEL } from './claude-session.js'
+import { PINNED_EFFORT, PINNED_MODEL } from './claude-session.js'
 import type { CredentialEnvs } from './session-pool.js'
 import type { ChannelAdapter } from './channel-adapter.js'
 import type { SpawnClaudeProcess } from './claude-process.js'
@@ -13,12 +13,16 @@ import { Core, type CoreLogRecord } from './core.js'
 import { ConfigurationMissing } from './env-config.js'
 import { FreshTokens } from './fresh-tokens.js'
 import type { CloudMinter, CloudReach, Installation, Minter } from './minter.js'
-import { ChosenModels, SessionGenerations } from './session-generation.js'
+import { ChosenEfforts, ChosenModels, SessionGenerations } from './session-generation.js'
 import { reasonOf, type OperatorLog } from './operator-log.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
 import { socketPathIn } from './shim-protocol.js'
 import { ShimServer, type ShimLogRecord } from './shim-server.js'
-import { startupSelfCheck, type StartupSelfCheckReport } from './startup-self-check.js'
+import {
+  startupSelfCheck,
+  type SelfCheckLogRecord,
+  type StartupSelfCheckReport,
+} from './startup-self-check.js'
 import { TaskQueue } from './task-queue.js'
 
 /**
@@ -192,6 +196,16 @@ export interface StartRomaOptions {
   readonly cloud?: CloudOptions
   /** The pinned model. Defaults to the one every Session runs on. */
   readonly model?: string
+  /**
+   * The Pinned Effort. Defaults to the one every Session runs at.
+   *
+   * Optional where the Overflow cap is required, and the difference is what each
+   * authorises: the cap opens a new way to spend money, and effort is money
+   * already being spent under another name (ADR-0016). It may name `ultracode`,
+   * which is off the Effort Menu — the Menu bounds Callers and never the
+   * operator, exactly as `model` may already name a model off the Model Menu.
+   */
+  readonly effort?: string
   readonly maxConcurrentTasks?: number
   readonly retryBudget?: RetryBudget
   readonly spawn?: SpawnClaudeProcess
@@ -203,7 +217,9 @@ export interface StartRomaOptions {
    * system, and an operator reading a credential swap wants the refusal that
    * prompted it on the same lines.
    */
-  readonly log?: OperatorLog<PoolLogRecord | CoreLogRecord | ShimLogRecord | CloudLogRecord>
+  readonly log?: OperatorLog<
+    PoolLogRecord | CoreLogRecord | ShimLogRecord | CloudLogRecord | SelfCheckLogRecord
+  >
   /**
    * Where the self-check's probe Session runs. A throwaway directory by default,
    * removed once the check is done.
@@ -259,6 +275,7 @@ export async function startRoma({
   minting,
   cloud,
   model,
+  effort,
   maxConcurrentTasks,
   retryBudget,
   spawn,
@@ -317,6 +334,11 @@ export async function startRoma({
   // rather than to a literal, which is the whole of why `ROMA_MODEL` and a Chosen
   // Model cannot come to disagree.
   const pinnedModel = model ?? PINNED_MODEL
+  // The same, for the effort. `/effort default` returns a Session to *this*
+  // rather than to a literal, which is why `ROMA_EFFORT` and a Chosen Effort
+  // cannot come to disagree. Validated in `readRomaEnv` before it reaches here —
+  // Claude Code would not refuse a wrong one.
+  const pinnedEffort = effort ?? PINNED_EFFORT
 
   // Built once and handed to both the check and the pool, so that what was
   // verified is the environment roma actually runs on rather than one built the
@@ -336,8 +358,17 @@ export async function startRoma({
       // probe, which is not a Session roma serves. What this proves is that the
       // deployment boots on what it pinned.
       ...(model === undefined ? {} : { model }),
+      // The Pinned Effort rather than the option, because unlike the model this
+      // one is *asked about* — the probe is spawned with it and then relayed
+      // `/effort current`, so what is compared has to be the resolved value
+      // rather than "whatever the default is on both sides".
+      effort: pinnedEffort,
       ...(spawn === undefined ? {} : { spawn }),
       ...(selfCheckTimeoutMs === undefined ? {} : { timeoutMs: selfCheckTimeoutMs }),
+      // A disagreement about the effort is an anomaly rather than a refusal, so
+      // it lands in the same log as everything else an operator reads. Boot
+      // continues.
+      ...(log === undefined ? {} : { log }),
     })
   } finally {
     // Ours to clean up only if it was ours to create.
@@ -412,14 +443,20 @@ export async function startRoma({
   // not happen is the pool being built without it: roma would answer `/model`
   // perfectly, write a perfect record, and run every Turn on the Pinned Model.
   const models = new ChosenModels({ workRoot, pinnedModel })
+  // Beside them, and handed to both for the same reason and at higher stakes: a
+  // pool built without this answers `/effort` perfectly, writes a perfect record,
+  // and runs every Turn at the Pinned Effort — with nothing anywhere in the
+  // stream to contradict it, because `system/init` carries no effort field.
+  const efforts = new ChosenEfforts({ workRoot, pinnedEffort })
 
   const pool = new SessionPool({
     workRoot,
     envs,
-    // No `model` beside it: `models` is what answers, and a second copy of the
-    // Pinned Model here would be a second thing to keep in step with the one
-    // `ChosenModels` holds.
+    // No `model` or `effort` beside them: `models` and `efforts` are what
+    // answer, and a second copy of either pinned value here would be a second
+    // thing to keep in step.
     models,
+    efforts,
     // Both announcements, or only the one there is. A blank line between them
     // rather than a joined paragraph, because they are two capabilities and an
     // agent skimming a system prompt reads a break as a change of subject —
@@ -445,6 +482,7 @@ export async function startRoma({
       queue,
       sessions,
       models,
+      efforts,
       audit,
       credential: credential.kind,
       usedCloudReach: (taskId) => cloudUse.takeUsedBy(taskId),

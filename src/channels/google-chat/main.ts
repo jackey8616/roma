@@ -15,7 +15,7 @@ import { GoogleCloudMinter } from '../../cloud/google-cloud-minter.js'
 import type { PoolLogRecord } from '../../session-pool.js'
 import type { ShimLogRecord } from '../../shim-server.js'
 import type { CloudLogRecord } from '../../startup.js'
-import type { StartupSelfCheckReport } from '../../startup-self-check.js'
+import type { SelfCheckLogRecord, StartupSelfCheckReport } from '../../startup-self-check.js'
 import { readChatEnv } from './env-config.js'
 import type { ChatEventLogRecord } from './chat-events.js'
 import { GoogleChatAdapter } from './google-chat-adapter.js'
@@ -70,6 +70,7 @@ type RomaLog = OperatorLog<
   | PubSubLogRecord
   | ChatEventLogRecord
   | CloudLogRecord
+  | SelfCheckLogRecord
   | ProcessLogRecord
 >
 

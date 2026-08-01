@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuditLog, type UnstampedRecord } from './audit-log.js'
+import { EFFORT_MENU, EFFORT_NOT_APPLIED } from './effort-menu.js'
 
 /** The month the clock below is in, as the file on disk names it. */
 const MONTH = '2026-07'
@@ -398,6 +399,71 @@ describe('which model spent the month', () => {
     appendFileSync(
       join(dir, `${MONTH}.jsonl`),
       `${JSON.stringify({ ...entry(), model: 5, at: new Date().toISOString() })}\n`,
+    )
+
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+  })
+})
+
+/**
+ * ADR-0016: the same argument as the model beside it, for a setting roma has
+ * weaker evidence about — and the record has to be spelled so that the
+ * difference is visible.
+ */
+describe('what effort spent the month', () => {
+  it('keeps the effort across a restart', () => {
+    const dir = newDir()
+    new AuditLog({ auditRoot: dir }).record(entry({ effort: 'max' }))
+
+    const [record] = new AuditLog({ auditRoot: dir }).readMonth(MONTH)
+    expect(record?.effort).toBe('max')
+  })
+
+  /**
+   * The one place this differs from `model`, and it is not a formality.
+   *
+   * An absent `model` reads as the Pinned Model, because nothing else was
+   * reachable before ADR-0014. An absent `effort` reads as **unknown**: a record
+   * written before this field ran on whatever the shared settings file happened
+   * to say, and roma genuinely does not know what that was. Labelling those
+   * retroactively would be inventing a fact — the discipline `costUsd` already
+   * keeps by distinguishing free from unpriced.
+   */
+  it('reads a record written before roma knew what effort it was running at', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), at: new Date().toISOString() })}\n`,
+    )
+
+    const [record] = log.readMonth(MONTH)
+    // Absent, and left absent. Nothing here fills it in with the Pinned Effort.
+    expect(record?.effort).toBeUndefined()
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 0, costUsd: 0.0103129 })
+  })
+
+  // Where the Effort Matrix says the model takes none, the record says that
+  // rather than naming a level nothing ran at — and the word is deliberately not
+  // spelled like a level, so a ledger read months later cannot mistake it for
+  // one.
+  it('keeps a record that says the effort did not apply at all', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ model: 'claude-haiku-4-5', effort: EFFORT_NOT_APPLIED }))
+
+    const [record] = log.readMonth(MONTH)
+    expect(record?.effort).toBe(EFFORT_NOT_APPLIED)
+    expect(EFFORT_MENU).not.toContain(record?.effort)
+  })
+
+  it('refuses an effort that is not a name', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ effort: 'high' }))
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), effort: 3, at: new Date().toISOString() })}\n`,
     )
 
     expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })

@@ -13,7 +13,12 @@ import { feed, recordedStream, withTotalCostUsd } from '../test/support/recorded
 const SESSION_ID = '11111111-2222-3333-4444-555555555555'
 
 function newSession(
-  options: { resume?: boolean; model?: string; appendSystemPrompt?: string } = {},
+  options: {
+    resume?: boolean
+    model?: string
+    effort?: string
+    appendSystemPrompt?: string
+  } = {},
 ) {
   const claude = new FakeClaude()
   const session = new ClaudeSession({
@@ -79,6 +84,34 @@ describe('how the process is invoked', () => {
 
     const args = claude.lastSpawn.args
     expect(args[args.indexOf('--model') + 1]).toBe('claude-sonnet-5')
+  })
+
+  /**
+   * On every spawn, including the Sessions nobody has touched.
+   *
+   * Omitting it does not fall back to nothing — it falls back to an
+   * `effortLevel` in the settings file under the config dir, which is one per
+   * deployment, so a value left there would set the effort for every Session in
+   * roma invisibly. Precedence was measured as `CLAUDE_CODE_EFFORT_LEVEL` >
+   * `--effort` > `settings.effortLevel` (ADR-0016): passing this closes the
+   * bottom of that list, and `buildEnv`'s allowlist closes the top.
+   */
+  it('pins the effort, because omitting it falls back to a file every Session shares', () => {
+    const { claude, session } = newSession()
+
+    session.start()
+
+    const args = claude.lastSpawn.args
+    expect(args[args.indexOf('--effort') + 1]).toBe('high')
+  })
+
+  it('passes the effort it was given, where a Session has been moved to one', () => {
+    const { claude, session } = newSession({ effort: 'max' })
+
+    session.start()
+
+    const args = claude.lastSpawn.args
+    expect(args[args.indexOf('--effort') + 1]).toBe('max')
   })
 
   // --verbose is in here because the CLI requires it: "When using --print,

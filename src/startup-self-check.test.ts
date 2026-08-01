@@ -3,11 +3,23 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildEnv, type Credential } from './build-env.js'
-import { TERMINATE_GRACE_MS } from './claude-session.js'
-import { startupSelfCheck, StartupSelfCheckFailed } from './startup-self-check.js'
+import { PINNED_EFFORT, TERMINATE_GRACE_MS } from './claude-session.js'
+import {
+  reportsEffort,
+  startupSelfCheck,
+  StartupSelfCheckFailed,
+  type SelfCheckLogRecord,
+} from './startup-self-check.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { FakeClaude, flush } from '../test/support/fake-claude.js'
-import { FAILED, feed, OK, STRAY_KEY, upToFirst } from '../test/support/recorded-stream.js'
+import {
+  EFFORT_ANSWERS,
+  FAILED,
+  feed,
+  OK,
+  STRAY_KEY,
+  upToFirst,
+} from '../test/support/recorded-stream.js'
 
 /**
  * A Turn that resolves the right credential and then fails to authenticate.
@@ -34,32 +46,62 @@ let dirs: string[] = []
 interface SelfCheckRun {
   readonly credential?: Credential
   readonly model?: string
+  readonly effort?: string
   readonly timeoutMs?: number
   /** The stream the probe process answers with. Null means it answers nothing. */
   readonly events?: readonly ClaudeEvent[] | null
+  /**
+   * What the process answers the relayed `/effort current` with. Null means it
+   * answers nothing at all, which is a disagreement roma cannot resolve.
+   *
+   * Defaults to agreeing, so that every test about something else is not also a
+   * test about the effort.
+   */
+  readonly effortAnswer?: readonly ClaudeEvent[] | null
 }
 
-function selfCheck({ credential = OAUTH, model, timeoutMs, events = OK }: SelfCheckRun = {}) {
+function selfCheck({
+  credential = OAUTH,
+  model,
+  effort,
+  timeoutMs,
+  events = OK,
+  effortAnswer = EFFORT_ANSWERS.at(effort ?? PINNED_EFFORT),
+}: SelfCheckRun = {}) {
   const claude = new FakeClaude({ exitOnKill: true })
   const cwd = mkdtempSync(join(tmpdir(), 'roma-self-check-'))
   dirs.push(cwd)
+  const log: SelfCheckLogRecord[] = []
 
   const check = startupSelfCheck({
     credential,
     env: buildEnv({ credential, inherit: {}, configDir: '/work/claude-home' }),
     cwd,
     spawn: claude.spawn,
+    log: (record) => log.push(record),
     ...(model === undefined ? {} : { model }),
+    ...(effort === undefined ? {} : { effort }),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   })
+  // Attached now rather than by the chain below, which does not adopt this
+  // promise until the feeding has finished. A check that refuses at
+  // `system/init` rejects before the second answer is even sent, and in that
+  // window it would otherwise be an unhandled rejection. The tests still await
+  // the real thing.
+  check.catch(() => {})
 
   // Fed after the check has started, the way a real process answers: there is
   // nothing to write to until the spawn has happened.
-  const answered = flush().then(() => {
-    if (events !== null) feed(claude.process, events)
+  const answered = flush().then(async () => {
+    if (events === null) return
+    feed(claude.process, events)
+    // And the relay after the probe Turn, because that is the order the check
+    // sends them in — nothing is listening for this until the first has settled.
+    await flush()
+    if (effortAnswer !== null) feed(claude.process, effortAnswer)
   })
 
-  return { claude, check: answered.then(() => check) }
+  return { claude, log, check: answered.then(() => check) }
 }
 
 /** The failed conditions, which is what an operator is actually told. */
@@ -235,3 +277,144 @@ describe('the startup self-check', () => {
   })
 })
 
+
+/**
+ * The one condition the check notices and does not refuse over.
+ *
+ * `--effort` is echoed nowhere in the stream — `system/init` carries no effort
+ * field at all — so unlike every other assertion here this one reads English
+ * prose, in three shapes, one of which embeds a description table. Refusing a
+ * boot on a sentence a release could reword is paying with an outage to catch a
+ * fault whose worst outcome is thinking at the wrong depth (ADR-0016).
+ *
+ * What it proves is **roma's own wiring**: that `--effort` really is in the spawn
+ * arguments and `ROMA_EFFORT` really resolved to what roma thinks. Per-spawn
+ * verification was decided and then withdrawn on measurement — `--effort` beats
+ * the settings file and `buildEnv` blocks the environment variable, so a
+ * per-spawn echo has nothing left to catch but a server-side ceiling nobody has
+ * ever observed.
+ */
+describe('what the probe says about its effort', () => {
+  it('spawns at the effort roma pinned, and relays a command to ask about it', async () => {
+    const { claude, check } = selfCheck({ effort: 'max', effortAnswer: EFFORT_ANSWERS.at('max') })
+    await check
+
+    const args = claude.lastSpawn.args
+    expect(args[args.indexOf('--effort') + 1]).toBe('max')
+    // As itself, over stdin, with no Caller Marker above it — a relay rather
+    // than a Task. This is the only place in roma that asks a process about
+    // effort, and it happens once per deployment.
+    expect(claude.process.sent.at(-1)).toMatchObject({
+      message: { content: [{ text: '/effort current' }] },
+    })
+  })
+
+  it('reports agreement, and says nothing to an operator about it', async () => {
+    const { log, check } = selfCheck()
+    const report = await check
+
+    expect(report.effort).toEqual({
+      pinned: PINNED_EFFORT,
+      reported: expect.any(String),
+      agrees: true,
+    })
+    // The Operator Log is what roma decided and what surprised it. A line per
+    // boot that agreed would make it a traffic log, which is what a check people
+    // learn to ignore looks like on the way to having stopped watching.
+    expect(log).toEqual([])
+  })
+
+  // The whole point of a loose match: the level word anywhere in the message,
+  // rather than the sentence's shape. `ultracode` answers with a parenthetical
+  // description attached and still agrees.
+  it('agrees however the sentence around the level is worded', async () => {
+    const { log, check } = selfCheck({
+      effort: 'ultracode',
+      effortAnswer: EFFORT_ANSWERS.ultracode(),
+    })
+
+    expect((await check).effort.agrees).toBe(true)
+    expect(log).toEqual([])
+  })
+
+  it('writes a disagreement to the Operator Log and starts anyway', async () => {
+    const { log, check } = selfCheck({ effort: 'max', effortAnswer: EFFORT_ANSWERS.at('low') })
+    const report = await check
+
+    // Started. That is the assertion — everything else here is what an operator
+    // is told on the way past.
+    expect(report.apiKeySource).toBe('none')
+    expect(report.effort).toMatchObject({ pinned: 'max', agrees: false })
+    expect(log).toEqual([
+      { event: 'effort-unverified', pinned: 'max', reported: expect.stringContaining('low') },
+    ])
+  })
+
+  /**
+   * The hole a bare level-word match leaves, and the reason `auto` disagrees
+   * with everything.
+   *
+   * `Effort level: auto (currently high)` is what the build says when nothing
+   * pinned an effort — and it contains `high`, which is the Pinned Effort of
+   * every deployment that has not set `ROMA_EFFORT`. Matching on the level alone
+   * would have this check pass in exactly the case it exists to catch: `--effort`
+   * missing from the spawn arguments altogether.
+   */
+  it('does not accept an unpinned answer that happens to name the pinned level', async () => {
+    const { log, check } = selfCheck({ effortAnswer: EFFORT_ANSWERS.unpinned(PINNED_EFFORT) })
+
+    expect((await check).effort.agrees).toBe(false)
+    expect(log).toHaveLength(1)
+  })
+
+  // `high` is inside `xhigh`, so a substring match would have a deployment
+  // pinned at `high` accept a process reporting `xhigh`.
+  it('does not read xhigh as high', () => {
+    expect(reportsEffort('Current effort level: xhigh', 'high')).toBe(false)
+    expect(reportsEffort('Current effort level: xhigh', 'xhigh')).toBe(true)
+  })
+
+  // A relay that failed is a disagreement roma cannot resolve rather than an
+  // agreement it may assume — and it is still not a refusal, because a process
+  // that cannot answer a free local command has failed nothing the boot depends
+  // on.
+  it('treats a relay that answered nothing as a disagreement, and still starts', async () => {
+    const { log, check } = selfCheck({ effortAnswer: FAILED })
+    const report = await check
+
+    expect(report.effort.agrees).toBe(false)
+    expect(log).toHaveLength(1)
+  })
+
+  /**
+   * The relay is under the same deadline the Turn was, and it must be.
+   *
+   * `send` settles on a stream result or on the process dying, so a probe that
+   * answers the Turn and then goes quiet has nothing to end this. Left outside
+   * the timeout, the one condition designed never to block would be the only one
+   * that could block for ever — and the check whose whole purpose is that a boot
+   * cannot hang would have become the hang.
+   *
+   * It expires to a disagreement rather than to a refusal, because "boot
+   * continues" is the decision (ADR-0016) and a process too slow to answer a free
+   * local command has failed nothing the boot depends on.
+   */
+  it('gives up on a relay that never answers, and starts anyway', async () => {
+    vi.useFakeTimers()
+    try {
+      const { log, check } = selfCheck({ timeoutMs: 1_000, effortAnswer: null })
+      // Past the deadline, with the relay still outstanding. Without the race
+      // this promise never settles and the test times out instead.
+      await vi.advanceTimersByTimeAsync(2_000)
+      const report = await check
+
+      expect(report.apiKeySource).toBe('none')
+      expect(report.effort).toMatchObject({ reported: null, agrees: false })
+      expect(log).toEqual([
+        { event: 'effort-unverified', pinned: PINNED_EFFORT, reported: null },
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

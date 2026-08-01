@@ -128,12 +128,46 @@ describe('reading roma out of the environment', () => {
         readRomaEnv({
           ...MINIMAL,
           ROMA_MODEL: 'claude-sonnet-5',
+          ROMA_EFFORT: 'max',
           ROMA_MAX_CONCURRENT_TASKS: '5',
         }),
       ).toMatchObject({
         model: 'claude-sonnet-5',
+        effort: 'max',
         maxConcurrentTasks: 5,
       })
+    })
+
+    // **The one wrong-effort failure that needs no measurement to catch, and the
+    // only place it can be caught.** Claude Code will not refuse this: an
+    // unrecognised `--effort` warns on stderr, the process starts, and it runs
+    // on the build's own default — so a deployment that mistyped this would be
+    // wrong about every Session it serves and every record it writes, and
+    // nothing would stop (ADR-0016).
+    it('refuses an effort the build would silently ignore', () => {
+      for (const effort of ['bananas', 'auto', 'HIGH', 'default']) {
+        expect(() => readRomaEnv({ ...MINIMAL, ROMA_EFFORT: effort })).toThrow(/ROMA_EFFORT/)
+      }
+    })
+
+    // Accepted here and only here. It is not a level — it is `xhigh` plus
+    // dynamic workflow orchestration — so it is off the Effort Menu and no
+    // Caller may reach it. An operator may pin it, for the reason `ROMA_MODEL`
+    // may already name a model off the Model Menu: the Menu bounds Callers and
+    // never the operator.
+    it('takes ultracode from an operator, which no Caller can ask for', () => {
+      expect(readRomaEnv({ ...MINIMAL, ROMA_EFFORT: 'ultracode' })).toMatchObject({
+        effort: 'ultracode',
+      })
+    })
+
+    // Optional, which is the opposite of what the Overflow cap is, and the
+    // difference is what each authorises: the cap opens a *new* way to spend
+    // money and effort is money already being spent under another name.
+    // Requiring it would stop every existing deployment booting in exchange for
+    // a signature on a default they already pay for.
+    it('does not insist on one, unlike the Overflow cap', () => {
+      expect(() => readRomaEnv(MINIMAL)).not.toThrow()
     })
 
     // Absent rather than present-and-undefined, so that `startRoma` sees the

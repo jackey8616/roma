@@ -1,16 +1,19 @@
 /**
- * The three things a person can say that roma answers itself.
+ * The five things a person can say that roma answers itself.
  *
  * `stop` ends the Task running now and leaves the Session intact, so the next
  * message can redirect it rather than start over. `clear` gives the
  * Conversation a Session with nothing in it, for when the context has gone
- * stale or wrong. `model` says which model that Session runs on.
+ * stale or wrong. `model` says which model that Session runs on, `effort` says
+ * how hard it is asked to think, and `config` says both at once and refuses to
+ * set anything else.
  *
- * There are three here, and ADR-0014 moved the number ADR-0003 fixed at two:
- * everything else a person types is work for Claude Code — apart from the few of
- * Claude Code's own commands ADR-0012 relays as a Readout. Three is a count of
- * Commands and not of spellings: ADR-0013 gives the reset three, and that moved
- * no number here.
+ * There are five here, and the number has moved twice: ADR-0014 took ADR-0003's
+ * two to three, and ADR-0016 and ADR-0017 take it to five. Everything else a
+ * person types is work for Claude Code — apart from the few of Claude Code's own
+ * commands ADR-0012 relays as a Readout. Five is a count of Commands and not of
+ * spellings: ADR-0013 gives the reset three and ADR-0017 gives `/config` two,
+ * and neither moved the number here.
  *
  * This comment used to say that every Claude Code slash command was passed
  * through as work, and it was never true. What is passed through is the *text*
@@ -21,16 +24,19 @@
  * the command. A Readout is the only route by which one of them arrives as
  * itself, and `/model` is why the third Command exists: ADR-0012 measured that
  * shape at `$0.0549` and named `/model` as the string it must never be relayed
- * for.
+ * for. `/effort` and `/config` are the same argument twice more — the first
+ * because a relayed `/effort` sets something the build itself calls `this
+ * session only`, and the second because a relayed `/config key=value` writes a
+ * settings file every Session in the deployment shares.
  */
-export type Command = 'stop' | 'clear' | 'model'
+export type Command = 'stop' | 'clear' | 'model' | 'effort' | 'config'
 
 /**
  * One Command as it was typed: which one, and what followed it.
  *
- * The argument is null for every Command but `/model`, and for `/model` itself
- * when nothing followed it — which is a request in its own right rather than a
- * malformed one.
+ * The argument is null for the two Commands that take none, and for the three
+ * that do when nothing followed them — which is a request in its own right
+ * rather than a malformed one.
  */
 export interface CommandRequest {
   readonly command: Command
@@ -57,8 +63,15 @@ export interface CommandRequest {
  * answers before `readReadout` is consulted — so whitelisting it later would
  * mean deleting it from here first, which is a deliberate act and reads as one.
  *
- * `/model` is here as well as below, because a `/model` with nothing after it is
- * the Command asking roma to report rather than a Caller forgetting the argument.
+ * `/config` answers to `/settings` for the same reason, and it is the same
+ * reason twice over: `settings` is the alias Claude Code declares on its own
+ * `/config`, so it is a string people arrive already typing, and left unclaimed
+ * it costs a Turn to answer nothing. ADR-0017 is the ruling; `/config` itself
+ * had never been claimed at all.
+ *
+ * `/model`, `/effort` and `/config` are here as well as below, because each with
+ * nothing after it is the Command asking roma to report rather than a Caller
+ * forgetting the argument.
  *
  * These strings are roma's outright. Nothing is relayed and nothing is compared
  * against Claude Code, so a release that drops `new` from its aliases changes
@@ -70,6 +83,9 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   '/reset': 'clear',
   '/new': 'clear',
   '/model': 'model',
+  '/effort': 'effort',
+  '/config': 'config',
+  '/settings': 'config',
 }
 
 /**
@@ -78,17 +94,30 @@ const COMMANDS: Readonly<Record<string, Command>> = {
  * ADR-0003 rejected prefix matching and the rejection is kept here, narrowed
  * rather than dropped. What it rejected was a *general* rule — "begins with a
  * slash and looks like ours" — and the reason was growth: such a rule inherits
- * every command a later Claude Code release adds. A named list does not grow on
- * its own. It is the Readout whitelist's shape: it fails closed, and adding a
- * string to it is a deliberate act somebody has to write down.
+ * every command a later Claude Code release adds. It is the Readout whitelist's
+ * shape: it fails closed, and adding a string to it is a deliberate act somebody
+ * has to write down.
  *
  * The sentence ADR-0003 defended the whole-message rule with — "Neither of roma's
  * two takes an argument, so there is nothing this rule turns away that was meant
- * for roma" — stops being true here. The rule survives it; only the count does
- * not.
+ * for roma" — stopped being true at ADR-0014. So did the observation that made
+ * "a named list does not grow on its own" comforting: this has gone from one
+ * entry to three across three ADRs, by hand, each time deliberately. The list
+ * still does not grow on its own, and that is the whole of the guarantee — the
+ * check on it is that adding a string is an act somebody writes down, not that
+ * the number stays small.
+ *
+ * `/settings` is deliberately absent, so `/settings key=value` is not a Command
+ * and falls through to a Task. That is the same opening `/clear foo` has had
+ * since ADR-0013 and `/config foo bar` has by ADR-0017: closing it means
+ * deciding what the argument means to roma, and on the alias it would mean
+ * exactly what `/config key=value` means, which is a refusal. Recorded rather
+ * than fixed, because ADR-0017 counted the heads here at three.
  */
 const TAKES_AN_ARGUMENT: Readonly<Record<string, Command>> = {
   '/model': 'model',
+  '/effort': 'effort',
+  '/config': 'config',
 }
 
 /**
@@ -105,10 +134,12 @@ const TAKES_AN_ARGUMENT: Readonly<Record<string, Command>> = {
  * word roma claims, and it is work. Claude Code's `/clear` takes a name and
  * roma's reset has nothing to name, so `/clear foo` still falls to a Task and is
  * billed as prose — left open deliberately (ADR-0013), because closing it means
- * deciding what a name would mean to roma.
+ * deciding what a name would mean to roma. `/config foo bar` is the same opening
+ * and is left open for the same reason (ADR-0017).
  *
- * A `/model` whose argument is not on the Menu is still a Command, and is refused
- * as one. Falling through would reproduce the exact fault this exists to fix.
+ * A `/model` or `/effort` whose argument is not on its Menu is still a Command,
+ * and is refused as one; so is any `/config` with an argument at all. Falling
+ * through would reproduce the exact fault this exists to fix.
  *
  * Case is ignored because a phone keyboard capitalises the first letter of a
  * message on its own, and `/Stop` is nobody asking for something else. The

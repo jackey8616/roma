@@ -7,10 +7,12 @@ function commandIn(text: string): string | null {
 }
 
 describe('reading a message as a Command', () => {
-  it('recognises the three Commands roma has', () => {
+  it('recognises the five Commands roma has', () => {
     expect(commandIn('/stop')).toBe('stop')
     expect(commandIn('/clear')).toBe('clear')
     expect(commandIn('/model')).toBe('model')
+    expect(commandIn('/effort')).toBe('effort')
+    expect(commandIn('/config')).toBe('config')
   })
 
   // ADR-0013. `clear` is Claude Code's name for this and `new` is one of its two
@@ -38,12 +40,21 @@ describe('reading a message as a Command', () => {
     expect(readCommand('  /model opus  ')).toEqual({ command: 'model', argument: 'opus' })
   })
 
-  // ADR-0014's one new rule: a listed head may take an argument, and the list
-  // holds `/model` and nothing else. What that keeps out is the prefix match
+  // `/config` answers to `/settings` for `/clear`'s reason, and it is
+  // Claude Code's own declared alias on its own `/config`: a spelling roma
+  // leaves unclaimed is one somebody is billed for (ADR-0017). Two spellings,
+  // one Command — the count that is five is the Commands, not the strings.
+  it('answers to both of Claude Code’s spellings for its settings', () => {
+    expect(commandIn('/config')).toBe('config')
+    expect(commandIn('/settings')).toBe('config')
+  })
+
+  // ADR-0014's rule, now carrying three heads: a listed head may take an
+  // argument and nothing else may. What that keeps out is the prefix match
   // ADR-0003 refused — a general "begins with a slash and looks like ours" rule
-  // inherits every command a later Claude Code release adds, and a named list
-  // does not grow on its own.
-  describe('the one Command that takes an argument', () => {
+  // inherits every command a later Claude Code release adds. The list still does
+  // not grow on its own; it has grown by hand, three times, deliberately.
+  describe('the Commands that take an argument', () => {
     it('carries the argument it was given', () => {
       expect(readCommand('/model opus')).toEqual({ command: 'model', argument: 'opus' })
     })
@@ -75,9 +86,44 @@ describe('reading a message as a Command', () => {
       expect(readCommand('/models')).toBeNull()
     })
 
+    it('carries the arguments the other two take', () => {
+      expect(readCommand('/effort max')).toEqual({ command: 'effort', argument: 'max' })
+      expect(readCommand('/config theme=dark')).toEqual({
+        command: 'config',
+        argument: 'theme=dark',
+      })
+    })
+
+    // Each is the Command asking roma to report rather than a malformed one:
+    // Claude Code's no-argument `/config` is a settings panel and a panel has no
+    // form in a chat message, so reporting is what that gesture can honestly
+    // mean in one (ADR-0017).
+    it('is the same Command with nothing after it', () => {
+      expect(readCommand('/effort')).toEqual({ command: 'effort', argument: null })
+      expect(readCommand('/config')).toEqual({ command: 'config', argument: null })
+    })
+
+    // Claimed so that it can be *refused*: `/config key=value` writes a settings
+    // file every Session in the deployment shares, so falling through is both
+    // the bill nobody wanted and a change nobody made.
+    it('claims a /config argument roma will refuse, rather than letting it fall through', () => {
+      expect(readCommand('/config model=opusplan')).toEqual({
+        command: 'config',
+        argument: 'model=opusplan',
+      })
+    })
+
     it('grants the argument to no other Command', () => {
       expect(readCommand('/stop the deploy')).toBeNull()
       expect(readCommand('/clear foo')).toBeNull()
+    })
+
+    // `/settings` is on the whole-message list and deliberately not on this one,
+    // so `/settings key=value` falls through to a Task and is billed as prose.
+    // The same opening `/clear foo` has had since ADR-0013, and ADR-0017 counted
+    // the heads here at three knowing it.
+    it('does not grant it to the alias, which is a gap ADR-0017 left open', () => {
+      expect(readCommand('/settings theme=dark')).toBeNull()
     })
   })
 
@@ -101,6 +147,13 @@ describe('reading a message as a Command', () => {
     expect(readCommand('/new deploy branch')).toBeNull()
   })
 
+  // The same opening on `/config`, recorded rather than fixed: closing it means
+  // deciding what a multi-word argument would mean to roma, and it would mean
+  // nothing (ADR-0017).
+  it('leaves a /config of two words to Claude Code', () => {
+    expect(readCommand('/config foo bar')).toBeNull()
+  })
+
   it('leaves ordinary work alone', () => {
     expect(readCommand('what does this repository do?')).toBeNull()
     expect(readCommand('')).toBeNull()
@@ -115,5 +168,7 @@ describe('reading a message as a Command', () => {
     expect(readCommand('clear')).toBeNull()
     expect(readCommand('reset')).toBeNull()
     expect(readCommand('model opus')).toBeNull()
+    expect(readCommand('effort max')).toBeNull()
+    expect(readCommand('config')).toBeNull()
   })
 })

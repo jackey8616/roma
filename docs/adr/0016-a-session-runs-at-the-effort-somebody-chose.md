@@ -4,8 +4,13 @@ Date: 2026-08-01
 
 ## Status
 
-Accepted. Not yet implemented — the measurements below were taken first,
-deliberately, and the build follows.
+Accepted and implemented — the measurements below were taken first,
+deliberately, and the build followed. `src/effort-menu.ts` holds the Menu and the
+Matrix, `ChosenEfforts` in `src/session-generation.ts` holds the record,
+`src/session-pool.ts` maintains the invariant on the swap it already had, and
+`scripts/claude-code-effort-matrix.ts` is the extractor. Run against 2.1.220 it
+reproduces the three gates quoted below by name, `claude-mythos-5` on the
+allowing branch included.
 
 Repeats ADR-0014's shape for a second per-Session setting, and the repetition is
 the point: `/effort` fails as a relay for the same reason `/model` does, and the

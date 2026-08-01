@@ -1,10 +1,11 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { PINNED_EFFORT } from '../../src/claude-session.js'
 import { sessionIdFor } from '../../src/session-id.js'
 import type { ClaudeEvent } from '../../src/stream-events.js'
 import { FakeClaude, flush, type FakeClaudeProcess } from './fake-claude.js'
-import { feed, OK } from './recorded-stream.js'
+import { EFFORT_ANSWERS, feed, OK } from './recorded-stream.js'
 
 /** The three directories a whole roma is given, in the shape it takes them. */
 export interface RomaDirectories {
@@ -50,13 +51,21 @@ export interface RomaFixture {
    */
   procIn(sessionId: string): FakeClaudeProcess
   /**
-   * Answer the self-check's probe Turn, the way a real process would.
+   * Answer the self-check's probe Turn and its effort relay, the way a real
+   * process would.
    *
    * Every entry point that boots a whole roma drives one before it will do
    * anything else, so every test of one has to answer it before it can get to
    * what it is actually about.
+   *
+   * Two answers rather than one, because the check is two exchanges with one
+   * process: the probe Turn that carries every blocking assertion, and then a
+   * relayed `/effort current` that blocks nothing. `effort` defaults to agreeing
+   * with the Pinned Effort — a boot that disagreed would still boot, and every
+   * test that is about something else would gain an unexplained line in its
+   * Operator Log.
    */
-  answerProbe(events?: readonly ClaudeEvent[]): Promise<void>
+  answerProbe(events?: readonly ClaudeEvent[], effort?: readonly ClaudeEvent[]): Promise<void>
 }
 
 /**
@@ -92,9 +101,14 @@ export function romaFixture(
     },
     procIn,
     procFor: (conversationKey) => procIn(sessionIdFor(conversationKey)),
-    answerProbe: async (events = OK) => {
+    answerProbe: async (events = OK, effort = EFFORT_ANSWERS.at(PINNED_EFFORT)) => {
       await flush()
       feed(claude.process, events)
+      // Fed after the first, the way a real process answers: the relay is not
+      // sent until the probe Turn has completed, so there is nothing listening
+      // for this until then.
+      await flush()
+      feed(claude.process, effort)
     },
   }
 }

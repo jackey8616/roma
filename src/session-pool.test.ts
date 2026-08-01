@@ -1154,9 +1154,81 @@ describe('running a Turn on the other credential', () => {
     })
   })
 
+  /**
+   * The third reason a process ends for money, and the one nothing else in roma
+   * could ever notice.
+   *
+   * `--effort` is fixed at spawn like `--model`, so a Session whose Chosen
+   * Effort has moved needs a different process to serve its next Turn. Unlike
+   * the model there is no `system/init` field to contradict a pool that got this
+   * wrong: it would serve every Turn at the effort the process happened to start
+   * at, report the level that was asked for, and record it — with no evidence
+   * anywhere (ADR-0016).
+   */
+  it('starts a new process when the Session has been moved to another effort', async () => {
+    const chosen = new Map<string, string>()
+    const { log, send, claude } = newPool({
+      efforts: { effortFor: (sessionId) => chosen.get(sessionId) ?? 'high' },
+    })
+    await send(A, 'first', OK)
+
+    chosen.set(A, 'max')
+    await send(A, 'and again', OK)
+
+    const args = claude.lastSpawn.args
+    expect(args[args.indexOf('--effort') + 1]).toBe('max')
+    expect(log).toContainEqual({
+      event: 'swap',
+      sessionId: A,
+      reason: 'effort',
+      from: 'high',
+      to: 'max',
+    })
+  })
+
+  // The model wins where both moved, because it is the larger fact — and the
+  // effort is on the `spawn` record that follows either way, which is the only
+  // statement per process of what roma put in the arguments.
+  it('names the model when the effort moved too, and leaves the effort to the spawn', async () => {
+    const model = new Map<string, string>()
+    const effort = new Map<string, string>()
+    const { log, send } = newPool({
+      models: { modelFor: (id) => model.get(id) ?? 'claude-sonnet-5' },
+      efforts: { effortFor: (id) => effort.get(id) ?? 'high' },
+    })
+    await send(A, 'first', OK)
+
+    model.set(A, 'claude-opus-5')
+    effort.set(A, 'max')
+    await send(A, 'and again', OK)
+
+    expect(log.filter(({ event }) => event === 'swap')).toEqual([
+      {
+        event: 'swap',
+        sessionId: A,
+        reason: 'model',
+        from: 'claude-sonnet-5',
+        to: 'claude-opus-5',
+      },
+    ])
+    expect(log.filter(({ event }) => event === 'spawn').at(-1)).toMatchObject({
+      model: 'claude-opus-5',
+      effort: 'max',
+    })
+  })
+
   // A Session nobody has moved is one process for as long as the pool keeps it.
   // Asked because the comparison is made at every acquisition, and one that read
   // the record wrongly would present as a cold start on every message.
+  it('keeps the process when the effort has not moved', async () => {
+    const { log, send } = newPool({ efforts: { effortFor: () => 'high' } })
+
+    await send(A, 'first', OK)
+    await send(A, 'and again', OK)
+
+    expect(log.filter(({ event }) => event === 'swap')).toEqual([])
+  })
+
   it('keeps the process when the model has not moved', async () => {
     const { log, send } = newPool({ models: { modelFor: () => 'claude-sonnet-5' } })
 

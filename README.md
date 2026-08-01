@@ -29,6 +29,7 @@ npm install
 | `npm run build` | `src` alone to `dist/`, which is what the image runs. |
 | `npm run test:seam2` | **Spends money.** Drives a real `claude -p`. |
 | `npm run check:claude-code-drift` | Is the pinned Claude Code still the published one? Reports; changes nothing. |
+| `npm run check:claude-code-effort-matrix` | Which models does the pinned Claude Code strip the effort from? Reads it out of the binary and prints the gates it read, for a person to check `EFFORT_MATRIX` against. Nothing consumes the output and nothing fails on it (ADR-0016). |
 | `npm run check:adr-collision` | Would merging this branch put two ADRs on one number? Reads the pull request's base branch, so it does nothing outside CI. |
 
 ### Seam 2 spends Shared Window quota
@@ -196,6 +197,7 @@ Terraform cannot do, in the order they have to happen.
 | `ROMA_OVERFLOW_API_KEY` | Metered billing. Absent, roma has no Overflow and never offers it. |
 | `ROMA_OVERFLOW_MONTHLY_CAP_USD` | Required **whenever** the line above is set, and vice versa. There is no default: how much of your money roma may spend is not roma's to decide. |
 | `ROMA_MODEL` | Overrides the pinned model. The self-check asserts on whatever this resolves to. |
+| `ROMA_EFFORT` | Overrides the **Pinned Effort** — how hard the model is asked to think on every Session nobody has moved. `high` by default, which is what Claude Code itself falls back to, so setting nothing changes nothing and roma gains the ability to say what it runs at. Takes any level a Caller may choose (`low`, `medium`, `high`, `xhigh`, `max`) and also `ultracode`, which is off the Effort Menu and reachable only from here: it is `xhigh` plus dynamic workflow orchestration, which turns one Task into a fleet on a window everybody shares. **Validated at startup**, unlike everything Claude Code checks for itself — an unrecognised `--effort` only warns on stderr and starts on the default, so a typo here would otherwise be silent on every Session and every Audit Record. The self-check asks the probe process about it once and writes a disagreement to the operator log; the boot continues either way (ADR-0016). |
 | `ROMA_MAX_CONCURRENT_TASKS` | Tasks that may run at once across every Session. Three by default. |
 | `ROMA_GH_BIN` | Where the real `gh` is, for the Shim in front of it. `/usr/local/lib/roma/gh` by default, which is where the image puts it. Read by the Shim from **its own** environment, not from a Session's — `buildEnv` does not pass it through — so in practice this is for the tests and for anything invoking the Shim by hand. Running from source installs no Shim in front of `gh` at all, and the agent's `gh` is then whatever the developer has. |
 | `ROMA_PUBSUB_MAX_MESSAGES` | Messages roma holds a lease on at once. Twenty by default — see `src/channels/google-chat/env-config.ts` for why it is not near the concurrency cap. |
