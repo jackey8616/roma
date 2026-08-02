@@ -1,5 +1,19 @@
 import { createSign } from 'node:crypto'
-import type { CloudMinter, MintedToken } from '../minter.js'
+import type { MintedToken, MintsTokens } from '../reach.js'
+
+/**
+ * A Minter that also knows which identity its tokens act as.
+ *
+ * Declared here rather than in the Core, because the account is what this
+ * directory's Reach announces and proves with, and nothing outside reads it.
+ * There is no `installation()` equivalent: a Cloud Reach reports no inventory —
+ * roma is told which identity to hand over and nothing about what that identity
+ * may do (ADR-0015).
+ */
+export interface CloudMinter extends MintsTokens {
+  /** How the identity names itself, as an operator would recognise it. */
+  readonly account: string
+}
 
 /**
  * What a Cloud Token is scoped to, every time, for everybody.

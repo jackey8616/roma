@@ -142,9 +142,12 @@ function readResponse(body: string): ShimResponse {
   return {
     token: typeof token === 'string' ? token : null,
     ...(typeof reason === 'string' ? { reason } : {}),
-    // Carried through rather than required, because only one asker has any use
-    // for them and roma answers a request for the other credential without.
+    // Carried through rather than required: an answer with no token carries
+    // neither, and an older roma answered some requests without them.
     ...(typeof expiresAt === 'number' ? { expiresAt } : {}),
-    ...(typeof account === 'string' ? { account } : {}),
+    // A null account is passed through rather than dropped. Dropping it would
+    // make "roma answered no account" indistinguishable from "roma did not answer
+    // one", which is the difference `--json` exists to report honestly.
+    ...(typeof account === 'string' || account === null ? { account } : {}),
   }
 }

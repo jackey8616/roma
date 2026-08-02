@@ -8,6 +8,11 @@
  * should — a Core that could be asked "did this Task talk to Google" would be a
  * Core that knows there is a Google.
  *
+ * The socket reports **every** credential it serves and this keeps one of them
+ * (ADR-0020 §6). Which one is interesting is this module's question rather than
+ * the socket's: what is worth remembering differs per credential, and the other
+ * one wants a list of repositories rather than a yes.
+ *
  * **A yes or a no, and deliberately not a count.** One token does unlimited API
  * calls for an hour, so a number of mints is not a measure of activity and would
  * be read as one (ADR-0015 §10). A `Set` is the shape that cannot accidentally

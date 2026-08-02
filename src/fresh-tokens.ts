@@ -1,4 +1,4 @@
-import type { MintsTokens, MintedToken } from './minter.js'
+import type { MintsTokens, MintedToken } from './reach.js'
 
 /**
  * How long before expiry a token is treated as spent.

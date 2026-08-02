@@ -1,5 +1,6 @@
-import type { Installation, Minter, MintedToken } from '../minter.js'
+import type { MintedToken } from '../reach.js'
 import { appJwt } from './app-jwt.js'
+import type { Installation, InstallationMinter } from './installation.js'
 
 /** Where GitHub's REST API lives, unless a deployment says otherwise. */
 const GITHUB_API = 'https://api.github.com'
@@ -95,7 +96,7 @@ export interface GitHubMinterOptions {
  * observation. `docs/github-app-verification.md` is the list, and it is honest
  * about being unrun.
  */
-export class GitHubMinter implements Minter {
+export class GitHubMinter implements InstallationMinter {
   readonly #appId: string
   readonly #privateKey: string
   readonly #api: string

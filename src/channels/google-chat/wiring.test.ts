@@ -6,10 +6,10 @@ import { GoogleChatAdapter } from './google-chat-adapter.js'
 import { HttpChatApi, type ChatRequest } from './http-chat-api.js'
 import { PubSubTransport } from './pubsub-transport.js'
 import { flush } from '../../../test/support/fake-claude.js'
-import { fakeCloud, fakeMinting, FakeMinter } from '../../../test/support/fake-minter.js'
-import { announce } from '../../github/announce.js'
-import { announceCloud } from '../../cloud/announce.js'
-import type { CloudOptions } from '../../startup.js'
+import { FakeCloudMinter, FakeMinter, fakeShims } from '../../../test/support/fake-minter.js'
+import { githubReach } from '../../github/reach.js'
+import { cloudReach, noCloudReach } from '../../cloud/reach.js'
+import type { Reach } from '../../reach.js'
 import { askMinter } from '../../shim-client.js'
 import { socketPathIn } from '../../shim-protocol.js'
 import type { ShimLogRecord } from '../../shim-server.js'
@@ -62,7 +62,7 @@ function mentioned(text: string): Record<string, unknown> {
 let running: Serving[] = []
 let fixtures: RomaFixture[] = []
 
-async function boot({ cloud }: { cloud?: CloudOptions } = {}) {
+async function boot({ cloud }: { cloud?: Reach<'cloud'> } = {}) {
   const fixture = romaFixture('wiring')
   fixtures.push(fixture)
 
@@ -85,12 +85,15 @@ async function boot({ cloud }: { cloud?: CloudOptions } = {}) {
   // told it can reach is assembled here out of the same two parts production
   // uses, and only the forge itself is a double.
   const minter = new FakeMinter({ installation: INSTALLATION })
-  const minting = fakeMinting({ minter, announce })
-  fixture.alsoRemove(minting.shimDir)
+  const shims = fakeShims()
+  fixture.alsoRemove(shims.dir)
   const serving = serve({
     credential: OAUTH,
-    minting,
-    ...(cloud === undefined ? {} : { cloud }),
+    // The real Reaches over Minters with no provider behind them: what a Session
+    // is told it can reach is assembled here out of the same parts production
+    // uses, announcement included.
+    reaches: { code: githubReach(minter), cloud: cloud ?? noCloudReach() },
+    shims,
     overflow: { credential: METERED, monthlyCapUsd: 100 },
     channel: new GoogleChatAdapter({ api }),
     transport: new PubSubTransport({ subscription, log: () => {} }),
@@ -109,7 +112,7 @@ async function boot({ cloud }: { cloud?: CloudOptions } = {}) {
     requests,
     subscription,
     minter,
-    minting,
+    shims,
     log,
     roma,
     /** Everything roma posted into Chat, in order. */
@@ -338,7 +341,7 @@ describe('reaching the code, out of the real parts', () => {
   // and never announced — a roma that mints perfectly and whose agent never
   // knows it can ask.
   it('tells the Session about the Cloud Reach, where the deployment has one', async () => {
-    const roma = await boot({ cloud: fakeCloud({ announce: announceCloud }) })
+    const roma = await boot({ cloud: cloudReach(new FakeCloudMinter()) })
     roma.subscription.publishJson(mentioned('what is in that bucket'), 'msg-1')
     await flush()
 

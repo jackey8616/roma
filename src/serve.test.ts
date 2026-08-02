@@ -4,7 +4,7 @@ import type { IngressMessage } from './channel-adapter.js'
 import { serve, type Serving } from './serve.js'
 import { StartupSelfCheckFailed } from './startup-self-check.js'
 import { flush } from '../test/support/fake-claude.js'
-import { fakeMinting } from '../test/support/fake-minter.js'
+import { fakeReaches, fakeShims } from '../test/support/fake-minter.js'
 import { FakeTransport } from '../test/support/fake-transport.js'
 import { RecordingAdapter, UNREADABLE } from '../test/support/recording-adapter.js'
 import { romaFixture, teardownRoma, type RomaFixture } from '../test/support/roma-fixture.js'
@@ -49,11 +49,12 @@ function boot({ overflow = true }: { overflow?: boolean } = {}) {
   const transport = new FakeTransport()
 
   let resolved = false
-  const minting = fakeMinting()
-  fixture.alsoRemove(minting.shimDir)
+  const shims = fakeShims()
+  fixture.alsoRemove(shims.dir)
   const serving = serve({
     credential: OAUTH,
-    minting,
+    reaches: fakeReaches(),
+    shims,
     ...(overflow ? { overflow: { credential: METERED, monthlyCapUsd: 100 } } : {}),
     channel,
     transport,

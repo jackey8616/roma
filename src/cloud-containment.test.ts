@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { code, compositionRoot, containment } from '../test/support/sources.js'
+import { code, containment } from '../test/support/sources.js'
 
 /**
  * Google Cloud is named under `src/cloud/`, and nowhere else — and roma never
@@ -97,32 +97,24 @@ describe('roma mints from the key it was given, never from a resolution chain', 
   })
 
   /**
-   * The composition root is the one file where the substitution could actually
-   * be written, and the rules above deliberately do not watch it.
+   * **The source match that used to live here is deleted (ADR-0020 §7).**
    *
-   * It is excluded from the containment rule for the reason every containment
-   * rule excludes it — assembling roma means naming what it is assembled out of
-   * — and it cannot be bound by the rule above either, because it holds a live
-   * `GoogleAuth` on purpose: that is how roma resolves its *own* credential for
-   * Pub/Sub and Chat. So this is the file that has both identities in scope at
-   * once, and the only place somebody could hand the agent's Minter something
-   * that resolved rather than something that was read.
+   * It asserted that the composition root contained `new
+   * GoogleCloudMinter(cloudEnv)` — because that file is the one place the
+   * substitution §4 forbids could be written, and the rule above deliberately
+   * does not bind it: it holds a live `GoogleAuth` on purpose, which is how roma
+   * resolves its *own* credential for Pub/Sub and Chat.
    *
-   * Asserted as a literal rather than by a denylist, because what is being kept
-   * is positive: the Minter is built from what the key reader returned, and from
-   * nothing else. Any edit that derives it from the ambient credential — a
-   * `??` fallback, the Chat client, an options object assembled inline — takes
-   * this exact expression away, and that is the point. It costs a rename of a
-   * local, which is a cheap price for the one check standing between §4 and a
-   * roma minting Cloud Tokens for its own identity.
+   * The construction moved into `src/cloud/reach.ts`, behind `cloudReachFrom(env:
+   * CloudEnv | null)`. That file is *inside* this containment, so the rule above
+   * now binds the construction site for the first time — and the composition root
+   * no longer names the constructor, so there is nothing there to substitute.
+   * What is left for a caller to get wrong is passing something other than
+   * `readCloudEnv`'s output, and anything of that shape is a private key somebody
+   * already holds rather than the resolution chain §4 is about.
+   *
+   * Do not add a source match back without reading ADR-0020 §7. What went with it
+   * is the only rule aimed at the composition root at all, which the ADR records
+   * as accepted rather than overlooked.
    */
-  it('builds the Cloud Reach’s Minter from the named key file and nothing else', () => {
-    const root = code(compositionRoot())
-
-    expect(root).toContain('new GoogleCloudMinter(cloudEnv)')
-    // And `cloudEnv` is the reader's own output rather than a name that happens
-    // to match: without this the assertion above would survive somebody
-    // assigning `cloudEnv` from anywhere at all.
-    expect(root).toMatch(/cloudEnv,?[\s\S]{0,80}=\s*readConfiguration\([\s\S]{0,120}readCloudEnv/)
-  })
 })

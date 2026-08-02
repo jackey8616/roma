@@ -12,12 +12,12 @@ import { StartupSelfCheckFailed } from './startup-self-check.js'
 import { flush } from '../test/support/fake-claude.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
 import {
-  fakeCloud,
-  fakeMinting,
+  fakeReaches,
+  fakeShims,
   FakeCloudMinter,
   FakeMinter,
 } from '../test/support/fake-minter.js'
-import type { CloudLogRecord } from './startup.js'
+import type { ReachLogRecord } from './startup.js'
 import { romaFixture, teardownRoma, type RomaFixture } from '../test/support/roma-fixture.js'
 import { feed, OK, STRAY_KEY } from '../test/support/recorded-stream.js'
 
@@ -37,21 +37,20 @@ function boot({
 } = {}) {
   const fixture = romaFixture('startup')
   fixtures.push(fixture)
-  const minting = fakeMinting({ minter })
-  const cloud = cloudMinter === undefined ? undefined : fakeCloud({ minter: cloudMinter })
-  fixture.alsoRemove(minting.shimDir)
+  const shims = fakeShims()
+  fixture.alsoRemove(shims.dir)
   const channel = new RecordingAdapter()
-  const log: CloudLogRecord[] = []
+  const log: ReachLogRecord[] = []
 
   let resolved = false
   const starting = startRoma({
     credential: OAUTH,
     channel,
     ...fixture.dirs,
-    minting,
-    ...(cloud === undefined ? {} : { cloud }),
+    reaches: fakeReaches({ minter, cloudMinter: cloudMinter ?? null }),
+    shims,
     spawn: fixture.claude.spawn,
-    log: (record) => log.push(record as CloudLogRecord),
+    log: (record) => log.push(record as ReachLogRecord),
     selfCheckTimeoutMs: 1_000,
   }).then((roma) => {
     resolved = true
@@ -72,7 +71,7 @@ function boot({
     auditRoot: fixture.dirs.auditRoot,
     minter,
     cloudMinter,
-    minting,
+    shims,
     log,
     starting,
     hasStarted: () => resolved,
@@ -250,13 +249,34 @@ describe('proving roma can reach the code, before anything can ask it to', () =>
     expect(roma.claude.spawns).toHaveLength(0)
   })
 
+  // On the log rather than on what `startRoma` returns. Nothing read the returned
+  // value — not a Channel, not the composition root — so ADR-0020 deleted it and
+  // gave the forge the boot line it had never had. The repository list is not
+  // here: `ReachProof` carries the account and the announcement carries the rest,
+  // which is the half of that trade the ADR names as a loss.
   it('reports what it found, for the boot log', async () => {
     const roma = boot()
     await roma.answerProbe()
+    await roma.starting
 
-    await expect(roma.starting).resolves.toMatchObject({
-      installation: { account: 'a-team', repositories: ['a-team/roma'] },
+    expect(roma.log).toContainEqual({ event: 'reach', credential: 'code', account: 'a-team' })
+  })
+
+  // The order used to be enforced by data flow — two statements, one after the
+  // other — and a loop is where that is lost. `Promise.all` over the Reaches
+  // compiles and reads as the natural generic form, and this is the only thing
+  // that would notice: a boot with a bad App key must not reach a second provider
+  // at all (ADR-0020 §4).
+  it('never touches another provider once the free check has refused', async () => {
+    const cloudMinter = new FakeCloudMinter()
+    const roma = boot({
+      minter: new FakeMinter({ failsWith: new Error('a bad private key') }),
+      cloudMinter,
     })
+
+    await expect(roma.starting).rejects.toThrow('a bad private key')
+
+    expect(cloudMinter.minted).toEqual([])
   })
 })
 
@@ -309,7 +329,7 @@ describe('proving the Cloud Reach before anything can ask to use it', () => {
     const roma = boot()
     await roma.answerProbe()
 
-    await expect(roma.starting).resolves.toMatchObject({ cloudReach: null })
+    await expect(roma.starting).resolves.toMatchObject({ core: expect.anything() })
   })
 
   it('reports which identity the agent acts as, for the boot log', async () => {
@@ -318,7 +338,8 @@ describe('proving the Cloud Reach before anything can ask to use it', () => {
     await roma.starting
 
     expect(roma.log).toContainEqual({
-      event: 'cloud-reach',
+      event: 'reach',
+      credential: 'cloud',
       account: 'agent@a-project.iam.gserviceaccount.com',
     })
   })
@@ -331,7 +352,7 @@ describe('proving the Cloud Reach before anything can ask to use it', () => {
     await roma.answerProbe()
     await roma.starting
 
-    expect(roma.log).toContainEqual({ event: 'cloud-reach', account: null })
+    expect(roma.log).toContainEqual({ event: 'reach', credential: 'cloud', account: null })
   })
 })
 
@@ -346,7 +367,7 @@ describe('watching for a mint storm', () => {
     const roma = boot({ cloudMinter })
     await roma.answerProbe()
     await roma.starting
-    const socket = socketPathIn(roma.minting.shimDir)
+    const socket = socketPathIn(roma.shims.dir)
     const ask = () =>
       askMinter(socket, { session: sessionIdFor(KEY), operation: 'get', credential: 'cloud' })
 
@@ -354,9 +375,38 @@ describe('watching for a mint storm', () => {
     await ask()
     await ask()
 
-    expect(roma.log.filter(({ event }) => event === 'cloud-token-minted')).toEqual([
-      { event: 'cloud-token-minted', account: 'agent@a-project.iam.gserviceaccount.com' },
+    // Filtered on the credential as well as the event. The record is generic now,
+    // so a filter on the event alone would span both Reaches and quietly stop
+    // asserting what this test is named for.
+    expect(
+      roma.log.filter((r) => r.event === 'reach-token-minted' && r.credential === 'cloud'),
+    ).toEqual([
+      {
+        event: 'reach-token-minted',
+        credential: 'cloud',
+        account: 'agent@a-project.iam.gserviceaccount.com',
+      },
     ])
+  })
+
+  // New with ADR-0020 §5, and named there as something uniformity produced rather
+  // than something anybody asked for. `git` asks on every invocation, so the mint
+  // storm this record exists to make visible is likelier here than on the side it
+  // was written for — and until now the forge's mints were invisible.
+  it('records a mint for the forge as well, which it never used to', async () => {
+    const roma = boot()
+    await roma.answerProbe()
+    await roma.starting
+    const socket = socketPathIn(roma.shims.dir)
+
+    await askMinter(socket, { session: sessionIdFor(KEY), operation: 'get' })
+    await askMinter(socket, { session: sessionIdFor(KEY), operation: 'get' })
+
+    // One mint, two asks: the second was served from the token roma already held,
+    // which is the distinction the record is for.
+    expect(
+      roma.log.filter((r) => r.event === 'reach-token-minted' && r.credential === 'code'),
+    ).toEqual([{ event: 'reach-token-minted', credential: 'code', account: 'a-team' }])
   })
 
   // The boot proof mints too, and is deliberately not one of these: it was never
@@ -367,7 +417,9 @@ describe('watching for a mint storm', () => {
     await roma.answerProbe()
     await roma.starting
 
-    expect(roma.log.filter(({ event }) => event === 'cloud-token-minted')).toEqual([])
+    expect(
+      roma.log.filter((r) => r.event === 'reach-token-minted' && r.credential === 'cloud'),
+    ).toEqual([])
   })
 })
 
@@ -421,7 +473,7 @@ describe('whether a Task used the Cloud Reach', () => {
 
     const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [] })
     await flush()
-    await askMinter(socketPathIn(roma.minting.shimDir), {
+    await askMinter(socketPathIn(roma.shims.dir), {
       session: sessionIdFor(KEY),
       operation: 'get',
       credential: 'cloud',
@@ -430,6 +482,28 @@ describe('whether a Task used the Cloud Reach', () => {
     await handled
 
     expect(audit.readMonth(monthOf(new Date()))).toMatchObject([{ cloudReach: true }])
+  })
+
+  // The socket reports every credential it serves now, and which one is worth
+  // remembering is decided one layer up (ADR-0020 §6). Without that filter a `git`
+  // asking for its own credential would mark the Task as having used the Cloud
+  // Reach — a false yes on the one record that answers who spent somebody's Google
+  // Cloud bill.
+  it('is not written for a Task that only asked for the forge', async () => {
+    const roma = boot({ cloudMinter: new FakeCloudMinter() })
+    await roma.answerProbe()
+    const { core, audit } = await roma.starting
+
+    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [] })
+    await flush()
+    await askMinter(socketPathIn(roma.shims.dir), {
+      session: sessionIdFor(KEY),
+      operation: 'get',
+    })
+    feed(roma.procFor(KEY), OK)
+    await handled
+
+    expect(audit.readMonth(monthOf(new Date()))).toMatchObject([{ cloudReach: false }])
   })
 
   // A yes and a no, not a yes and a blank. A Task that never touched the cloud
@@ -475,8 +549,8 @@ describe('putting a credential in front of a Session’s tools', () => {
     await handled
 
     expect(env['ROMA_SESSION_ID']).toBe(sessionIdFor(KEY))
-    expect(env['ROMA_MINTER_SOCKET']).toBe(socketPathIn(roma.minting.shimDir))
-    expect(env['GIT_CONFIG_GLOBAL']).toBe(join(roma.minting.shimDir, 'gitconfig'))
+    expect(env['ROMA_MINTER_SOCKET']).toBe(socketPathIn(roma.shims.dir))
+    expect(env['GIT_CONFIG_GLOBAL']).toBe(join(roma.shims.dir, 'gitconfig'))
   })
 
   // Not under the work root, which is walked by a reclaim that deletes what has
@@ -488,9 +562,9 @@ describe('putting a credential in front of a Session’s tools', () => {
     await roma.answerProbe()
     await roma.starting
 
-    expect(existsSync(socketPathIn(roma.minting.shimDir))).toBe(true)
-    expect(readFileSync(join(roma.minting.shimDir, 'gitconfig'), 'utf8')).toBe(
-      roma.minting.gitConfig,
+    expect(existsSync(socketPathIn(roma.shims.dir))).toBe(true)
+    expect(readFileSync(join(roma.shims.dir, 'gitconfig'), 'utf8')).toBe(
+      roma.shims.gitConfig,
     )
     expect(readdirSync(roma.workRoot)).toEqual([])
   })

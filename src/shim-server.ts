@@ -6,18 +6,6 @@ import { reasonOf, writeToStderr, type OperatorLog } from './operator-log.js'
 import type { CredentialWanted, ShimRequest, ShimResponse } from './shim-protocol.js'
 
 /**
- * What roma says when something asks for a cloud credential and there is no
- * Cloud Reach.
- *
- * A plain sentence rather than a failure, because most deployments have none and
- * that is not a fault (ADR-0015 §9). The Cloud Shortcut is installed either way
- * so that this is what an agent reads instead of `command not found`, which it
- * would spend a Turn investigating as a broken `PATH`.
- */
-export const NO_CLOUD_REACH =
-  'This roma has no Cloud Reach, so there is no cloud credential for it to give.'
-
-/**
  * One credential request, as an operator sees it.
  *
  * Attribution is by Session, resolved to a Task through the Task Queue, and a
@@ -88,17 +76,31 @@ export type ShimLogRecord =
     }
 
 /**
- * What roma needs to answer a request for a cloud credential.
+ * One Reach, as the socket sees it: something to mint from, or a reason there is
+ * nothing.
  *
  * The account rides along with the tokens rather than being asked for per
- * request, for the reason a Cloud Reach is a value roma holds: it is fixed at
- * boot and identical in every Session.
+ * request, for the reason a Reach is a value roma holds: it is fixed at boot and
+ * identical in every Session.
+ *
+ * A union rather than nullable fields, so that reading `tokens` off a Reach with
+ * none does not typecheck. What the unavailable arm carries is the sentence roma
+ * answers with, which is the Reach's own — the Core is not the place a sentence
+ * about somebody's cloud belongs (ADR-0020 §2).
  */
-export interface CloudCredentials {
-  readonly tokens: FreshTokens
-  /** Which identity a Cloud Token acts as. */
-  readonly account: string
-}
+export type ServedReach =
+  | { readonly tokens: FreshTokens; readonly account: string | null }
+  | { readonly unavailable: string }
+
+/**
+ * One of those per credential something can ask for.
+ *
+ * Total over `CredentialWanted`, which is what makes `readRequest`'s check the
+ * whole of the validation: a request naming a credential this record does not
+ * have is not representable, so there is no missing-entry case to design an
+ * answer for.
+ */
+export type ServedReaches = Readonly<Record<CredentialWanted, ServedReach>>
 
 export interface ShimServerOptions {
   /**
@@ -110,27 +112,37 @@ export interface ShimServerOptions {
    * that can write to the whole Installation.
    */
   readonly socketPath: string
-  readonly tokens: FreshTokens
   /**
-   * The Cloud Reach's tokens and the identity they act as, or null where the
-   * deployment has none.
+   * What to answer each credential with.
    *
-   * Null rather than absent-or-present because "there is no Cloud Reach" is an
-   * answer roma gives out loud (ADR-0015 §9) rather than a case it has no branch
-   * for — the Cloud Shortcut is installed either way and gets a sentence.
+   * One entry per credential and no absences: a Reach a deployment has no key for
+   * is present and carries the sentence it answers with, because "there is none"
+   * is an answer roma gives out loud rather than a case it has no branch for
+   * (ADR-0015 §9, ADR-0020 §2).
    */
-  readonly cloud?: CloudCredentials | null
+  readonly reaches: ServedReaches
   /**
-   * Told that a Task obtained a Cloud Token, so that its Audit Record can say
-   * so.
+   * Told that a credential was served, so that something else can decide what is
+   * worth remembering about it.
    *
    * A callback rather than a record kept here, because what this owns is one
    * request over one socket and what an Audit Record is filed against is a Task
    * that has ended. Called with null for a request belonging to no running Task,
-   * which is the same honesty the log above keeps: a background process the
-   * agent left running is attributed to nobody rather than to the nearest Task.
+   * which is the same honesty the log above keeps: a background process the agent
+   * left running is attributed to nobody rather than to the nearest Task.
+   *
+   * Every credential rather than one of them. Which of them is interesting is not
+   * the socket's question — what a Task reached for is a property of the requests
+   * that crossed it, and the shapes worth keeping differ per credential: whether
+   * the Cloud Reach was used is a yes or a no and never a count (ADR-0015 §10),
+   * and which repositories a Task minted for is a list accumulated from `path`.
+   * One observer serves both (ADR-0020 §6).
    */
-  readonly onCloudToken?: (taskId: string | null) => void
+  readonly onCredential?: (
+    taskId: string | null,
+    credential: CredentialWanted,
+    path: string | null,
+  ) => void
   /**
    * Which Task that Session is running right now, or null.
    *
@@ -160,9 +172,12 @@ export interface ShimServerOptions {
 export class ShimServer {
   readonly socketPath: string
   readonly #server: Server
-  readonly #tokens: FreshTokens
-  readonly #cloud: CloudCredentials | null
-  readonly #onCloudToken: (taskId: string | null) => void
+  readonly #reaches: ServedReaches
+  readonly #onCredential: (
+    taskId: string | null,
+    credential: CredentialWanted,
+    path: string | null,
+  ) => void
   readonly #taskFor: (sessionId: string) => string | null
   readonly #log: OperatorLog<ShimLogRecord>
   /**
@@ -178,9 +193,8 @@ export class ShimServer {
   private constructor(options: ShimServerOptions, server: Server) {
     this.socketPath = options.socketPath
     this.#server = server
-    this.#tokens = options.tokens
-    this.#cloud = options.cloud ?? null
-    this.#onCloudToken = options.onCloudToken ?? (() => {})
+    this.#reaches = options.reaches
+    this.#onCredential = options.onCredential ?? (() => {})
     this.#taskFor = options.taskFor
     this.#log = options.log ?? writeToStderr
   }
@@ -271,25 +285,29 @@ export class ShimServer {
     const path = request.path ?? null
     const credential = request.credential ?? 'code'
     const where = { sessionId, taskId, path, credential } as const
-    // Decided once. Which credential a request is about is the only question
+    // Looked up once. Which credential a request is about is the only question
     // that branches here, and asking it in each of the three places below would
     // be three chances to answer it differently — the worst of which hands a
     // Cloud Shortcut an Installation Token, and looks like everything working
     // until the first API call.
     //
-    // Null for a cloud request on a deployment with no Cloud Reach, which is
-    // answered rather than crashed on below.
-    const wanted = credential === 'cloud' ? this.#cloud : { tokens: this.#tokens, account: null }
+    // Total, so there is no missing entry to answer for: a Reach a deployment has
+    // no key for is present and carries its own refusal.
+    const reach = this.#reaches[credential]
 
     if (request.operation === 'erase') {
       // Only `git` ever sends one — the Cloud Shortcut has nothing to hand back,
       // because nothing it prints goes through a tool that could report the
-      // rejection. It is routed by `wanted` all the same, so that a caller who
+      // rejection. It is routed by the Reach all the same, so that a caller who
       // does send one cannot drop the *other* credential by naming the wrong
       // side: an agent could otherwise force a re-mint of every Session's
       // Installation Token by erasing tokens labelled cloud.
-      if (typeof request.token === 'string' && request.token !== '') {
-        wanted?.tokens.discard(request.token)
+      //
+      // Ahead of the unavailable answer below, and deliberately: an erase for a
+      // credential roma has none of is a rejection of nothing, and it has always
+      // been recorded as `credential-rejected` rather than as a failure.
+      if ('tokens' in reach && typeof request.token === 'string' && request.token !== '') {
+        reach.tokens.discard(request.token)
       }
       this.#log({ event: 'credential-rejected', ...where })
       return { token: null }
@@ -298,24 +316,26 @@ export class ShimServer {
     // Said rather than failed. A deployment with no Cloud Reach is the ordinary
     // case, and the Cloud Shortcut is installed on every image so that this
     // sentence is what an agent reads — a refusal it can repeat to a person,
-    // rather than a hang, a crash, or a `PATH` it would go and investigate.
-    if (wanted === null) {
-      this.#log({ event: 'credential-failed', ...where, reason: NO_CLOUD_REACH })
-      return { token: null, reason: NO_CLOUD_REACH }
+    // rather than a hang, a crash, or a `PATH` it would go and investigate. The
+    // sentence is the Reach's; roma reads it rather than holding it.
+    if (!('tokens' in reach)) {
+      this.#log({ event: 'credential-failed', ...where, reason: reach.unavailable })
+      return { token: null, reason: reach.unavailable }
     }
 
     try {
-      const { token, expiresAt } = await wanted.tokens.fresh()
-      // Before the log line and before the answer, so that a Task credited with
-      // a Cloud Token is one that was actually handed one.
-      if (credential === 'cloud') this.#onCloudToken(taskId)
+      const { token, expiresAt } = await reach.tokens.fresh()
+      // Before the log line and before the answer, so that a Task credited with a
+      // credential is one that was actually handed one.
+      this.#onCredential(taskId, credential, path)
       this.#log({ event: 'credential', ...where })
-      // The expiry and the account go only to the asker that has somewhere to
-      // put them. A Credential Shim hands its token to `git` or to one child
-      // process's environment, neither of which has a field for either.
-      return wanted.account === null
-        ? { token }
-        : { token, expiresAt, account: wanted.account }
+      // Everything roma knows about the answer, to every asker. Withholding the
+      // expiry and the account from the two Credential Shims was minimalism
+      // rather than protection — neither has a field to put them in and both
+      // collapse the response to a token before anything reads it — and the
+      // branch that did it was where a Reach could be paired with the wrong
+      // tokens (ADR-0020 §9).
+      return { token, expiresAt, account: reach.account }
     } catch (error) {
       const reason = reasonOf(error)
       this.#log({ event: 'credential-failed', ...where, reason })

@@ -11,6 +11,15 @@ Credentials out of it. The Minter port gained a cloud half, `FreshTokens` (which
 was `InstallationTokens`) now serves both credentials from one piece of expiry
 arithmetic, and the socket answers a second kind of request.
 
+**Amended 2026-08-02 by ADR-0020**, which renames the shape rather than the
+decision. There is no `Minter` port with a cloud half any more: `MintsTokens` is
+the port, and what sits on top of it is a **Reach** — one per credential, of which
+an Installation is one and a Cloud Reach is the other. The Core-level `Minter` and
+`CloudMinter` ports are gone: what the Core sees is `MintsTokens` and a Reach.
+`CloudMinter` survives as a `src/cloud/` type — a Minter that knows its own account
+— and `src/cloud/reach.ts` is what builds a Reach from the key. Everything this ADR
+decided about the key, the identity, the scope and the Shortcut is untouched.
+
 **Still unmeasured, and still the one thing that matters:** no Cloud Reach has
 ever existed. Every response in `src/cloud/google-cloud-minter.test.ts` is
 written from Google's documentation, and only a real service account can settle
@@ -24,9 +33,10 @@ than joining that same *message*. A deployment with both a missing audit root an
 a revoked key therefore still boots twice. Everything a key file can be wrong
 about short of being revoked — unreadable, empty, not JSON, not a service account
 key — is caught by `readCloudEnv` and does join the single refusal, so only the
-revoked case diverges. The `minter.installation()` check has had the identical
-property since ADR-0008, so this is the existing shape rather than a new
-exception. Closing it means `readConfiguration` collecting problems rather than
+revoked case diverges. The forge's own boot proof has had the identical property
+since ADR-0008, so this is the existing shape rather than a new exception. (That
+proof was `minter.installation()` until ADR-0020; it is now the `code` Reach's
+`prove()`, and the gap this paragraph describes moved with it and did not close.) Closing it means `readConfiguration` collecting problems rather than
 throwing them, which changes how every reader reports and was not in scope here.
 
 **This record has been reversed twice and merged once, all in the session that
@@ -222,6 +232,16 @@ This repository has paid for the general version of that mistake already, in
 Same shape, second vendor. A missing key must produce a *failure*, never a
 *substitution*.
 
+**Amended 2026-08-02 by ADR-0020 §7 — in how this is enforced, not in what it
+says.** This section was carried by two guards. `RESOLVES_A_CREDENTIAL`, which bans
+the library's finding calls inside `src/cloud/`, is **kept unchanged**. The second
+was a match against the text of the composition root, and it is **deleted** —
+because `new GoogleCloudMinter` moved inside `src/cloud/`, behind
+`cloudReachFrom(env: CloudEnv | null)`, so the substitution the match watched for
+can no longer be written there and the directory rule now binds the construction
+site for the first time. If you are reading this because the guard looks thin: read
+ADR-0020 §7 before adding a source match back.
+
 ### 5. A Cloud Token is scoped to `cloud-platform`, and that is not configurable
 
 The exchange requires naming scopes (see Verification status). roma names
@@ -333,6 +353,16 @@ both-or-neither rule to a CLI present without a key and a key present without a
 CLI. §1 left one image, so neither mismatch can occur and there is nothing left
 to pair. What survives of that refusal is §8, which is the half that was
 protecting something: a key that exists and does not work still stops the boot.
+
+**Amended 2026-08-02 by ADR-0020 §2**, which makes this structural rather than a
+branch. A deployment with no key still *has* a Cloud Reach — an **unavailable**
+one, always present, carrying the sentence it answers with. "There is none" stops
+being a `null` that two modules have to agree about, and the unavailable arm is
+reachable from an absent key and from nothing else: a proof that fails still
+throws, which is §8 above and is the thing this section is most likely to be read
+as contradicting. The Operator Log line this section promises is still written on
+every boot; it now reads `{event:'reach', credential:'cloud', account:null}` rather
+than `{event:'cloud-reach', account:null}`.
 
 ### 10. An Audit Record says whether a Task used the Cloud Reach
 
