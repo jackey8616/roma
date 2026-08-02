@@ -3,7 +3,12 @@ import type { TaskProgress } from './channel-adapter.js'
 import { ProgressReporter, type ProgressReporterOptions } from './progress-reporter.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { flush } from '../test/support/fake-claude.js'
-import { GENERATING, ofKind, recordedStream } from '../test/support/recorded-stream.js'
+import {
+  COMPACTED_MANUALLY,
+  GENERATING,
+  ofKind,
+  recordedStream,
+} from '../test/support/recorded-stream.js'
 
 /** The tool-using Turn: a thinking block, a `Bash` call, and 25 seconds of silence. */
 const TOOL = recordedStream('tool-use-partial-messages').turn(1)
@@ -45,6 +50,19 @@ const TOOL_STARTED = ofKind(TOOL, 'system/task_started')[0] as ClaudeEvent
 const TOOL_FINISHED = ofKind(TOOL, 'system/task_notification')[0] as ClaudeEvent
 const THINKING = ofKind(TOOL, 'system/thinking_tokens')[0] as ClaudeEvent
 const TEXT_DELTAS = ofKind(GENERATING, 'stream_event/text_delta')
+
+/**
+ * The two `system/status` events of a real `/compact`, told apart by `status`.
+ *
+ * One of them opens a window nothing else is said inside; the other closes it,
+ * on the same subtype and carrying `status: null`. Taken off the capture rather
+ * than written here, because which field distinguishes them is the whole thing
+ * under test.
+ */
+const [COMPACTING, COMPACTION_OVER] = ofKind(COMPACTED_MANUALLY, 'system/status') as [
+  ClaudeEvent,
+  ClaudeEvent,
+]
 
 beforeEach(() => {
   // setImmediate stays real, so `flush` can still drain the microtask queue
@@ -209,6 +227,33 @@ describe('what an update says the Task is doing', () => {
       phase: 'writing',
       characters: TEXT_DELTAS.slice(0, 2).map(textOf).join('').length,
     })
+  })
+
+  // The other dead stream, and the longer one: nothing at all arrives between a
+  // Compaction starting and its boundary — 28,517ms in the longest capture roma
+  // holds. Without this a `/compact` posts "Working…" and then says nothing
+  // whatsoever until it is over, which is the failure ADR-0003 named when it
+  // argued the cap: unacknowledged waiting causes people to resend.
+  it('says a Compaction is under way, which is otherwise silence', async () => {
+    const { reporter, sent } = newReporter()
+
+    await acknowledgeAnd(reporter, [COMPACTING])
+    await vi.advanceTimersByTimeAsync(INTERVAL)
+
+    expect(sent.at(-1)).toEqual({ phase: 'compacting' })
+  })
+
+  // The same event carries `compact_result` when a Compaction has *finished*,
+  // with `status: null`. An announcement that work is over is not an
+  // announcement that work is starting, so the reading is on `status` rather
+  // than on the subtype.
+  it('does not read a finished Compaction as one still running', async () => {
+    const { reporter, sent } = newReporter()
+
+    await acknowledgeAnd(reporter, [COMPACTION_OVER])
+    await vi.advanceTimersByTimeAsync(INTERVAL)
+
+    expect(sent.at(-1)).toEqual({ phase: 'working' })
   })
 
   // The complete answer arrives once more as its own `assistant` event, 85ms

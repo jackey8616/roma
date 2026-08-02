@@ -46,15 +46,15 @@ export interface About {
   /**
    * Serialise this against its key, but do not count it against the cap.
    *
-   * For a Readout (ADR-0012), and the two halves are answered differently
+   * For a free Relay (ADR-0012), and the two halves are answered differently
    * because they are different rules. Serialisation is forced — two processes
-   * writing one Session file corrupt it, and a Readout needs that Session's
-   * process like anything else — so a Readout queues behind the Session's work
+   * writing one Session file corrupt it, and a Relay needs that Session's
+   * process like anything else — so a Relay queues behind the Session's work
    * and there is no way around it.
    *
    * The cap is a choice, and ADR-0003 argues it entirely in terms of model
    * work: retry storms holding a slot for three minutes, one bad credential
-   * reaching "bot halted" on its own. A Readout drives no Turn, spends nothing
+   * reaching "bot halted" on its own. A free Relay drives no Turn, spends nothing
    * and cannot storm. Counted, three people asking what is going on could stop
    * the work they are asking about.
    *
@@ -103,7 +103,7 @@ export class TaskQueue {
   /**
    * The keys with something running, and what each one is running.
    *
-   * Its size is **not** the number of running Tasks any more: a Readout holds a
+   * Its size is **not** the number of running Tasks any more: a free Relay holds a
    * key without being one (ADR-0012). `running` counts what the cap counts, and
    * this counts what serialisation counts, which is everything.
    *
@@ -123,10 +123,10 @@ export class TaskQueue {
   }
 
   /**
-   * Tasks running right now — what the cap counts, so Readouts are not in it.
+   * Tasks running right now — what the cap counts, so free Relays are not in it.
    *
    * Derived rather than kept as a counter beside the map. The map holds at most
-   * the cap plus however many Readouts are in flight, so counting it is free,
+   * the cap plus however many free Relays are in flight, so counting it is free,
    * and a counter is one more thing that can drift out of step with the truth it
    * is describing.
    */
@@ -221,7 +221,7 @@ export class TaskQueue {
    *
    * The whole list is walked rather than stopping once the cap is full: an
    * uncapped entry behind a full cap is still admissible, and a loop that
-   * stopped there would hold every Readout hostage to exactly the busy period
+   * stopped there would hold every free Relay hostage to exactly the busy period
    * they exist to ask about. `#claim` is where the two rules are applied, so
    * this only has to stop deciding for it.
    */

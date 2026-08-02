@@ -103,7 +103,10 @@ roma chose and tells the agent where it is; what the sender called it travels
 beside the path as a string and is never made into one, which is the whole of why
 a filename nobody vetted is safe to carry (ADR-0011). A message with one is a
 request whether or not it has any text: what is not a request is a message with
-nothing in it at all.
+nothing in it at all. One kind of request carries none of them, though: a Relay
+goes on the wire as a command and has nowhere to name a file, so an Enclosure
+sent with one is never fetched — bytes paid for and then mentioned to nobody is
+the alternative, and the request there is the command (ADR-0018).
 _Avoid_: attachment (that is the Channel's word for the thing upstream, and the
 two are not the same object — an Enclosure is named by roma and the Channel's is
 not), file (so is everything else in a Working Directory), upload, payload
@@ -198,12 +201,18 @@ context outright, a Compaction stays in the same Session and keeps a summary. A
 failed one is a third thing again, and how serious it is depends on why: too
 little conversation to summarise is benign and is the common one, while a context
 that cannot be reduced below the limit is a Session that will not serve another
-Turn. Claude Code says which by a code rather than a sentence, and roma answers it
-three ways rather than two: **benign** is told to nobody, **unreducible** goes to
-the Operator Log and to the Caller with `/clear` named, and **unexplained** — a
-code roma has never seen — goes to the operator and no further, because telling
-somebody their thread is finished is a sentence roma has to be able to stand
-behind (ADR-0019).
+Turn. On the automatic kind Claude Code says which by a code rather than a
+sentence, and roma answers it three ways rather than two: **benign** is told to
+nobody, **unreducible** goes to the Operator Log and to the Caller with `/clear`
+named, and **unexplained** — a code roma has never seen — goes to the operator and
+no further, because telling somebody their thread is finished is a sentence roma
+has to be able to stand behind (ADR-0019). On the asked-for kind roma judges
+nothing: the same field carries a **sentence** there rather than a code, so the
+Caller gets Claude Code's own words relayed and the Operator Log gets nothing.
+Not a gap left open — the alternative is roma enumerating one build's error text,
+which is a mistake it has made once already — and the repair is deferred rather
+than lost, because a Session that truly cannot be reduced fails the next ordinary
+message on the automatic path, where the code is a code.
 _Avoid_: clearing (that is `/clear`, and it is roma's), summarising (that is how
 it works, not what it is), truncation (nothing is cut off — older messages are
 replaced), and using this for anything that happens to the Transcript, which loses
@@ -604,5 +613,8 @@ money, which is the Audit Records'. Nothing is totalled from it. A *failed*
 Compaction is in here and a successful one is not, which is the rule rather than
 an exception to it: the first can mean a Session that will not serve another
 Turn, which roma has a repair for, and the second is somebody's bill (ADR-0019).
+One Compaction is in neither, and for the same rule read the other way: a
+`/compact` that failed is the answer to a request rather than something that
+surprised roma, so it goes to whoever asked and no further.
 _Avoid_: audit log (that is the Audit Records), event log (that is nearer the
 Transcript), telemetry, metrics

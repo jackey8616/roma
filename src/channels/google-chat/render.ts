@@ -248,6 +248,11 @@ function phrase(progress: TaskProgress): string {
       return progress.position === 1 ? 'Queued.' : `Queued — ${progress.position} waiting.`
     case 'working':
       return 'Working…'
+    case 'compacting':
+      // Claude Code's own word for it, and the one the person typed if they
+      // asked for this. Nothing about how far along it is: the figures arrive
+      // with the boundary, which is the moment it is finished.
+      return 'Compacting…'
     case 'thinking':
       return `Thinking… (~${progress.estimatedTokens} tokens)`
     case 'tool':

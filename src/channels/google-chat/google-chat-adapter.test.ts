@@ -489,6 +489,20 @@ describe('the acknowledgement', () => {
     expect(api.texts).toEqual([`${TO}Running awk…`])
   })
 
+  // The phase with nothing in it, and it has to be shown for exactly that
+  // reason: a Compaction is a stretch of half a minute in which the stream says
+  // nothing at all. It arrives inside somebody's ordinary Turn and as the whole
+  // of a `/compact` they asked for, and Chat has no reason to tell those apart.
+  it('says a Compaction is under way, in Claude Code’s own word for it', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, { kind: 'progress', progress: { phase: 'working' } }))
+    await adapter.deliver(to(THREAD, { kind: 'progress', progress: { phase: 'compacting' } }))
+
+    expect(api.calls).toEqual(['post', 'edit'])
+    expect(api.messages[0]?.text).toBe(`${TO}Compacting…`)
+  })
+
   // The one phase whose length roma does not control: a tool is named by Claude
   // Code's own description of it, which is the command itself. It is cut to
   // something that can be read at a glance, well before Chat's limit is in

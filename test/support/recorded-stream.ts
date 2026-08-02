@@ -177,6 +177,26 @@ export function withCompactionError(
 }
 
 /**
+ * The same recorded Compaction with its token figures taken off.
+ *
+ * `Compaction`'s fields are nullable everywhere in roma — a boundary that
+ * carried none is a fact rather than a zero — and no capture roma holds is
+ * missing them, so this is the only way to reach the branch that answers
+ * without numbers. `withCompactionError`'s discipline exactly: a real stream,
+ * with the one field under test changed.
+ */
+export function withoutCompactionTokens(events: readonly ClaudeEvent[]): ClaudeEvent[] {
+  return events.map((event) => {
+    if (event['subtype'] !== 'compact_boundary') return event
+    const { pre_tokens, post_tokens, ...metadata } = (event['compact_metadata'] ??
+      {}) as Record<string, unknown>
+    void pre_tokens
+    void post_tokens
+    return { ...event, compact_metadata: metadata }
+  })
+}
+
+/**
  * Push events at a fake process as NDJSON bytes.
  *
  * `chunkSize` decides where the chunk boundaries fall. The default sends each
@@ -322,13 +342,14 @@ export const GENERATING: readonly ClaudeEvent[] = recordedStream(
 ).turn(1)
 
 /**
- * The `/context` Readout, exactly as captured: `num_turns: 0`,
- * `total_cost_usd: 0`, the command's own output as `result`.
+ * The `/context` Relay, exactly as captured: `num_turns: 0`,
+ * `total_cost_usd: 0`, `modelUsage: {}`, the command's own output as `result`.
  *
- * Named here because it is the only recording of a *relayed* command roma holds,
- * and it is the right base for any other one.
+ * Named here because it is the only recording of a *free* relayed command roma
+ * holds, and it is the right base for any other one. The file keeps the name it
+ * was captured under, before ADR-0018 retired the word.
  */
-export const READOUT: readonly ClaudeEvent[] = recordedStream('readout-context').turn(1)
+export const FREE_RELAY: readonly ClaudeEvent[] = recordedStream('readout-context').turn(1)
 
 /**
  * The Turn an auto-Compaction happened inside, exactly as captured.
@@ -358,13 +379,49 @@ export const COMPACTION_FAILED: readonly ClaudeEvent[] = recordedStream(
 ).turn(2)
 
 /**
+ * A `/compact` somebody asked for, exactly as captured — ADR-0018's paid Relay.
+ *
+ * The same `system/status` sequence and the same `system/compact_boundary` as the
+ * auto path, differing in one field: `trigger: "manual"`. One reader serves both,
+ * which is the finding that let this be built without inventing anything.
+ *
+ * The terminal event is where it stops resembling a Task. **`num_turns: 0`**,
+ * `duration_api_ms: 0`, the top-level `usage` all zeros, and `result: ""` — while
+ * `total_cost_usd` moved by $0.0453 over 28,545ms and `modelUsage` moved by
+ * +1,978 output tokens. Two decisions rest on that pair: the drift check reads
+ * `modelUsage` because nothing else can see this, and roma writes the reply
+ * because Claude Code sends none.
+ */
+export const COMPACTED_MANUALLY: readonly ClaudeEvent[] = recordedStream(
+  'manual-compaction',
+).turn(4)
+
+/**
+ * A `/compact` on a thread with too little in it to summarise, exactly as
+ * captured.
+ *
+ * On the evidence the commonest failure of the manual path there is, because
+ * typing `/compact` into a short thread is exactly this. Free, instant — 29ms,
+ * `num_turns: 0`, no cost — `is_error: false`, and Claude Code writes the
+ * Caller's sentence itself, in both `compact_error` and the terminal `result`.
+ *
+ * **`compact_error` here is a sentence and not a code**, which is the seam
+ * ADR-0018 left for the implementation: `compaction.ts` classifies by code, so
+ * this would sort into `unexplained` and write an operator line about a Turn that
+ * was fine. What closes it is that roma knows whose Compaction this is.
+ */
+export const MANUAL_COMPACTION_REFUSED: readonly ClaudeEvent[] = recordedStream(
+  'manual-compaction-too-few-groups',
+).turn(2)
+
+/**
  * The same recorded Turn saying something else.
  *
  * For the case no capture can hold without spending the Shared Window again: an
  * `/effort current` answer. ADR-0016 measured what that command says, in prose,
  * against the pinned build — every shape is quoted in its verification section —
  * and this is how those sentences are put on a stream that is otherwise a real
- * relayed Readout, rather than hand-written from nothing. `withApiKeySource`'s
+ * relayed command, rather than hand-written from nothing. `withApiKeySource`'s
  * discipline exactly: the stream is real and the one field under test is the
  * only thing changed.
  */
@@ -383,15 +440,15 @@ export function withResultText(events: readonly ClaudeEvent[], text: string): Cl
 export const EFFORT_ANSWERS = {
   /** A level that landed: what `--effort <level>` produces. */
   at: (level: string): readonly ClaudeEvent[] =>
-    withResultText(READOUT, `Current effort level: ${level}`),
+    withResultText(FREE_RELAY, `Current effort level: ${level}`),
   /** `ultracode`, which reports itself with its description attached. */
   ultracode: (): readonly ClaudeEvent[] =>
     withResultText(
-      READOUT,
+      FREE_RELAY,
       'Current effort level: ultracode (xhigh + dynamic workflow orchestration; ' +
         'this session only)',
     ),
   /** No `--effort` at all — the sentence that names a level roma never asked for. */
   unpinned: (currently = 'high'): readonly ClaudeEvent[] =>
-    withResultText(READOUT, `Effort level: auto (currently ${currently})`),
+    withResultText(FREE_RELAY, `Effort level: auto (currently ${currently})`),
 } as const

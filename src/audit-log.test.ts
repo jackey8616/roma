@@ -57,7 +57,7 @@ describe('what a Task leaves behind', () => {
     expect(new AuditLog({ auditRoot: dir }).totalFor(MONTH)).toEqual({
       month: MONTH,
       tasks: 1,
-      readouts: 0,
+      relays: 0,
       costUsd: 0.0103129,
       unpriced: 0,
       unreadable: 0,
@@ -125,7 +125,7 @@ describe('adding a calendar month up', () => {
     expect(log.totalFor('2019-04')).toEqual({
       month: '2019-04',
       tasks: 0,
-      readouts: 0,
+      relays: 0,
       costUsd: 0,
       unpriced: 0,
       unreadable: 0,
@@ -288,17 +288,17 @@ describe('a record that cannot be written', () => {
   })
 })
 
-describe('telling a Readout from a Task', () => {
+describe('telling a Relay from a Task', () => {
   // The reason the field exists. Folded into `tasks`, a Conversation where
   // somebody checked `/context` forty times reads as forty Tasks.
   it('counts them apart', () => {
     const log = new AuditLog({ auditRoot: newDir() })
 
     log.record(entry())
-    log.record(entry({ kind: 'readout', taskId: 'readout-one', costUsd: 0 }))
-    log.record(entry({ kind: 'readout', taskId: 'readout-two', costUsd: 0 }))
+    log.record(entry({ kind: 'relay', taskId: 'relay-one', costUsd: 0 }))
+    log.record(entry({ kind: 'relay', taskId: 'relay-two', costUsd: 0 }))
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, readouts: 2 })
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, relays: 2 })
   })
 
   // A record written before ADR-0012 has no kind and can only ever have been a
@@ -311,15 +311,41 @@ describe('telling a Readout from a Task', () => {
 
     const [record] = log.readMonth(MONTH)
     expect(record?.kind).toBeUndefined()
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, readouts: 0, unreadable: 0 })
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, relays: 0, unreadable: 0 })
   })
 
   it('keeps the kind across a restart', () => {
     const dir = newDir()
-    new AuditLog({ auditRoot: dir }).record(entry({ kind: 'readout', costUsd: 0 }))
+    new AuditLog({ auditRoot: dir }).record(entry({ kind: 'relay', costUsd: 0 }))
 
     const [record] = new AuditLog({ auditRoot: dir }).readMonth(MONTH)
-    expect(record?.kind).toBe('readout')
+    expect(record?.kind).toBe('relay')
+  })
+
+  // **The ADR-0018 rename is a breaking change to the ledger, and this is what
+  // it breaks.** `readout` is what every Relay record written before the rename
+  // says, and it is now a kind this version cannot name — so those lines are
+  // dropped and their cost leaves the month's `costUsd`, which is the figure the
+  // Overflow cap is enforced against. Chosen with that in view: the alternative
+  // is a synonym that can never be deleted. It is not silent — the lines are
+  // counted in `unreadable` — and it is avoidable by scheduling, which is why
+  // this lands at a month boundary and the loss falls entirely in a closed month.
+  it('drops a record written under the retired spelling', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ costUsd: 0.01 }))
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), kind: 'readout', costUsd: 0.05, at: new Date().toISOString() })}\n`,
+    )
+
+    // The five cents are gone from the month, not merely uncounted as a Relay.
+    expect(log.totalFor(MONTH)).toMatchObject({
+      tasks: 1,
+      relays: 0,
+      unreadable: 1,
+      costUsd: 0.01,
+    })
   })
 
   // A kind this version cannot name is unreadable rather than assumed to be a
@@ -335,22 +361,24 @@ describe('telling a Readout from a Task', () => {
       `${JSON.stringify({ ...entry(), kind: 'something-later', at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, readouts: 0, unreadable: 1 })
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, relays: 0, unreadable: 1 })
   })
 
-  // What the record is insurance against. Nothing on the Readout list spends
-  // money on the pinned build, but the list is a person's judgement — so a cost
-  // that turns up on one is summed like any other, into the figure the Overflow
-  // cap is enforced on.
-  it('puts what a Readout spent into the month, if it ever spends anything', () => {
+  // What the record is insurance against, and since ADR-0018 it is also the
+  // ordinary case. Most of the Relay list is expected to cost nothing on the
+  // pinned build and the list is a person's judgement, so a cost that turns up
+  // on one of those is summed like any other — and a `/compact` is expected to
+  // cost money and is summed the same way. Either way it reaches the figure the
+  // Overflow cap is enforced on.
+  it('puts what a Relay spent into the month', () => {
     const log = new AuditLog({ auditRoot: newDir() })
 
     log.record(entry({ costUsd: 0.01 }))
-    log.record(entry({ kind: 'readout', taskId: 'drifted', costUsd: 0.05 }))
+    log.record(entry({ kind: 'relay', taskId: 'compacted', costUsd: 0.05 }))
 
     expect(log.totalFor(MONTH)).toMatchObject({
       tasks: 1,
-      readouts: 1,
+      relays: 1,
       costUsd: 0.060000000000000005,
     })
   })

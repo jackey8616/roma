@@ -20,7 +20,7 @@
  * pin), read out of that build's own alias table, and it must be re-audited when
  * the pin moves. Nothing enforces that — the version is named here so the drift
  * report's working-tree sweep lists this file under what rests on the pin, which
- * is enumeration rather than enforcement. `src/readouts.ts` carries the same line
+ * is enumeration rather than enforcement. `src/relays.ts` carries the same line
  * for the same reason.
  */
 

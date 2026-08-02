@@ -22,11 +22,18 @@ import {
 // #100 produced is of an *auto* Compaction, and `trigger` is
 // `E.enum(["manual","auto"])` — so half the enum had never been seen.
 //
-// roma has no code for a relayed `/compact` yet, so the frames below are written
-// by hand, exactly as ADR-0012 relays a Readout and ADR-0018 decided a Relay
-// carrying an argument would be written: command first, on stdin, as a
-// `{type:'user'}` frame. When the implementation lands, these strings are what
-// it has to produce.
+// roma had no code for a relayed `/compact` when this ran, so the frames below
+// are written by hand: command first, on stdin, as a `{type:'user'}` frame.
+// They are **left hand-written on purpose** now that `relayed` exists. This file
+// is the record of a measurement, and a measurement whose input is computed by
+// the code it was used to justify has stopped being evidence about anything —
+// the frame would follow `relayed` wherever a later edit took it, and the
+// captures beside it would silently stop describing what was sent.
+//
+// One of them is therefore already historical: arm A's frame carries the Caller
+// Marker between the command and the Caller's text, which is what ADR-0018
+// decided before the frame survey retired it. That is what was sent, and it is
+// what this file has to go on saying.
 //
 // **`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` is deliberately absent.** It is the lever
 // `compaction.live.test.ts` leans on and it is the wrong one here: it lowers the
@@ -364,8 +371,12 @@ describe('a manual /compact that works', () => {
       // ADR-0012's drift check was "a Readout reporting `num_turns !== 0` goes
       // to the Operator Log", and ADR-0018 replaced it on the grounds that it
       // "would fire on every legitimate `/compact`, and a check that cries wolf
-      // is a check somebody mutes". It would not fire at all. Whatever replaces
-      // it has to read the cost.
+      // is a check somebody mutes". It would not fire at all.
+      //
+      // What replaced it reads the `modelUsage` output-token delta rather than
+      // the cost: model work is what the membership rule is about, and money is
+      // a function of it that also moves with pricing, plans and which model
+      // answered.
       expect(compact.turns).toBe(0)
       expect(compact.result['duration_api_ms']).toBe(0)
     } finally {

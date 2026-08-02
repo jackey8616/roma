@@ -8,6 +8,16 @@
  * the rest are fine — is the shape that fails silently on the release that adds
  * a code, which is exactly what "anything that is not `allowed` is spent" did
  * one file over.
+ *
+ * **This judges the Compaction nobody asked for, and only that one.** The whole
+ * file reads a *code*, which is what the automatic path sends; a `/compact`
+ * somebody typed carries a **sentence** in the same field on the pinned build —
+ * `"Not enough messages to compact."` — so putting it through here would sort
+ * the commonest failure of that path into `unexplained` and write an operator
+ * line about a Turn that was fine. Reconciled in the Core rather than here, and
+ * not by adding sentences to the lists below: a Compaction that failed inside a
+ * Relay roma sent is that Relay's own answer, so the Caller gets Claude Code's
+ * words and nothing reaches this function (ADR-0018).
  */
 
 /**

@@ -128,12 +128,15 @@ describe('reading a message as a Command', () => {
   })
 
   // Every slash command that is not roma's is somebody else's — Claude Code's to
-  // answer as a Readout if it is on ADR-0012's list, and work if it is not.
+  // answer as a Relay if it is on the ADR-0012 list, and work if it is not.
   it('claims no slash command that is not its own', () => {
+    // `/compact` is a Relay since ADR-0018 and `/newsletter` is nobody's; both
+    // have to fall through here, and for the same reason.
     expect(readCommand('/compact')).toBeNull()
+    expect(readCommand('/compact keep the ADRs')).toBeNull()
     expect(readCommand('/newsletter')).toBeNull()
-    // A Readout, which `readReadout` answers — and only because nothing here
-    // did. Asserted from this side too, since a Command shadows one silently.
+    // A Relay, which `readRelay` answers — and only because nothing here did.
+    // Asserted from this side too, since a Command shadows one silently.
     expect(readCommand('/context')).toBeNull()
   })
 

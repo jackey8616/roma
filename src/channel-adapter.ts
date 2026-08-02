@@ -128,6 +128,24 @@ export type TaskProgress =
     }
   | {
       /**
+       * A Compaction is under way, and the stream will say nothing else until it
+       * finishes — 28,517ms, in the longest capture roma holds.
+       *
+       * The `tool` phase's problem with a different cause, and it arrives two
+       * ways: inside somebody's ordinary Turn, where auto-compaction crossed the
+       * threshold, and as the whole of a `/compact` somebody asked for. An
+       * Adapter has no reason to tell those apart — what a person watching needs
+       * is that the silence is work rather than a hang.
+       *
+       * Carries nothing. `compact_metadata`'s figures arrive with the *boundary*,
+       * which is the moment it is over, so there is no progress to report while
+       * it runs — and an Acknowledgement saying how much has been discarded so
+       * far would be saying what the reply is about to say.
+       */
+      readonly phase: 'compacting'
+    }
+  | {
+      /**
        * Thinking, with Claude Code's running estimate of how much.
        *
        * Never what about. `thinking_delta` carries `"thinking": ""` and a token
@@ -355,7 +373,7 @@ export type OutboundInstruction = TaskAddress &
          * The two whose whole outcome is "there was something to do, or there
          * was not". `/model` has an answer rather than an outcome — which model,
          * which ones are on offer, why a name was refused — so it comes back as
-         * a `result` or a `failure`, the way a Readout's output does, and an
+         * a `result` or a `failure`, the way a Relay's output does, and an
          * Adapter needs to learn nothing new to post it.
          */
         readonly command: Exclude<Command, 'model'>

@@ -189,7 +189,7 @@ describe('the image defaults the one path whose loss is by design', () => {
  */
 describe('the lists that rest on the pin say so', () => {
   it.each([
-    ['src/readouts.ts', 'the Claude Code commands roma relays as themselves'],
+    ['src/relays.ts', 'the Claude Code commands roma relays as themselves'],
     ['src/model-menu.ts', 'the models roma offers a Caller'],
   ])('%s names the version it was judged against', (file) => {
     expect(fromRepo(file)).toContain(CLAUDE_CODE_VERSION)

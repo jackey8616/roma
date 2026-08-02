@@ -43,10 +43,38 @@ export interface Turn {
    * How many model Turns this drove, or null where the event did not say.
    *
    * Zero for a message Claude Code answered locally, which is what every entry
-   * on the Readout list does on the pinned build. The Core reads it to notice
-   * when one of them has stopped doing that — see ADR-0012.
+   * on the Relay list reports on the pinned build — including the one that
+   * spends money. That is why the drift check no longer reads it; see
+   * `outputTokens` below and ADR-0018.
+   *
+   * **Nothing in the Core reads this any more**, and it is kept rather than
+   * deleted for one reason: it is the field the seam 2 tests assert *is* zero on
+   * a paid Relay, which is the measurement the drift check's new key exists
+   * because of. A reading nothing depends on and a reading nothing records are
+   * different things, and deleting it would lose the second.
    */
   readonly turns: number | null
+  /**
+   * The output tokens this Turn produced — what it added, not the running total.
+   *
+   * `modelUsage` is cumulative for the process the way `total_cost_usd` is, so
+   * this is differenced here for the same reason. It is what the Relay drift
+   * check reads: an entry the list declares free that produces output tokens is
+   * doing model work, whatever `num_turns` says about it.
+   *
+   * **Never negative**, unlike `costUsd`, and `#outputTokenMark` is where that is
+   * argued — the per-model breakdown is not stable across a process's life, and
+   * one capture roma holds walks it backwards. This is one side of a
+   * one-directional alarm rather than a figure anything is billed from, so it is
+   * floored rather than reported faithfully.
+   *
+   * Null where the terminal event carried no `modelUsage` at all, which no
+   * capture roma holds does — a free Relay reports an empty object and therefore
+   * zero. Null rather than zero for the reason `costUsd` is: a build that stopped
+   * reporting is a different fact from a Turn that produced nothing, and only one
+   * of them should be able to retire a check.
+   */
+  readonly outputTokens: number | null
   /** The raw terminal event, for anything this interface does not name. */
   readonly result: ClaudeEvent
 }
@@ -299,6 +327,33 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
    * process therefore has nothing to carry forward.
    */
   #cumulativeCostUsd = 0
+  /**
+   * The high-water mark of `modelUsage`'s output-token total, summed across
+   * models. Turn output is what a terminal event reports above it.
+   *
+   * Zero for every process for the reason `#cumulativeCostUsd` is: the totals are
+   * the process's rather than the Session's, so a resumed process has nothing to
+   * carry forward.
+   *
+   * **A high-water mark rather than the last value, and `total_cost_usd` is not
+   * treated this way.** `modelUsage` is a per-model breakdown, and the breakdown
+   * is not stable across a process's life: in `three-turns-one-process.jsonl` —
+   * one process, the pinned build — the third Turn drops the `claude-haiku-4-5`
+   * entry altogether and reports fewer `outputTokens` for `claude-sonnet-5` than
+   * the Turn before it did, while `total_cost_usd` climbs as it should. Read as a
+   * plain delta that is a *negative* Turn, which is harmless in itself; what is
+   * not harmless is the baseline it would leave behind, because the next Turn to
+   * report normally would then show a large positive delta and the drift check
+   * would accuse an innocent entry. A check that cries wolf is a check somebody
+   * mutes.
+   *
+   * So a reading that goes backwards is treated as a reading roma cannot use: the
+   * mark holds, and that Turn's output is reported as zero. What it costs is that
+   * real work done immediately after such a reading is under-counted, which is
+   * the right way round for a one-directional alarm — it can fail to fire, and it
+   * cannot fire wrongly.
+   */
+  #outputTokenMark = 0
 
   constructor(options: ClaudeSessionOptions) {
     super()
@@ -529,6 +584,13 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     // is the cumulative-total bug wearing a different hat.
     const previousTotalUsd = this.#cumulativeCostUsd
     if (result.cumulativeCostUsd !== null) this.#cumulativeCostUsd = result.cumulativeCostUsd
+    // Moved on the same terminal event, so the two figures cannot come to
+    // disagree about which Turn they belong to — but only ever upwards, which is
+    // where they differ. See `#outputTokenMark`.
+    const previousMark = this.#outputTokenMark
+    if (result.cumulativeOutputTokens !== null) {
+      this.#outputTokenMark = Math.max(previousMark, result.cumulativeOutputTokens)
+    }
     if (pending === null) return
 
     const delta =
@@ -537,6 +599,10 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     const turn: Turn = {
       text: result.text ?? pending.assistantText.join(''),
       costUsd: delta,
+      outputTokens:
+        result.cumulativeOutputTokens === null
+          ? null
+          : Math.max(0, result.cumulativeOutputTokens - previousMark),
       durationMs: Date.now() - pending.startedAt,
       isError: result.isError,
       subtype: result.subtype,

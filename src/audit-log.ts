@@ -41,32 +41,50 @@ function isCompaction(value: unknown): boolean {
   )
 }
 
-/** What kind of work one record describes. */
-export type AuditKind = 'task' | 'readout'
+/**
+ * What kind of work one record describes — the shape the message took on the
+ * wire, and nothing about what it cost.
+ *
+ * Two values rather than three, deliberately. ADR-0018 separated the shape of a
+ * message from what governs it, so a third value naming a *paid* Relay would
+ * smuggle cost back into a field that is not about cost. What a Relay cost is
+ * already on the record, in `costUsd`, and who asked for a Compaction is
+ * `(kind, compaction.trigger)` between them: `task`+`auto` is a bill for a thread
+ * the whole Conversation filled, `relay`+`manual` is a bill for a `/compact`.
+ */
+export type AuditKind = 'task' | 'relay'
 
 /** The same, for reading a record back off disk. */
-const KINDS: readonly AuditKind[] = ['task', 'readout']
+const KINDS: readonly AuditKind[] = ['task', 'relay']
 
-/** One Task — or one Readout — written down. */
+/** One Task — or one Relay — written down. */
 export interface AuditRecord {
   /** When the Task ended, ISO-8601 in UTC. */
   readonly at: string
   readonly taskId: string
   /**
-   * Whether this was a Task or a Readout (ADR-0012).
+   * Whether this was a Task or a Relay (ADR-0012, ADR-0018).
    *
-   * Optional, and **absent means `task`**. Every record roma wrote before
-   * Readouts existed lacks it, and `readRecord` drops a line it cannot read —
-   * so requiring this would make all of them unreadable at once, silently
-   * emptying the month the Overflow cap is enforced against. That is the
-   * reasoning `callerName` already carries, and it is the same failure.
+   * Optional, and **absent means `task`**. Every record roma wrote before Relays
+   * existed lacks it, and `readRecord` drops a line it cannot read — so requiring
+   * this would make all of them unreadable at once, silently emptying the month
+   * the Overflow cap is enforced against. That is the reasoning `callerName`
+   * already carries, and it is the same failure.
    *
-   * A Readout is recorded at all because the list it comes from is maintained by
-   * a person and can be wrong. Nothing on it spends money on the pinned build,
-   * but "ought to be free" is an assumption, and writing no record would bake
-   * that assumption into the ledger — the one place that has to survive it being
-   * false. On the day an entry becomes a model Turn, the money lands here
-   * instead of nowhere.
+   * A free Relay is recorded at all because the list it comes from is maintained
+   * by a person and can be wrong. "Ought to be free" is an assumption, and
+   * writing no record would bake it into the ledger — the one place that has to
+   * survive it being false. On the day an entry becomes a model Turn, the money
+   * lands here instead of nowhere.
+   *
+   * **This value was spelled `readout` until ADR-0018, and no legacy spelling is
+   * kept.** Records written before the rename are dropped by `readRecord`,
+   * counted in `unreadable`, and absent from their month's `costUsd` — a genuine
+   * breaking change to the ledger, chosen with it in view because the alternative
+   * is a synonym that can never be deleted and has to be explained to every
+   * future reader of a two-value enum with three values in it. It is not silent,
+   * and it is avoidable by scheduling: deployed at a month boundary the loss is
+   * entirely in a closed month, and the live Overflow cap is untouched.
    */
   readonly kind?: AuditKind
   /**
@@ -277,24 +295,26 @@ export type UnstampedRecord = Omit<AuditRecord, 'at'>
 export interface AuditTotal {
   readonly month: string
   /**
-   * Tasks in the month. Readouts are **not** counted here.
+   * Tasks in the month. Relays are **not** counted here.
    *
    * Kept apart because this number is read as "how much work did this month
-   * ask for", and folding Readouts in would quietly turn it into "how many
+   * ask for", and folding Relays in would quietly turn it into "how many
    * messages were sent" — a Conversation where somebody checked `/context`
    * forty times would read as forty Tasks. Their cost is another matter and is
    * in `costUsd` below.
    */
   readonly tasks: number
-  /** Readouts in the month, counted separately for the reason above. */
-  readonly readouts: number
+  /** Relays in the month, counted separately for the reason above. */
+  readonly relays: number
   /**
-   * What the month spent, Readouts included.
+   * What the month spent, Relays included.
    *
-   * Everything that cost anything, whatever kind of thing it was. A Readout is
-   * expected to cost nothing and is summed anyway: the moment one does not, the
-   * cap this feeds is the thing that has to know, and a total that filtered by
-   * kind would be enforcing against a figure it had chosen not to see.
+   * Everything that cost anything, whatever kind of thing it was. Most of the
+   * Relay list is expected to cost nothing and is summed anyway: the moment one
+   * of those does not, the cap this feeds is the thing that has to know, and a
+   * total that filtered by kind would be enforcing against a figure it had
+   * chosen not to see. Since ADR-0018 one entry is expected to cost money, and
+   * this is the sentence that already covered it.
    */
   readonly costUsd: number
   /**
@@ -469,7 +489,7 @@ export class AuditLog {
    */
   totalFor(month: string, credential?: CredentialKind): AuditTotal {
     let tasks = 0
-    let readouts = 0
+    let relays = 0
     let costUsd = 0
     let unpriced = 0
     let unreadable = 0
@@ -482,9 +502,11 @@ export class AuditLog {
         continue
       }
       if (credential !== undefined && record.credential !== credential) continue
-      // A record written before Readouts existed carries no kind and is a Task,
-      // which is the only thing it can have been.
-      if (record.kind === 'readout') readouts += 1
+      // A record written before Relays existed carries no kind and is a Task,
+      // which is the only thing it can have been. A record written before the
+      // ADR-0018 rename carries `readout` and never reaches here at all —
+      // `readRecord` drops it, and it is counted in `unreadable` above.
+      if (record.kind === 'relay') relays += 1
       else tasks += 1
       // Counted as having happened and left out of the money, which is the only
       // honest pair of answers: it happened, and what it cost is not knowable.
@@ -493,7 +515,7 @@ export class AuditLog {
       if (!paidAsIntended(record)) mismatched += 1
     }
 
-    return { month, tasks, readouts, costUsd, unpriced, unreadable, mismatched }
+    return { month, tasks, relays, costUsd, unpriced, unreadable, mismatched }
   }
 
   /** A month nothing was written in reads as a month with nothing in it. */

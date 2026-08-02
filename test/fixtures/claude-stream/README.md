@@ -25,7 +25,7 @@ are computed from it.
 | `generation-partial-messages.jsonl` | `q5-A-gen-flag-on-96264fb0.jsonl` | `q5.mjs` | A 72-second pure-generation Turn with `--include-partial-messages` on: 209 events, worst gap 2641ms, and the complete 17706-character answer arriving *again* as its own `assistant` event before the terminal result. |
 | `generation-no-partial-messages.jsonl` | `q5-B-gen-flag-off-06bce022.jsonl` | `q5.mjs` | The control for the above, same prompt with the flag off: 6 events, the whole answer after 66747ms of dead stream. |
 | `tool-use-partial-messages.jsonl` | `q5-C-tool-flag-on-c2ac815b.jsonl` | `q5.mjs` | A tool-using Turn with the flag on — 25339ms of silence while the tool ran, against a largest generating gap of 208ms. |
-| `readout-context.jsonl` | captured for ADR-0012 | — | A Readout: `/context` with the Caller Marker written *after* it, relayed exactly as roma relays one. `num_turns: 0` and `total_cost_usd: 0` — the command answered locally and the model was never called — with the command's own output as `result`. What the marker-first version does instead is a real Turn at $0.0549, which is the fault ADR-0012 exists to fix. |
+| `readout-context.jsonl` | captured for ADR-0012 | — | A free Relay: `/context` with the Caller Marker written *after* it, relayed exactly as roma relays one. The **file name is historical** — ADR-0018 retired the word Readout, and a capture is named for what it was when it was taken. `num_turns: 0` and `total_cost_usd: 0` — the command answered locally and the model was never called — with the command's own output as `result`. What the marker-first version does instead is a real Turn at $0.0549, which is the fault ADR-0012 exists to fix. |
 | `compaction-auto.jsonl` | captured for #98 | — | An auto-Compaction, on stdout: `system/compact_boundary` with `compact_metadata.trigger: "auto"`, 61486 tokens in and 1375 out over 19487ms. Also the cost claim #98 rests on, in one file — two byte-identical `OK` messages, the quiet one $0.0186 over 1 turn, the one the Compaction landed inside $0.0917 over 2. And a `compact_result: "failed"` (`too_few_groups`) *earlier in the same run*, during a healthy Turn, which is why "failed therefore dead" is not a rule roma can use. |
 | `compaction-failed.jsonl` | captured for #98 | — | The same failure on its own, provoked with the threshold under the floor: `system/status` carrying `compact_result: "failed"` and `compact_error: "too_few_groups"` — a code rather than the error text. The Session then served the next Turn normally at $0.0104. |
 | `manual-compaction.jsonl` | captured for #89 | — | A **manual** Compaction, which is the half of `trigger: E.enum(["manual","auto"])` nobody had seen: `compact_boundary` with `compact_metadata.trigger: "manual"`, 31953 tokens in and 1764 out over 28517ms. Beside it, the figure that breaks a design: the terminal event reports `num_turns: 0` and `duration_api_ms: 0` for a message that moved `total_cost_usd` by $0.0453 — so a paid Relay cannot be told from a free one by anything except cost. |
@@ -105,7 +105,7 @@ either, and it is left in because editing a capture is how a fixture stops being
 evidence.
 
 This is also the only capture that cost nothing to take, which is the whole
-point of it: a Readout drives no Turn.
+point of it: a free Relay drives no Turn.
 
 `resume-lost.jsonl` is the second one that cost nothing, for a different reason:
 a `--resume` the CLI cannot honour exits before it calls anything, which is also

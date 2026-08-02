@@ -7,6 +7,7 @@ import {
   wasInterrupted,
   type Turn,
 } from './claude-session.js'
+import type { ClaudeEvent } from './stream-events.js'
 import { FakeClaude } from '../test/support/fake-claude.js'
 import { feed, recordedStream, withTotalCostUsd } from '../test/support/recorded-stream.js'
 
@@ -514,5 +515,89 @@ describe('when the process misbehaves', () => {
     feed(claude.process, stream.turn(3))
 
     expect((await turn).costUsd).toBeCloseTo(0.0019952, 7)
+  })
+})
+
+// What the Relay drift check reads, and the only field that can see a
+// `type:"local"` command doing model work: on a manual `/compact` the top-level
+// `usage` is all zeros, `duration_api_ms` is 0 and `num_turns` is 0, while
+// `modelUsage` moves.
+describe('per-Turn output tokens', () => {
+  it('reports what the Turn added rather than the process total', async () => {
+    const { claude, session } = newSession()
+    const stream = recordedStream('manual-compaction')
+    const ended: Turn[] = []
+    session.on('turn-end', (turn) => ended.push(turn))
+    session.start()
+
+    for (const n of [1, 2, 3, 4]) {
+      const turn = session.send(`message ${n}`)
+      feed(claude.process, stream.turn(n))
+      await turn.catch(() => {})
+    }
+
+    // 21 → 28 → 36 → 2014 across the four, summed across both models the capture
+    // names. The fourth is the `/compact`, and it is the only one of the four
+    // that reports `num_turns: 0`.
+    expect(ended.map((turn) => turn.outputTokens)).toEqual([21, 7, 8, 1978])
+    expect(ended.map((turn) => turn.turns)).toEqual([1, 1, 1, 0])
+  })
+
+  // The empty object a free Relay reports, which is a Turn that produced nothing
+  // rather than a build that stopped saying.
+  it('reads an empty modelUsage as no output at all', async () => {
+    const { claude, session } = newSession()
+    session.start()
+
+    const turn = session.send('/context\n\n<from>Ada (users/17)</from>')
+    feed(claude.process, recordedStream('readout-context').turn(1))
+
+    expect((await turn).outputTokens).toBe(0)
+  })
+
+  // **The reading that goes backwards, and it is a real capture on the pinned
+  // build.** One process: the third Turn drops the `claude-haiku-4-5` entry and
+  // reports fewer `outputTokens` for `claude-sonnet-5` than the Turn before it,
+  // while `total_cost_usd` climbs as it should. Reported faithfully that is a
+  // negative Turn and a baseline left below where it had been — and the *next*
+  // ordinary Turn would then look like a burst of model work, on an entry that
+  // did nothing wrong. So the mark holds and the Turn reports zero.
+  it('never reports a negative Turn, however the breakdown moves', async () => {
+    const { claude, session } = newSession()
+    const stream = recordedStream('three-turns-one-process')
+    const ended: Turn[] = []
+    session.on('turn-end', (turn) => ended.push(turn))
+    session.start()
+
+    for (const n of [1, 2, 3]) {
+      const turn = session.send(`message ${n}`)
+      feed(claude.process, stream.turn(n))
+      await turn.catch(() => {})
+    }
+
+    expect(ended.map((turn) => turn.outputTokens)).toEqual([17, 0, 0])
+  })
+
+  // A build that stopped reporting the object is a different fact from a Turn
+  // that produced nothing, and only one of the two should be able to retire the
+  // check that reads this.
+  it('says nothing rather than zero where the field is absent', async () => {
+    const { claude, session } = newSession()
+    session.start()
+
+    const turn = session.send('hello')
+    feed(
+      claude.process,
+      recordedStream('three-turns-one-process')
+        .turn(1)
+        .map((event) => {
+          if (event.type !== 'result') return event
+          const { modelUsage, ...rest } = event
+          void modelUsage
+          return rest as ClaudeEvent
+        }),
+    )
+
+    expect((await turn).outputTokens).toBeNull()
   })
 })
