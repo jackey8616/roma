@@ -20,36 +20,29 @@ looking at Claude Code.
 ### Verification status
 
 Read out of the pinned build's bundle (2.1.220, ADR-0007) with `grep`, in this
-repo's container. **Weaker evidence than ADR-0012's**, and the difference is
-worth naming: that ADR ran the binary and read the stream. This one read a
-minified object literal. It is enough to establish that the strings exist and how
-Claude Code groups them, and it is not enough to establish behaviour.
+repo's container. The readings are in
+[`docs/command-spellings-verification.md`](../command-spellings-verification.md),
+beside ADR-0017's, because the two are one subject.
 
-**Read — the descriptor.**
+**Weaker evidence than ADR-0012's**, and the difference is worth naming: that ADR
+ran the binary and read the stream. This one read a minified object literal. It is
+enough to establish that the strings exist and how Claude Code groups them, and it
+is not enough to establish behaviour.
 
-```
-{type:"local", name:"clear",
- description:"Start a new session with empty context; previous session stays on disk",
- aliases:["reset","new"], supportsNonInteractive:!0}
-```
+**Read — the descriptor.** `clear` is the name, with `description:"Start a new
+session with empty context; previous session stays on disk"` and
+`aliases:["reset","new"]`. **So roma answers to the alias and not to the name**,
+which is the whole of the fault below.
 
-So `clear` is the name and `new` is one of two aliases on it. roma answers to the
-alias and not to the name.
-
-**Read — `/stop` collides too.** `{type:"local", name:"stop",
-supportsNonInteractive:!0, description:"Stop this background session; transcript
-and worktree are kept"}`. roma's `/stop` shadows it. Recorded because it is the
+**Read — `/stop` collides too**, and roma's shadows it. Recorded because it is the
 same class of fact and somebody will find it later; nothing here changes because
 of it, since the two mean close enough to the same thing that shadowing is the
 outcome anybody would want.
 
 **Not verified — what `/clear` costs today.** The claim below that it is billed
 as prose is ADR-0012's mechanism applied to one more string, not a fresh
-measurement. That ADR verified the mechanism directly (`attribution.ts` writes
-the Caller Marker first, so the frame does not begin with a slash, so Claude Code
-sees prose) and measured one instance of it at `num_turns: 1` and
-`total_cost_usd: 0.0549`. `/clear` takes the same path for the same reason. The
-figure is that measurement's, quoted for scale rather than re-measured.
+measurement. `/clear` takes the same path for the same reason, and ADR-0012's
+`total_cost_usd: 0.0549` is quoted for scale rather than re-measured.
 
 ## Context
 

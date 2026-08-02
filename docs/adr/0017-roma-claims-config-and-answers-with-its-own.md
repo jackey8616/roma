@@ -17,41 +17,29 @@ claimed spelling should *do*.
 
 Measured on the pinned build (2.1.220, ADR-0007) on 2026-08-01, in the same
 credential-free harness ADR-0016 describes. Every case is `num_turns: 0`,
-`total_cost_usd: 0`.
+`total_cost_usd: 0`. The measurements are in
+[`docs/command-spellings-verification.md`](../command-spellings-verification.md),
+beside ADR-0013's, because the two are one subject.
 
-**Measured — `/config` is non-interactive on this build, and it sets things.**
+**Measured — `/config` is non-interactive on this build, and it sets things.** It
+declares two descriptors the way `/model` does, and the one that answers under
+`-p` is `{supportsNonInteractive:!0, description:"Set a setting by key"}`. So
+ADR-0012's denylist case was right about this string, and this ADR is that case
+being acted on rather than corrected.
 
-```js
-ic_  = {aliases:["settings"], type:"local-jsx", name:"config",
-        description:"Open settings", argumentHint:"[key=value]", …}
-iUs  = {type:"local", name:"config", aliases:["settings"],
-        supportsNonInteractive:!0, description:"Set a setting by key",
-        argumentHint:"key=value…"}
-```
+**Measured — what each form does.** Bare `/config` returns a usage list of 35
+settable keys and writes nothing. `/config theme=dark` replies `Set Theme to
+dark` **and writes the settings file under `CLAUDE_CONFIG_DIR`** — observed
+directly, as a `settings.json.tmp.<pid>.<hash>` left behind by the atomic write
+in a run killed mid-flight. An unknown key is refused without a write.
 
-So ADR-0012's denylist case was right about this string, and this ADR is that
-case being acted on rather than corrected.
-
-**Measured — what each form does.**
-
-| message | reply | side effect |
-| --- | --- | --- |
-| `/config` | the usage list: 35 settable keys | none |
-| `/config theme=dark` | `Set Theme to dark` | writes the settings file under `CLAUDE_CONFIG_DIR` |
-| `/config effortLevel=max` | `effortLevel isn't a /config setting. Run /config to see what's available.` | none |
-
-The write was observed directly: a `settings.json.tmp.<pid>.<hash>` left in the
-throwaway config dir by the atomic write, in a run killed mid-flight.
+That write is the disqualifying fact, because roma passes one config dir to every
+spawn.
 
 **Measured — the keys, and two of them matter more than the rest.** The list
-includes:
-
-```
-model=default|sonnet|opus|haiku|best|sonnet[1m]|opusplan
-workflows=true|false
-workflowSizeGuideline=unrestricted|small|medium|large
-permissionMode=default|plan|acceptEdits|auto|dontAsk
-```
+includes `model=…`, `workflows`, `workflowSizeGuideline` and `permissionMode` —
+the first a second door onto what ADR-0014's Menu bounds, the next two the
+switches ADR-0016 keeps `ultracode` away from Callers for.
 
 **Not measured — whether a relayed `/config model=…` actually moves a running
 Session's model.** It was not measured because the decision does not turn on it:
