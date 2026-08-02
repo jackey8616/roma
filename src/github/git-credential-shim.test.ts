@@ -3,10 +3,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { FreshTokens } from '../fresh-tokens.js'
 import { MINTER_SOCKET_VAR, SESSION_ID_VAR, socketPathIn } from '../shim-protocol.js'
 import { ShimServer, type ShimLogRecord } from '../shim-server.js'
-import { FakeMinter } from '../../test/support/fake-minter.js'
+import { FakeMinter, fakeServedReaches } from '../../test/support/fake-minter.js'
 import { gitConfig } from './shims.js'
 
 /**
@@ -52,7 +51,7 @@ async function pointGitAtRoma(minter = new FakeMinter()) {
   const log: ShimLogRecord[] = []
   const server = await ShimServer.listen({
     socketPath: socketPathIn(dir),
-    tokens: new FreshTokens({ minter }),
+    reaches: fakeServedReaches({ minter }),
     taskFor: () => 'the-task',
     log: (record) => log.push(record),
   })

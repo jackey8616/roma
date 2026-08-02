@@ -1,8 +1,13 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { CloudMinter, Installation, Minter, MintedToken } from '../../src/minter.js'
-import type { CloudOptions, MintingOptions } from '../../src/startup.js'
+import type { CloudMinter } from '../../src/cloud/google-cloud-minter.js'
+import { cloudReach, noCloudReach, NO_CLOUD_REACH } from '../../src/cloud/reach.js'
+import { FreshTokens } from '../../src/fresh-tokens.js'
+import type { Installation, InstallationMinter } from '../../src/github/installation.js'
+import type { AvailableReach, MintedToken, Reach, Reaches } from '../../src/reach.js'
+import type { ServedReaches } from '../../src/shim-server.js'
+import type { ShimsOptions } from '../../src/startup.js'
 
 /** An hour, which is how long a real Installation Token lasts. */
 const HOUR_MS = 60 * 60_000
@@ -23,7 +28,7 @@ export interface FakeMinterOptions {
  * that blocks on an unreachable Installation — is roma's, and all of it can be
  * asserted against this without a private key, a network, or a real GitHub App.
  */
-export class FakeMinter implements Minter {
+export class FakeMinter implements InstallationMinter {
   /** Every token this has produced, in order. Tokens are `token-1`, `token-2`. */
   readonly minted: MintedToken[] = []
   /** How many times the Installation has been asked for. */
@@ -118,33 +123,90 @@ export class FakeCloudMinter implements CloudMinter {
   }
 }
 
-/** A Cloud Reach for `startRoma`, with a fake announcement and nothing real. */
-export function fakeCloud(overrides: Partial<CloudOptions> = {}): CloudOptions & {
-  readonly minter: FakeCloudMinter
-} {
-  const minter = (overrides.minter as FakeCloudMinter | undefined) ?? new FakeCloudMinter()
+/**
+ * roma's Reach on the forge, with a fake announcement and nothing real.
+ *
+ * Built here rather than by `githubReach` because these tests are about the boot,
+ * the socket and the ordering — not about the paragraph an agent reads. A short
+ * announcement is what makes `--append-system-prompt` assertable at all.
+ */
+export function fakeCodeReach(minter: FakeMinter = new FakeMinter()): AvailableReach<'code'> {
+  let installation: Installation | null = null
   return {
+    credential: 'code',
     minter,
-    announce: overrides.announce ?? ((reach) => `acts as ${reach.account}`),
+    prove: async () => {
+      installation = await minter.installation()
+      return { account: installation.account }
+    },
+    announce: () => {
+      if (installation === null) throw new Error('announced before proving')
+      return `reaches ${installation.repositories.join(', ')}`
+    },
   }
 }
 
 /**
- * Everything `startRoma` needs to put a credential in front of a Session, with
- * nothing real behind it.
+ * roma's Reach on the cloud, or the one a deployment without a key has.
  *
- * The socket directory is a throwaway of its own rather than anything under the
- * test's work root, which is the same separation the real thing keeps: a socket
- * under a tree that gets reclaimed is every credential request failing at once.
+ * Null gives the real unavailable Reach rather than a stand-in, because the
+ * sentence it carries is what several tests assert against.
  */
-export function fakeMinting(overrides: Partial<MintingOptions> = {}): MintingOptions & {
-  readonly minter: FakeMinter
-} {
-  const minter = (overrides.minter as FakeMinter | undefined) ?? new FakeMinter()
+export function fakeCloudReach(minter: FakeCloudMinter | null): Reach<'cloud'> {
+  if (minter === null) return noCloudReach()
+  // The real Reach, with only the announcement swapped. How it proves and how it
+  // refuses are what these tests are about, and a fixture that reimplemented
+  // either would be asserting itself.
+  return { ...cloudReach(minter), announce: () => `acts as ${minter.account}` }
+}
+
+/** One Reach per credential, with nothing real behind either. */
+export function fakeReaches({
+  minter = new FakeMinter(),
+  cloudMinter = null,
+}: {
+  readonly minter?: FakeMinter
+  readonly cloudMinter?: FakeCloudMinter | null
+} = {}): Reaches {
+  return { code: fakeCodeReach(minter), cloud: fakeCloudReach(cloudMinter) }
+}
+
+/**
+ * roma's own directory, as `startRoma` wants it.
+ *
+ * A throwaway of its own rather than anything under the test's work root, which
+ * is the same separation the real thing keeps: a socket under a tree that gets
+ * reclaimed is every credential request failing at once.
+ */
+export function fakeShims(overrides: Partial<ShimsOptions> = {}): ShimsOptions {
   return {
-    minter,
-    shimDir: overrides.shimDir ?? mkdtempSync(join(tmpdir(), 'roma-shims-')),
+    dir: overrides.dir ?? mkdtempSync(join(tmpdir(), 'roma-shims-')),
     gitConfig: overrides.gitConfig ?? '[credential]\n\tuseHttpPath = true\n',
-    announce: overrides.announce ?? ((installation) => `reaches ${installation.repositories.join(', ')}`),
+  }
+}
+
+/**
+ * What the socket serves, with nothing real behind either Reach.
+ *
+ * `startRoma` builds this from the Reaches it proved; a test that is about the
+ * socket rather than about the boot builds it directly. No cloud minter gives the
+ * unavailable arm carrying roma's real sentence, because what several of those
+ * tests assert is exactly that sentence.
+ */
+export function fakeServedReaches({
+  minter = new FakeMinter(),
+  cloudMinter = null,
+  account = 'a-team',
+}: {
+  readonly minter?: FakeMinter
+  readonly cloudMinter?: FakeCloudMinter | null
+  readonly account?: string | null
+} = {}): ServedReaches {
+  return {
+    code: { tokens: new FreshTokens({ minter }), account },
+    cloud:
+      cloudMinter === null
+        ? { unavailable: NO_CLOUD_REACH }
+        : { tokens: new FreshTokens({ minter: cloudMinter }), account: cloudMinter.account },
   }
 }

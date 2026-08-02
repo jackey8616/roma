@@ -4,10 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { FreshTokens } from '../fresh-tokens.js'
 import { MINTER_SOCKET_VAR, SESSION_ID_VAR, socketPathIn } from '../shim-protocol.js'
 import { ShimServer } from '../shim-server.js'
-import { FakeMinter } from '../../test/support/fake-minter.js'
+import { FakeMinter, fakeServedReaches } from '../../test/support/fake-minter.js'
 
 /**
  * The `gh` Shim, against a stub that reports the environment it was started
@@ -45,7 +44,7 @@ async function shimInFrontOf(stub: string, minter = new FakeMinter()) {
 
   const server = await ShimServer.listen({
     socketPath: socketPathIn(dir),
-    tokens: new FreshTokens({ minter }),
+    reaches: fakeServedReaches({ minter }),
     taskFor: () => null,
     log: () => {},
   })

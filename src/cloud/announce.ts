@@ -1,5 +1,3 @@
-import type { CloudReach } from '../minter.js'
-
 /**
  * What every Session is told about the cloud it can reach.
  *
@@ -26,11 +24,15 @@ export const CLOUD_SHORTCUT = 'roma-cloud-token'
  * `--help` is a Turn, a Session remembers nothing, and that is a Turn paid once
  * per Session to save Turns.
  *
- * Absent entirely where a deployment has no Cloud Reach — `startRoma` does not
- * call this — because a paragraph explaining a capability that is not there is
- * worse than silence.
+ * Absent entirely where a deployment has no Cloud Reach — the Reach it has is the
+ * unavailable one, whose own announcement is empty — because a paragraph
+ * explaining a capability that is not there is worse than silence.
+ *
+ * Takes the account rather than a Cloud Reach: what it needs is the identity, and
+ * a one-field type standing between it and the string was the `ReachProof` shape
+ * written twice (ADR-0020).
  */
-export function announceCloud({ account }: CloudReach): string {
+export function announceCloud(account: string): string {
   return [
     'Google Cloud access is already configured for this session, by roma:',
     '',

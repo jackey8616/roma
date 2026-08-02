@@ -412,6 +412,22 @@ from a build, and the reading can be wrong in ways only a person notices
 
 ### Reaching the code
 
+**Reach**:
+What roma can reach on one provider at all — the credential that reaches it, what
+it reaches, and what every Session is told about it. An Installation is one and a
+Cloud Reach is one: the two were always the same idea on two providers, and this
+is the name for the idea rather than for either instance (ADR-0020). A deployment
+has one Reach per provider whether or not anybody gave it the key: a Reach nobody
+configured still answers, because "there is none" is a sentence roma says out loud
+rather than a case it has no branch for (ADR-0015 §9) — which is why an
+unconfigured Reach is one that is *unavailable* and never one that is absent. Not
+a second name for the Minter, which is the half of a Reach that holds the key; a
+Reach is also the boundary and the sentence.
+_Avoid_: provider (that is the company on the other end, and a Reach is roma's
+side of it), credential (that word is the Shared Window's and Overflow's), and
+using this for either instance on its own — an Installation is a Reach and so is a
+Cloud Reach, and a sentence about one of them should say which
+
 **Installation**:
 Which repositories roma can reach at all. A GitHub App is installed on a list of
 them, and roma acts as that App rather than as anybody. Because no Conversation
@@ -419,7 +435,9 @@ is bound to a repository — the agent clones what it was asked about, and roma
 performs no checkout — this list is the *only* boundary there is: every
 Conversation reaches all of it, and so does everyone who can message roma
 (ADR-0008). Named here for that reason and not for GitHub's sake: a term that is
-the whole of a security property should be a term.
+the whole of a security property should be a term. roma's Reach on the forge, and
+the one Reach no deployment can boot without — required means required, which is
+the whole of what makes it unlike the other one.
 _Avoid_: the App (that is the thing installed, not what it reaches), repo access,
 scope, permissions (those are what an Installation may *do*, which is a second
 question)
@@ -445,7 +463,11 @@ long-lived key never enters the space the agent can reach — and a term that is
 whole of a security property should be a term. One term for both because it is one
 rule; what differs is which provider is on the other end, and that is the Minter's
 business and nobody else's. The Core sees a port for obtaining a credential and
-nothing else.
+nothing else. One half of a Reach, and the half holding the key. It may be what
+*fetches* what a Reach reaches — asking the forge is the same round trip as proving
+the key, so one call does both — but what a Session is told is the Reach's and
+never a Minter's: nothing here composes a sentence or decides what is worth
+announcing.
 _Avoid_: token service, credential provider, GitHub client (it is not a general
 client for the product; it does this and nothing else), and naming one of the two
 keys as *the* private key now that there are two
@@ -473,9 +495,12 @@ refused by Google and never by roma. Named here for the reason an Installation
 is: a term that is the whole of a security property should be a term.
 Deliberately **not** the identity roma itself runs on — one that could reach
 roma's own ingress could end roma quietly, and a deployment where those two are
-the same has no boundary at all (ADR-0015). Most deployments have none, and a
-deployment with none has no Cloud Shortcut either: the Reach is what there is to
-reach, so without one there is nothing to be handed.
+the same has no boundary at all (ADR-0015). roma's Reach on the cloud, and the one
+most deployments do not have — which is why it is the Reach that is ordinarily
+unavailable rather than the Reach that is ordinarily missing. A deployment with
+none still ships the Cloud Shortcut and still answers it: what is missing is the
+Reach and never the command, because a command that is not there reads as a broken
+`PATH` and costs the Turn the Shortcut exists to save.
 _Avoid_: Installation (that is GitHub's; the two are the same idea on two
 providers, and saying either for the other hides which one a sentence is about),
 project (a Reach may span several, and need not include roma's own), service

@@ -40,10 +40,11 @@ export function sources(): Source[] {
  */
 export const COMPOSITION_ROOTS = [['channels', 'google-chat', 'main.ts'].join(sep)]
 
-/** One composition root, read. */
-export function compositionRoot(file = COMPOSITION_ROOTS[0] ?? ''): string {
-  return sources().find((source) => source.file === file)?.source ?? ''
-}
+// A reader for one composition root used to live here, for the single rule that
+// watched `main.ts` — the source match ADR-0020 §7 deleted. It is gone with its
+// only caller rather than left as an export nothing reaches. Rebuilding a rule
+// about the composition root means bringing it back, which the ADR records as
+// removed rather than never built.
 
 /**
  * The sources a containment rule binds, split by the directory that owns the

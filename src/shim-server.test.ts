@@ -2,11 +2,11 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { FreshTokens } from './fresh-tokens.js'
 import { askMinter } from './shim-client.js'
-import { socketPathIn } from './shim-protocol.js'
-import { NO_CLOUD_REACH, ShimServer, type ShimLogRecord } from './shim-server.js'
-import { FakeCloudMinter, FakeMinter } from '../test/support/fake-minter.js'
+import { socketPathIn, type CredentialWanted } from './shim-protocol.js'
+import { NO_CLOUD_REACH } from './cloud/reach.js'
+import { ShimServer, type ShimLogRecord } from './shim-server.js'
+import { FakeCloudMinter, FakeMinter, fakeServedReaches } from '../test/support/fake-minter.js'
 
 /**
  * roma's side of the credential contract, over a real socket.
@@ -51,12 +51,13 @@ async function listening({
   const cloudTokensFor: (string | null)[] = []
   const server = await ShimServer.listen({
     socketPath: socketPathIn(dir),
-    tokens: new FreshTokens({ minter }),
-    cloud:
-      cloudMinter === undefined
-        ? null
-        : { tokens: new FreshTokens({ minter: cloudMinter }), account: cloudMinter.account },
-    onCloudToken: (taskId) => cloudTokensFor.push(taskId),
+    reaches: fakeServedReaches({ minter, cloudMinter: cloudMinter ?? null }),
+    // Every credential the socket serves, filtered here the way `startRoma`
+    // filters it — which is the thing worth asserting now that the socket no
+    // longer decides which one is interesting.
+    onCredential: (taskId: string | null, credential: CredentialWanted) => {
+      if (credential === 'cloud') cloudTokensFor.push(taskId)
+    },
     taskFor,
     log: (record) => log.push(record),
   })
@@ -231,8 +232,14 @@ describe('answering the Cloud Shortcut', () => {
     })
 
     expect(code.token).toBe('token-1')
-    expect(code.account).toBeUndefined()
     expect(cloud.token).toBe('cloud-token-1')
+    // Each answer carries *its own* Reach's account. Stronger than the assertion
+    // this replaces, which only said the forge's answer had none: the mis-pairing
+    // worth catching is a Reach served from another Reach's tokens, and after
+    // ADR-0020 §9 built this record by mapping over the Reaches, nothing else in
+    // the suite stands where the old ternary did.
+    expect(code.account).toBe('a-team')
+    expect(cloud.account).toBe('agent@a-project.iam.gserviceaccount.com')
   })
 
   it('carries the reason when the Cloud Reach’s key has stopped working', async () => {
@@ -319,7 +326,7 @@ describe('the socket itself', () => {
 
     const server = await ShimServer.listen({
       socketPath: socketPathIn(dir),
-      tokens: new FreshTokens({ minter: new FakeMinter() }),
+      reaches: fakeServedReaches(),
       taskFor: () => null,
       log: () => {},
     })

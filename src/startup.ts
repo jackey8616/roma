@@ -10,14 +10,18 @@ import type { SpawnClaudeProcess } from './claude-process.js'
 import type { RetryBudget } from './config.js'
 import { CloudReachUse } from './cloud-reach-use.js'
 import { Core, type CoreLogRecord } from './core.js'
-import { ConfigurationMissing } from './env-config.js'
 import { FreshTokens } from './fresh-tokens.js'
-import type { CloudMinter, CloudReach, Installation, Minter } from './minter.js'
+import { eachReach, type Reach, type Reaches } from './reach.js'
 import { ChosenEfforts, ChosenModels, SessionGenerations } from './session-generation.js'
-import { reasonOf, type OperatorLog } from './operator-log.js'
+import type { OperatorLog } from './operator-log.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
-import { socketPathIn } from './shim-protocol.js'
-import { ShimServer, type ShimLogRecord } from './shim-server.js'
+import { socketPathIn, type CredentialWanted } from './shim-protocol.js'
+import {
+  ShimServer,
+  type ServedReach,
+  type ServedReaches,
+  type ShimLogRecord,
+} from './shim-server.js'
 import {
   startupSelfCheck,
   type SelfCheckLogRecord,
@@ -26,17 +30,15 @@ import {
 import { TaskQueue } from './task-queue.js'
 
 /**
- * Everything roma needs to put a credential in front of a Session's tools.
+ * roma's own directory, and what roma writes into it.
  *
- * One option rather than four loose ones, because they are one decision: a roma
- * with a Minter and no socket to answer on, or a socket and no gitconfig
- * pointing at it, is a roma whose agent cannot reach a line of anybody's code —
- * and required means required (ADR-0008). Nothing in here names a forge; what
- * does lives under `src/github/` and reaches this as values.
+ * One option rather than two loose ones, because they are one decision: a roma
+ * with a socket to answer on and no gitconfig pointing at it is a roma whose
+ * agent cannot reach a line of anybody's code. Not a Reach's — the socket serves
+ * every credential there is, and the gitconfig is how `git`'s Credential Shim is
+ * installed rather than anything about minting (ADR-0020 §3).
  */
-export interface MintingOptions {
-  /** The only thing that holds the App's private key. */
-  readonly minter: Minter
+export interface ShimsOptions {
   /**
    * roma's own directory: the Credential Shim socket, and the gitconfig every
    * Session runs under.
@@ -46,7 +48,7 @@ export interface MintingOptions {
    * roma failing at once with no explanation. Not inside a Working Directory
    * either — the agent runs `git add -A` in there.
    */
-  readonly shimDir: string
+  readonly dir: string
   /**
    * The gitconfig `GIT_CONFIG_GLOBAL` points every Session at, as text.
    *
@@ -56,73 +58,48 @@ export interface MintingOptions {
    * a Working Directory and to name it in the environment.
    */
   readonly gitConfig: string
-  /**
-   * What every Session is told it can reach, given what roma found at boot.
-   *
-   * A function rather than a string, because the answer is not known until the
-   * Installation has been fetched — and fetching it is the boot check, which has
-   * to happen inside this function for the same reason the self-check does.
-   */
-  readonly announce: (installation: Installation) => string
 }
 
-/**
- * What roma needs to give a Session's work a Cloud Token, where a deployment has
- * a Cloud Reach.
- *
- * Optional in `StartRomaOptions` and complete when it is there, which is the
- * `MintingOptions` shape rather than the Overflow shape — but for the opposite
- * reason. Overflow is refused half-configured because a cap with no key caps
- * nothing; there is no half of this to configure, because both halves come out
- * of one key file. What makes it one object is the same rule: a Minter with
- * nothing announcing it is a capability the agent will never try.
- */
-export interface CloudOptions {
-  /** The only thing that holds the Cloud Reach's key. */
-  readonly minter: CloudMinter
-  /**
-   * What every Session is told it can reach in the cloud.
-   *
-   * A function for the reason the Installation's is, minus the fetching: the
-   * text names the identity, and naming a provider's identity is not something
-   * the Core may do. It reaches here as a value.
-   */
-  readonly announce: (reach: CloudReach) => string
-}
-
-/** What an operator is told about the Cloud Reach: once at boot, and per mint. */
-export type CloudLogRecord =
+/** What an operator is told about a Reach: once at boot, and per mint. */
+export type ReachLogRecord =
   | {
       /**
-       * Whether this deployment has a Cloud Reach, and which identity it is.
+       * What this deployment reaches on one provider, and which identity it is.
        *
-       * Written on every boot, including the boots where the answer is "none".
-       * Which deployment an operator is looking at is exactly the question, and
-       * a line that appeared only sometimes would make its absence mean two
-       * things — no Cloud Reach, or an older roma.
+       * Written on every boot for every Reach, including the ones whose answer is
+       * "none". Which deployment an operator is looking at is exactly the
+       * question, and a line that appeared only sometimes would make its absence
+       * mean two things — no Reach, or an older roma.
        *
        * It is also the record of the boot proof: the line is written after the
-       * mint that proved the key, so a boot that reaches it is a boot where the
-       * Cloud Reach worked. That mint gets no `cloud-token-minted` of its own,
-       * because it was never served to anybody and counting it would put a
-       * standing +1 on every deployment's mint rate.
+       * proof, so a boot that reaches it is a boot where that Reach worked. A
+       * proof that minted gets no `reach-token-minted` of its own, because that
+       * token was never served to anybody and counting it would put a standing +1
+       * on every deployment's mint rate.
        */
-      readonly event: 'cloud-reach'
+      readonly event: 'reach'
+      readonly credential: CredentialWanted
       readonly account: string | null
     }
   | {
       /**
-       * A Cloud Token was minted — not merely asked for.
+       * A credential was minted — not merely asked for.
        *
-       * The distinction is the whole reason this is a record rather than a
-       * field on the credential line beside it. Something in the agent's
-       * userland asks on every invocation by design, and almost every ask is
-       * served from the token roma already holds; a mint is a signed assertion
-       * and a round trip to the provider. An operator watching for a mint storm
-       * needs the count that can actually storm.
+       * The distinction is the whole reason this is a record rather than a field
+       * on the credential line beside it. Something in the agent's userland asks
+       * on every invocation by design, and almost every ask is served from the
+       * token roma already holds; a mint is a signed assertion and a round trip to
+       * the provider. An operator watching for a mint storm needs the count that
+       * can actually storm.
+       *
+       * Written for every Reach, which for the forge is new: `git` asks far more
+       * often than a Cloud Shortcut does, so the argument that produced this
+       * record applies there harder than where it was written (ADR-0020 §5).
        */
-      readonly event: 'cloud-token-minted'
-      readonly account: string
+      readonly event: 'reach-token-minted'
+      readonly credential: CredentialWanted
+      /** Nullable for the reason the line above is, and never null in practice. */
+      readonly account: string | null
     }
 
 export interface StartRomaOptions {
@@ -183,17 +160,22 @@ export interface StartRomaOptions {
    * what an agent did, on the strength of it living somewhere roma named.
    */
   readonly configDir: string
-  /** How a Session's tools get a credential, and what it reaches. */
-  readonly minting: MintingOptions
   /**
-   * The Cloud Reach, where this deployment has one.
+   * One Reach per credential a Session's tools can ask for.
    *
-   * Absent is the ordinary case and costs nothing: roma starts, announces
-   * nothing about the cloud, and the Cloud Shortcut answers that there is none
-   * (ADR-0015 §9). Present, it is proved live before anything can accept an
-   * Ingress Message — see the boot proof in `startRoma`.
+   * Every one of them is proved live before anything that could accept an Ingress
+   * Message exists. A record rather than a list so that none can be left out: a
+   * roma with no `code` Reach would prove no key, announce nothing, and fail every
+   * `git` request inside somebody's Turn, which is the failure blocking the boot
+   * exists to prevent (ADR-0008, ADR-0020 §3).
+   *
+   * A deployment with no cloud key has a Cloud Reach all the same — the
+   * unavailable one, which announces nothing and answers the Cloud Shortcut that
+   * there is none (ADR-0015 §9).
    */
-  readonly cloud?: CloudOptions
+  readonly reaches: Reaches
+  /** roma's own directory, and the gitconfig every Session runs under. */
+  readonly shims: ShimsOptions
   /** The pinned model. Defaults to the one every Session runs on. */
   readonly model?: string
   /**
@@ -218,7 +200,7 @@ export interface StartRomaOptions {
    * prompted it on the same lines.
    */
   readonly log?: OperatorLog<
-    PoolLogRecord | CoreLogRecord | ShimLogRecord | CloudLogRecord | SelfCheckLogRecord
+    PoolLogRecord | CoreLogRecord | ShimLogRecord | ReachLogRecord | SelfCheckLogRecord
   >
   /**
    * Where the self-check's probe Session runs. A throwaway directory by default,
@@ -241,11 +223,13 @@ export interface Roma {
   readonly audit: AuditLog
   /** What the self-check found, for the boot log. */
   readonly selfCheck: StartupSelfCheckReport
-  /** What roma proved at boot that it can reach, and told every Session about. */
-  readonly installation: Installation
-  /** The identity the agent acts as in the cloud, or null where there is none. */
-  readonly cloudReach: CloudReach | null
-  /** End every resident process. Sessions keep their context on disk. */
+  /**
+   * End every resident process. Sessions keep their context on disk.
+   *
+   * What roma proved about each Reach is deliberately not here. It was reported
+   * to nobody — no production caller read either field — and what an operator
+   * wants is on the boot log, which now carries a line per Reach (ADR-0020 §4).
+   */
   shutdown(): Promise<void>
 }
 
@@ -272,8 +256,8 @@ export async function startRoma({
   workRoot,
   auditRoot,
   configDir,
-  minting,
-  cloud,
+  reaches,
+  shims,
   model,
   effort,
   maxConcurrentTasks,
@@ -283,51 +267,28 @@ export async function startRoma({
   selfCheckCwd,
   selfCheckTimeoutMs,
 }: StartRomaOptions): Promise<Roma> {
-  // First, because it is free and the other check is not. A bad private key or
-  // an App installed twice is found before a single paid Turn has been driven,
-  // and a deployment that is wrong in both ways is told about the cheap one
-  // first. It blocks the boot for the reason the self-check does: a failure that
+  // **One at a time, in this order, and `code` first.** The order used to be
+  // enforced by data flow — two statements, one after the other — and a loop is
+  // where that is lost. `await Promise.all(…)` compiles, reads as the natural
+  // generic form, and takes two properties with it: a deployment broken in both
+  // ways is told about the free check first, and a boot with a bad App key makes
+  // no network call to the *other* provider at all (ADR-0020 §4).
+  //
+  // Each proof blocks the boot for the reason the self-check does: a failure that
   // surfaced instead as an inexplicable `git clone` inside somebody's Turn would
-  // read as "roma is broken" with no diagnosis attached.
-  const installation = await minting.minter.installation()
-
-  // The other free check, and the same argument: a key that is syntactically
-  // perfect and revoked is a blind spot no amount of parsing closes, so roma
-  // uses the key rather than reading it. The token is thrown away — what is
-  // being proved is that one can be had at all.
-  //
-  // It lives here rather than in `startup-self-check.ts` deliberately. That term
-  // is defined as the live *Turn* roma drives at boot, and a check driving no
-  // Turn would make the definition false (ADR-0015 §8). It never falls back to
-  // another identity, which is the whole reason the key is loaded by an exact
-  // path in the first place.
-  //
-  // **It refuses in `readConfiguration`'s shape rather than inside it, and that
-  // is a gap rather than a choice.** ADR-0015 §8 asks for "one of the problems
-  // the single `readConfiguration` refusal reports"; that reader is synchronous
-  // and this is a network round trip, so a deployment with both a missing audit
-  // root and a revoked key still boots twice. Everything a *file* can be wrong
-  // about — unreadable, empty, not a key — is caught by `readCloudEnv` and does
-  // join the single refusal; only a key that parses and does not work lands
-  // here. The line above has the same property for a bad App key and has since
-  // ADR-0008, so this is the existing shape rather than a new one. Closing it
-  // means `readConfiguration` collecting problems instead of throwing them,
-  // which is a change to how every reader reports and is not this ticket's.
-  if (cloud !== undefined) {
-    try {
-      await cloud.minter.mint()
-    } catch (error) {
-      throw new ConfigurationMissing([
-        `roma could not mint a Cloud Token with the key it was given, so its Cloud Reach ` +
-          `(${cloud.minter.account}) does not work: ${reasonOf(error)}`,
-      ])
-    }
+  // read as "roma is broken" with no diagnosis attached. How a Reach refuses is
+  // the Reach's own — the forge names what it found, and the cloud wraps itself in
+  // `readConfiguration`'s shape (ADR-0015 §8).
+  const proved = new Map<CredentialWanted, string | null>()
+  for (const reach of eachReach(reaches)) {
+    const { account } = await reach.prove()
+    proved.set(reach.credential, account)
+    // Said on every boot for every Reach, including the ones with nothing to say,
+    // so that which deployment this is can be read off the log rather than
+    // inferred from a line that is not there.
+    log?.({ event: 'reach', credential: reach.credential, account })
   }
-  const cloudReach: CloudReach | null = cloud === undefined ? null : { account: cloud.minter.account }
-  // Said on every boot, including the boots with nothing to say, so that which
-  // deployment this is can be read off the log rather than inferred from a line
-  // that is not there.
-  log?.({ event: 'cloud-reach', account: cloudReach?.account ?? null })
+
 
   // What the deployment pinned, named once rather than defaulted in each of the
   // three places that need it. `/model default` returns a Session to *this*
@@ -377,11 +338,11 @@ export async function startRoma({
 
   // roma's own directory, made before anything points at it. The gitconfig goes
   // in beside the socket rather than in a Working Directory, for the reason
-  // `MintingOptions` gives: the agent runs `git add -A` in one of those.
-  mkdirSync(minting.shimDir, { recursive: true, mode: 0o700 })
-  const gitConfigPath = join(minting.shimDir, 'gitconfig')
-  writeFileSync(gitConfigPath, minting.gitConfig, { mode: 0o600 })
-  const socketPath = socketPathIn(minting.shimDir)
+  // `ShimsOptions` gives: the agent runs `git add -A` in one of those.
+  mkdirSync(shims.dir, { recursive: true, mode: 0o700 })
+  const gitConfigPath = join(shims.dir, 'gitconfig')
+  writeFileSync(gitConfigPath, shims.gitConfig, { mode: 0o600 })
+  const socketPath = socketPathIn(shims.dir)
 
   const queue = new TaskQueue(
     maxConcurrentTasks === undefined ? {} : { maxConcurrent: maxConcurrentTasks },
@@ -391,28 +352,18 @@ export async function startRoma({
   // Reach: without one nothing ever puts a Task in it, so every record says no,
   // which is true.
   const cloudUse = new CloudReachUse()
-  const shims = await ShimServer.listen({
+  const shimServer = await ShimServer.listen({
     socketPath,
-    tokens: new FreshTokens({ minter: minting.minter }),
-    // Two `FreshTokens` rather than one, because they hold two credentials with
-    // two expiries. The arithmetic is one class; the state is not shared.
-    cloud:
-      cloud === undefined
-        ? null
-        : {
-            tokens: new FreshTokens({
-              minter: cloud.minter,
-              // What makes a mint storm visible. The credential line beside this
-              // one is written per *request*, and a Cloud Shortcut asks on every
-              // invocation by design — so without this an operator counting the
-              // log cannot tell a loop that is minting from a loop that is being
-              // served the token roma already holds.
-              onMint: () => log?.({ event: 'cloud-token-minted', account: cloud.minter.account }),
-            }),
-            account: cloud.minter.account,
-          },
-    onCloudToken: (taskId) => {
-      cloudUse.minted(taskId)
+    // One `FreshTokens` per Reach, never one shared: they hold different
+    // credentials with different expiries. The arithmetic is one class; the state
+    // is not.
+    reaches: servedReaches(reaches, proved, log),
+    // Every request over the socket, whichever credential it was for. What is kept
+    // of it is decided one layer up — the socket knows a request happened and
+    // which Task the queue says its Session was running, and nothing else should
+    // be asked of it (ADR-0020 §6).
+    onCredential: (taskId, credential) => {
+      if (credential === 'cloud') cloudUse.minted(taskId)
     },
     // Attribution is by Session, resolved to a Task through the queue — which
     // serialises the Tasks of a Session already, so the answer is unambiguous.
@@ -457,14 +408,19 @@ export async function startRoma({
     // thing to keep in step.
     models,
     efforts,
-    // Both announcements, or only the one there is. A blank line between them
-    // rather than a joined paragraph, because they are two capabilities and an
-    // agent skimming a system prompt reads a break as a change of subject —
-    // which it is.
-    appendSystemPrompt: [
-      minting.announce(installation),
-      ...(cloud === undefined || cloudReach === null ? [] : [cloud.announce(cloudReach)]),
-    ].join('\n\n'),
+    // Every Reach that has something to say, in the order they were proved. A
+    // blank line between them rather than a joined paragraph, because they are
+    // separate capabilities and an agent skimming a system prompt reads a break
+    // as a change of subject — which it is.
+    //
+    // An empty announcement is dropped rather than joined and trimmed. An
+    // unavailable Reach says nothing, and `--append-system-prompt` is gated on
+    // the value being `undefined` and never on it being empty — so a trailing
+    // blank line would reach the argv rather than being tidied away.
+    appendSystemPrompt: eachReach(reaches)
+      .map((reach) => reach.announce())
+      .filter((announcement) => announcement !== '')
+      .join('\n\n'),
     ...(retryBudget === undefined ? {} : { retryBudget }),
     ...(spawn === undefined ? {} : { spawn }),
     ...(log === undefined ? {} : { log }),
@@ -494,8 +450,6 @@ export async function startRoma({
     sessions,
     audit,
     selfCheck,
-    installation,
-    cloudReach,
     // The socket goes after the processes, not before: a Session being killed can
     // still have a `git` mid-operation, and taking the credential away first
     // turns a clean shutdown into a handful of authentication failures in
@@ -506,8 +460,43 @@ export async function startRoma({
       } finally {
         // Whatever the pool did. A socket left listening on a roma that is
         // otherwise gone is a credential still being served to nothing.
-        await shims.close()
+        await shimServer.close()
       }
     },
   }
+}
+
+/**
+ * One `FreshTokens` per Reach that has a key, and the sentence for the one that
+ * does not.
+ *
+ * Built here rather than inside a Reach so that the mint record stays in the Core
+ * beside every other Operator Log record: a Reach hands over a `MintsTokens` and
+ * roma does the arithmetic — see ADR-0020's Consequences. The account comes
+ * from what the Reach proved rather than from the Reach, because proving is the
+ * only thing that learns it.
+ */
+function servedReaches(
+  reaches: Reaches,
+  proved: ReadonlyMap<CredentialWanted, string | null>,
+  log: OperatorLog<ReachLogRecord> | undefined,
+): ServedReaches {
+  const served = (reach: Reach): ServedReach => {
+    if (!('minter' in reach)) return { unavailable: reach.unavailable }
+    const account = proved.get(reach.credential) ?? null
+    return {
+      account,
+      tokens: new FreshTokens({
+        minter: reach.minter,
+        // What makes a mint storm visible. The credential line beside this one is
+        // written per *request*, and things in the agent's userland ask on every
+        // invocation by design — so without this an operator counting the log
+        // cannot tell a loop that is minting from a loop that is being served the
+        // token roma already holds.
+        onMint: () => log?.({ event: 'reach-token-minted', credential: reach.credential, account }),
+      }),
+    }
+  }
+
+  return { code: served(reaches.code), cloud: served(reaches.cloud) }
 }

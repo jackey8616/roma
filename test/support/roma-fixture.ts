@@ -29,7 +29,7 @@ export interface RomaFixture {
   /**
    * Hand the teardown a directory this roma owns that the fixture did not make.
    *
-   * For the parts a test assembles for itself. `fakeMinting`'s socket directory
+   * For the parts a test assembles for itself. `fakeShims`'s socket directory
    * is the one there is: a throwaway of its own, made where the test decides
    * what minting is, and gone when the rest of the roma goes.
    */

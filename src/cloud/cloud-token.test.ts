@@ -4,10 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { FreshTokens } from '../fresh-tokens.js'
 import { MINTER_SOCKET_VAR, SESSION_ID_VAR, socketPathIn } from '../shim-protocol.js'
 import { ShimServer } from '../shim-server.js'
-import { FakeCloudMinter, FakeMinter } from '../../test/support/fake-minter.js'
+import { FakeCloudMinter, fakeServedReaches } from '../../test/support/fake-minter.js'
 
 /**
  * The Cloud Shortcut as a shell sees it: a real child process, a real socket.
@@ -46,11 +45,7 @@ async function shortcutAgainst({
 
   const server = await ShimServer.listen({
     socketPath: socketPathIn(dir),
-    tokens: new FreshTokens({ minter: new FakeMinter() }),
-    cloud:
-      cloudMinter === undefined
-        ? null
-        : { tokens: new FreshTokens({ minter: cloudMinter }), account: cloudMinter.account },
+    reaches: fakeServedReaches({ cloudMinter: cloudMinter ?? null }),
     taskFor: () => null,
     log: () => {},
   })

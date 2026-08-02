@@ -73,18 +73,29 @@ export interface ShimRequest {
 /**
  * What roma answers with: a credential, or why there is not one.
  *
- * The two fields beside the token are the Cloud Shortcut's `--json`, and they
- * are the answer's rather than the asker's — roma is the only thing that knows
- * when a token dies or which identity it acts as, and a Shortcut that inferred
- * either would be inventing it.
+ * The two fields beside the token are the answer's rather than the asker's —
+ * roma is the only thing that knows when a token dies or which identity it acts
+ * as, and an asker that inferred either would be inventing it. They ride on every
+ * successful answer, not only the Cloud Shortcut's: withholding them from the two
+ * Credential Shims was minimalism rather than protection, and the branch that did
+ * it was where a Reach could be paired with the wrong tokens (ADR-0020 §9).
+ *
+ * Absent on an answer that carries no token, because there is nothing to say
+ * about one that was never minted.
  */
 export interface ShimResponse {
   readonly token: string | null
   readonly reason?: string
   /** Epoch milliseconds, as the provider reported it. */
   readonly expiresAt?: number
-  /** Which identity the token acts as. */
-  readonly account?: string
+  /**
+   * Which identity the token acts as, or null where roma knows of none.
+   *
+   * Nullable rather than absent for the null case: "roma answered no account" and
+   * "roma did not answer one" are different facts, and a Shortcut that could not
+   * tell them apart would report the second when it meant the first.
+   */
+  readonly account?: string | null
 }
 
 /**

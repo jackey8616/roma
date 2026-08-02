@@ -6,15 +6,13 @@ import { writeToStderr, type OperatorLog } from '../../operator-log.js'
 import { serve, type IngressLogRecord, type Serving } from '../../serve.js'
 import type { CoreLogRecord } from '../../core.js'
 import { readMinterEnv } from '../../github/env-config.js'
-import { GitHubMinter } from '../../github/github-minter.js'
-import { announce } from '../../github/announce.js'
+import { githubReachFrom } from '../../github/reach.js'
 import { gitConfig } from '../../github/shims.js'
-import { announceCloud } from '../../cloud/announce.js'
 import { readCloudEnv } from '../../cloud/env-config.js'
-import { GoogleCloudMinter } from '../../cloud/google-cloud-minter.js'
+import { cloudReachFrom } from '../../cloud/reach.js'
 import type { PoolLogRecord } from '../../session-pool.js'
 import type { ShimLogRecord } from '../../shim-server.js'
-import type { CloudLogRecord } from '../../startup.js'
+import type { ReachLogRecord } from '../../startup.js'
 import type { SelfCheckLogRecord, StartupSelfCheckReport } from '../../startup-self-check.js'
 import { readChatEnv } from './env-config.js'
 import type { ChatEventLogRecord } from './chat-events.js'
@@ -69,7 +67,7 @@ type RomaLog = OperatorLog<
   | ShimLogRecord
   | PubSubLogRecord
   | ChatEventLogRecord
-  | CloudLogRecord
+  | ReachLogRecord
   | SelfCheckLogRecord
   | ProcessLogRecord
 >
@@ -130,23 +128,22 @@ export async function startGoogleChatRoma(
   // to know any of the three answers. `src/github-containment.test.ts` and
   // `src/cloud-containment.test.ts` are what hold the rest of the tree to that.
   //
-  // Note what the Cloud Reach's Minter is **not** given: the `GoogleAuth` above,
-  // or anything else that would go looking for a credential. It is handed the
-  // key `readCloudEnv` read from the path the deployment named, and nothing
-  // else — because the resolution chain ends at the metadata server, and on a
-  // Google host that is roma's own identity (ADR-0015 §4). The two credentials
-  // on this page are deliberately unrelated: one is roma's, one is the agent's.
+  // Note what this page does **not** do any more: construct the Cloud Reach's
+  // Minter. `cloudReachFrom` takes the key `readCloudEnv` read from the path the
+  // deployment named and nothing else, and it lives inside `src/cloud/`, which
+  // `src/cloud-containment.test.ts` binds against every way of asking a library
+  // to find a credential — so the substitution ADR-0015 §4 forbids cannot be
+  // written here, because the constructor is not named here (ADR-0020 §7). The
+  // `GoogleAuth` above is roma's own identity and is deliberately unrelated to
+  // the agent's: two credentials on one page, and only one of them is the
+  // agent's.
   return await serve({
     ...core,
-    minting: {
-      minter: new GitHubMinter(minterEnv),
-      shimDir,
-      gitConfig: gitConfig(),
-      announce,
+    reaches: {
+      code: githubReachFrom(minterEnv),
+      cloud: cloudReachFrom(cloudEnv),
     },
-    ...(cloudEnv === null
-      ? {}
-      : { cloud: { minter: new GoogleCloudMinter(cloudEnv), announce: announceCloud } }),
+    shims: { dir: shimDir, gitConfig: gitConfig() },
     channel: new GoogleChatAdapter({ api: new HttpChatApi({ send, download }), log }),
     transport: new PubSubTransport({ subscription, log }),
     log,

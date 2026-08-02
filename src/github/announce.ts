@@ -1,4 +1,4 @@
-import type { Installation } from '../minter.js'
+import type { Installation } from './installation.js'
 
 /**
  * What every Session is told it can reach.
