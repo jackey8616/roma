@@ -54,55 +54,38 @@ Leaves ADR-0007 untouched — one image, one pin, no floating tags, all unchange
 
 ### Verification status
 
-**Measured — what a cloud CLI costs.** Google Cloud CLI 578.0.0, `linux x86_64`,
-downloaded and unpacked in this session:
+The evidence is in
+[`docs/cloud-token-verification.md`](../cloud-token-verification.md); what
+follows is the part of it the decision rests on.
 
-```
-google-cloud-cli-linux-x86_64.tar.gz    88,566,196 bytes  (compressed)
-unpacked                               460,335,231 bytes  (439 MiB)
-```
-
-Against a runtime stage that is `node:22-slim` plus five apt packages and one Go
-binary. **Not** an image-layer measurement — no Docker daemon was available — so
-this is on-disk footprint. A layer would be of the same order.
+**Measured — what a cloud CLI costs.** Google Cloud CLI 578.0.0 unpacks to
+**439 MiB**, against a runtime stage that is `node:22-slim` plus five apt
+packages and one Go binary. That is the number §1 refuses to pay.
 
 **Measured — the image can already do all of it, with nothing installed.** On
-Node 22, using only `node:crypto`, with no dependency whatsoever:
+Node 22, using only `node:crypto` and global `fetch`: an RS256-signed JWT, which
+is exactly what a Google service account key is exchanged with, and the SigV4
+HMAC-SHA256 chain AWS would require. Not even `curl` is needed. So §1 costs
+nothing to hold.
 
-- an RS256-signed JWT, which is exactly what a Google service account key is
-  exchanged with;
-- the SigV4 HMAC-SHA256 key derivation chain, which is what AWS requires;
-- global `fetch` is present, so not even `curl` is needed.
+**Measured — the token endpoints answer a credential-shaped request.** Google,
+Azure and AWS each rejected the *credential* rather than the request, so a valid
+one would have been exchanged. This is what makes the Minter buildable against
+documentation.
 
-**Measured — the token endpoints answer a credential-shaped request.** One POST
-each from this session's sandbox, with deliberately invalid credentials:
+**Measured — scopes are a property of the exchange, not an invention.** The JWT
+client takes one of two paths — a self-signed JWT bound to a target audience, or
+an access-token exchange when scopes are set — and with neither it returns empty
+headers. So a general-purpose access token *requires* naming scopes, and the only
+way to avoid naming them is to bind the credential to one API up front. §5 is
+that fact, not a preference.
 
-| endpoint | answered |
-| --- | --- |
-| `oauth2.googleapis.com/token` | `invalid_request` |
-| `login.microsoftonline.com/…/oauth2/v2.0/token` | `AADSTS700016: Application with identifier 'bogus' was not found` |
-| `sts.amazonaws.com` | `MissingAuthenticationToken` |
-
-Each rejected the *credential* rather than the request: a valid one would have
-been exchanged. Azure's is a plain POST with no signing at all.
-
-**Measured — scopes are a property of the exchange, not an invention.** Read out
-of the installed `google-auth-library`: `scopes` is optional on the JWT client,
-and the client takes one of two paths — a self-signed JWT bound to a target
-audience when no scopes are set, or an access-token exchange when they are. With
-neither scopes nor an audience it returns empty headers. So a general-purpose
-access token requires naming scopes, and the only way to avoid naming them is to
-bind the credential to one API up front.
-
-**What the endpoint measurement is not.** It was taken from this session's
-sandbox and not from a roma deployment, so it establishes the protocol shape and
-not any particular deployment's egress. The README states that roma has no egress
-allowlist and no firewall, which is the only reason the shape is the whole story.
-
-**Not measured.** The cost of a mint against a real service account, expected to
-be sub-second and free. How usable narrow scopes are across Google's APIs. And
-everything else: no part of this has been deployed, and no Cloud Reach has ever
-existed.
+**Not measured, and it is the one that matters.** No part of this has been
+deployed and no Cloud Reach has ever existed, so the cost of a mint against a
+real service account and the usability of narrow scopes across Google's APIs are
+both open. The endpoint readings were taken from a sandbox rather than from a
+roma deployment: they establish the protocol shape and not any deployment's
+egress.
 
 ## Context
 
