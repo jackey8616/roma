@@ -74,6 +74,22 @@ describe('reading a Relay', () => {
     })
   })
 
+  // A table is asked what roma wrote in it, not what JavaScript put there. An
+  // object literal inherits `Object.prototype`, so the bare lookup answers
+  // `constructor` with a function — and a message that is that single word was
+  // read as a Relay whose cost is nothing at all, put on the wire as a command,
+  // and audited as one. Ordinary English words, swallowed silently.
+  it('reads a word that is only on Object.prototype as work', () => {
+    for (const word of ['constructor', '__proto__', 'toString', 'valueOf', 'hasOwnProperty']) {
+      expect(readRelay(word)).toBeNull()
+      expect(readRelay(`${word} keep the ADRs`)).toBeNull()
+      // Both tables are asked, so both are checked. `commands.ts` had this
+      // first and for longer; it was found while giving this one the guard.
+      expect(readCommand(word)).toBeNull()
+      expect(readCommand(`${word} opus`)).toBeNull()
+    }
+  })
+
   it('shares no string with a Command', () => {
     // **The one machine-checkable half of the membership rule.** The rest of it —
     // that an entry changes nothing roma holds a belief about — is a person's

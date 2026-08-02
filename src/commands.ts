@@ -164,7 +164,7 @@ export function commandSpellings(): readonly string[] {
 export function readCommand(text: string): CommandRequest | null {
   const message = text.trim().toLowerCase()
 
-  const whole = COMMANDS[message]
+  const whole = named(COMMANDS, message)
   if (whole !== undefined) return { command: whole, argument: null }
 
   const [head = '', argument, ...rest] = message.split(/\s+/)
@@ -173,6 +173,25 @@ export function readCommand(text: string): CommandRequest | null {
   // swallowed by a Command that would answer it with a refusal.
   if (argument === undefined || rest.length > 0) return null
 
-  const withArgument = TAKES_AN_ARGUMENT[head]
+  const withArgument = named(TAKES_AN_ARGUMENT, head)
   return withArgument === undefined ? null : { command: withArgument, argument }
+}
+
+/**
+ * What one of these tables says about a spelling, and **only** what roma wrote
+ * there.
+ *
+ * `COMMANDS[message]` alone is not that question, and the difference is a bug
+ * rather than pedantry: an object literal inherits `Object.prototype`, so
+ * `COMMANDS['constructor']` answers with a function. A person who typed the
+ * single word `constructor` was getting a `command-outcome` posted about a
+ * Command that does not exist, instead of an answer from the agent — and
+ * `__proto__` the same. Ordinary English words, swallowed silently.
+ *
+ * Older than the Relay list and found while giving that one the same guard.
+ * `relays.ts` carries the reasoning for putting it at the lookup rather than
+ * declaring the table safe.
+ */
+function named(table: Readonly<Record<string, Command>>, spelling: string): Command | undefined {
+  return Object.hasOwn(table, spelling) ? table[spelling] : undefined
 }

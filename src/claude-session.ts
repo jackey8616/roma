@@ -46,6 +46,12 @@ export interface Turn {
    * on the Relay list reports on the pinned build — including the one that
    * spends money. That is why the drift check no longer reads it; see
    * `outputTokens` below and ADR-0018.
+   *
+   * **Nothing in the Core reads this any more**, and it is kept rather than
+   * deleted for one reason: it is the field the seam 2 tests assert *is* zero on
+   * a paid Relay, which is the measurement the drift check's new key exists
+   * because of. A reading nothing depends on and a reading nothing records are
+   * different things, and deleting it would lose the second.
    */
   readonly turns: number | null
   /**

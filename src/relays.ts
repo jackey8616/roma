@@ -202,7 +202,7 @@ export function readRelay(text: string): RelayRequest | null {
   const message = text.trim()
 
   const spelling = message.toLowerCase()
-  const whole = RELAYS[spelling]
+  const whole = entryFor(spelling)
   if (whole !== undefined) return { command: spelling, argument: null, cost: whole.cost }
 
   // The first run of whitespace ends the head; every character after it is the
@@ -212,10 +212,29 @@ export function readRelay(text: string): RelayRequest | null {
   const split = /^(\S+)\s+([\s\S]+)$/.exec(message)
   if (split === null) return null
   const command = (split[1] ?? '').toLowerCase()
-  const head = RELAYS[command]
+  const head = entryFor(command)
   if (head === undefined || !head.takesArgument) return null
 
   return { command, argument: split[2] ?? '', cost: head.cost }
+}
+
+/**
+ * One entry of the table, and **only** an entry roma wrote there.
+ *
+ * `RELAYS[word]` alone is not that question. An object literal inherits
+ * `Object.prototype`, so `RELAYS['constructor']` answers with a function rather
+ * than with `undefined` — and a message that is the single word `constructor`
+ * would be read as a Relay whose cost is nothing at all, put on the wire as a
+ * command, and audited as one. Every table roma matches a typed message against
+ * needs this, `commands.ts` included, and neither had it.
+ *
+ * `Object.hasOwn` rather than a null-prototype table, because the guard belongs
+ * where the lookup is: a table declared safe is one a later reader has to trace
+ * back to its declaration to know it is safe, and a second table added beside it
+ * inherits nothing.
+ */
+function entryFor(spelling: string): RelayEntry | undefined {
+  return Object.hasOwn(RELAYS, spelling) ? RELAYS[spelling] : undefined
 }
 
 /**

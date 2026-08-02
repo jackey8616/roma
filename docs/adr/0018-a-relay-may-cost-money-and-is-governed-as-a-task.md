@@ -23,12 +23,37 @@ fix is not to enumerate sentences, which this ADR names as the `shared-window.ts
 mistake in a new hat, and it is not to re-key the classifier: **a Compaction that
 fails inside a Relay roma sent is that Relay's own answer, and roma classifies
 nothing.** The Caller asked, so the Caller is told, in Claude Code's own words,
-and the operator hears nothing. What it gives up is stated rather than hidden: an
-`exhausted` on this path reaches the Caller without roma's "and `/clear` is the
-way out" beside it. The repair is deferred rather than lost — a Session that
-genuinely cannot be reduced fails the *next* ordinary message on the auto path,
-where the code is a code and ADR-0019's machinery reads it properly. #118 is
-answered by this.
+and the operator hears nothing.
+
+**This is wider than what was asked for, and the difference is worth naming.**
+Consequences below asks only that the *noise* stop — "an Operator Log line per
+`/compact` on a short thread". Suppressing every judgement also drops the two
+things ADR-0019 does about a serious one: the Caller's `/clear` sentence, and the
+operator's line. So an `exhausted` on this path reaches the Caller as Claude
+Code's own "conversation could not be reduced below the context limit" and
+nothing else, and reaches the operator not at all.
+
+It is taken because the narrower fix cannot be built honestly. Splitting benign
+from serious needs a key, every candidate is a claim about behaviour nobody has
+provoked — only `too_few_groups` of the manual path's five has ever been seen —
+and a key guessed wrong tells somebody their thread is finished when it is not,
+which is the one sentence ADR-0019 says roma has to be able to stand behind. The
+repair is also deferred rather than lost: a Session that genuinely cannot be
+reduced fails the *next* ordinary message on the auto path, where the code is a
+code and ADR-0019's machinery reads it properly.
+
+**#118 is therefore half-answered and stays open.** The noise is gone; what is
+left is whether the manual path can be keyed on anything at all, and that is a
+measurement rather than a design — the cheapest version is provoking one
+`exhausted` and reading what the stream does with a `V7`, which is the spend #98
+judged not worth making and this ADR still does not.
+
+Two smaller inventions came with the reply and are recorded rather than assumed.
+This ADR specifies one sentence — "Compacted: 31,953 → 1,764 tokens" — and the
+implementation carries two fallbacks behind it, because the figures it quotes are
+nullable everywhere else in roma and a Relay that neither compacted nor spoke
+would otherwise end in silence. Neither has been seen on any capture; both exist
+so that no ending of a paid Relay is unanswered.
 
 **The drift check's new key needed a floor, and a capture is why.** This ADR
 specifies "the `modelUsage` output-token delta, summed across models". The
