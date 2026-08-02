@@ -19,45 +19,38 @@ for nothing else.
 
 ### Verification status
 
-Measured on the pinned build (2.1.220, ADR-0007), in this repo's container.
+Measured on the pinned build (2.1.220, ADR-0007), in this repo's container. The
+evidence is in
+[`docs/readout-whitelist-verification.md`](../readout-whitelist-verification.md);
+what follows is the part of it the decision rests on.
 
 **Verified — the fault.** `<from>Ada (users/17)</from>\n\n/context` drives a real
-Turn: `num_turns: 1`, `total_cost_usd: 0.0549`, and the result is the model's
-prose *about* `/context` rather than the command's output. Reproduced
-independently through Google Chat against a running roma, which is where it was
-first seen.
+Turn at `num_turns: 1` and **`total_cost_usd: 0.0549`**, and answers with the
+model's prose *about* `/context` rather than the command's output. This is the
+figure the rest of the repo quotes for the shape, and it was seen through Google
+Chat before it was reproduced.
 
-**Verified — the fix, on roma's own invocation.** `/context\n\n<from>…</from>`,
-written as a `{type:'user'}` frame to the stdin of a process spawned with
-`--input-format stream-json --output-format stream-json --verbose
---include-partial-messages --replay-user-messages --session-id`, returns
-`num_turns: 0`, `total_cost_usd: 0`, and the command's real output. The marker
-survives into the Transcript, as `<command-args><from>…</from></command-args>`
-beside `<command-name>/context</command-name>`.
+**Verified — the fix, on roma's own invocation.** Marker last, written as a
+`{type:'user'}` frame to a process spawned with roma's own arguments, returns
+`num_turns: 0`, `total_cost_usd: 0` and the command's real output — and the
+marker still survives into the Transcript, which is what keeps the Audit Record
+honest.
 
-**Verified — the list.** `/context`, `/usage`, `/cost` and `/stats` each return
-`num_turns: 0` and `total_cost_usd: 0`. `/cost` and `/stats` are aliases
-Claude Code declares on `/usage` and they resolve to it.
-
-**Verified — that the list fails safely when an entry is gone.**
-`/skill-doctor` — which the binary carries with `supportsNonInteractive:!0` but
-this build does not register — returns `Unknown command: /skill-doctor`, at
-`num_turns: 0` and `total_cost_usd: 0`. A missing entry does not fall back to
-being a prompt.
+**Verified — the list, and that it fails safely.** `/context`, `/usage`, `/cost`
+and `/stats` each cost nothing. An entry this build does not register answers
+`Unknown command`, also at zero: **a missing entry does not fall back to being a
+prompt.** That is what makes a whitelist safe to hold across a pin move.
 
 **Verified — that a resumed process reports the Session, not the process.**
-A Turn whose `result.usage` summed to 35,225 input-side tokens was followed by
-`--resume` and `/context` on a new process, which reported `35.2k / 967k` with
-`Messages` at `4.6k` — against `8` on a process with no history. Resume
-rehydrates, and the two independent readings agree.
+Resume rehydrates, on two independent readings that agree. Without this a Readout
+would report the truth about a process nobody asked about.
 
-**Not verified — `--permission-mode bypassPermissions`.** The stdin replication
-above omits it: the flag is refused to root and the container this was measured
-in runs as root, where roma's does not. It has nothing to do with how a message
-is parsed, but it is a difference between what was run and what roma runs, and
-naming it is cheaper than someone later discovering it.
+**Not verified — `--permission-mode bypassPermissions`**, because the flag is
+refused to root and the measuring container runs as root where roma's does not.
+It has nothing to do with how a message is parsed, but naming it is cheaper than
+someone later discovering it.
 
-**Not verified — any build but this one.** Every measurement here is a fact about
+**Not verified — any build but this one.** Every measurement is a fact about
 2.1.220. That is the whole reason the list is a list rather than a rule.
 
 **Verified since — the concurrency exemption.** It was written down here as a
