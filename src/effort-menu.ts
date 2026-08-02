@@ -21,7 +21,7 @@
  * 2.1.220** (the ADR-0007 pin), read out of that build, and both must be
  * re-audited when the pin moves. Nothing enforces that — the version is named
  * here so the drift report's working-tree sweep lists this file under what rests
- * on the pin, which is enumeration rather than enforcement. `src/readouts.ts`
+ * on the pin, which is enumeration rather than enforcement. `src/relays.ts`
  * and `src/model-menu.ts` carry the same line for the same reason, and this is
  * the third: the re-audit list is now long enough that "somebody remembers" has
  * stopped being the mechanism.

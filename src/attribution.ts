@@ -1,5 +1,6 @@
 import type { IngressMessage } from './channel-adapter.js'
 import type { WrittenEnclosure } from './enclosures.js'
+import type { RelayRequest } from './relays.js'
 
 /**
  * The marker's two halves.
@@ -23,6 +24,11 @@ const CLOSE = '</from>'
  * which is lost on a restart, and an unmarked message is read as "the same
  * person again": Bob's request would be quietly filed under Ada, in the one
  * record ADR-0006 says roma never deletes. A marker on a DM costs a line.
+ *
+ * Every message *this* function writes, which is every message given to the
+ * model as prose. A Relay carrying an argument is the one message roma sends
+ * with no marker anywhere in it, and `relayed` below is where that exception is
+ * argued and bounded.
  *
  * The marker rides on the text because there is nowhere else for it to ride. A
  * process serves a whole Session and its environment and arguments are fixed at
@@ -93,7 +99,8 @@ function attribute(value: string): string {
 }
 
 /**
- * A Readout with the Caller named *below* it, as Claude Code is given it.
+ * A Relay as Claude Code is given it: the command first, and the Caller named
+ * below it — or not named at all.
  *
  * The one place the marker does not come first, and the exception is the whole
  * of why roma can relay one of Claude Code's own commands at all. Claude Code
@@ -104,23 +111,41 @@ function attribute(value: string): string {
  * the command's output for nothing. That is the fault ADR-0012 exists to fix,
  * and it is the reason `attributed` cannot be used here.
  *
- * **Safe only because `readReadout` demands an exact whole-message match.** The
- * rule the marker's placement enforces — see above — is about what follows it
- * being something a person typed. Here nothing follows it and nothing was
- * typed: `command` comes from roma's own table, and a message that was not
- * exactly one of those entries never reaches this function. There is no Caller
- * text for a forged marker to hide in, so being second costs nothing.
- *
- * Attribution is not traded away for it. Claude Code carries what follows the
- * command into the Transcript as the command's arguments —
+ * **Where the Caller supplied no text, the marker follows the command.** Safe
+ * only because `readRelay` demands an exact whole-message match there: `command`
+ * comes from roma's own table, nothing a person typed follows it, and there is
+ * no Caller text for a forged marker to hide in. Attribution is not traded away
+ * — Claude Code carries what follows the command into the Transcript as
  * `<command-args><from>…</from></command-args>`, measured — so the Caller is
- * recorded on a Readout exactly as on a Turn. What moves is where the marker
- * sits in the frame, not whether it is kept.
+ * recorded exactly as on a Turn. What moves is where the marker sits, not
+ * whether it is kept.
+ *
+ * **Where the Caller supplied an argument, there is no marker at all** — the
+ * only message roma writes without one, and ADR-0018 is where that is argued.
+ * The one sentence it rests on:
+ *
+ * > A Caller Marker says **who sent a message**. A summarisation instruction
+ * > says **what to keep**, and what to keep legitimately names other people —
+ * > "keep what Bob said about the deploy". Inside one string those two are
+ * > indistinguishable, and no ordering separates them.
+ *
+ * Measured rather than reasoned: given roma's genuine marker first and a second
+ * `<from>` behind it, the summariser credited **both**, 3/3, and in one run
+ * called both fake. And the misattribution the marker guards against does not
+ * arise here — with no marker, 5/5 summaries credited the request to nobody. A
+ * summariser is compressing rather than reconstructing who said what.
+ *
+ * The rule therefore reads backwards — the marker is present when there is no
+ * content and absent when there is — and it follows from the same sentence both
+ * times. What is lost is the Transcript's record of *who* asked; what is asked
+ * is still there verbatim in `<command-args>`, and who asked is on the Audit
+ * Record, which is where CONTEXT.md already puts the attribution of spending.
  */
-export function attributedReadout(
+export function relayed(
   { caller, callerName }: Pick<IngressMessage, 'caller' | 'callerName'>,
-  command: string,
+  { command, argument }: Pick<RelayRequest, 'command' | 'argument'>,
 ): string {
+  if (argument !== null) return `${command}\n\n${argument}`
   return `${command}\n\n${OPEN}${named(caller, callerName)}${CLOSE}`
 }
 

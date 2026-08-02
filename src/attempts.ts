@@ -175,6 +175,20 @@ export class Attempts {
   }
 
   /**
+   * The Compaction that happened inside this Task, whichever Attempt paid for
+   * it, or null where none did.
+   *
+   * Deliberately blind to the credential, unlike `spentOn`. That one answers "who
+   * paid for this", which is a question about a bill and has to be split by
+   * credential; this one answers "did the thing the Caller asked for happen", and
+   * a `/compact` that was blocked and reran on Overflow compacted once either
+   * way. The first one stands, for the reason `Spend.compaction` gives.
+   */
+  compaction(): Compaction | null {
+    return this.#made.find((attempt) => attempt.compaction !== null)?.compaction ?? null
+  }
+
+  /**
    * What Claude Code said its credential resolved to, off a Turn's `system/init`.
    *
    * Nullable because the event's own field is: `"none"` under the OAuth token is

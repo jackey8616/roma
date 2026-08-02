@@ -26,7 +26,9 @@ import {
   BLOCKED,
   BLOCKED_WITH_OVERAGE,
   COMPACTED,
+  COMPACTED_MANUALLY,
   COMPACTION_FAILED,
+  MANUAL_COMPACTION_REFUSED,
   NEARLY_SPENT,
   FAILED,
   FAILED_OUTRIGHT,
@@ -1169,22 +1171,26 @@ describe('the Commands roma answers itself', () => {
     })
   })
 
-  // Claude Code's own slash commands are work unless they are on the Readout
-  // list or are one of roma's own. `/compact` is neither: it is left to Claude
-  // Code, which never sees it as a command, because ADR-0009 puts the Caller
-  // Marker above it and what reaches stdin therefore begins with `<from>`. That
-  // is the fault ADR-0012 describes, and it is what every string roma has not
-  // claimed still does.
-  it('interprets no command string but its own and the Readout list', async () => {
+  // Claude Code's own slash commands are work unless they are on the Relay list
+  // or are one of roma's own. `/doctor` is neither: it is left to Claude Code,
+  // which never sees it as a command, because ADR-0009 puts the Caller Marker
+  // above it and what reaches stdin therefore begins with `<from>`. That is the
+  // fault ADR-0012 describes, and it is what every string roma has not claimed
+  // still does.
+  //
+  // This case used to be written with `/compact`, which was the most expensive
+  // example there was of the fault — and is now the fifth entry on the Relay
+  // list, which is ADR-0018. The example moved rather than the rule.
+  it('interprets no command string but its own and the Relay list', async () => {
     const { adapter, claude, say } = newCore()
 
-    await say('/compact')
+    await say('/doctor')
 
     // Untouched under the marker, which is what passing a message through has to
     // mean now that ADR-0009 puts roma's own line above every one of them.
     expect(claude.process.sent.at(-1)).toMatchObject({
       type: 'user',
-      message: { content: [{ text: '<from>Ada (users/17)</from>\n\n/compact' }] },
+      message: { content: [{ text: '<from>Ada (users/17)</from>\n\n/doctor' }] },
     })
     expect(posted(adapter.instructions).at(-1)).toEqual({
       kind: 'result',
@@ -2999,17 +3005,19 @@ function coreSources(): Source[] {
 /**
  * A real relayed `/context`, captured on the pinned build.
  *
- * `num_turns: 0` and `total_cost_usd: 0` — the command answered locally and the
- * model was never called. See the fixture README for how it was taken.
+ * `num_turns: 0`, `total_cost_usd: 0` and `modelUsage: {}` — the command
+ * answered locally and the model was never called. See the fixture README for
+ * how it was taken; the file keeps the name it was captured under, before
+ * ADR-0018 retired the word.
  */
-const READOUT = recordedStream('readout-context').turn(1)
+const FREE_RELAY = recordedStream('readout-context').turn(1)
 
 /**
  * What `OK` — one recorded Turn — leaves on its process's running total.
  *
  * Read off the capture rather than written down beside it. The recorded value is
  * `0.010312900000000002`, and a transcribed `0.0103129` is a different double:
- * the difference turns up as a Readout that cost -1.7e-18.
+ * the difference turns up as a Relay that cost -1.7e-18.
  *
  * Its own reading of the field rather than `readTerminalResult`'s, for the
  * reason `kindOf` gives: a test that located its fixtures with the code under
@@ -3023,19 +3031,37 @@ function totalCostOf(events: readonly ClaudeEvent[]): number {
   return total
 }
 
-/** The same, if the pinned version moved and the command started driving a Turn. */
-const READOUT_DRIFTED = READOUT.map((event) =>
-  event.type === 'result' ? { ...event, num_turns: 1, total_cost_usd: 0.0549 } : event,
+/**
+ * The same, if the pinned version moved and the command started doing model work.
+ *
+ * **`num_turns` stays at zero, deliberately**, and that is the whole reason the
+ * drift check changed its key. ADR-0018 measured a `/compact` moving
+ * `total_cost_usd` by five cents while reporting `num_turns: 0`: an entry that
+ * stays a local command and quietly starts calling the model is exactly the
+ * shape ADR-0012's check could not see. What moves is `modelUsage`, and the
+ * figures below are the ones that run measured.
+ */
+const FREE_RELAY_DRIFTED = FREE_RELAY.map((event) =>
+  event.type === 'result'
+    ? {
+        ...event,
+        num_turns: 0,
+        total_cost_usd: 0.0549,
+        modelUsage: {
+          'claude-sonnet-5': { inputTokens: 2019, outputTokens: 1978, costUSD: 0.0549 },
+        },
+      }
+    : event,
 )
 
-describe('relaying a Readout', () => {
+describe('relaying a free Relay', () => {
   // The fault ADR-0012 exists to fix, from the other side. With the marker on
   // top the frame does not begin with a slash, Claude Code sees prose, and the
   // Caller is billed for the model's guess about what the command would say.
   it('sends the command first and the Caller after it', async () => {
     const { claude, say } = newCore()
 
-    await say('/context', { events: READOUT })
+    await say('/context', { events: FREE_RELAY })
 
     expect(claude.process.sent.at(-1)).toMatchObject({
       type: 'user',
@@ -3046,7 +3072,7 @@ describe('relaying a Readout', () => {
   it('sends the spelling roma chose, not the one that was typed', async () => {
     const { claude, say } = newCore()
 
-    await say('  /CONTEXT ', { events: READOUT })
+    await say('  /CONTEXT ', { events: FREE_RELAY })
 
     expect(claude.process.sent.at(-1)).toMatchObject({
       message: { content: [{ text: '/context\n\n<from>Ada (users/17)</from>' }] },
@@ -3058,7 +3084,7 @@ describe('relaying a Readout', () => {
   it('posts what Claude Code said', async () => {
     const { adapter, say } = newCore()
 
-    await say('/context', { events: READOUT })
+    await say('/context', { events: FREE_RELAY })
 
     const last = posted(adapter.instructions).at(-1)
     expect(last).toMatchObject({ kind: 'result', conversationKey: KEY })
@@ -3068,29 +3094,29 @@ describe('relaying a Readout', () => {
   // Recorded because the list it came from is a person's judgement and can be
   // wrong. Told apart from a Task because "how much work did this month ask
   // for" and "how many messages were sent" are different questions.
-  it('is written down, as a Readout rather than as a Task', async () => {
+  it('is written down, as a Relay rather than as a Task', async () => {
     const { audit, say } = newCore()
 
     await say('hello')
     // The capture was taken on a fresh process, so its terminal event reports a
-    // Session total of 0 — and this Readout is the second thing its process has
-    // served. Measured on the pinned build, a Readout repeats the total it was
+    // Session total of 0 — and this Relay is the second thing its process has
+    // served. Measured on the pinned build, a free Relay repeats the total it was
     // given rather than resetting it (0.211943 before, 0.211943 after), because
     // it spends nothing. Left at the capture's own 0 the delta would come out
     // negative, which is the splice showing rather than anything roma does.
-    await say('/context', { events: withTotalCostUsd(READOUT, TASK_COST) })
+    await say('/context', { events: withTotalCostUsd(FREE_RELAY, TASK_COST) })
 
     const records = recordsIn(audit)
-    expect(records.map((record) => record.kind)).toEqual([undefined, 'readout'])
+    expect(records.map((record) => record.kind)).toEqual([undefined, 'relay'])
     expect(records.at(-1)).toMatchObject({
-      kind: 'readout',
+      kind: 'relay',
       caller: 'users/17',
       callerName: 'Ada',
       outcome: 'result',
       costUsd: 0,
       credential: 'shared-window',
     })
-    expect(audit.totalFor(MONTH)).toMatchObject({ tasks: 1, readouts: 1 })
+    expect(audit.totalFor(MONTH)).toMatchObject({ tasks: 1, relays: 1 })
   })
 
   // ADR-0010's rule, applied to something that answers in milliseconds: an
@@ -3101,12 +3127,12 @@ describe('relaying a Readout', () => {
     await say('hello')
     const before = progressOf(adapter).length
 
-    await say('/context', { events: READOUT })
+    await say('/context', { events: FREE_RELAY })
 
     expect(progressOf(adapter).length).toBe(before)
   })
 
-  // The other half of the same rule. A Readout is serialised against its
+  // The other half of the same rule. A free Relay is serialised against its
   // Session — forced, because two processes on one transcript corrupt it — so it
   // can wait behind a five-minute Task, and ADR-0003's case for the cap is that
   // unacknowledged waiting makes people resend.
@@ -3115,7 +3141,7 @@ describe('relaying a Readout', () => {
 
     const { task } = await start('a long one')
 
-    const readout = core.handle(ingress('/context'))
+    const relay = core.handle(ingress('/context'))
     await flush()
 
     expect(queuedIn(adapter)).toHaveLength(1)
@@ -3123,25 +3149,30 @@ describe('relaying a Readout', () => {
     feed(procFor(KEY), OK)
     await task
     await flush()
-    feed(claude.process, READOUT)
-    await readout
+    feed(claude.process, FREE_RELAY)
+    await relay
   })
 
-  // The drift check. Nothing on the list may drive a Turn, and one that did
-  // means the ADR-0007 pin has moved under roma and the entry is now spending
-  // money. Said where an operator looks, not to the Caller — they asked a
-  // question and got an answer; what is wrong is roma's list.
-  it('tells an operator when a Readout drove a Turn', async () => {
+  // The drift check. Nothing the list declares free may do model work, and one
+  // that did means the ADR-0007 pin has moved under roma and the entry is now
+  // spending money. Said where an operator looks, not to the Caller — they asked
+  // a question and got an answer; what is wrong is roma's list.
+  //
+  // The capture this runs on reports `num_turns: 0`, so ADR-0012's own check
+  // would sit silent through it. That is the point: `/compact` is a live example
+  // of an entry that costs real money and reports no Turns, and the key had to
+  // move to something that can see one.
+  it('tells an operator when a free Relay did model work', async () => {
     const { adapter, log, say } = newCore()
 
-    await say('/context', { events: READOUT_DRIFTED })
+    await say('/context', { events: FREE_RELAY_DRIFTED })
 
     expect(log).toEqual([
       {
-        event: 'readout-drove-turn',
+        event: 'free-relay-did-model-work',
         taskId: expect.any(String),
         command: '/context',
-        turns: 1,
+        outputTokens: 1978,
         costUsd: 0.0549,
       },
     ])
@@ -3149,22 +3180,278 @@ describe('relaying a Readout', () => {
     expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'result' })
   })
 
-  it('says nothing to an operator about a Readout that behaved', async () => {
+  it('says nothing to an operator about a free Relay that behaved', async () => {
     const { log, say } = newCore()
 
-    await say('/context', { events: READOUT })
+    await say('/context', { events: FREE_RELAY })
 
     expect(log).toEqual([])
   })
 
   // And the money lands in the month either way, which is what recording it was
   // insurance for.
-  it('puts a drifted Readout’s cost into the month', async () => {
+  it('puts a drifted Relay’s cost into the month', async () => {
     const { audit, say } = newCore()
 
-    await say('/context', { events: READOUT_DRIFTED })
+    await say('/context', { events: FREE_RELAY_DRIFTED })
 
-    expect(audit.totalFor(MONTH)).toMatchObject({ tasks: 0, readouts: 1, costUsd: 0.0549 })
+    expect(audit.totalFor(MONTH)).toMatchObject({ tasks: 0, relays: 1, costUsd: 0.0549 })
+  })
+})
+
+// ADR-0018. `/compact` is not a fourth kind of message — it is the fourth cell
+// of a grid roma already had, and what these assert is that nothing was invented
+// for it. Its shape on the wire is a Relay's; everything that governs it is the
+// Task path, unchanged.
+describe('relaying a `/compact`, which costs money', () => {
+  // The frame, and the half ADR-0012 already settled: a marker above it turns it
+  // into prose Claude Code answers *about*, at five cents a go.
+  it('sends the command first and the Caller after it, with no argument', async () => {
+    const { claude, say } = newCore()
+
+    await say('/compact', { events: COMPACTED_MANUALLY })
+
+    expect(claude.process.sent.at(-1)).toMatchObject({
+      message: { content: [{ text: '/compact\n\n<from>Ada (users/17)</from>' }] },
+    })
+  })
+
+  // **The only message roma sends with no Caller Marker anywhere in it.** A
+  // marker says who sent a message, an instruction says what to keep, and what
+  // to keep legitimately names other people — inside one string those are the
+  // same shape, and it was measured: given roma's marker and a second `<from>`
+  // behind it, the summariser credited both, 3/3.
+  it('sends an argument with no marker at all', async () => {
+    const { claude, say } = newCore()
+
+    await say('/compact keep the ADRs and anything unresolved', {
+      events: COMPACTED_MANUALLY,
+    })
+
+    expect(claude.process.sent.at(-1)).toMatchObject({
+      message: { content: [{ text: '/compact\n\nkeep the ADRs and anything unresolved' }] },
+    })
+    expect(JSON.stringify(claude.process.sent.at(-1))).not.toContain('<from>')
+  })
+
+  // Governed as a Task, which for the record means one field: `relay` rather
+  // than absent. Together with `compaction.trigger` it is what answers "who
+  // asked for this Compaction" — `relay` plus `manual` is somebody typing
+  // `/compact` and paying for it, where `task` plus `auto` is somebody's bad
+  // luck. No new field, and no third value on `kind`.
+  it('is written down as a Relay that cost money, with the Compaction on it', async () => {
+    const { audit, say } = newCore()
+
+    await say('/compact', { events: COMPACTED_MANUALLY })
+
+    expect(recordsIn(audit)).toMatchObject([
+      {
+        kind: 'relay',
+        caller: 'users/17',
+        callerName: 'Ada',
+        outcome: 'result',
+        credential: 'shared-window',
+        compaction: { trigger: 'manual', preTokens: 31953, postTokens: 1764 },
+      },
+    ])
+    expect(recordsIn(audit).at(0)?.costUsd).toBeGreaterThan(0)
+    expect(audit.totalFor(MONTH)).toMatchObject({ tasks: 0, relays: 1 })
+  })
+
+  // **Nothing on the wire says this cost anything.** `num_turns` is 0, exactly
+  // as it is for the four free entries, and `duration_api_ms` and the top-level
+  // `usage` are zeros with it — so the drift check ADR-0012 wrote could never
+  // have fired on it, which is why it now reads `modelUsage` instead. Asserted
+  // from this side because the free path is where it fires, and this is the
+  // entry that proves the old key was blind.
+  it('reports no Turns at all, which is what re-keyed the drift check', async () => {
+    const { audit, log, say } = newCore()
+
+    await say('/compact', { events: COMPACTED_MANUALLY })
+
+    expect(COMPACTED_MANUALLY.at(-1)).toMatchObject({ num_turns: 0 })
+    // And no operator line: the entry is declared paid, so doing model work is
+    // what it is for. The check is one-directional by construction.
+    expect(log).toEqual([])
+    expect(recordsIn(audit).at(0)?.costUsd).toBeGreaterThan(0)
+  })
+
+  // Claude Code returns `result: ""` on a successful `/compact`, so roma has to
+  // speak or nobody is told anything after half a minute and five cents. The
+  // figures are the boundary's own — nothing is computed and nothing parallel is
+  // maintained.
+  it('says what the money bought, in the boundary’s own figures', async () => {
+    const { adapter, say } = newCore()
+
+    await say('/compact', { events: COMPACTED_MANUALLY })
+
+    expect(posted(adapter.instructions).at(-1)).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: 'Compacted: 31,953 → 1,764 tokens.',
+    })
+  })
+
+  // The Acknowledgement, unconditionally. ADR-0012 made it conditional on "a
+  // Readout on a warm Session returns in milliseconds", which is measured false
+  // here by a factor of twenty thousand — and `status: "compacting"` is the only
+  // thing on the wire for the whole of it, so without reading it the
+  // acknowledgement would say "Working…" and then freeze.
+  it('acknowledges it even on a warm Session, and says it is compacting', async () => {
+    const { adapter, say, start } = newCore()
+
+    // Warm: a free Relay on a Session with a live process says nothing at all
+    // first, which is ADR-0012's rule and stays written for the four it was
+    // written for. This one is acknowledged anyway, before it has produced
+    // anything.
+    await say('hello')
+    const before = progressOf(adapter).length
+
+    const { task, proc } = await start('/compact')
+    expect(progressOf(adapter).slice(before).map(({ progress }) => progress)).toEqual([
+      { phase: 'working' },
+    ])
+
+    // And then the acknowledgement keeps moving, on the one event there is
+    // between the command going out and the boundary coming back. The throttle
+    // is what the timer advance is for — the real gap here is 28,517ms.
+    feed(proc, upToFirst(COMPACTED_MANUALLY, 'system/compact_boundary'))
+    await vi.advanceTimersByTimeAsync(THROTTLE)
+
+    expect(adapter.instructions.at(-1)).toMatchObject({
+      kind: 'progress',
+      progress: { phase: 'compacting' },
+    })
+
+    feed(proc, COMPACTED_MANUALLY.slice(-1))
+    await task
+  })
+
+  // What ADR-0012 recorded as a gap and accepted, because a free Relay is free
+  // and instant. A `/compact` is neither, so it is in `#running` like any Task
+  // and `/stop` reaches it — as a consequence of being governed as one rather
+  // than as a second decision. Upstream agrees stopping one is coherent:
+  // `aborted` is in its own failure vocabulary.
+  it('can be stopped, which a free Relay cannot', async () => {
+    const { adapter, core, start } = newCore()
+    const INTERRUPTED = recordedStream('interrupted-turn')
+    const { task, proc } = await start('/compact')
+
+    await core.handle(ingress('/stop'))
+    feed(proc, INTERRUPTED.turn(1))
+    await task
+
+    expect(posted(adapter.instructions)).toContainEqual({
+      kind: 'command-outcome',
+      conversationKey: KEY,
+      command: 'stop',
+      carriedOut: true,
+    })
+    expect(posted(adapter.instructions).at(-1)).toEqual({ kind: 'stopped', conversationKey: KEY })
+  })
+
+  // Counted against the cap of three, which the free entries are exempt from.
+  // ADR-0012 bought that exemption with "no Turn, no money, no retry", and not
+  // one clause of it survives a twenty-second, five-cent Turn.
+  it('holds one of the three concurrency slots while it runs', async () => {
+    const { queue, start } = newCore()
+
+    const { task, proc } = await start('/compact')
+    expect(queue.running).toBe(1)
+
+    feed(proc, COMPACTED_MANUALLY)
+    await task
+    expect(queue.running).toBe(0)
+  })
+
+  // Parkable and Overflowable, with no carve-out — #89 asked for one, and
+  // ADR-0018 refused it. Overflow is an *offer* made at the moment of blocking
+  // and declining costs nothing, so suppressing it for one string would be roma
+  // deciding on somebody's behalf how much of their money is worth spending.
+  it('is offered Overflow when the window blocks it, like anything else', async () => {
+    const { adapter, start } = newCore()
+
+    const { task, proc } = await start('/compact keep the ADRs')
+    feed(proc, BLOCKED_WITH_OVERAGE)
+    await flush()
+
+    expect(posted(adapter.instructions)).toContainEqual({
+      kind: 'blocked',
+      conversationKey: KEY,
+      resetsAt: RESETS_AT,
+      overflowOffered: true,
+    })
+    leftParked(task)
+  })
+})
+
+describe('a `/compact` that did not compact', () => {
+  // What ADR-0018 called the seam its implementation had to close. On the auto
+  // path `compact_error` is a code and `compaction.ts` classifies it; here it is
+  // a **sentence** — "Not enough messages to compact." — so every failure of a
+  // `/compact` would sort into `unexplained` and write an operator line about a
+  // Turn that was fine. And this is the *commonest* manual failure there is,
+  // because typing `/compact` into a short thread is exactly it.
+  //
+  // Closed by asking whose Compaction this is rather than by enumerating
+  // sentences, which would be the `shared-window.ts` mistake in a new hat.
+  it('writes no operator line, because roma is not the one classifying it', async () => {
+    const { log, say } = newCore()
+
+    await say('/compact', { events: MANUAL_COMPACTION_REFUSED })
+
+    expect(log).toEqual([])
+  })
+
+  // roma relays what Claude Code already wrote, so the field's spelling stops
+  // mattering: the sentence arrives in the terminal event's own `result`,
+  // addressed to a person, at no cost, on a Turn that reported no error at all.
+  it('relays Claude Code’s own sentence to whoever asked', async () => {
+    const { adapter, say } = newCore()
+
+    await say('/compact', { events: MANUAL_COMPACTION_REFUSED })
+
+    expect(posted(adapter.instructions).at(-1)).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: 'Not enough messages to compact.',
+    })
+  })
+
+  // The same on a code that means something serious, and the same reason: roma
+  // cannot tell it from the benign one without reading sentences. What is given
+  // up is named rather than hidden — the Caller gets Claude Code's words without
+  // roma's "and `/clear` is the way out", and the repair is deferred rather than
+  // lost, because a Session that truly cannot be reduced fails the next ordinary
+  // message on the auto path, where the code is a code.
+  it('says nothing of its own about one that sounds serious', async () => {
+    const { adapter, log, say } = newCore()
+    const exhausted = withCompactionError(
+      MANUAL_COMPACTION_REFUSED,
+      'Compaction failed · conversation could not be reduced below the context limit',
+    )
+
+    await say('/compact', { events: exhausted })
+
+    expect(log).toEqual([])
+    expect(posted(adapter.instructions)).not.toContainEqual(
+      expect.objectContaining({ kind: 'context-full' }),
+    )
+  })
+
+  // An auto-Compaction inside an ordinary Task is untouched by any of the above,
+  // and it has to be: that is where a code really is a code, and where roma's
+  // own sentence about `/clear` is the whole reason the classifier exists.
+  it('leaves the classifier alone for a Compaction nobody asked for', async () => {
+    const { adapter, log, say } = newCore()
+
+    await say('OK', { events: withCompactionError(COMPACTION_FAILED, 'exhausted') })
+
+    expect(log).toMatchObject([{ event: 'compaction-failed', severity: 'unreducible' }])
+    expect(posted(adapter.instructions)).toContainEqual({
+      kind: 'context-full',
+      conversationKey: KEY,
+    })
   })
 })
 

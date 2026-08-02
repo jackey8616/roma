@@ -28,16 +28,43 @@ export interface TerminalResult {
    * How many model Turns the message drove — `num_turns`, and zero for a local
    * command that answered without one.
    *
-   * Read for the Readout drift check (ADR-0012) and for nothing else. Every
-   * entry on the Readout list answers locally on the pinned build, measured, so
-   * anything above zero means the pin has moved and an entry has quietly become
-   * something that spends money.
+   * **Not the Relay drift check's key any more, and ADR-0018 is where that was
+   * measured false.** A manual `/compact` moved `total_cost_usd` by $0.0453 over
+   * 28,545ms and reported `num_turns: 0`: an entry that stays `type:"local"` and
+   * starts doing model work is invisible here. `cumulativeOutputTokens` below is
+   * what the check reads instead. This is kept because it is still what the
+   * stream says about a message, and it is what tells a local command apart from
+   * a prompt — the other shape an entry can drift into.
    *
    * Null where the event carried no count. Not folded into zero: "it drove no
    * Turn" and "this build does not say" are different facts, and only the first
    * of them is the one being asserted.
    */
   readonly turns: number | null
+  /**
+   * Output tokens across every model this process has used, cumulative.
+   *
+   * Summed off `modelUsage`, which is the one field that moves when a
+   * `type:"local"` command does model work: on the measured `/compact` the
+   * top-level `usage` was all zeros, `duration_api_ms` was 0 and `num_turns` was
+   * 0, while `modelUsage` moved by +2,019 input and +1,978 output tokens.
+   *
+   * Cumulative for the *process* the way `total_cost_usd` is, so differencing is
+   * the caller's job — `ClaudeSession` does it, for the reason it does it there.
+   *
+   * Output rather than input, and tokens rather than money. The membership rule a
+   * Relay is judged against is about **model work**; money is a function of model
+   * work that also moves with pricing, plans and which model answered, so a
+   * zero-cost model would silently retire the check while the behaviour it
+   * watches carried on. Input moves for reasons that are not the entry's doing —
+   * a cache read is counted there — and output does not.
+   *
+   * Zero where the object is present and empty, which is what a free Relay
+   * reports (`modelUsage: {}` on `readout-context.jsonl`). Null only where the
+   * field is absent altogether, which is a build that has stopped saying rather
+   * than a Turn that did nothing.
+   */
+  readonly cumulativeOutputTokens: number | null
   /**
    * What went wrong, in Claude Code's own words, or `[]` where it said nothing.
    *
@@ -251,6 +278,25 @@ export function readCompactionFailure(event: ClaudeEvent): CompactionFailure | n
   return { code: asString(event['compact_error']) }
 }
 
+/**
+ * Whether this event says a Compaction is under way right now.
+ *
+ * The only thing on the wire between a `/compact` being sent and the boundary
+ * arriving, and the gap it covers was measured at up to 28,517ms. Without it the
+ * Acknowledgement idles for the whole of that — the same dead-stream shape
+ * `readToolStarted` exists for, and the failure ADR-0003 named when it argued the
+ * concurrency cap: "unacknowledged waiting causes users to resend".
+ *
+ * The same event carries `compact_result` when a Compaction has *finished*, so
+ * this reads the `status` field rather than the subtype: a `status: null` event
+ * announcing a result is not an announcement that work is starting.
+ */
+export function readCompacting(event: ClaudeEvent): boolean {
+  return (
+    event.type === 'system' && event['subtype'] === 'status' && event['status'] === 'compacting'
+  )
+}
+
 export function parseEvent(line: string): ClaudeEvent | null {
   let parsed: unknown
   try {
@@ -283,8 +329,34 @@ export function readTerminalResult(event: ClaudeEvent): TerminalResult | null {
     stopReason: asString(event['stop_reason']),
     terminalReason: asString(event['terminal_reason']),
     turns: asNumber(event['num_turns']),
+    cumulativeOutputTokens: outputTokensIn(event['modelUsage']),
     errors: asStrings(event['errors']),
   }
+}
+
+/**
+ * Output tokens across every model in one `modelUsage` object, or null if there
+ * is no such object.
+ *
+ * Summed rather than read per model, because what the drift check asks is
+ * whether *any* model did work — and the answer is spread across entries the
+ * caller has no reason to know the names of. A `/compact` charges the
+ * summarisation to whichever model Claude Code picked for it, which is not
+ * necessarily the one the Session runs on: the measured capture has a
+ * `claude-haiku-4-5` entry beside the Session's own `claude-sonnet-5`.
+ *
+ * A model whose entry carries no `outputTokens` contributes nothing rather than
+ * making the whole sum null. The check this feeds fires on movement, so an
+ * unreadable entry should be able to hide work it did — not to hide work another
+ * entry did.
+ */
+function outputTokensIn(value: unknown): number | null {
+  if (typeof value !== 'object' || value === null) return null
+  let total = 0
+  for (const model of Object.values(value as Record<string, unknown>)) {
+    total += asNumber(fieldsOf(model)['outputTokens']) ?? 0
+  }
+  return total
 }
 
 /**

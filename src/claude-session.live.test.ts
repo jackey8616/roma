@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { attributedReadout } from './attribution.js'
+import { relayed } from './attribution.js'
 import { buildEnv } from './build-env.js'
 import { spawnClaudeProcess } from './claude-process.js'
 import { ClaudeSession, type Turn } from './claude-session.js'
@@ -249,26 +249,27 @@ describe('an Enclosure on disk, read by the agent', () => {
 // pinned build rather than about roma, and neither was a test. Nothing re-checked
 // either of them when the ADR-0007 pin moved.
 //
-// One Session, three sends, and the order is the whole measurement. A Readout on
-// a process that has not spent is nearly free and settles the cheap half; the
-// same Readout after a real Turn is the half worth the money, because it is the
+// One Session, three sends, and the order is the whole measurement. A free Relay
+// on a process that has not spent is nearly free and settles the cheap half; the
+// same Relay after a real Turn is the half worth the money, because it is the
 // only one that can tell "the terminal event repeated the running total" apart
 // from "the process had spent nothing yet". Run cold-only, the second assertion
 // passes for the wrong reason.
 //
-// Written through `attributedReadout` rather than as a bare string, so what goes
-// on the wire is the frame roma actually sends — the marker *after* the command,
-// which is what ADR-0012 exists for.
+// Written through `relayed` rather than as a bare string, so what goes on the
+// wire is the frame roma actually sends — the marker *after* the command, which
+// is what ADR-0012 exists for.
 
-const READOUT_CALLER = { caller: 'users/17', callerName: 'Ada' }
+const RELAY_CALLER = { caller: 'users/17', callerName: 'Ada' }
+const CONTEXT = { command: '/context', argument: null }
 
-describe("a Readout on roma's own invocation path", () => {
+describe("a free Relay on roma's own invocation path", () => {
   const sessionId = randomUUID()
   const turns: Turn[] = []
   let session: ClaudeSession
 
   beforeAll(async () => {
-    const { configDir, cwd } = liveSessionDirs('readout')
+    const { configDir, cwd } = liveSessionDirs('free-relay')
     session = new ClaudeSession({
       sessionId,
       cwd,
@@ -276,9 +277,9 @@ describe("a Readout on roma's own invocation path", () => {
     })
     session.start()
 
-    turns.push(await session.send(attributedReadout(READOUT_CALLER, '/context')))
+    turns.push(await session.send(relayed(RELAY_CALLER, CONTEXT)))
     turns.push(await session.send(PING))
-    turns.push(await session.send(attributedReadout(READOUT_CALLER, '/context')))
+    turns.push(await session.send(relayed(RELAY_CALLER, CONTEXT)))
   }, 240_000)
 
   // In the hook, so a run that spent the money leaves the reading behind even
@@ -287,14 +288,15 @@ describe("a Readout on roma's own invocation path", () => {
   // the thing that would move under it.
   afterAll(async () => {
     if (session.alive) await session.terminate()
-    const labels = ['cold readout', 'task', 'warm readout']
+    const labels = ['cold relay', 'task', 'warm relay']
     console.log(
       [
-        `readout seam 2 (#85) — $${session.cumulativeCostUsd.toFixed(6)} over ${turns.length} sends`,
+        `free relay seam 2 (#85) — $${session.cumulativeCostUsd.toFixed(6)} over ${turns.length} sends`,
         ...turns.map((turn, i) => {
           const raw = turn.result['total_cost_usd']
           return (
             `  ${(labels[i] ?? '?').padEnd(13)} num_turns=${String(turn.turns)} ` +
+            `out=${String(turn.outputTokens)} ` +
             `delta=${String(turn.costUsd)} total_cost_usd=${String(raw)}`
           )
         }),
@@ -302,7 +304,7 @@ describe("a Readout on roma's own invocation path", () => {
     )
   })
 
-  // The premise of the whole Readout list, and the cheap half of it. `/context`
+  // The premise of the whole Relay list, and the cheap half of it. `/context`
   // answering locally is also what makes the entry still an entry: a command
   // that had been removed would come back as `Unknown command`, for free, and
   // pass a test that only looked at the cost.
@@ -314,7 +316,7 @@ describe("a Readout on roma's own invocation path", () => {
 
   // The one worth the money. `ClaudeSession` prices a Turn by differencing
   // `total_cost_usd` and rebases its baseline on every terminal event, so a
-  // build whose Readout reported `0` instead of the running total would record a
+  // build whose Relay reported `0` instead of the running total would record a
   // negative cost here *and* rebase the baseline to zero — billing the next Task
   // in this Session for the whole of the process's prior spend.
   //
@@ -324,12 +326,12 @@ describe("a Readout on roma's own invocation path", () => {
   // behaviour. They stay green if the behaviour moves. This does not.
   it('still costs nothing on a process that has already spent', () => {
     // The guard that keeps the assertion below meaningful. If the middle Turn
-    // were free, the Readout after it would report zero either way.
+    // were free, the Relay after it would report zero either way.
     expect(turns[1]?.costUsd).toBeGreaterThan(0)
 
     expect(turns[2]?.turns).toBe(0)
     expect(turns[2]?.costUsd).toBe(0)
-    // The other half of the same fact, from the Session's side: a Readout moves
+    // The other half of the same fact, from the Session's side: a free Relay moves
     // the baseline nowhere, so the process's total is still the Task's.
     expect(session.cumulativeCostUsd).toBe(turns[1]?.costUsd)
   })

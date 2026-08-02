@@ -1,5 +1,6 @@
 import type { TaskProgress } from './channel-adapter.js'
 import {
+  readCompacting,
   readTextDelta,
   readThinkingTokens,
   readToolFinished,
@@ -165,6 +166,10 @@ export class ProgressReporter {
     if (estimatedTokens !== null) return { phase: 'thinking', estimatedTokens }
     const started = readToolStarted(event)
     if (started !== null) return { phase: 'tool', tool: started }
+    // The other dead stream, and the longer one. Nothing arrives between this and
+    // the boundary — 28,517ms in the longest capture — so without it a `/compact`
+    // posts "Working…" and then says nothing at all for half a minute.
+    if (readCompacting(event)) return { phase: 'compacting' }
     // Only where a tool is what is being shown. A background task finishing
     // while the answer is being written closes no window the acknowledgement is
     // showing, and would otherwise throw the prose away for a whole interval.
@@ -240,6 +245,10 @@ function saysTheSame(a: TaskProgress, b: TaskProgress | null): boolean {
       return b.phase === 'queued' && b.position === a.position
     case 'working':
       return b.phase === 'working'
+    case 'compacting':
+      // No number to compare, and none is wanted: a Compaction reports nothing
+      // while it runs, so every moment of one really does say the same thing.
+      return b.phase === 'compacting'
     case 'thinking':
       return b.phase === 'thinking' && b.estimatedTokens === a.estimatedTokens
     case 'tool':

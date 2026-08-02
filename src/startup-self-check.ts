@@ -23,8 +23,8 @@ const PROBE = 'Reply with OK and nothing else. Do not use any tools.'
  * deployment rather than once per spawn — measured at `num_turns: 0`,
  * `total_cost_usd: 0`, and answered with no credential at all.
  *
- * **Deliberately not named a Readout.** CONTEXT.md's entry for that term lists
- * `/effort` under what it must never be used for: a Readout is something roma
+ * **Deliberately not named a Relay.** CONTEXT.md's entry for that term lists
+ * `/effort` under what it must never be used for: a Relay is something roma
  * relays *on a Caller's behalf, to their Session*, and `/effort` is roma's own
  * Command precisely so that it never reaches one. This is a boot probe asking a
  * throwaway process about itself, with no Caller, no Session anybody is on and
@@ -70,7 +70,7 @@ export type SelfCheckCondition = 'credential' | 'model' | 'turn' | 'init' | 'tim
  * fault whose worst outcome is thinking at the wrong depth (ADR-0016).
  *
  * So it goes to the Operator Log, which is where an anomaly goes — ADR-0012's
- * drift check already writes a misbehaving Readout there for the same reason. And
+ * drift check already writes a misbehaving Relay there for the same reason. And
  * the match is loose so the line fires on a changed *level* rather than on
  * changed *prose*, because a check people learn to ignore has stopped watching.
  *
@@ -357,8 +357,8 @@ export async function startupSelfCheck({
  * Relay one of Claude Code's own commands to a process and hand back what it
  * said, or null if it did not say anything.
  *
- * The gesture `Core.#runReadout` makes, with everything that makes a Readout a
- * Readout taken away: no Caller, so no Caller Marker; no Task, so no queue, no
+ * The gesture `Core.#runFreeRelay` makes, with everything that makes a Relay a
+ * Relay taken away: no Caller, so no Caller Marker; no Task, so no queue, no
  * concurrency slot and no acknowledgement; no Audit Record, because nobody was
  * billed and nobody asked. What is left is the primitive itself — one command
  * onto stdin as itself, one Turn's worth of waiting, and the text back.

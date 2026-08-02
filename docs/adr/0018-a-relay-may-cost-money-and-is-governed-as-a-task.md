@@ -4,23 +4,47 @@ Date: 2026-08-01
 
 ## Status
 
-Accepted, and **not implemented**. What it depended on is now built: ADR-0019
-landed `readCompaction` and `readCompactionFailure`, the Audit Record's optional
-`compaction` field carrying `trigger`, and `compaction.ts` (#115). What is left
-is this ADR's own half — the rename, the argument, the paid Relay's governance,
-and the ledger migration.
+Accepted, and **implemented** (#89). The rename, the argument, the paid Relay's
+governance, the drift check's new key, the replies and the ledger migration are
+all in. What it depended on was already built: ADR-0019 landed `readCompaction`
+and `readCompactionFailure`, the Audit Record's optional `compaction` field
+carrying `trigger`, and `compaction.ts` (#115).
 
-**One thing ADR-0019 built does not reach the manual path, and it is nobody's
-mistake.** `compaction.ts` classifies a failure by **code**, with
+Two things this document left to the implementation, decided there and recorded
+here because they are decisions rather than mechanics:
+
+**The code-keyed classifier is reconciled by asking whose Compaction it is.**
+`compaction.ts` classifies a failure by **code**, with
 `BENIGN = ['too_few_groups', 'aborted']` and everything unrecognised landing in
 `unexplained`. On the manual path `compact_error` is a **sentence** — `"Not enough
 messages to compact."` — so the commonest manual failure there is would classify
-as `unexplained`. ADR-0019's design fails in the safe direction, which is the
-point of its third value: the Caller is told nothing wrong, and only the operator
-hears. What it produces is **noise** — an Operator Log line every time somebody
-types `/compact` into a short thread, which is how a log that records decisions
-turns into a log that records traffic. Reconciling that belongs to this ADR's
-implementation and is named in Consequences rather than solved here.
+as `unexplained` and write an Operator Log line about a Turn that was fine. The
+fix is not to enumerate sentences, which this ADR names as the `shared-window.ts`
+mistake in a new hat, and it is not to re-key the classifier: **a Compaction that
+fails inside a Relay roma sent is that Relay's own answer, and roma classifies
+nothing.** The Caller asked, so the Caller is told, in Claude Code's own words,
+and the operator hears nothing. What it gives up is stated rather than hidden: an
+`exhausted` on this path reaches the Caller without roma's "and `/clear` is the
+way out" beside it. The repair is deferred rather than lost — a Session that
+genuinely cannot be reduced fails the *next* ordinary message on the auto path,
+where the code is a code and ADR-0019's machinery reads it properly. #118 is
+answered by this.
+
+**The drift check's new key needed a floor, and a capture is why.** This ADR
+specifies "the `modelUsage` output-token delta, summed across models". The
+implementation found that the sum is not monotonic: in
+`three-turns-one-process.jsonl` — one process, the pinned build — the third Turn
+drops the `claude-haiku-4-5` entry altogether and reports fewer `outputTokens`
+for `claude-sonnet-5` than the Turn before it, while `total_cost_usd` climbs as
+it should. A plain delta reads that as a negative Turn, which is harmless, and
+leaves a baseline below where it had been, which is not: the next Turn to report
+normally would show a large positive delta and the check would accuse an innocent
+entry. So the baseline is a **high-water mark** and a backwards reading reports
+zero. The cost is that real work immediately after such a reading is
+under-counted, which is the right way round for a one-directional alarm — it can
+fail to fire, and it cannot fire wrongly. `total_cost_usd` is deliberately *not*
+treated this way: it is a figure things are billed from, and it does not exhibit
+this.
 
 **Amended 2026-08-01, and this one is to the decisions rather than only to the
 evidence.** It was written the same day, on facts read off the pinned build and
@@ -636,6 +660,16 @@ request rather than an additional message, and the bar is not in play.
   short thread. The implementation has to reconcile them, and it cannot do it by
   enumerating sentences — that is the `shared-window.ts` mistake wearing a
   different hat, and only one of the five manual failures has ever been observed.
+  **Settled in Status above**: a Compaction that fails inside a Relay roma sent
+  is that Relay's own answer, so roma classifies nothing and the Caller gets
+  Claude Code's sentence. The consequence is that `severityOf` no longer sees
+  every failed Compaction — it sees every *unasked-for* one, which is the set it
+  was written about.
+- **`compaction.ts` and the Operator Log now describe the auto path only**, and
+  CONTEXT.md's Compaction entry says so. "A failed Compaction is in the Operator
+  Log" acquires the same exception the Caller Marker did, and for a related
+  reason: a `/compact` is a request, and the answer to a request goes to whoever
+  made it.
 - roma gains its first relayed free text. Nothing validates it, and nothing can.
 - **The one machine-checkable half of the membership rule is currently guarding
   four spellings out of five, and this is the work that has to fix it.** The

@@ -11,7 +11,7 @@
  * There are five here, and the number has moved twice: ADR-0014 took ADR-0003's
  * two to three, and ADR-0016 and ADR-0017 take it to five. Everything else a
  * person types is work for Claude Code — apart from the few of Claude Code's own
- * commands ADR-0012 relays as a Readout. Five is a count of Commands and not of
+ * commands ADR-0012 relays as a Relay. Five is a count of Commands and not of
  * spellings: ADR-0013 gives the reset three and ADR-0017 gives `/config` two,
  * and neither moved the number here.
  *
@@ -21,7 +21,7 @@
  * reaches stdin begins with `<from>` and Claude Code — which parses a command
  * only when the message starts with a slash — sees prose. The Turn is real and
  * is billed, and the answer is the model's guess about the command rather than
- * the command. A Readout is the only route by which one of them arrives as
+ * the command. A Relay is the only route by which one of them arrives as
  * itself, and `/model` is why the third Command exists: ADR-0012 measured that
  * shape at `$0.0549` and named `/model` as the string it must never be relayed
  * for. `/effort` and `/config` are the same argument twice more — the first
@@ -48,7 +48,7 @@ export interface CommandRequest {
  * How each Command is written when it takes nothing. Nothing else is one.
  *
  * The reset answers to three strings, and the ADR-0013 reason is the one
- * `readouts.ts` already gives for carrying `/cost` and `/stats`: a spelling roma
+ * `relays.ts` already gives for carrying `/cost` and `/stats`: a spelling roma
  * leaves unclaimed is one somebody is billed for. `clear` is Claude Code's own
  * name for this and `reset` and `new` are the two aliases it declares on it, so
  * all three are strings a person arrives already typing — and roma held only the
@@ -56,11 +56,11 @@ export interface CommandRequest {
  * nothing.
  *
  * `/clear` is the one that mattered, and not for the five cents. Relaying it as
- * a Readout is the obvious repair and is the worst move available: Claude Code's
+ * a Relay is the obvious repair and is the worst move available: Claude Code's
  * `/clear` moves its process onto a session roma is not tracking, so the next
  * `--resume` resolves to a session roma believes in and Claude Code has left.
  * Being a Command puts it out of reach of that by construction — `readCommand`
- * answers before `readReadout` is consulted — so whitelisting it later would
+ * answers before `readRelay` is consulted — so whitelisting it later would
  * mean deleting it from here first, which is a deliberate act and reads as one.
  *
  * `/config` answers to `/settings` for the same reason, and it is the same
@@ -94,7 +94,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
  * ADR-0003 rejected prefix matching and the rejection is kept here, narrowed
  * rather than dropped. What it rejected was a *general* rule — "begins with a
  * slash and looks like ours" — and the reason was growth: such a rule inherits
- * every command a later Claude Code release adds. It is the Readout whitelist's
+ * every command a later Claude Code release adds. It is the Relay whitelist's
  * shape: it fails closed, and adding a string to it is a deliberate act somebody
  * has to write down.
  *
@@ -146,6 +146,21 @@ const TAKES_AN_ARGUMENT: Readonly<Record<string, Command>> = {
  * argument is lowercased with the head for the same reason and because every name
  * on the Menu is lower case, so `/Model Opus` is not a different message.
  */
+/**
+ * Every spelling roma claims, in the order the table declares them.
+ *
+ * Exported for one check and it is a safety one: that no string here is also on
+ * the Relay list. Four of the five beliefs a Relay may not disturb are broken by
+ * a Command — the session id, the model, the effort, the shared settings file —
+ * and what puts those out of reach of the whitelist is `readCommand` answering
+ * first over a table with no overlap. `relays.test.ts` asserts it against this
+ * rather than against a copy, which is #85: the copy it replaces held four of
+ * these eight and would have gone on passing while covering half the table.
+ */
+export function commandSpellings(): readonly string[] {
+  return Object.keys(COMMANDS)
+}
+
 export function readCommand(text: string): CommandRequest | null {
   const message = text.trim().toLowerCase()
 

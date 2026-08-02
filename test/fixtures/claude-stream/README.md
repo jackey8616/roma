@@ -105,7 +105,7 @@ either, and it is left in because editing a capture is how a fixture stops being
 evidence.
 
 This is also the only capture that cost nothing to take, which is the whole
-point of it: a Readout drives no Turn.
+point of it: a free Relay drives no Turn.
 
 `resume-lost.jsonl` is the second one that cost nothing, for a different reason:
 a `--resume` the CLI cannot honour exits before it calls anything, which is also

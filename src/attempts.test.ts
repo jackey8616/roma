@@ -37,6 +37,7 @@ function turn(fields: Partial<Turn> = {}): Turn {
     stopReason: null,
     terminalReason: null,
     turns: 1,
+    outputTokens: 100,
     result: { type: 'result' },
     ...fields,
   }

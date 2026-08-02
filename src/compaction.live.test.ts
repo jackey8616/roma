@@ -55,7 +55,7 @@ const PCT_OVERRIDE = 'CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'
  *
  * `/context` on a freshly spawned roma-shaped Session reports 29.9k of a 967k
  * window — 8.9k of system prompt, 17.4k of tool schemas, and the rest memory
- * files and skills. It costs nothing to ask, because `/context` is a Readout.
+ * files and skills. It costs nothing to ask, because `/context` is a free Relay.
  *
  * The number is here because it is what makes the two percentages below
  * different measurements rather than two guesses. A threshold *above* it is one
@@ -98,7 +98,7 @@ function filler(): string {
     'transcript',
     'generation',
     'enclosure',
-    'readout',
+    'relay',
   ]
   return Array.from({ length: 900 }, (_, i) => {
     const line = Array.from({ length: 10 }, (_, j) => words[(i * 7 + j * 3) % words.length])

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Attempts, waitMsUntil } from './attempts.js'
 import { monthOf, type AuditLog, type TaskOutcome } from './audit-log.js'
 import type { CredentialKind } from './build-env.js'
-import { attributed, attributedReadout } from './attribution.js'
+import { attributed, relayed } from './attribution.js'
 import type {
   ChannelAdapter,
   IngressMessage,
@@ -28,7 +28,7 @@ import {
   readModelRequest,
   type ModelRequest,
 } from './model-menu.js'
-import { readReadout } from './readouts.js'
+import { readRelay, type RelayRequest } from './relays.js'
 import { ProgressReporter } from './progress-reporter.js'
 import {
   ChosenEffortNotOffered,
@@ -45,6 +45,7 @@ import {
   readSharedWindow,
   readSystemInit,
   type ClaudeEvent,
+  type Compaction,
 } from './stream-events.js'
 import type { TaskQueue } from './task-queue.js'
 
@@ -89,24 +90,40 @@ export type CoreLogRecord =
     }
   | {
       /**
-       * A Readout drove a model Turn, which no entry on its list may.
+       * A Relay the list declares free did model work.
        *
-       * The drift check ADR-0012 built the Readout list around. Membership is a
+       * The drift check ADR-0012 built the Relay list around. Membership is a
        * person's judgement about a specific Claude Code build, and the container
        * image pin moves — so this is what says the judgement has expired, in the
        * one way a machine can see: an entry that used to answer locally is now
        * spending money and returning the model's opinion instead of the
        * command's output.
        *
-       * An anomaly rather than traffic, which is why a Readout that behaves is
+       * **Keyed on output tokens rather than on `num_turns`, and ADR-0018 is
+       * where that key was measured wrong.** A manual `/compact` moves
+       * `total_cost_usd` by five cents and reports `num_turns: 0`, so an entry
+       * that stays a local command and starts doing model work was invisible to
+       * the old check — the shape `/compact` itself has. `modelUsage` is what
+       * moves, and it moves for model work rather than for money, which is what
+       * the membership rule is actually about.
+       *
+       * **One direction only.** A Relay the list declares paid is not checked
+       * against an expectation of work: a `/compact` that fails with too little
+       * conversation to summarise does none, at a delta of zero, and a
+       * two-directional check would report that as drift every time somebody
+       * typed `/compact` into a short thread. Structurally so, rather than by a
+       * condition — only the free path reaches this.
+       *
+       * An anomaly rather than traffic, which is why a Relay that behaves is
        * not logged here at all. The Operator Log is what roma decided and what
-       * surprised it; a record per Readout would make it a traffic log, which
+       * surprised it; a record per Relay would make it a traffic log, which
        * its own definition rejects.
        */
-      readonly event: 'readout-drove-turn'
+      readonly event: 'free-relay-did-model-work'
       readonly taskId: string
       readonly command: string
-      readonly turns: number
+      /** Output tokens the Turn produced, which for a free entry should be none. */
+      readonly outputTokens: number
       /** What that Turn cost, or null where nothing priced it. */
       readonly costUsd: number | null
     }
@@ -261,6 +278,15 @@ interface RunningTask extends TaskAddress {
    */
   readonly sessionId: string
   /**
+   * The Relay this is, or null where it is an ordinary Task.
+   *
+   * A paid Relay is governed as a Task in every respect (ADR-0018), so it is one
+   * of these — and the two things that still differ about it are read off here:
+   * what the Caller is told at the end, and that a Compaction failing inside it
+   * is that Relay's own answer rather than something roma classifies.
+   */
+  readonly relay: RelayRequest | null
+  /**
    * The model this Task ran on, for its Audit Record.
    *
    * Read when the Task arrives so that a Task which never reaches a Turn still
@@ -403,7 +429,7 @@ export class Core {
   }
 
   /**
-   * Take one message: a Command roma answers itself, a Readout it relays, or a
+   * Take one message: a Command roma answers itself, a Relay it hands over, or a
    * Task.
    *
    * All three are told apart here rather than in an Adapter, so that `/stop`
@@ -411,12 +437,20 @@ export class Core {
    * kind of message. Everything that is none of them is work.
    *
    * Order matters, and only in one direction: a Command is checked first so
-   * that roma's own three can never be shadowed by something added to the Readout
-   * list. Nothing is on both lists today and this is what keeps that from
-   * mattering — Claude Code has a `/stop` of its own, and roma's is the one that
-   * must win. Since ADR-0013 the same is true of `/clear`, where it is a safety
-   * property rather than a preference — see `COMMANDS` — and since ADR-0014 of
-   * `/model`, which must never reach a process at all.
+   * that roma's own five can never be shadowed by something added to the Relay
+   * list. Nothing is on both lists and `relays.test.ts` is what keeps that true —
+   * Claude Code has a `/stop` of its own, and roma's is the one that must win.
+   * Since ADR-0013 the same is true of `/clear`, where it is a safety property
+   * rather than a preference — see `COMMANDS` — and since ADR-0014 of `/model`,
+   * which must never reach a process at all.
+   *
+   * **A paid Relay goes down the Task path, and that is ADR-0018's whole
+   * decision.** What tells a Relay from a Task is the shape the message takes on
+   * the wire; what governs it is what it costs. Those are different axes, and
+   * roma answered them together for as long as every entry on the list was free.
+   * So a `/compact` is queued, capped, stoppable, Parkable, Overflowable and
+   * audited by the machinery that already does all five — nothing is invented for
+   * it, which is what makes it not a fourth kind of message.
    *
    * Resolves when the Conversation has been told how it went. It rejects only
    * if the Channel could not be told at all — a failed Task is an outcome, not
@@ -425,39 +459,47 @@ export class Core {
   async handle(message: IngressMessage): Promise<void> {
     const command = readCommand(message.text)
     if (command !== null) return await this.#runCommand(command, message)
-    const readout = readReadout(message.text)
-    if (readout !== null) return await this.#runReadout(readout, message)
-    return await this.#runTask(message)
+    const relay = readRelay(message.text)
+    if (relay !== null && relay.cost === 'free') return await this.#runFreeRelay(relay, message)
+    return await this.#runTask(message, relay)
   }
 
   /**
-   * Relay one of Claude Code's own commands and post what it said.
+   * Relay one of Claude Code's own commands that answers locally, and post what
+   * it said.
    *
-   * Deliberately not `#runTask`, and the difference is not tidiness. A Readout
-   * drives no Turn, so none of what makes a Task a Task applies to it: there are
-   * no Attempts, because there is no credential decision to make and nothing to
-   * park; there is no Shared Window reading, because no API call is made; there
-   * is no Overflow, because there is nothing to spend. Reusing `#runTask` would
-   * mean carrying all of that machinery through a path where every branch of it
-   * is dead, and the dead branches are where a later reader looks for meaning
-   * that is not there.
+   * The free half of the Relay list, governed exactly as ADR-0012 left it.
+   * Deliberately not `#runTask`, and the difference is not tidiness: a free
+   * Relay drives no Turn, so none of what makes a Task a Task applies to it —
+   * there are no Attempts, because there is no credential decision to make and
+   * nothing to park; there is no Shared Window reading, because no API call is
+   * made; there is no Overflow, because there is nothing to spend. Reusing
+   * `#runTask` would mean carrying all of that machinery through a path where
+   * every branch of it is dead, and the dead branches are where a later reader
+   * looks for meaning that is not there.
    *
-   * What it does share is the two things a Readout genuinely has in common with
-   * work: it is serialised against its Session, because two processes on one
-   * transcript corrupt it, and it is written down, because the list it came from
-   * is a person's judgement and can be wrong.
+   * A **paid** Relay is the other way round: every one of those branches is live,
+   * so it goes down `#runTask` and shares them rather than growing copies. That
+   * is why this method is the free path by name rather than the Relay path — the
+   * split is by cost, which is what ADR-0018 decided governance follows.
+   *
+   * What this does share with work is the two things a free Relay genuinely has
+   * in common with it: it is serialised against its Session, because two
+   * processes on one transcript corrupt it, and it is written down, because the
+   * list it came from is a person's judgement and can be wrong.
    *
    * **`/stop` does not reach one, and that is a gap rather than a decision.** A
-   * Readout is not in `#running`, so `#stop` neither marks it nor counts it —
-   * which means `/stop` in a Conversation whose only work in flight is a Readout
-   * answers "nothing to stop" and then the Readout answers anyway. It costs
+   * free Relay is not in `#running`, so `#stop` neither marks it nor counts it —
+   * which means `/stop` in a Conversation whose only work in flight is one of
+   * these answers "nothing to stop" and then the Relay answers anyway. It costs
    * nothing and cannot be interrupted usefully once it runs, so what is actually
    * lost is a stale context reading arriving after the Task it queued behind.
-   * Left alone because closing it means giving a Readout the shape of a
-   * `RunningTask` — Attempts it has none of, a park it can never take — and that
-   * is a wider change than the fault this was built for.
+   * Left alone because closing it means giving this the shape of a `RunningTask`
+   * — Attempts it has none of, a park it can never take. ADR-0018 closed the same
+   * gap for the paid half by putting it on the path that already has both.
    */
-  async #runReadout(command: string, message: IngressMessage): Promise<void> {
+  async #runFreeRelay(relay: RelayRequest, message: IngressMessage): Promise<void> {
+    const { command } = relay
     const { conversationKey } = message
     const address = addressOf({ ...message, taskId: randomUUID() })
     const { taskId } = address
@@ -473,7 +515,7 @@ export class Core {
     // the one failure that happens before there is one: a Conversation whose
     // Session roma could not work out.
     let session: string | null = null
-    // The same, for the model and the effort: a Readout runs on whatever process
+    // The same, for the model and the effort: a Relay runs on whatever process
     // its Session has, so its record names both for the reason a Task's does.
     let model: string | null = null
     let effort: string | null = null
@@ -484,13 +526,17 @@ export class Core {
       model = this.#models.modelFor(sessionId)
       effort = this.#efforts.effortFor(sessionId)
       // Acknowledged only where it cannot be answered at once, which is the
-      // whole of ADR-0012's rule about this. A Readout on a Session with a live
-      // process comes back in milliseconds, and an acknowledgement there would
-      // be posted and superseded in the same breath — two messages for one
-      // event, which is what ADR-0010 exists to prevent. The other two cases are
-      // the ones where silence is what makes people resend: a cold start, said
-      // here, and waiting for the Session's own work, said by the queue's notice
-      // below.
+      // whole of ADR-0012's rule about this — and it stays written for the four
+      // free entries it was written for. A paid Relay gets the ordinary Task
+      // Acknowledgement instead, unconditionally, because the premise here is
+      // measured false there by a factor of twenty thousand.
+      //
+      // A free Relay on a Session with a live process comes back in
+      // milliseconds, and an acknowledgement there would be posted and
+      // superseded in the same breath — two messages for one event, which is
+      // what ADR-0010 exists to prevent. The other two cases are the ones where
+      // silence is what makes people resend: a cold start, said here, and
+      // waiting for the Session's own work, said by the queue's notice below.
       //
       // Computed rather than remembered. The Caller Marker is unconditional
       // precisely because a rule needing memory is lost across a restart; this
@@ -499,7 +545,7 @@ export class Core {
 
       turn = await this.#queue.run(
         sessionId,
-        () => this.#pool.send(sessionId, attributedReadout(message, command), this.#credential),
+        () => this.#pool.send(sessionId, relayed(message, relay), this.#credential),
         {
           notice: (position) => reporter.update({ phase: 'queued', position }),
           // Serialised against the Session like anything else, and outside the
@@ -515,7 +561,7 @@ export class Core {
       // be a concept every Channel had to learn for no change in behaviour.
       instruction = { kind: 'result', ...address, text: turn.text }
     } catch (error) {
-      // A Readout that failed carries whatever the Turn said, exactly as a Task
+      // A Relay that failed carries whatever the Turn said, exactly as a Task
       // does. `Unknown command: /x` arrives as a *successful* Turn rather than
       // here — an entry that has been removed from a later build answers, for
       // nothing, and telling the Caller what Claude Code said is more use than
@@ -524,32 +570,39 @@ export class Core {
       instruction = { kind: 'failure', ...address, reason: reasonFor(error) }
     }
 
-    // The drift check. Nothing on the Readout list may drive a Turn, and one
+    // The drift check. Nothing the list declares free may do model work, and one
     // that did means the pin has moved under roma — so it is said out loud,
     // once, where an operator looks. Not said to the Caller: they asked a
     // question and got an answer, and what is wrong is roma's list rather than
     // anything they did.
-    if (turn !== null && turn.turns !== null && turn.turns > 0) {
+    //
+    // On the output-token delta rather than on `num_turns`, which ADR-0018
+    // measured cannot see this: a paid Relay reports zero Turns while spending
+    // five cents, so the shape being watched for is one the old key was blind to.
+    // One direction, and structurally — nothing checks a paid entry for the work
+    // it is expected to do, because a `/compact` with too little to summarise
+    // legitimately does none.
+    if (turn !== null && turn.outputTokens !== null && turn.outputTokens > 0) {
       this.#log({
-        event: 'readout-drove-turn',
+        event: 'free-relay-did-model-work',
         taskId,
         command,
-        turns: turn.turns,
+        outputTokens: turn.outputTokens,
         costUsd: turn.costUsd,
       })
     }
 
     // Written whatever it cost, including nothing — see `AuditRecord.kind`. A
-    // Readout has one credential and no Attempts, so there is no second record
+    // free Relay has one credential and no Attempts, so there is no second record
     // and no question of which one paid.
     this.#audit.record({
-      kind: 'readout',
+      kind: 'relay',
       taskId,
       caller: message.caller,
       callerName: message.callerName,
       sessionId: session,
       outcome: outcomeOf(instruction),
-      // Zero rather than null where no Turn ran at all: a Readout that never
+      // Zero rather than null where no Turn ran at all: a Relay that never
       // reached Claude Code spent nothing, and that is a fact rather than an
       // absence. Null is reserved for a Turn that began and nothing priced.
       costUsd: turn === null ? 0 : turn.costUsd,
@@ -558,9 +611,9 @@ export class Core {
       credential: this.#credential,
       model: model ?? this.#models.pinnedModel,
       effort: effortOn(model ?? this.#models.pinnedModel, effort ?? this.#efforts.pinnedEffort),
-      // Asked rather than assumed false. A Readout drives no Turn so nothing it
-      // does can mint, but the answer is read-and-forget and a hard `false` here
-      // would be roma writing down a fact it declined to check.
+      // Asked rather than assumed false. A free Relay drives no Turn so nothing
+      // it does can mint, but the answer is read-and-forget and a hard `false`
+      // here would be roma writing down a fact it declined to check.
       cloudReach: this.#usedCloudReach(taskId),
       apiKeySource: null,
     })
@@ -638,7 +691,7 @@ export class Core {
    * Task is running would be read as having changed that Task.
    *
    * An answer rather than a `command-outcome`, because "it was carried out" is
-   * not what any of these say. It is a `result` for the same reason a Readout's
+   * not what any of these say. It is a `result` for the same reason a Relay's
    * output is one: text to be posted as its own message, which an Adapter already
    * knows how to do. A refusal is a `failure`, whose reason an Adapter passes
    * through — so a name roma does not offer is refused in the reply to the
@@ -961,8 +1014,17 @@ export class Core {
    * because two processes writing one Session file corrupt it, or roma may
    * already be running as much as it runs at once — and waiting is a thing the
    * acknowledgement says rather than a silence.
+   *
+   * **`relay` is what a paid Relay comes down here as**, and its being one
+   * parameter is the measure of ADR-0018's claim that nothing was invented. What
+   * it moves is three things and no more: what goes on the wire, which is a
+   * command rather than prose; which `kind` the Audit Record carries; and who
+   * writes the reply. Everything else — the queue, the cap, `/stop`, the park,
+   * Overflow, the Attempts, the ledger — is shared rather than copied, which is
+   * the whole reason `/compact` is a cell of the grid roma already had rather
+   * than a fourth kind of message.
    */
-  async #runTask(message: IngressMessage): Promise<void> {
+  async #runTask(message: IngressMessage, relay: RelayRequest | null = null): Promise<void> {
     const { conversationKey } = message
     // Minted here rather than derived, because it names this Task and not the
     // Conversation: two messages in one Conversation can be in flight at once,
@@ -1011,6 +1073,7 @@ export class Core {
         toldContextFull: false,
         attempts,
         parked: null,
+        relay,
       }
       running = task
       this.#running.add(task)
@@ -1024,8 +1087,15 @@ export class Core {
       // message with nothing attached — nearly all of them — reaches the Turn
       // exactly as it did before Enclosures existed, touching no filesystem and
       // waiting on nothing.
+      //
+      // A Relay redeems none, and never did: `relayed` writes a command and has
+      // nowhere to name a file, so bytes fetched here would be paid for and then
+      // not mentioned to anybody. That is the free path's behaviour since
+      // ADR-0012 — `/context` with a screenshot attached has always ignored the
+      // screenshot — and it is kept here rather than quietly changed for the one
+      // entry that now comes down this path.
       const enclosures =
-        message.enclosures.length === 0
+        relay !== null || message.enclosures.length === 0
           ? []
           : await writeEnclosures(message.enclosures, this.#pool.cwdFor(sessionId))
 
@@ -1035,7 +1105,21 @@ export class Core {
       // that prefixed the text would turn `/stop` into something `readCommand`
       // no longer recognises, and CONTEXT.md has Commands read in the Core and
       // nowhere else.
-      instruction = await this.#drive(task, attributed(message, enclosures), reporter)
+      //
+      // A Relay goes on the wire as the command instead, because a marker above
+      // one turns it into prose and Claude Code answers *about* it — the fault
+      // ADR-0012 exists to fix, at five cents a go. Where it carries an argument
+      // there is no marker at all, which `relayed` is where it is argued.
+      instruction = await this.#drive(
+        task,
+        relay === null ? attributed(message, enclosures) : relayed(message, relay),
+        reporter,
+      )
+      // What the Caller is told about a Relay is roma's to write, and only here:
+      // `#drive` speaks for a Task and has no business knowing about `/compact`.
+      if (relay !== null && instruction.kind === 'result') {
+        instruction = { ...instruction, text: relayReply(attempts.compaction(), instruction.text) }
+      }
     } catch (error) {
       // Two ways here: roma could not work out which Session the Conversation is
       // on, or an Enclosure could not be fetched. Everything after that is an
@@ -1080,6 +1164,12 @@ export class Core {
       // that it did.
       if (credential !== answeredOn && !paid.costUsd && paid.compaction === null) continue
       this.#audit.record({
+        // Absent for a Task, which is what "absent means task" asks of the
+        // writer, and `relay` for the one that arrived as a command. Nothing
+        // about cost, deliberately: what this cost is in `costUsd`, and what it
+        // says together with `compaction.trigger` is who asked for a Compaction —
+        // `relay` plus `manual` is somebody typing `/compact` and paying for it.
+        ...(relay === null ? {} : { kind: 'relay' as const }),
         taskId,
         caller: message.caller,
         // Both halves, because they answer the question at different removes: a
@@ -1366,8 +1456,34 @@ export class Core {
    * Not awaited, because this arrives on a stream listener in the middle of a
    * Turn and the Turn is what everything else is waiting for. `#tell` absorbs
    * its own failures, so there is nothing here for a rejection to reach.
+   *
+   * **None of it applies to a Compaction somebody asked for**, and that is the
+   * seam ADR-0018 left for its implementation to close. `severityOf` reads a
+   * *code*, which is what the auto path sends; the manual path sends a
+   * **sentence** — `"Not enough messages to compact."` — so every failure of a
+   * `/compact` would land in `unexplained` and write an operator line about a
+   * Turn that was fine. That is not a wrong answer, it is noise, and it would
+   * arrive every time somebody typed `/compact` into a short thread, which is
+   * how a log that records decisions turns into one that records traffic.
+   *
+   * Closed by asking **whose Compaction this is** rather than by enumerating
+   * sentences — that would be the `shared-window.ts` mistake in a new hat, and
+   * only one of the manual path's five failures has ever been observed. roma
+   * knows the answer for free: a Compaction failing inside a Relay roma sent is
+   * the one the Relay asked for. There is nothing here to classify because there
+   * is nothing here for roma to decide — the Caller asked, the Caller is told, in
+   * Claude Code's own words, by `#runTask`'s reply.
+   *
+   * What that gives up is named rather than hidden. An `exhausted` on this path
+   * reaches the Caller as Claude Code's sentence without roma's own "and
+   * `/clear` is the way out" beside it, and no operator line is written. The
+   * repair is not lost, only deferred: a Session that genuinely cannot be reduced
+   * fails the *next* ordinary message in that Conversation on the auto path,
+   * where the code is a code and ADR-0019's machinery reads it properly.
    */
   #compactionFailed(task: RunningTask, code: string | null): void {
+    if (task.relay !== null) return
+
     const severity = severityOf(code)
     if (severity === 'benign') return
 
@@ -1498,6 +1614,56 @@ const ROMA_FAILED = 'roma could not run this Task.'
  * it.
  */
 const ROMA_FAILED_COMMAND = 'roma could not carry out that command.'
+
+/**
+ * What a Caller is told about a Relay that ran, from the Compaction it produced
+ * and whatever Claude Code itself said.
+ *
+ * Two answers to what looks like one question, and the thing that separates them
+ * is structural rather than a string: **a Compaction happened, or it did not.**
+ * Nothing here matches on an error code, on a sentence, or on which entry of the
+ * list this was, which is what keeps it off the ground ADR-0018 named as the
+ * `shared-window.ts` mistake — `compact_error` is a code on one path and a
+ * sentence on the other, and roma parses neither.
+ *
+ * **On failure roma relays what Claude Code already wrote.** Measured: the
+ * sentence arrives in the terminal event's own `result`, addressed to a person,
+ * at no cost, on a Turn that reported no error at all. There is nothing for roma
+ * to improve and a paraphrase would only be a second build's worth of drift.
+ *
+ * **On success roma has to speak, because Claude Code does not.** Also measured,
+ * and not something anybody anticipated: a successful `/compact` returns
+ * `result: ""`. Silence after half a minute and five cents is not restraint — it
+ * is a Caller wondering whether anything happened, which is what ADR-0003 names
+ * as producing a resend. The figures are the boundary's own (`pre_tokens`,
+ * `post_tokens`), so nothing is computed and nothing parallel is maintained: it
+ * is still Claude Code's reading, relayed.
+ *
+ * The third case is a Relay that neither compacted nor said anything, which no
+ * capture roma holds shows and which would otherwise be silence by omission.
+ */
+function relayReply(compaction: Compaction | null, text: string): string {
+  const { preTokens = null, postTokens = null } = compaction ?? {}
+  if (preTokens !== null && postTokens !== null) {
+    return `Compacted: ${grouped(preTokens)} → ${grouped(postTokens)} tokens.`
+  }
+  // A boundary that arrived without its figures. It still happened, and saying so
+  // without numbers beats inventing them or saying nothing.
+  if (compaction !== null) return 'Compacted.'
+  if (text !== '') return text
+  return 'That command finished, and Claude Code said nothing about it.'
+}
+
+/**
+ * A token count as somebody reads it, which is in thousands.
+ *
+ * Written out rather than left to `toLocaleString`, whose grouping and separator
+ * follow whichever locale the process happens to be running under — and roma's
+ * replies are one Conversation's, not one deployment's machine's.
+ */
+function grouped(tokens: number): string {
+  return String(tokens).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+}
 
 /**
  * What roma says when a Conversation has been put on a model.
