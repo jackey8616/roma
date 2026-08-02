@@ -103,7 +103,10 @@ roma chose and tells the agent where it is; what the sender called it travels
 beside the path as a string and is never made into one, which is the whole of why
 a filename nobody vetted is safe to carry (ADR-0011). A message with one is a
 request whether or not it has any text: what is not a request is a message with
-nothing in it at all.
+nothing in it at all. One kind of request carries none of them, though: a Relay
+goes on the wire as a command and has nowhere to name a file, so an Enclosure
+sent with one is never fetched — bytes paid for and then mentioned to nobody is
+the alternative, and the request there is the command (ADR-0018).
 _Avoid_: attachment (that is the Channel's word for the thing upstream, and the
 two are not the same object — an Enclosure is named by roma and the Channel's is
 not), file (so is everything else in a Working Directory), upload, payload

@@ -95,8 +95,29 @@ export type RelayCost =
    */
   | 'paid'
 
+/** One entry of the table: what it costs, and whether anything may follow it. */
+interface RelayEntry {
+  readonly cost: RelayCost
+  /**
+   * Whether a Caller may put text after the command.
+   *
+   * False for all but one, and stated on every entry rather than defaulted, so
+   * that a string added later has to answer the question instead of inheriting
+   * an answer. That is ADR-0003's rejection of prefix matching kept at the
+   * smallest scale there is: a *general* "begins with a slash and looks like
+   * ours" rule inherits every command a later release adds.
+   *
+   * Here rather than in a second table keyed on the same strings, because two
+   * such tables can disagree — and while they agree, the entry the second one
+   * omits leaves a branch in `readRelay` that nothing can reach, which is where
+   * a later reader looks for meaning that is not there.
+   */
+  readonly takesArgument: boolean
+}
+
 /**
- * Every string roma relays, and what each is expected to cost.
+ * Every string roma relays, what each is expected to cost, and what may follow
+ * it.
  *
  * The cost class is a claim about the pinned build and is checked two ways: a
  * seam 2 case per entry, which fires before a deploy, and the drift check the
@@ -104,42 +125,35 @@ export type RelayCost =
  * `/autocompact`'s own gate is a remote experiment flag, so Claude Code's
  * behaviour can move under a fixed binary, and a pin-move ritual alone assumes
  * the binary is the whole contract.
+ *
+ * The table does not grow on its own, and that is the whole of the guarantee:
+ * adding a string is an act somebody writes down, not something a rule infers.
  */
-const RELAYS: Readonly<Record<string, RelayCost>> = {
+const RELAYS: Readonly<Record<string, RelayEntry>> = {
   // Show current context usage: how full this Session's context window is.
-  '/context': 'free',
+  '/context': { cost: 'free', takesArgument: false },
   // Show session cost, plan usage, and activity stats — with `/cost` and
   // `/stats`, which Claude Code declares as aliases of it. The aliases are here
   // because leaving them out reproduces exactly the fault ADR-0012 exists to
   // fix, only for two more strings: somebody types `/cost` and is billed for a
   // plausible sentence about what `/cost` would have said.
-  '/usage': 'free',
-  '/cost': 'free',
-  '/stats': 'free',
+  '/usage': { cost: 'free', takesArgument: false },
+  '/cost': { cost: 'free', takesArgument: false },
+  '/stats': { cost: 'free', takesArgument: false },
   // Replace this Session's conversation with a summary, keeping what the Caller
   // asked to keep. The first entry that costs money, and the whole of ADR-0018.
+  //
+  // The only entry that takes an argument, because dropping it would leave
+  // `/compact` differing from auto-compaction only in *timing* — and "what gets
+  // kept" is the other half of the want, the half upstream's own warning
+  // advertises: "Autocompact will trigger soon, which discards older messages.
+  // Use `/compact` now to control what gets kept."
+  //
   // One spelling: the pinned build's descriptor declares no aliases, so
   // ADR-0013's fault — a spelling roma leaves unclaimed is one somebody is
   // billed for — has nothing to bite on here.
-  '/compact': 'paid',
+  '/compact': { cost: 'paid', takesArgument: true },
 }
-
-/**
- * The heads that may be followed by an argument, and nothing else may.
- *
- * The shape is `commands.ts`'s and its defence carries over verbatim: what
- * ADR-0003 rejected was a *general* "begins with a slash and looks like ours"
- * rule, because such a rule inherits every command a later release adds. A named
- * list does not grow on its own — which is a thing somebody has to keep true
- * rather than an observation about the number of entries.
- *
- * `/compact` alone, and it is here because dropping the argument would leave it
- * differing from auto-compaction only in *timing*. "What gets kept" is the other
- * half of the want, and it is the half upstream's own warning advertises:
- * "Autocompact will trigger soon, which discards older messages. Use `/compact`
- * now to control what gets kept."
- */
-const TAKES_AN_ARGUMENT: readonly string[] = ['/compact']
 
 /** One Relay as it was typed: which command, what followed it, what it costs. */
 export interface RelayRequest {
@@ -187,8 +201,9 @@ export interface RelayRequest {
 export function readRelay(text: string): RelayRequest | null {
   const message = text.trim()
 
-  const whole = RELAYS[message.toLowerCase()]
-  if (whole !== undefined) return { command: message.toLowerCase(), argument: null, cost: whole }
+  const spelling = message.toLowerCase()
+  const whole = RELAYS[spelling]
+  if (whole !== undefined) return { command: spelling, argument: null, cost: whole.cost }
 
   // The first run of whitespace ends the head; every character after it is the
   // argument. `[\s\S]` rather than `.` so a multi-line instruction survives —
@@ -196,12 +211,11 @@ export function readRelay(text: string): RelayRequest | null {
   // the summariser, measured.
   const split = /^(\S+)\s+([\s\S]+)$/.exec(message)
   if (split === null) return null
-  const head = (split[1] ?? '').toLowerCase()
-  const argument = split[2] ?? ''
-  if (!TAKES_AN_ARGUMENT.includes(head)) return null
+  const command = (split[1] ?? '').toLowerCase()
+  const head = RELAYS[command]
+  if (head === undefined || !head.takesArgument) return null
 
-  const cost = RELAYS[head]
-  return cost === undefined ? null : { command: head, argument, cost }
+  return { command, argument: split[2] ?? '', cost: head.cost }
 }
 
 /**

@@ -1015,16 +1015,22 @@ export class Core {
    * already be running as much as it runs at once — and waiting is a thing the
    * acknowledgement says rather than a silence.
    *
-   * **`relay` is what a paid Relay comes down here as**, and its being one
-   * parameter is the measure of ADR-0018's claim that nothing was invented. What
-   * it moves is three things and no more: what goes on the wire, which is a
-   * command rather than prose; which `kind` the Audit Record carries; and who
-   * writes the reply. Everything else — the queue, the cap, `/stop`, the park,
-   * Overflow, the Attempts, the ledger — is shared rather than copied, which is
-   * the whole reason `/compact` is a cell of the grid roma already had rather
-   * than a fourth kind of message.
+   * **`relay` is what a paid Relay comes down here as**, and how little it moves
+   * is the measure of ADR-0018's claim that nothing was invented. It is read in
+   * five places, listed here so the claim can be checked rather than believed:
+   * what goes on the wire is a command rather than prose; Enclosures are not
+   * redeemed; the reply is roma's to write; the Audit Record carries a `kind`;
+   * and a Compaction that failed inside it is not roma's to classify. Everything
+   * else — the queue, the cap, `/stop`, the park, Overflow, the Attempts, the
+   * ledger — is shared rather than copied, which is the whole reason `/compact`
+   * is a cell of the grid roma already had rather than a fourth kind of message.
+   *
+   * Two of the five are absences rather than behaviour, and both are the free
+   * path's arrangements arriving here rather than anything new: ADR-0012 never
+   * redeemed an Enclosure on a relayed command, and roma has never classified a
+   * failure somebody asked for.
    */
-  async #runTask(message: IngressMessage, relay: RelayRequest | null = null): Promise<void> {
+  async #runTask(message: IngressMessage, relay: RelayRequest | null): Promise<void> {
     const { conversationKey } = message
     // Minted here rather than derived, because it names this Task and not the
     // Conversation: two messages in one Conversation can be in flight at once,
@@ -1645,7 +1651,7 @@ const ROMA_FAILED_COMMAND = 'roma could not carry out that command.'
 function relayReply(compaction: Compaction | null, text: string): string {
   const { preTokens = null, postTokens = null } = compaction ?? {}
   if (preTokens !== null && postTokens !== null) {
-    return `Compacted: ${grouped(preTokens)} → ${grouped(postTokens)} tokens.`
+    return `Compacted: ${readableTokens(preTokens)} → ${readableTokens(postTokens)} tokens.`
   }
   // A boundary that arrived without its figures. It still happened, and saying so
   // without numbers beats inventing them or saying nothing.
@@ -1655,13 +1661,13 @@ function relayReply(compaction: Compaction | null, text: string): string {
 }
 
 /**
- * A token count as somebody reads it, which is in thousands.
+ * A token count as somebody in a Conversation reads it, which is in thousands.
  *
  * Written out rather than left to `toLocaleString`, whose grouping and separator
- * follow whichever locale the process happens to be running under — and roma's
- * replies are one Conversation's, not one deployment's machine's.
+ * follow whichever locale the process happens to be running under — and this
+ * sentence is one Conversation's, not one deployment's machine's.
  */
-function grouped(tokens: number): string {
+function readableTokens(tokens: number): string {
   return String(tokens).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 

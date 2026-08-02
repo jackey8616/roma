@@ -665,6 +665,17 @@ request rather than an additional message, and the bar is not in play.
   Claude Code's sentence. The consequence is that `severityOf` no longer sees
   every failed Compaction — it sees every *unasked-for* one, which is the set it
   was written about.
+- **A Relay redeems no Enclosure, and this ADR did not say so.** Found in the
+  implementation rather than decided here, and it is the free path's behaviour
+  arriving with the paid one rather than anything new: ADR-0012 relays a command,
+  `relayed` has nowhere to name a file, and `/context` sent with a screenshot
+  attached has ignored the screenshot since it landed. Kept rather than quietly
+  changed for the one entry that now costs money — bytes fetched would be paid
+  for out of somebody's upload and then mentioned to nobody. It is a real edge
+  against CONTEXT.md's Enclosure entry, which says "a message with one is a
+  request whether or not it has any text": it still is, and on a Relay the
+  request is the command. Recorded here because the alternative is a decision
+  that lives only in a code comment.
 - **`compaction.ts` and the Operator Log now describe the auto path only**, and
   CONTEXT.md's Compaction entry says so. "A failed Compaction is in the Operator
   Log" acquires the same exception the Caller Marker did, and for a related

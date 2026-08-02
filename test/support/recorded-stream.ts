@@ -177,6 +177,26 @@ export function withCompactionError(
 }
 
 /**
+ * The same recorded Compaction with its token figures taken off.
+ *
+ * `Compaction`'s fields are nullable everywhere in roma — a boundary that
+ * carried none is a fact rather than a zero — and no capture roma holds is
+ * missing them, so this is the only way to reach the branch that answers
+ * without numbers. `withCompactionError`'s discipline exactly: a real stream,
+ * with the one field under test changed.
+ */
+export function withoutCompactionTokens(events: readonly ClaudeEvent[]): ClaudeEvent[] {
+  return events.map((event) => {
+    if (event['subtype'] !== 'compact_boundary') return event
+    const { pre_tokens, post_tokens, ...metadata } = (event['compact_metadata'] ??
+      {}) as Record<string, unknown>
+    void pre_tokens
+    void post_tokens
+    return { ...event, compact_metadata: metadata }
+  })
+}
+
+/**
  * Push events at a fake process as NDJSON bytes.
  *
  * `chunkSize` decides where the chunk boundaries fall. The default sends each

@@ -121,6 +121,21 @@ const TAKES_AN_ARGUMENT: Readonly<Record<string, Command>> = {
 }
 
 /**
+ * Every spelling roma claims, in the order the table declares them.
+ *
+ * Exported for one check and it is a safety one: that no string here is also on
+ * the Relay list. Four of the five beliefs a Relay may not disturb are broken by
+ * a Command — the session id, the model, the effort, the shared settings file —
+ * and what puts those out of reach of the whitelist is `readCommand` answering
+ * first over a table with no overlap. `relays.test.ts` asserts it against this
+ * rather than against a copy, which is #85: the copy it replaces held four of
+ * these eight and would have gone on passing while covering half the table.
+ */
+export function commandSpellings(): readonly string[] {
+  return Object.keys(COMMANDS)
+}
+
+/**
  * Read a message as a Command, or null if it is work.
  *
  * The whole message has to be the Command, or a listed head and exactly one
@@ -146,21 +161,6 @@ const TAKES_AN_ARGUMENT: Readonly<Record<string, Command>> = {
  * argument is lowercased with the head for the same reason and because every name
  * on the Menu is lower case, so `/Model Opus` is not a different message.
  */
-/**
- * Every spelling roma claims, in the order the table declares them.
- *
- * Exported for one check and it is a safety one: that no string here is also on
- * the Relay list. Four of the five beliefs a Relay may not disturb are broken by
- * a Command — the session id, the model, the effort, the shared settings file —
- * and what puts those out of reach of the whitelist is `readCommand` answering
- * first over a table with no overlap. `relays.test.ts` asserts it against this
- * rather than against a copy, which is #85: the copy it replaces held four of
- * these eight and would have gone on passing while covering half the table.
- */
-export function commandSpellings(): readonly string[] {
-  return Object.keys(COMMANDS)
-}
-
 export function readCommand(text: string): CommandRequest | null {
   const message = text.trim().toLowerCase()
 

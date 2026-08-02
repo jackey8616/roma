@@ -44,6 +44,8 @@ import {
   upToFirst,
   withApiKeySource,
   withCompactionError,
+  withoutCompactionTokens,
+  withResultText,
   withTotalCostUsd,
 } from '../test/support/recorded-stream.js'
 import { sources, type Source } from '../test/support/sources.js'
@@ -3289,6 +3291,38 @@ describe('relaying a `/compact`, which costs money', () => {
       kind: 'result',
       conversationKey: KEY,
       text: 'Compacted: 31,953 → 1,764 tokens.',
+    })
+  })
+
+  // A boundary that arrived without its figures — the fields are read as
+  // nullable everywhere else in roma for the reason `Compaction` gives, and this
+  // is the one place that nullability reaches a person. It still happened, and
+  // saying so without numbers beats inventing them or saying nothing.
+  it('still says it compacted when the boundary carried no figures', async () => {
+    const { adapter, say } = newCore()
+
+    await say('/compact', { events: withoutCompactionTokens(COMPACTED_MANUALLY) })
+
+    expect(posted(adapter.instructions).at(-1)).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: 'Compacted.',
+    })
+  })
+
+  // Nothing compacted and nothing said, which no capture roma holds shows. It is
+  // answered anyway, because the alternative is a Task that ends with silence
+  // after somebody waited for it — the failure ADR-0003 named as what makes
+  // people resend.
+  it('says something even when Claude Code says nothing at all', async () => {
+    const { adapter, say } = newCore()
+
+    await say('/compact', { events: withResultText(MANUAL_COMPACTION_REFUSED, '') })
+
+    expect(posted(adapter.instructions).at(-1)).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: 'That command finished, and Claude Code said nothing about it.',
     })
   })
 
