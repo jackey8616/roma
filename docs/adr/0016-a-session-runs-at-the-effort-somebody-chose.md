@@ -26,67 +26,43 @@ on the pinned build; both were re-measured here.
 
 ### Verification status
 
-Measured on the pinned build (2.1.220, ADR-0007), against the binary in this
-repo's own container, on 2026-08-01. Every case below reports `num_turns: 0` and
-`total_cost_usd: 0`: **nothing in this ADR cost anything to establish.** That is a
-fact about `/effort` and `/config` rather than about the care taken, and it is
-what makes the build-time check below possible at all.
+Everything below was measured on the pinned build (2.1.220, ADR-0007), against
+the binary in this repo's own container, on 2026-08-01, before any of this was
+built. The evidence is in
+[`docs/effort-menu-verification.md`](../effort-menu-verification.md); what
+follows is the part of it the decision rests on.
+
+Every case reported `num_turns: 0` and `total_cost_usd: 0`: **nothing in this ADR
+cost anything to establish.** That is a fact about `/effort` and `/config` rather
+than about the care taken, and it is what makes the build-time check below
+possible at all.
 
 **Measured — `/effort` is a command on this build, with `/model`'s two-descriptor
-shape.**
+shape**, and under `-p` the non-interactive one answers. `/effort current` returns
+a report and `/effort <level>` returns `Set effort level to <level> (this session
+only)`.
 
-```js
-JD_ = {type:"local-jsx", name:"effort", description:"Set effort level for model usage", …}
-U6s = {type:"local",     name:"effort", supportsNonInteractive:!0,
-       isEnabled:()=>yn(), get isHidden(){return!yn()}, …}
-```
+**Measured — the levels.** `["low","medium","high","xhigh","max"]`, one alias
+(`med` → `medium`), and `ultracode` → `xhigh` — so `ultracode` is not a sixth
+level.
 
-`yn()` is `!isInteractive` (ADR-0014's amendment), so under `-p` the second one
-answers. Confirmed live: `/effort current` returns a report and `/effort <level>`
-returns `Set effort level to <level> (this session only)`.
+**Measured — `--effort` lands and `/effort current` echoes it**, for every level
+and for `ultracode`. With no `--effort` at all the build reports `Effort level:
+auto (currently high)`, which settles the default: this build's own fallback is
+`high`, and that is what makes `ROMA_EFFORT`'s default below behaviour-preserving
+rather than a quiet change.
 
-**Measured — the levels.** `EL = ["low","medium","high","xhigh","max"]`, one alias
-(`mBc = {med:"medium"}`), and `hBc = {ultracode:"xhigh"}` — so `ultracode` is not
-a sixth level.
+**And an unrecognised one is the failure mode the whole design is arranged
+around. `--effort bananas` does not fail the spawn.** It warns on stderr, the
+process starts, and it runs on the default — so roma can be wrong about the
+effort of every Session it serves and nothing stops.
 
-**Measured — `--effort` lands and `/effort current` echoes it.** Spawned with
-roma's own argument shape plus `--effort`, one `{type:'user'}` frame carrying
-`/effort current`:
-
-| spawned with | reported back |
-| --- | --- |
-| `--effort low` … `--effort max` | the same level, each |
-| `--effort ultracode` | `Current effort level: ultracode (xhigh + dynamic workflow orchestration; this session only)` |
-| `--effort bananas` | `Effort level: auto (currently high)`, plus a stderr `Warning: Unknown --effort value 'bananas' — ignoring it and using the default effort.` |
-| no `--effort` | `Effort level: auto (currently high)` |
-
-The last row settles the default: this build's own fallback is `high`, which is
-what makes `ROMA_EFFORT`'s default below behaviour-preserving rather than a quiet
-change.
-
-The `bananas` row is the failure mode the whole design is arranged around. **An
-unrecognised `--effort` does not fail the spawn.** It warns on stderr, the process
-starts, and it runs on the default — so roma can be wrong about the effort of
-every Session it serves and nothing stops.
-
-**Measured — `system/init` carries no effort field.** Live, on a fresh init:
-`type, subtype, cwd, session_id, tools, mcp_servers, model, permissionMode,
-slash_commands, apiKeySource, claude_code_version, output_style, agents, skills,
-plugins, capabilities, analytics_disabled, product_feedback_disabled, uuid,
-fast_mode_state, fast_mode_disabled_reason, startup_timing`. This is the whole
-reason `/model`'s solution does not carry over intact.
+**Measured — `system/init` carries no effort field.** It carries `model`, which
+is what the Startup Self-Check asserts on, and there is no counterpart for
+effort. This is the whole reason `/model`'s solution does not carry over intact.
 
 **Measured — the precedence, and it closes two holes.**
-
-| `settings.json` | `--effort` | `CLAUDE_CODE_EFFORT_LEVEL` | result |
-| --- | --- | --- | --- |
-| `low` | — | — | low |
-| `low` | `high` | — | **high** |
-| — | — | `low` | low |
-| — | `high` | `low` | **low** |
-| `low` | `high` | `xhigh` | **xhigh** |
-
-So `CLAUDE_CODE_EFFORT_LEVEL` > `--effort` > `settings.effortLevel`. Two
+`CLAUDE_CODE_EFFORT_LEVEL` > `--effort` > `settings.effortLevel`. Two
 consequences, both load-bearing:
 
 - **Passing `--effort` on every spawn closes the settings file.** The config dir
@@ -110,32 +86,19 @@ needs none of the three.
 **Measured, and it is the finding that changed the design — the echo reports what
 was *stored*, not what the model will *use*.** `claude-haiku-4-5` spawned with
 `--effort xhigh` reports `xhigh`. It also reports `max`. Every level, on every
-model, comes back identical:
+model, comes back identical, so the echo cannot be used to tell a level that
+landed from one that was accepted and discarded.
 
-```
-sonnet-5-set-max    → Set effort level to max (this session only): …
-haiku-4-5-set-max   → Set effort level to max (this session only): …
-```
-
-**Read — the gate the echo cannot see.** The request builder:
-
-```js
-function YO_(e,t,r,n,o){ if(!OI(o)){ delete t.effort; return } … }
-function OI(e){ … if(r.includes("claude-3-")||r==="claude-opus-4-0"
-                    ||r==="claude-opus-4-1"||r==="claude-sonnet-4-0"
-                    ||r==="claude-sonnet-4-5"||r==="claude-haiku-4-5") return !1
-                if(M$(r,"effort")||r==="claude-mythos-5") return !0
-                return dj(ny(e)) }
-```
-
-So on `claude-haiku-4-5` the effort is deleted from the request, and nothing
-observable says so. Corroborated by the build's own user-facing text: `xhigh`
-describes itself as `Deeper reasoning than high, just below maximum (Fable 5,
-Opus 4.7+, Sonnet 5)` — haiku is not among them.
+**Read — the gate the echo cannot see.** The request builder deletes `effort`
+from the request for a named list of models, `claude-haiku-4-5` among them. So on
+haiku the effort is dropped and nothing observable says so. Corroborated by the
+build's own user-facing text: `xhigh` describes itself as `Deeper reasoning than
+high, just below maximum (Fable 5, Opus 4.7+, Sonnet 5)` — haiku is not among
+them.
 
 **Not measured, and not measurable — what actually goes on the wire.** The one
 thing that would settle it is the request body, and roma never sees one. Every
-claim about `OI` here is a *reading of a binary*, and it is written down as one.
+claim about that gate is a *reading of a binary*, and it is written down as one.
 
 **Not measured — the server-side ceiling.** `kQt()` reads `maxEffortLevel` from
 the entitled-models response, and `YCe()` clamps a level down to it. No clamping

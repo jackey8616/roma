@@ -138,7 +138,7 @@ describe('every model on the Menu, against the pinned build', () => {
  * than to justify. It is recorded because the alternative to knowing is guessing
  * the day somebody proposes relaying it after all.
  *
- * What one run found is in ADR-0014's verification section, where a measurement
+ * What one run found is in `docs/model-menu-verification.md`, where a measurement
  * of a specific build belongs. It is not repeated here: this file's job is to
  * produce the reading, and prose that restates a result goes stale the first time
  * somebody runs it against a newer pin without touching the comment.
