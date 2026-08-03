@@ -4,6 +4,7 @@ import { buildEnv } from './build-env.js'
 import type { Turn } from './claude-session.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
 import { liveWorkRoot, sharedWindowCredential } from '../test/support/live-claude.js'
+import { WorkRoot } from './work-root.js'
 
 // SEAM 2 — the pool against a real `claude -p`. Slow, and it spends Shared
 // Window quota. Excluded from `npm test`; run it with `npm run test:seam2`.
@@ -25,7 +26,7 @@ describe('a Session that outlives its process', () => {
   beforeAll(async () => {
     const dirs = liveWorkRoot('outlives-its-process')
     pool = new SessionPool({
-      workRoot: dirs.workRoot,
+      workRoot: new WorkRoot(dirs.workRoot),
       envs: {
         'shared-window': () =>
           buildEnv({

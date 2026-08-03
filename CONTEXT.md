@@ -176,6 +176,33 @@ still run, unexamined — the cost is accepted, not overlooked.
 _Avoid_: workspace, checkout, sandbox, and using this word for the directory the
 Transcript lives in — that one is nobody's to reclaim
 
+**Work Root**:
+The tree every Session's Working Directory sits in, with every record roma keeps
+about a Conversation beside them. Two kinds of entry live in it and the
+difference is the whole of why the seven-day reclaim is safe to run: **a
+directory is a Session's Working Directory, and a file is a record.** The sweep
+deletes the first and steps over the second, so a Conversation can go quiet for a
+fortnight, lose the directory it was working in, and still come back on the model
+and the effort somebody chose for it. Four kinds of file rely on that and were
+each added by somebody who had to work it out again — a Session Generation, a
+Chosen Model, a Chosen Effort, and the half-written record a machine that lost
+power leaves behind. Named here because until it was named the rule had nowhere
+to live: it was one line in the Session Pool and three comments in another module
+that does not import it, and what actually held it was two tests.
+Deliberately **not** the directory a deployment has to mount, and that asymmetry
+is argued rather than inherited: the image defaults this one because losing it is
+by design — ADR-0003 reclaims whatever has gone a week untouched anyway — while
+the Audit Records and the Transcript get no default at all, because losing either
+is data loss and roma refuses to boot without being told where they go. So this
+is the tree roma is allowed to lose, which is the whole reason what a
+Conversation cannot afford to lose is kept outside it.
+Not the Working Directory's opposite number — that is the Transcript, and the two
+of them sit *inside* what this describes and outside it respectively.
+_Avoid_: store, database, cache (roma keeps no database, and the Conversation
+Key's entry is where that is argued), workspace, and using this for a single
+Session's Working Directory — a Work Root has many of those and one of everything
+else
+
 **Session Generation**:
 Which of a Conversation's Sessions is the current one. A Conversation Key never
 changes, so `/clear` moves this instead: the Session id derives from the key and
