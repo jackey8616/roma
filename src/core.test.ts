@@ -1,6 +1,5 @@
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, sep } from 'node:path'
-import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuditLog, monthOf } from './audit-log.js'
 import { Core, type CoreLogRecord } from './core.js'
@@ -107,8 +106,9 @@ function newCore({
   fixtures.push(fixture)
   const { claude, procFor, procIn } = fixture
   const { workRoot, auditRoot } = fixture.dirs
-  // One Work Root for everything under it: the pool, the generation record, and
-  // both Chosen records. They agreed on a path before; now they agree on a layout.
+  // One Work Root for everything under it: the pool, the Core, the generation
+  // record and both Chosen records. They agreed on a path before; now they
+  // agree on a layout.
   const work = new WorkRoot(workRoot)
   // Shared by the pool and the Core, which is what makes `/model` observable: the
   // Core writes what somebody chose and the pool reads it at the next spawn.
@@ -151,6 +151,9 @@ function newCore({
   const core = new Core({
     channel: adapter,
     pool,
+    // The same one the pool has. The Core writes an Enclosure into a Working
+    // Directory and the pool spawns the process that reads it.
+    workRoot: work,
     queue,
     sessions,
     models,
@@ -212,8 +215,12 @@ function newCore({
     poolLog,
     queue,
     sessions,
+    // Both spellings of one tree: the Work Root its components share, and its
+    // path, for the tests that read what was written into it.
+    work,
     workRoot,
     procFor,
+    spawnedFor: fixture.spawnedFor,
     say,
     start,
   }
@@ -256,6 +263,7 @@ function coreOver(shared: ReturnType<typeof newCore>, channel: ChannelAdapter): 
   return new Core({
     channel,
     pool: shared.pool,
+    workRoot: shared.work,
     queue: shared.queue,
     sessions: shared.sessions,
     models: shared.models,
@@ -3505,31 +3513,6 @@ describe('what somebody sent along with a message', () => {
     redeem: () => Promise.resolve(new TextEncoder().encode(content)),
   })
 
-  /**
-   * Wait until the Session serving `KEY` has been spawned.
-   *
-   * Every other test here spawns within one `flush`, because nothing stands
-   * between the message arriving and the Turn. An Enclosure does: it is written
-   * to disk first, and that is real filesystem work.
-   *
-   * Waited on with real elapsed time rather than by counting `flush`es. A count
-   * of event-loop turns is not a duration — under a loaded machine the turns run
-   * out long before the write lands, which is a test that passes alone and fails
-   * in the suite. `node:timers/promises` is used because `vi.useFakeTimers`
-   * above fakes the global `setTimeout` and this has to be a real wait.
-   */
-  const spawned = async (procFor: (key: string) => FakeClaudeProcess) => {
-    for (let waited = 0; waited < 5_000; waited += 5) {
-      await flush()
-      try {
-        return procFor(KEY)
-      } catch {
-        await sleep(5)
-      }
-    }
-    throw new Error('nothing was spawned')
-  }
-
   /** The text of a `user` frame, out of the NDJSON the Session wrote. */
   const textOf = (frame: Record<string, unknown> | undefined): string => {
     const message = frame?.['message'] as { content?: { text?: string }[] } | undefined
@@ -3537,14 +3520,19 @@ describe('what somebody sent along with a message', () => {
   }
 
   it('writes it into the Session’s Working Directory and names it to the agent', async () => {
-    const { core, procFor, workRoot } = newCore()
+    const { claude, core, spawnedFor } = newCore()
 
     const task = core.handle(withEnclosures('what is this?', [sent('screenshot.png', 'PNG')]))
-    const proc = await spawned(procFor)
+    const proc = await spawnedFor(KEY)
     feed(proc, OK)
     await task
 
-    const cwd = join(workRoot, sessionIdFor(KEY))
+    // The cwd the spawn was recorded with, which is the pool's own derivation.
+    // Not `proc.cwd` and not a join spelled out here: `spawnedFor` finds a
+    // process *by* joining that path, so either would only restate itself. What
+    // is being asserted is that the bytes landed where the agent reading them
+    // runs; where that is is `work-root.test.ts`'s assertion, not this file's.
+    const cwd = claude.lastSpawn.cwd
     const [file] = readdirSync(join(cwd, '.enclosures'))
     expect(readFileSync(join(cwd, '.enclosures', file!), 'utf8')).toBe('PNG')
     // Named to the agent by the path roma minted, with what the sender called it
@@ -3559,7 +3547,7 @@ describe('what somebody sent along with a message', () => {
   // once, at the moment the Turn is about to run, and not when the message was
   // read.
   it('redeems it once, and not before the Session is known', async () => {
-    const { core, procFor } = newCore()
+    const { core, spawnedFor } = newCore()
     let redemptions = 0
     const counted: PendingEnclosure = {
       name: 'a.png',
@@ -3573,7 +3561,7 @@ describe('what somebody sent along with a message', () => {
     expect(redemptions).toBe(0)
 
     const task = core.handle(message)
-    feed(await spawned(procFor), OK)
+    feed(await spawnedFor(KEY), OK)
     await task
 
     expect(redemptions).toBe(1)
@@ -3617,10 +3605,10 @@ describe('what somebody sent along with a message', () => {
   // fresh thread) was answered with `--resume` at a Transcript nobody had
   // written, and every retry in that thread failed the same way for free.
   it('creates the Session for a first message that carries one', async () => {
-    const { core, claude, procFor } = newCore()
+    const { core, claude, spawnedFor } = newCore()
 
     const task = core.handle(withEnclosures('what is this?', [sent('shot.webp', 'PNG')]))
-    feed(await spawned(procFor), OK)
+    feed(await spawnedFor(KEY), OK)
     await task
 
     expect(claude.spawns).toHaveLength(1)
@@ -3629,10 +3617,10 @@ describe('what somebody sent along with a message', () => {
   })
 
   it('answers that first message rather than failing it', async () => {
-    const { core, adapter, procFor } = newCore()
+    const { core, adapter, spawnedFor } = newCore()
 
     const task = core.handle(withEnclosures('what is this?', [sent('shot.webp', 'PNG')]))
-    feed(await spawned(procFor), OK)
+    feed(await spawnedFor(KEY), OK)
     await task
 
     expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'result', text: 'ok' })

@@ -77,6 +77,7 @@ function boot({
     hasStarted: () => resolved,
     answerProbe: fixture.answerProbe,
     procFor: fixture.procFor,
+    spawnedFor: fixture.spawnedFor,
   }
 }
 
@@ -182,6 +183,38 @@ describe('starting roma', () => {
     await handled
 
     expect(roma.claude.lastSpawn.args).toContain('claude-opus-5')
+  })
+
+  // The ADR-0011 half of that wiring, and the one that needs the Core and the
+  // pool to have been given the same work root. The Core derives the Working
+  // Directory it writes an Enclosure into; the pool derives the one it spawns
+  // the Session in. Nothing reconciles the two afterwards, so over two
+  // different roots roma answers the message perfectly and names the agent a
+  // path with nothing at it — an attachment lost with no symptom at either end,
+  // which is what this family of tests is for.
+  //
+  // Read out of `lastSpawn.cwd` rather than out of a path this test joins for
+  // itself, because a path built here would agree with a wrong one.
+  it('writes an Enclosure into the directory it spawns the Session in', async () => {
+    const roma = boot()
+    await roma.answerProbe()
+    const { core } = await roma.starting
+
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'what is this?',
+      enclosures: [
+        { name: 'screenshot.png', redeem: () => Promise.resolve(new TextEncoder().encode('PNG')) },
+      ],
+    })
+    feed(await roma.spawnedFor(KEY), OK)
+    await handled
+
+    const enclosures = join(roma.claude.lastSpawn.cwd, '.enclosures')
+    const [file] = readdirSync(enclosures)
+    expect(readFileSync(join(enclosures, file!), 'utf8')).toBe('PNG')
   })
 
   // The other half of that wiring, and the half nothing else would notice was

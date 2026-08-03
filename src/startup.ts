@@ -389,11 +389,16 @@ export async function startRoma({
   }
 
   // The tree every Session's Working Directory sits in, and every record roma
-  // keeps about a Conversation beside them. One instance because the layout is
-  // one fact — a directory is a Session, a file is a record — though nothing
-  // here holds state, so two over the same path would behave identically. It is
-  // built once so that #128 can hand this same object to the record classes and
-  // to the Core without either of them being told a path to join for itself.
+  // keeps about a Conversation beside them. Built once and handed to everything
+  // below that needs one, rather than each being told a path to join for
+  // itself, because the layout is one fact — a directory is a Session, a file
+  // is a record.
+  //
+  // Nothing here holds state, so two of these over the same path would behave
+  // identically and one instance is a tidiness rather than a safety property.
+  // Two over *different* paths is the failure, and the Core and the pool are
+  // where it bites: one writes an Enclosure into a Working Directory and the
+  // other spawns the process that reads it.
   const work = new WorkRoot(workRoot)
 
   // Beside the generations, and handed to both the pool and the Core. What has
@@ -444,6 +449,9 @@ export async function startRoma({
     core: new Core({
       channel,
       pool,
+      // The same one the pool has, which is what makes an Enclosure land where
+      // the process that reads it runs.
+      workRoot: work,
       queue,
       sessions,
       models,

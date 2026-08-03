@@ -48,6 +48,7 @@ import {
   type Compaction,
 } from './stream-events.js'
 import type { TaskQueue } from './task-queue.js'
+import type { WorkRoot } from './work-root.js'
 
 /**
  * Metered billing, and the ceiling on it. Absent means roma has no Overflow at
@@ -175,6 +176,23 @@ export interface CoreOptions {
    */
   readonly channel: ChannelAdapter
   readonly pool: SessionPool
+  /**
+   * The tree the Sessions this Core drives work in.
+   *
+   * Here for one thing: the Working Directory to write an Enclosure into,
+   * before the Turn that reads it (ADR-0011). Asked of the Work Root rather
+   * than of the Session Pool, which used to answer it — a Session that has
+   * never been spawned has a Working Directory the same way a resident one
+   * does, so it was never a question about processes.
+   *
+   * The same one the pool has, for the reason `models` below is: what the two
+   * must agree on is the work root rather than the object. Disagreeing is a
+   * failure with no symptom at either end — the Core writes an Enclosure where
+   * the process the pool spawns will never look, so roma answers the message
+   * perfectly and names the agent a path with nothing at it. `startup.test.ts`
+   * is what holds it, from the outside.
+   */
+  readonly workRoot: WorkRoot
   /**
    * Shared with every other Core, exactly as the pool is.
    *
@@ -373,6 +391,7 @@ interface Parked {
 export class Core {
   readonly #channel: ChannelAdapter
   readonly #pool: SessionPool
+  readonly #workRoot: WorkRoot
   readonly #queue: TaskQueue
   readonly #sessions: SessionGenerations
   readonly #models: ChosenModels
@@ -395,6 +414,7 @@ export class Core {
   constructor({
     channel,
     pool,
+    workRoot,
     queue,
     sessions,
     models,
@@ -417,6 +437,7 @@ export class Core {
     }
     this.#channel = channel
     this.#pool = pool
+    this.#workRoot = workRoot
     this.#queue = queue
     this.#sessions = sessions
     this.#models = models
@@ -1103,7 +1124,7 @@ export class Core {
       const enclosures =
         relay !== null || message.enclosures.length === 0
           ? []
-          : await writeEnclosures(message.enclosures, this.#pool.cwdFor(sessionId))
+          : await writeEnclosures(message.enclosures, this.#workRoot.sessionDir(sessionId))
 
       // Named above what they said rather than handed over beside it, because
       // the line written to stdin is the only per-Turn channel there is — see

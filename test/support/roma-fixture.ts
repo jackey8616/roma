@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { PINNED_EFFORT } from '../../src/claude-session.js'
 import { sessionIdFor } from '../../src/session-id.js'
 import type { ClaudeEvent } from '../../src/stream-events.js'
@@ -42,6 +43,20 @@ export interface RomaFixture {
    * out would be asserting it in passing every time it wanted to feed a Turn.
    */
   procFor(conversationKey: string): FakeClaudeProcess
+  /**
+   * The same process, waited for rather than demanded.
+   *
+   * Almost every test spawns within one `flush`, because nothing stands between
+   * the message arriving and the Turn. An Enclosure does: it is redeemed and
+   * written into the Working Directory first (ADR-0011), and that is real
+   * filesystem work rather than a microtask.
+   *
+   * Waited out in elapsed time rather than by counting `flush`es, because a
+   * count of event-loop turns is not a duration — on a loaded machine the turns
+   * run out before the write lands, which is a test that passes alone and fails
+   * in the suite.
+   */
+  spawnedFor(conversationKey: string): Promise<FakeClaudeProcess>
   /**
    * The process serving one named Session.
    *
@@ -90,6 +105,7 @@ export function romaFixture(
   const auditRoot = mkdtempSync(join(tmpdir(), `roma-${name}-audit-`))
   const configDir = mkdtempSync(join(tmpdir(), `roma-${name}-claude-`))
   const procIn = (sessionId: string) => claude.processFor(join(workRoot, sessionId))
+  const procFor = (conversationKey: string) => procIn(sessionIdFor(conversationKey))
   const roots = [workRoot, auditRoot, configDir]
 
   return {
@@ -100,7 +116,20 @@ export function romaFixture(
       roots.push(root)
     },
     procIn,
-    procFor: (conversationKey) => procIn(sessionIdFor(conversationKey)),
+    procFor,
+    spawnedFor: async (conversationKey) => {
+      for (let waited = 0; waited < 5_000; waited += 5) {
+        await flush()
+        try {
+          return procFor(conversationKey)
+        } catch {
+          // `node:timers/promises` rather than the global, because a test that
+          // fakes timers still has to wait here in real time.
+          await sleep(5)
+        }
+      }
+      throw new Error(`nothing was spawned for ${conversationKey}`)
+    },
     answerProbe: async (events = OK, effort = EFFORT_ANSWERS.at(PINNED_EFFORT)) => {
       await flush()
       feed(claude.process, events)
