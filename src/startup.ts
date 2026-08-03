@@ -28,6 +28,7 @@ import {
   type StartupSelfCheckReport,
 } from './startup-self-check.js'
 import { TaskQueue } from './task-queue.js'
+import { WorkRoot } from './work-root.js'
 
 /**
  * roma's own directory, and what roma writes into it.
@@ -393,6 +394,14 @@ export async function startRoma({
     ...(overflow === undefined ? {} : { overflow: sessionEnv(overflow.credential) }),
   }
 
+  // The tree every Session's Working Directory sits in, and every record roma
+  // keeps about a Conversation beside them. One instance because the layout is
+  // one fact — a directory is a Session, a file is a record — though nothing
+  // here holds state, so two over the same path would behave identically. It is
+  // built once so that #128 can hand this same object to the record classes and
+  // to the Core without either of them being told a path to join for itself.
+  const work = new WorkRoot(workRoot)
+
   // Beside the generations, and handed to both the pool and the Core. What has
   // to be one thing is the *work root* rather than the object — `ChosenModels`
   // keeps nothing between calls, it reads and writes files — and passing one
@@ -407,7 +416,7 @@ export async function startRoma({
   const efforts = new ChosenEfforts({ workRoot, pinnedEffort })
 
   const pool = new SessionPool({
-    workRoot,
+    workRoot: work,
     envs,
     // No `model` or `effort` beside them: `models` and `efforts` are what
     // answer, and a second copy of either pinned value here would be a second

@@ -1,13 +1,5 @@
 import { EventEmitter } from 'node:events'
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  utimesSync,
-  writeFileSync,
-} from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawnClaudeProcess, type SpawnClaudeProcess } from './claude-process.js'
 import {
@@ -24,13 +16,12 @@ import type { CredentialKind } from './build-env.js'
 import { defaultConfig, type RetryBudget } from './config.js'
 import { writeToStderr, type OperatorLog } from './operator-log.js'
 import { readApiRetry, type ApiRetry, type ClaudeEvent } from './stream-events.js'
+import type { WorkRoot } from './work-root.js'
 
 /** ADR-0003: at most ten resident processes, evicted least-recently-used. */
 const MAX_RESIDENT = 10
 /** ADR-0003: idle processes are reaped after fifteen minutes. */
 const IDLE_REAP_MS = 15 * 60_000
-/** ADR-0003: one working directory per Session, reclaimed after seven days idle. */
-const WORK_DIR_TTL_MS = 7 * 24 * 60 * 60_000
 const RECLAIM_INTERVAL_MS = 60 * 60_000
 /**
  * The file that says this Session has been spawned before.
@@ -331,8 +322,15 @@ export interface SpawnTerms {
 }
 
 export interface SessionPoolOptions {
-  /** Working directories live directly under here, one per Session. */
-  readonly workRoot: string
+  /**
+   * The tree Working Directories live in, one per Session.
+   *
+   * The Work Root itself rather than its path, so that the layout it holds —
+   * directories are Sessions, files are records — has one owner instead of being
+   * a rule this pool enforced in one line and `session-generation.ts` relied on
+   * from a module it does not import.
+   */
+  readonly workRoot: WorkRoot
   /** One environment per credential a Turn may run on. */
   readonly envs: CredentialEnvs
   /**
@@ -476,7 +474,7 @@ interface Resident {
  * observability section.
  */
 export class SessionPool extends EventEmitter<SessionPoolEvents> {
-  readonly #workRoot: string
+  readonly #workRoot: WorkRoot
   readonly #envs: CredentialEnvs
   readonly #model: string | undefined
   readonly #models: SessionModels | undefined
@@ -536,9 +534,13 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * filesystem nothing, so a Session that has never run has an answer too —
    * which is the case that matters, since the first message to a Conversation
    * is as likely to carry an Enclosure as any other.
+   *
+   * Answered by the Work Root, which is where the derivation lives now. Still
+   * offered here because the Core reaches it through the pool; #128 moves that
+   * call to the Work Root directly and this goes with it.
    */
   cwdFor(sessionId: string): string {
-    return join(this.#workRoot, sessionId)
+    return this.#workRoot.sessionDir(sessionId)
   }
 
   /**
@@ -585,6 +587,12 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * Runs on a timer as well, because a directory only goes stale by *not* being
    * used and nothing else would ever come and look.
    *
+   * The deleting is the Work Root's, which is what knows that a directory is a
+   * Session and a file is a record. What is the pool's is the two things only it
+   * can supply: which Sessions are resident and must survive whatever their
+   * mtime says, and the announcement — an operator reads a reclaim beside an
+   * Eviction and a Reaping, and those are judgements this pool made.
+   *
    * The Transcript is deliberately left behind. It belongs to Claude Code and
    * ADR-0006 upheld that it is not roma's to delete, so a Conversation that goes
    * quiet for more than seven days comes back to a directory that is gone and a
@@ -594,30 +602,10 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * which reaches the Session having forgotten nothing.
    */
   reclaimIdleWorkDirs(): string[] {
-    let entries
-    try {
-      entries = readdirSync(this.#workRoot, { withFileTypes: true })
-    } catch {
-      return []
-    }
-
-    const now = Date.now()
     const reclaimed: string[] = []
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      const sessionId = entry.name
-      if (this.#residents.has(sessionId)) continue
-
-      const cwd = join(this.#workRoot, sessionId)
-      let idleMs: number
-      try {
-        idleMs = now - statSync(cwd).mtimeMs
-      } catch {
-        continue
-      }
-      if (idleMs < WORK_DIR_TTL_MS) continue
-
-      rmSync(cwd, { recursive: true, force: true })
+    for (const { sessionId, cwd, idleMs } of this.#workRoot.reclaimIdle(
+      new Set(this.#residents.keys()),
+    )) {
       reclaimed.push(sessionId)
       this.#log({ event: 'reclaim', sessionId, cwd, idleMs })
     }
@@ -697,7 +685,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       // that eviction order and the idle time it logs are the same measurement.
       // A Turn that ran for minutes finished later than one started after it.
       this.#markUsed(resident)
-      this.#touch(resident.cwd)
+      this.#workRoot.touch(resident.sessionId)
       if (this.#residents.get(resident.sessionId) === resident) this.#scheduleReap(resident)
     }
   }
@@ -775,7 +763,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     }
     await this.#makeRoom()
 
-    const cwd = join(this.#workRoot, sessionId)
+    const cwd = this.#workRoot.sessionDir(sessionId)
     // This file is the Session's record that it exists. Read from the filesystem
     // rather than from memory, which is what keeps the rule right across a
     // restart of roma, where every Session is one that already exists — and read
@@ -788,7 +776,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     // from before this file existed — or one somebody removed it from — starts
     // recording again after a single recovery.
     writeFileSync(spawnFile, '')
-    this.#touch(cwd)
+    this.#workRoot.touch(sessionId)
 
     const session = new ClaudeSession({
       sessionId,
@@ -1056,16 +1044,6 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   #forget(resident: Resident): void {
     if (this.#residents.get(resident.sessionId) === resident) {
       this.#residents.delete(resident.sessionId)
-    }
-  }
-
-  /** The working directory's mtime is how long the Session has been idle. */
-  #touch(cwd: string): void {
-    const seconds = Date.now() / 1000
-    try {
-      utimesSync(cwd, seconds, seconds)
-    } catch {
-      // A directory reclaimed underneath us is not worth failing a Turn over.
     }
   }
 
