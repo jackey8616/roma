@@ -1,8 +1,62 @@
-import { readdirSync, rmSync, statSync, utimesSync } from 'node:fs'
+import {
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 /** ADR-0003: one working directory per Session, reclaimed after seven days idle. */
 const WORK_DIR_TTL_MS = 7 * 24 * 60 * 60_000
+
+/**
+ * What a record of a Conversation's generation is called, next to the working
+ * directories of the Sessions it names.
+ *
+ * A file rather than a directory, deliberately: `reclaimIdle` walks this root
+ * deleting directories nothing has used for seven days and steps over everything
+ * else. A directory here would eventually be reclaimed, and reclaiming this is
+ * not the same as reclaiming a working directory — it would send the
+ * Conversation back to a Session it was moved off, with the context `/clear` was
+ * used to drop.
+ */
+const GENERATION_SUFFIX = '.generation'
+
+/**
+ * What a record of a Session's Chosen Model is called, beside the generations.
+ *
+ * A file for the same reason, and the stakes are the same shape: reclaimed, a
+ * Conversation that went quiet for seven days would come back on the Pinned
+ * Model having asked for something else, at a moment nobody can observe.
+ */
+const MODEL_SUFFIX = '.model'
+
+/**
+ * What a record of a Session's Chosen Effort is called, beside the models.
+ *
+ * A file for the same reason and at the same stakes: reclaimed, a Conversation
+ * that went quiet for seven days would come back at the Pinned Effort having
+ * asked for something else, at a moment nobody can observe — and unlike the
+ * model, nothing in the stream would say so afterwards, because `system/init`
+ * carries no effort field at all (ADR-0016).
+ */
+const EFFORT_SUFFIX = '.effort'
+
+/**
+ * "There is no record", told apart from every other way a read can fail.
+ *
+ * Its own function for one caller, and a name rather than a saving: it was three
+ * callers before the read moved here. The name is the point — `catch { return
+ * null }` is the bug it is spelled out to prevent, and `readRecord` is where
+ * what that bug would cost is argued.
+ */
+function isMissing(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT'
+}
 
 /**
  * One working directory this sweep deleted, and what it knew about it.
@@ -83,10 +137,13 @@ export class WorkRoot {
    * that had to agree with the filesystem's, and nothing would notice when it
    * stopped.
    *
-   * Takes the Session rather than the path, so that every member here speaks the
-   * same word. A caller holding a `cwd` got it from `sessionDir` in the first
-   * place, and one that could pass any path at all could age a directory this
-   * module does not own.
+   * Takes the Session rather than the path its caller is holding, because a
+   * `cwd` came from `sessionDir` here in the first place and handing it back
+   * only invites a caller to pass one that did not. Not a rule the whole class
+   * keeps: the record members below take a path, because a record is read and
+   * written by name and the name is the useful thing to hand around. The two
+   * currencies follow the two jobs — a sweep speaks Sessions, a record speaks
+   * paths.
    */
   touch(sessionId: string): void {
     const seconds = Date.now() / 1000
@@ -148,5 +205,106 @@ export class WorkRoot {
       reclaimed.push({ sessionId, cwd, idleMs })
     }
     return reclaimed
+  }
+
+  /**
+   * Where a Conversation's generation is written.
+   *
+   * Takes the Session id rather than the Conversation Key, and the caller is
+   * what decides *which* id — generation zero's, so that the record is findable
+   * knowing only the key. That rule belongs to whoever counts generations. What
+   * belongs here is the one this module can state on its own: a Conversation Key
+   * carries whatever a Channel puts in it, so nothing derived from one reaches a
+   * filename through this module.
+   */
+  generationRecord(sessionId: string): string {
+    return join(this.#root, `${sessionId}${GENERATION_SUFFIX}`)
+  }
+
+  /** Where a Session's Chosen Model is written, beside its generation. */
+  modelRecord(sessionId: string): string {
+    return join(this.#root, `${sessionId}${MODEL_SUFFIX}`)
+  }
+
+  /** Where a Session's Chosen Effort is written, beside its model. */
+  effortRecord(sessionId: string): string {
+    return join(this.#root, `${sessionId}${EFFORT_SUFFIX}`)
+  }
+
+  /**
+   * What a record says, or null where there is none.
+   *
+   * Bytes and nothing else: what a record *means* — a generation is a count, a
+   * model is on the Menu — is the caller's, and the Model Menu is a security
+   * property that does not belong in a module about paths.
+   *
+   * Null means the file is not there, which is the ordinary answer: almost every
+   * Conversation has never used `/clear` and almost every Session runs on the
+   * Pinned Model. Every other failure throws, because a record that may exist and
+   * cannot be read is not the same as one nobody wrote, and answering "none" to
+   * both is how a Chosen Model disappears without anybody being told.
+   *
+   * Trimmed here so that three callers do not each remember to.
+   */
+  readRecord(path: string): string | null {
+    let contents: string
+    try {
+      contents = readFileSync(path, 'utf8')
+    } catch (error) {
+      if (isMissing(error)) return null
+      throw error
+    }
+    return contents.trim()
+  }
+
+  /**
+   * Write one record so that nothing can ever read half of it.
+   *
+   * Every reader of a record refuses one it cannot make sense of rather than
+   * guessing at it — a generation that is not a count, a model that is not on
+   * the Menu — and all of them are right to. None of those readers is here;
+   * they are the three classes in `session-generation.ts`, and this is the write
+   * that keeps them from ever having to defend against a torn line. That is not
+   * the same as the state being unreachable: a `writeFileSync` onto the live name leaves a third
+   * thing a reader can observe besides the old contents and the new, and a
+   * machine that loses power mid-write is what produces it. What the
+   * Conversation gets is a thread that stops working for a write nobody got
+   * wrong.
+   *
+   * A rename within one directory is atomic, so a reader sees the old record or
+   * the new one and never a part of either. The temporary name is in that same
+   * directory for exactly that reason: across filesystems a rename is a copy,
+   * and a copy is the thing being avoided.
+   *
+   * What it can leave behind is a `.pending` file, where the power went between
+   * the write and the rename. It is bounded — one per record, overwritten by the
+   * next attempt — and it is not a record: nothing reads that name, and
+   * `reclaimIdle` steps over files as it does over the records themselves.
+   * Litter of the same kind ADR-0014 already accepts, in exchange for a state no
+   * reader has to be defended against.
+   *
+   * The root is made here rather than by each caller. A deployment's mount is
+   * empty on its first boot, and three classes each remembering to create it was
+   * three places for one of them to forget.
+   */
+  writeRecord(path: string, contents: string): void {
+    mkdirSync(this.#root, { recursive: true })
+    const pending = `${path}.pending`
+    writeFileSync(pending, contents, 'utf8')
+    renameSync(pending, path)
+  }
+
+  /**
+   * Forget a record, whether or not there was one.
+   *
+   * `force` for the Session nobody ever moved, where there is nothing to delete
+   * and that is the state being asked for. Deliberately **not** `recursive`: a
+   * directory where a record should be is something roma did not put there and
+   * cannot read, so this throws rather than quietly removing it — and the
+   * Command answers that it failed instead of saying it moved a Session it did
+   * not.
+   */
+  forgetRecord(path: string): void {
+    rmSync(path, { force: true })
   }
 }
