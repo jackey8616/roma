@@ -222,6 +222,67 @@ stops the agent reaching the metadata server and standing in roma's *own* identi
 `fetch`; roma has no egress control. That is an argument for keeping the account above at the
 `pubsub.subscriber` it has today and nothing more.
 
+## The agent's Document Reach and its Depot
+
+Separate from everything above, and **this directory creates none of it either**. Half of it
+cannot be created here at all: a shared drive is made by a Workspace user, and a service
+account is not one.
+
+A **Document Reach** is one identity the *agent* creates the team's Docs and Sheets as. A
+**Depot** is the one folder it works in. A deployment names both or neither —
+`ROMA_DOCUMENT_KEY_FILE` and `ROMA_DOCUMENT_DEPOT` — and roma holds the key, never hands it
+over, and mints an hour-long token whenever the agent asks (ADR-0022). Leave them unset and
+roma behaves exactly as it does without them.
+
+**It must be a shared drive, and that is forced twice.** A service account has no Drive
+storage of its own, so a file it creates in a folder in somebody's My Drive is a file it owns
+against a zero quota. And the role that makes this safe exists only on shared drives.
+
+**Add the account as a Contributor and no higher.** That is the whole of the boundary, and
+it is one row apart from the thing you do not want:
+
+| | read | create | edit | move | trash | delete |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Contributor** — give the account this | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
+| Content manager — give the people this | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
+
+So roma fills the Depot and only a person empties it. That is deliberate, and it means
+**the Depot grows until somebody tidies it** — nothing roma has can reclaim anything there.
+
+By hand — the service account in whichever project you like, the shared drive in Google
+Drive:
+
+```bash
+gcloud iam service-accounts create roma-document-reach \
+  --display-name="The identity roma's agent writes the team's files as"
+
+gcloud iam service-accounts keys create document-reach.json \
+  --iam-account="roma-document-reach@THE_PROJECT.iam.gserviceaccount.com"
+```
+
+Then, in Drive: create a shared drive, add
+`roma-document-reach@THE_PROJECT.iam.gserviceaccount.com` to it as a **Contributor**, make
+the folder roma should work in, and take its id out of the folder's URL.
+
+```bash
+export ROMA_DOCUMENT_KEY_FILE=/run/secrets/document-reach.json
+export ROMA_DOCUMENT_DEPOT=THE_FOLDER_ID
+```
+
+roma proves all of it at boot: that the key mints, that the folder is there, and that the
+account can actually add to it. A typo in the id, an account never added to the drive, and
+an account added as a Viewer are three different refusals rather than one failure inside
+somebody's first Task. **It is a snapshot, not a guarantee** — remove the account from the
+drive an hour later and roma finds out inside a Turn.
+
+**Know what it is not.** No IAM role grants any of this: Drive's boundary is who pressed
+Share, so the Cloud console has nothing to say about what this account may touch, and
+granting it project roles changes nothing here. **Anyone who shares another file with that
+address widens what the agent can read**, silently, without touching roma. And there is one
+Depot for the whole deployment — everything in it is readable by every Conversation and by
+everyone who can message roma. The key has the same gap the two above it do: the agent
+shares the container and the uid, so a shell can read it.
+
 ## The three numbers this directory decides
 
 Each is a variable with the reasoning next to it in `variables.tf`; the short version:

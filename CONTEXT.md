@@ -456,19 +456,23 @@ from a build, and the reading can be wrong in ways only a person notices
 
 **Reach**:
 What roma can reach on one provider at all — the credential that reaches it, what
-it reaches, and what every Session is told about it. An Installation is one and a
-Cloud Reach is one: the two were always the same idea on two providers, and this
-is the name for the idea rather than for either instance (ADR-0020). A deployment
+it reaches, and what every Session is told about it. An Installation is one, a
+Cloud Reach is one, and a Document Reach is one: they were always the same idea on
+several providers, and this is the name for the idea rather than for any instance
+(ADR-0020). A deployment
 has one Reach per provider whether or not anybody gave it the key: a Reach nobody
 configured still answers, because "there is none" is a sentence roma says out loud
 rather than a case it has no branch for (ADR-0015 §9) — which is why an
 unconfigured Reach is one that is *unavailable* and never one that is absent. Not
 a second name for the Minter, which is the half of a Reach that holds the key; a
-Reach is also the boundary and the sentence.
+Reach is also the boundary and the sentence. What a Reach bounds is not always
+what roma was *told about*: a Document Reach reaches everything shared with one
+account, and the Depot is one folder inside that — the two coincide until somebody
+presses Share (ADR-0022).
 _Avoid_: provider (that is the company on the other end, and a Reach is roma's
 side of it), credential (that word is the Shared Window's and Overflow's), and
-using this for either instance on its own — an Installation is a Reach and so is a
-Cloud Reach, and a sentence about one of them should say which
+using this for one instance on its own — an Installation is a Reach and so are the
+other two, and a sentence about one of them should say which
 
 **Installation**:
 Which repositories roma can reach at all. A GitHub App is installed on a list of
@@ -537,14 +541,14 @@ refused by Google and never by roma. Named here for the reason an Installation
 is: a term that is the whole of a security property should be a term.
 Deliberately **not** the identity roma itself runs on — one that could reach
 roma's own ingress could end roma quietly, and a deployment where those two are
-the same has no boundary at all (ADR-0015). roma's Reach on the cloud, and the one
-most deployments do not have — which is why it is the Reach that is ordinarily
-unavailable rather than the Reach that is ordinarily missing. A deployment with
+the same has no boundary at all (ADR-0015). roma's Reach on the cloud, and one of
+the two most deployments do not have — which is why it is a Reach that is
+ordinarily unavailable rather than one that is ordinarily missing. A deployment with
 none still ships the Cloud Shortcut and still answers it: what is missing is the
 Reach and never the command, because a command that is not there reads as a broken
 `PATH` and costs the Turn the Shortcut exists to save.
-_Avoid_: Installation (that is GitHub's; the two are the same idea on two
-providers, and saying either for the other hides which one a sentence is about),
+_Avoid_: Installation and Document Reach (the three are one idea on three
+providers, and saying any of them for another hides which one a sentence is about),
 project (a Reach may span several, and need not include roma's own), service
 account (what it is made of, not what it bounds), permissions, scope
 
@@ -581,6 +585,61 @@ _Avoid_: Credential Shim (see above), helper (that is `git`'s word, and the
 Shims' to refuse), SDK, client library, wrapper, and describing it as how an
 agent reaches the cloud — it is one way, and the cheap one
 
+### Reaching the documents
+
+**Document Reach**:
+What the agent can touch in the team's own files at all. One identity somebody
+decided on, and what has been shared with it is the whole of the boundary — every
+Conversation reaches all of it, and so does everyone who can message roma. Named
+`documents` rather than for the product, on the rule that already governs the other
+two: `code` is where the work lives, `cloud` is where the infrastructure lives, and
+this is where the things **people read and edit by hand** live. Deliberately not the
+Cloud Reach with more scopes: that one's whole sentence is that the roles are the
+boundary, and here the boundary is who pressed Share — which appears in no console
+that one is administered from, and would make an announcement roma already makes
+false (ADR-0022). Optional, like the Cloud Reach and unlike the Installation.
+_Avoid_: Cloud Reach (same vendor, different product, different permission model,
+and saying either for the other hides which one a sentence is about), Drive,
+Workspace, Sheets (product names, and the last one is a format rather than a
+boundary), Depot (that is one folder inside this, and the two only coincide until
+somebody shares something else with the same account)
+
+**Document Token**:
+The hour-long credential roma mints so that a Session's work can reach the Document
+Reach. The Cloud Token's opposite number and the same in every property it was
+argued for: minted when something asks, never put in a process environment fixed at
+spawn, never written anywhere outliving the command it was made for. What it can do
+is create files and edit the ones it created; what it cannot do is move, trash or
+delete anything, and that is Google's answer rather than roma's — the identity is a
+Contributor, and a Contributor may fill a Depot and may not empty one.
+_Avoid_: Cloud Token (that one is the other Reach's), Drive token, access token
+(Google's word for the wire format, not roma's for what it hands over)
+
+**Document Shortcut**:
+The one command roma provides for getting a Document Token, so that reaching the
+Document Reach costs nobody a Turn. The Cloud Shortcut in every respect, including
+the ones that make it not a boundary: the agent has a shell, the long way round is
+writing Google's own API call, and roma saves money here and nothing else.
+_Avoid_: Credential Shim (a Shim occupies somebody else's tool name; this is roma's
+own), and describing it as how the agent reaches the documents — it is one way, and
+the cheap one
+
+**Depot**:
+The one folder roma is told to work in. A place and never a boundary — the boundary
+is the Document Reach, and this is a folder inside it — which is why the two have
+different names even while they describe the same files. Named for what it is: a
+commons, held by everyone who can message roma and owned by none of them, so one
+Conversation's output sits where every other Conversation can read it. It fills and
+never empties: roma's identity may create and edit and may not move or trash, so
+what accumulates there leaves only when a person takes it away, and that asymmetry
+is the design rather than a gap in it (ADR-0022). One per deployment. The Working
+Directory's opposite number and easily mistaken for one kind of thing with it — that
+one is per-Session, private, and reclaimed after a week; this one is shared,
+durable, and reclaimed by nobody.
+_Avoid_: folder (so is everything else in a Drive), Document Folder (that reads as
+the Document Reach and they are two things), outbox (things come in as well),
+workspace, and using this for what the Reach reaches
+
 ### Paying for it
 
 **Shared Window**:
@@ -608,7 +667,7 @@ The line roma writes when a Task ends: the Caller, which Session ran it, how lon
 they waited, what it cost, which credential paid, which model ran it, what effort
 it ran at, whether a Compaction happened inside it and who asked for that, which
 repositories it minted an Installation Token for, and whether it used the Cloud
-Reach. The model is here because a
+Reach or the Document Reach. The model is here because a
 Chosen Model is a Caller moving the shared bill and nothing else would remember
 which Task did (ADR-0014). The effort is here for the same reason and is weaker
 evidence, and says so: it is what roma sent and what the Effort Matrix says the
@@ -626,7 +685,11 @@ that would mean reading the Transcript. The Cloud Reach is a yes or a no and
 never a count: one Cloud Token does unlimited work for an hour, so a number would
 be read as a measure of activity roma does not have — and on that side even the
 destination is not free, since a request for a Cloud Token carries none
-(ADR-0015). One per Task — a failed or
+(ADR-0015). The Document Reach is the
+same yes or no for the same reasons, and it answers a question the other one does
+not have to: a Depot is shared by every Conversation, and Google's own record of
+what happened there names the one account and never the person, so this is the only
+half of "who put this here" that exists at all (ADR-0022). One per Task — a failed or
 stopped one included — and the cost on it is the Turn's own delta, never the
 Session's running total. It can also be nothing at all: a Turn that began and
 never reached a terminal event spent real tokens nothing will ever name, and that

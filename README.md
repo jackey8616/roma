@@ -79,6 +79,19 @@ deployments have none and are unaffected; see `ROMA_CLOUD_KEY_FILE` below and
   -v /path/to/cloud-reach.json:/run/secrets/cloud-reach.json:ro \
 ```
 
+Add three more to give it a **Document Reach** — the identity it writes the team's files as,
+and the **Depot** it writes them into. Also optional, also unaffecting to deployments without
+one, and **both variables or neither**: a key with no Depot has nowhere to write and a Depot
+with no key has nobody to reach it, so setting one refuses the boot naming the other. See
+`infra/README.md` for the shared drive it needs and why a folder in somebody's My Drive will
+not do.
+
+```bash
+  -e ROMA_DOCUMENT_KEY_FILE=/run/secrets/document-reach.json \
+  -e ROMA_DOCUMENT_DEPOT=THE_FOLDER_ID \
+  -v /path/to/document-reach.json:/run/secrets/document-reach.json:ro \
+```
+
 It carries **its own Claude Code, pinned to v2.1.220** — the version every measurement in
 `docs/` was taken against. Moving that pin is a re-verification event that costs Shared
 Window money, not a dependency bump, and nothing automated will ever move it for you.
@@ -194,6 +207,8 @@ Terraform cannot do, in the order they have to happen.
 | `ROMA_PUBSUB_SUBSCRIPTION` | **Required.** The subscription's name. Read, never created. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Google's own, not roma's: a service account key file, or nothing at all on a Google host with a metadata server. This is the identity **roma** runs as — not the agent's. |
 | `ROMA_CLOUD_KEY_FILE` | A path to a service account key file, and the whole of what gives the agent a **Cloud Reach**. Unset — the usual case — roma starts normally, announces nothing about the cloud, and `roma-cloud-token` says this deployment has none. Set, roma reads the key at boot **by exactly that path**, mints one token with it and throws it away, and refuses to start if any of that fails; it never falls back to another identity, because the fallback on a Google host is roma's own. The roles on that identity are the entire boundary — every Conversation reaches all of it, and so does everyone who can message roma. It must not be the identity above. `infra/README.md` has the steps and says which project to put it in. **Mount it read-only, and know what it is not:** roma is the only thing that reads it, but the agent shares the container and the uid, so a shell can read it too — the same gap `ROMA_GITHUB_PRIVATE_KEY_FILE` has. |
+| `ROMA_DOCUMENT_KEY_FILE` | A path to a service account key file, and half of what gives the agent a **Document Reach** — the identity it creates the team's Docs and Sheets as. Unset, roma starts normally, announces nothing about documents, and `roma-document-token` says this deployment has none. Set, roma reads the key at boot **by exactly that path**, proves it, and refuses to start if that fails; it never falls back to another identity, for `ROMA_CLOUD_KEY_FILE`'s reason. Required **whenever** the line below is set, and vice versa. What has been shared with that identity is the entire boundary — every Conversation reaches all of it, and so does everyone who can message roma. **Mount it read-only, and know what it is not:** the agent shares the container and the uid, so a shell can read it too — the same gap the two keys above have. |
+| `ROMA_DOCUMENT_DEPOT` | The id of the folder roma works in — the **Depot**. It must be a folder in a **shared drive**, with the identity above as a **Contributor**: that role can create and edit and cannot move, trash or delete, which is what makes "roma leaves work there and a person takes it away" the permission model rather than a convention. A folder in somebody's My Drive does not work, and fails in two ways at once (`infra/README.md`). roma proves at boot that the folder exists **and** that the account can add to it, so a typo, an account never added, and an account added as Viewer are three different refusals rather than one failure inside somebody's first Task. **One Depot for the whole deployment**: everything in it is readable by every Conversation and by everyone who can message roma, and it grows monotonically because nothing roma has can empty it (ADR-0022). |
 | `ROMA_OVERFLOW_API_KEY` | Metered billing. Absent, roma has no Overflow and never offers it. |
 | `ROMA_OVERFLOW_MONTHLY_CAP_USD` | Required **whenever** the line above is set, and vice versa. There is no default: how much of your money roma may spend is not roma's to decide. |
 | `ROMA_MODEL` | Overrides the pinned model. The self-check asserts on whatever this resolves to. |
