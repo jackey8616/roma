@@ -10,6 +10,7 @@ import type {
   IngressMessage,
   OutboundInstruction,
   PendingEnclosure,
+  Quotation,
 } from './channel-adapter.js'
 import { PINNED_EFFORT, PINNED_MODEL } from './claude-session.js'
 import { EFFORT_NOT_APPLIED } from './effort-menu.js'
@@ -275,7 +276,7 @@ function ingress(
   conversationKey = KEY,
   who: { caller: string; callerName: string | null } = { caller: 'users/17', callerName: 'Ada' },
 ): IngressMessage {
-  return { conversationKey, ...who, text, enclosures: [] }
+  return { conversationKey, ...who, text, enclosures: [], quotation: null }
 }
 
 /** The other person in the same thread, for the tests about telling them apart. */
@@ -3498,6 +3499,7 @@ describe('what somebody sent along with a message', () => {
 
   const sent = (name: string, content: string): PendingEnclosure => ({
     name,
+    from: null,
     redeem: () => Promise.resolve(new TextEncoder().encode(content)),
   })
 
@@ -3559,6 +3561,7 @@ describe('what somebody sent along with a message', () => {
     let redemptions = 0
     const counted: PendingEnclosure = {
       name: 'a.png',
+      from: null,
       redeem: () => {
         redemptions += 1
         return Promise.resolve(new Uint8Array([1]))
@@ -3583,6 +3586,7 @@ describe('what somebody sent along with a message', () => {
     const { core, adapter } = newCore()
     const unreachable: PendingEnclosure = {
       name: 'design.fig',
+      from: null,
       redeem: () => Promise.reject(new Error('roma has no Drive scope')),
     }
 
@@ -3598,6 +3602,7 @@ describe('what somebody sent along with a message', () => {
     const { core, claude } = newCore()
     const unreachable: PendingEnclosure = {
       name: 'design.fig',
+      from: null,
       redeem: () => Promise.reject(new Error('gone')),
     }
 
@@ -3632,5 +3637,105 @@ describe('what somebody sent along with a message', () => {
     await task
 
     expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'result', text: 'ok' })
+  })
+})
+
+describe('the message a message quotes', () => {
+  /** A Quotation on a message that is otherwise ordinary. */
+  const withQuotation = (text: string, quotation: Quotation): IngressMessage => ({
+    ...ingress(text),
+    quotation,
+  })
+
+  const BOB_SAID: Quotation = {
+    text: 'the deploy failed at step 3',
+    author: 'Bob (users/99)',
+  }
+
+  // Composed in the Core rather than by an Adapter, which is the whole reason
+  // the inbound contract has a word for this: an Adapter that spliced the
+  // quotation into `text` would be writing what the model reads, and `/stop`
+  // would stop meaning `/stop` on the one Channel that had done it.
+  it('names it to the agent, under the Caller Marker and above what was typed', async () => {
+    const { core, claude, procFor } = newCore()
+
+    const task = core.handle(withQuotation('why did this happen?', BOB_SAID))
+    await flush()
+    feed(procFor(KEY), OK)
+    await task
+
+    expect(claude.process.sent.at(-1)).toMatchObject({
+      type: 'user',
+      message: {
+        content: [
+          {
+            text:
+              '<from>Ada (users/17)</from>\n' +
+              '<quoted from="Bob (users/99)">the deploy failed at step 3</quoted>\n' +
+              '\n' +
+              'why did this happen?',
+          },
+        ],
+      },
+    })
+  })
+
+  // The rule the Command path rests on, from the outside: a Command is the whole
+  // message, and what somebody quoted is not part of it. Stopping work is the
+  // case that matters — somebody quoting the message they are worried about and
+  // typing `/stop` is in a hurry, and a `/stop` that had become prose would
+  // spend a Turn instead of ending one.
+  it('leaves a Command a Command', async () => {
+    const { core, adapter, claude, start } = newCore()
+    const { task, proc } = await start('take a while')
+
+    await core.handle(withQuotation('/stop', BOB_SAID))
+
+    expect(proc.sent.at(-1)).toMatchObject({
+      type: 'control_request',
+      request: { subtype: 'interrupt' },
+    })
+    feed(proc, recordedStream('interrupted-turn').turn(1))
+    await task
+
+    expect(posted(adapter.instructions)).toContainEqual({
+      kind: 'command-outcome',
+      conversationKey: KEY,
+      command: 'stop',
+      carriedOut: true,
+    })
+    // One spawn: the Task that was stopped. The `/stop` drove no Turn of its own.
+    expect(claude.spawns).toHaveLength(1)
+  })
+
+  // Dropped for a reason that is *not* ADR-0018's. An Enclosure is dropped on a
+  // Relay because bytes would be paid for and then mentioned to nobody; a
+  // quotation costs nothing, and what stops it is that a Relay's wire format has
+  // nowhere to put it. Anything before the command turns it into prose
+  // (ADR-0012); anything after it becomes the command's argument, which is a
+  // different instruction from the one somebody typed.
+  it('carries none of it on a Relay, which goes on the wire as a command', async () => {
+    const { core, claude, procFor } = newCore()
+
+    const task = core.handle(withQuotation('/compact', BOB_SAID))
+    await flush()
+    feed(procFor(KEY), OK)
+    await task
+
+    expect(claude.process.sent.at(-1)).toMatchObject({
+      type: 'user',
+      message: { content: [{ text: '/compact\n\n<from>Ada (users/17)</from>' }] },
+    })
+  })
+
+  it('changes nothing about a message that quotes nothing', async () => {
+    const { claude, say } = newCore()
+
+    await say('fix the CI')
+
+    expect(claude.process.sent.at(-1)).toMatchObject({
+      type: 'user',
+      message: { content: [{ text: '<from>Ada (users/17)</from>\n\nfix the CI' }] },
+    })
   })
 })

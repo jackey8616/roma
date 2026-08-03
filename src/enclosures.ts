@@ -28,6 +28,11 @@ export interface WrittenEnclosure {
   readonly path: string
   /** What the Channel said the sender called it. Never a path. */
   readonly name: string
+  /**
+   * Whoever sent it along, where that is not the Caller. Carried across from
+   * `PendingEnclosure` unchanged, and printed for the same reason the name is.
+   */
+  readonly from: string | null
 }
 
 /**
@@ -67,7 +72,7 @@ export async function writeEnclosures(
       throw new EnclosureUnreadable(enclosure.name, error)
     }
     await writeFile(join(cwd, path), content)
-    written.push({ path, name: enclosure.name })
+    written.push({ path, name: enclosure.name, from: enclosure.from })
   }
   return written
 }

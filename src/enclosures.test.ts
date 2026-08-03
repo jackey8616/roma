@@ -20,7 +20,7 @@ afterEach(() => {
 
 /** One Enclosure that hands over the bytes it was built with. */
 function sent(name: string, content = 'bytes'): PendingEnclosure {
-  return { name, redeem: () => Promise.resolve(new TextEncoder().encode(content)) }
+  return { name, from: null, redeem: () => Promise.resolve(new TextEncoder().encode(content)) }
 }
 
 describe('writing an Enclosure into a Working Directory', () => {
@@ -110,6 +110,7 @@ describe('writing an Enclosure into a Working Directory', () => {
     const cwd = workingDirectory()
     const unreachable: PendingEnclosure = {
       name: 'design.fig',
+      from: null,
       redeem: () => Promise.reject(new Error('roma has no Drive scope')),
     }
 

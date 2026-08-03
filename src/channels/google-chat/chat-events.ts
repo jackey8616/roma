@@ -1,31 +1,54 @@
-import type { IngressMessage, PendingEnclosure } from '../../channel-adapter.js'
+import type { IngressMessage, PendingEnclosure, Quotation } from '../../channel-adapter.js'
 import type { OperatorLog } from '../../operator-log.js'
 
 /** Fetch the bytes of one thing Chat holds, by the resource name Chat gave it. */
 export type DownloadAttachment = (resourceName: string) => Promise<Uint8Array>
 
 /** What reading an event can tell an operator that a Conversation cannot. */
-export type ChatEventLogRecord = {
-  /**
-   * An event carried something attachment-shaped and roma read no Enclosure
-   * out of it.
-   *
-   * The one line standing between "roma cannot read this payload" and the bug
-   * it was built to fix. Everything in this file was written from Google's
-   * documentation rather than from a capture, and the envelope depends on how
-   * an event was delivered — roma is on Pub/Sub, not an HTTP webhook — so the
-   * shape below is a guess until a real message proves it. A wrong guess
-   * produces `null` and falls through: no throw, no reply, roma silently
-   * ignoring images, which is indistinguishable from the fault this whole area
-   * exists to remove. This is what makes it distinguishable.
-   *
-   * `keys` rather than the payload, because an attachment's metadata is
-   * somebody's filename and roma writes an Operator Log it does not otherwise
-   * put user content in. The keys are enough to say which shape arrived.
-   */
-  readonly event: 'attachment-unread'
-  readonly keys: readonly string[]
-}
+export type ChatEventLogRecord =
+  | {
+      /**
+       * An event carried a quoted message and roma read no Quotation out of it.
+       *
+       * `attachment-unread`'s argument, and it lands harder here. Chat's
+       * `quotedMessageSnapshot` is documented output-only on the *Message
+       * resource*, and what an interaction event carries is a separate question
+       * this repository cannot answer — so the single reading everything else
+       * rests on, that the words arrive in the payload, is the one nobody has
+       * seen hold. If it does not, roma answers every quoted message as though
+       * the quotation were not there, which is exactly what roma did before this
+       * existed. This line is the difference (ADR-0021).
+       *
+       * `keys` rather than the payload, for the reason below: a quotation is
+       * somebody's words, and the Operator Log is not where roma puts those. The
+       * snapshot's own keys are carried under their path, because "the snapshot
+       * is missing" and "the snapshot is there and empty" are different faults
+       * with different repairs.
+       */
+      readonly event: 'quote-unread'
+      readonly keys: readonly string[]
+    }
+  | {
+      /**
+       * An event carried something attachment-shaped and roma read no Enclosure
+       * out of it.
+       *
+       * The one line standing between "roma cannot read this payload" and the bug
+       * it was built to fix. Everything in this file was written from Google's
+       * documentation rather than from a capture, and the envelope depends on how
+       * an event was delivered — roma is on Pub/Sub, not an HTTP webhook — so the
+       * shape below is a guess until a real message proves it. A wrong guess
+       * produces `null` and falls through: no throw, no reply, roma silently
+       * ignoring images, which is indistinguishable from the fault this whole area
+       * exists to remove. This is what makes it distinguishable.
+       *
+       * `keys` rather than the payload, because an attachment's metadata is
+       * somebody's filename and roma writes an Operator Log it does not otherwise
+       * put user content in. The keys are enough to say which shape arrived.
+       */
+      readonly event: 'attachment-unread'
+      readonly keys: readonly string[]
+    }
 
 /**
  * One event as Google Chat delivers it.
@@ -111,7 +134,12 @@ export function readIngressMessage(
   // Claude Code should see: the mention is how Chat addresses roma, not part of
   // what was asked.
   const text = (asString(message['argumentText']) ?? asString(message['text']) ?? '').trim()
-  const enclosures = readEnclosures(message, download, log)
+  const quoted = readQuotation(message, download, log)
+  // The Caller's own first and the quotation's behind them, which is the order
+  // they are named to the agent in. Nothing distinguishes them here beyond the
+  // `from` each carries — an Enclosure is an Enclosure, whoever sent it, and the
+  // Core writes them all into one Working Directory in one pass.
+  const enclosures = [...readEnclosures(message, null, download, log), ...quoted.enclosures]
   // A message with *nothing* in it is not a request — a bare @-mention with
   // nothing after it, say, where answering would spend a Turn asking Claude Code
   // what to make of an empty message.
@@ -120,7 +148,11 @@ export function readIngressMessage(
   // when this rule was written, because text was all a message could carry; a
   // pasted screenshot with no words is the most ordinary thing there is to do in
   // a chat window and carries more than most one-line messages (ADR-0011).
-  if (text === '' && enclosures.length === 0) return null
+  //
+  // A Quotation counts as something in it, on exactly that argument: pointing at
+  // a message is what a chat window is for, and quoting an error at roma without
+  // typing a word is the same act as pasting the screenshot (ADR-0021).
+  if (text === '' && enclosures.length === 0 && quoted.quotation === null) return null
 
   // The Conversation Key doubles as the address a reply goes to, which is what
   // lets this Adapter store nothing: `spaces/{space}/threads/{thread}` is a
@@ -132,7 +164,82 @@ export function readIngressMessage(
     callerName,
     text,
     enclosures,
+    quotation: quoted.quotation,
   }
+}
+
+/** What one event's quoted message came to, once roma had read it. */
+interface QuotedMessage {
+  readonly quotation: Quotation | null
+  readonly enclosures: readonly PendingEnclosure[]
+}
+
+/** An event that quoted nothing at all. */
+const NOTHING_QUOTED: QuotedMessage = { quotation: null, enclosures: [] }
+
+/**
+ * Read the message this one quotes, as a Quotation and whatever came attached
+ * to it.
+ *
+ * **The snapshot and never the link.** Chat's `quotedMessageMetadata` carries
+ * both: `name` points at the quoted message, and `quotedMessageSnapshot` is the
+ * words as they stood when somebody quoted them. roma reads the second and
+ * ignores the first, which is ADR-0021's decision and is three things at once —
+ * it is free where following the link is a round trip, it needs no scope beyond
+ * the `chat.bot` roma already has (`spaces.messages.get` under that scope
+ * reaches only messages the app was addressed in, and reaching further wants
+ * `chat.app.messages.readonly` and an administrator), and it is the *more*
+ * faithful of the two, because a message edited after it was quoted should not
+ * change what roma says Bob said.
+ *
+ * `quoteType` is deliberately unread. Chat has two — `REPLY` within a thread and
+ * `FORWARD` from somewhere else entirely — and both populate the two fields this
+ * reads. Telling them apart would buy roma nothing it acts on and would add a
+ * third guess about a payload nobody has seen, against this file's own rule of
+ * reading only what it can survive being wrong about.
+ * https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces.messages
+ */
+function readQuotation(
+  message: Readonly<Record<string, unknown>>,
+  download: DownloadAttachment | undefined,
+  log: OperatorLog<ChatEventLogRecord> | undefined,
+): QuotedMessage {
+  const metadata = asRecord(message['quotedMessageMetadata'])
+  if (metadata === null) return NOTHING_QUOTED
+
+  const snapshot = asRecord(metadata['quotedMessageSnapshot'])
+  // Chat's only sender that is a bare string rather than a `User`, and its
+  // documented shape is "the quoted message's author name" — which is an id in
+  // one reading and a display name in the other. Carried either way and read
+  // neither: printing it is all roma ever does with a person's name.
+  const author = asString(snapshot?.['sender'])
+  const text = (asString(snapshot?.['text']) ?? '').trim()
+  // Attachments on the quoted message, which Chat documents on the snapshot for
+  // a forward. Fetched exactly as the Caller's own are, over the same
+  // `media.download` and the same `chat.bot` — ADR-0021's "never fetches" is
+  // about the quoted *message*, and bytes are not it. Where the ref turns out
+  // not to be roma's to redeem, the Task ends with the reason, which is the path
+  // `driveDataRef` already made ordinary.
+  const enclosures = snapshot === null ? [] : readEnclosures(snapshot, author, download, log)
+  // Only where there are words. A quotation with no text is a tag with nothing
+  // in it, and an attachment that came with it stands on its own already.
+  const quotation = text === '' ? null : { text, author }
+
+  // Something quote-shaped arrived and roma understood none of it. See
+  // `ChatEventLogRecord`.
+  if (quotation === null && enclosures.length === 0) {
+    log?.({
+      event: 'quote-unread',
+      keys: [
+        ...Object.keys(metadata),
+        ...(snapshot === null
+          ? []
+          : Object.keys(snapshot).map((key) => `quotedMessageSnapshot.${key}`)),
+      ],
+    })
+  }
+
+  return { quotation, enclosures }
 }
 
 /** What reading an event needs beyond the event. */
@@ -162,9 +269,14 @@ export interface ReadOptions {
  * file is read that way — `spaceType`/`type`, `event.space`/`message.space`,
  * `common.parameters`/`action.parameters`. The envelope depends on how the event
  * was delivered, and nothing here has ever seen a real one.
+ *
+ * `from` is who sent these along, and it is null for the Caller's own — the
+ * message itself and a quoted message's snapshot both come through here, and an
+ * Enclosure that arrived on somebody else's message has to say so (ADR-0021).
  */
 function readEnclosures(
   message: Readonly<Record<string, unknown>>,
+  from: string | null,
   download: DownloadAttachment | undefined,
   log: OperatorLog<ChatEventLogRecord> | undefined,
 ): readonly PendingEnclosure[] {
@@ -183,7 +295,7 @@ function readEnclosures(
 
     const resourceName = asString(asRecord(attachment['attachmentDataRef'])?.['resourceName'])
     if (resourceName !== null && download !== undefined) {
-      enclosures.push({ name, redeem: () => download(resourceName) })
+      enclosures.push({ name, from, redeem: () => download(resourceName) })
       continue
     }
 
@@ -191,6 +303,7 @@ function readEnclosures(
     if (driveFileId !== null) {
       enclosures.push({
         name,
+        from,
         redeem: () =>
           Promise.reject(
             new Error(
