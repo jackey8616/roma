@@ -546,6 +546,72 @@ describe('whether a Task used the Cloud Reach', () => {
   })
 })
 
+/**
+ * ADR-0022 §9: the same question about the Document Reach, and it answers one
+ * the field above does not have to.
+ *
+ * Everything the agent does in a Depot is done as one service account, so
+ * Drive's own record of what happened there names the account and never the
+ * person — and one Depot holds every Conversation's work. This is the only half
+ * of "who put this here" that exists at all.
+ */
+describe('whether a Task used the Document Reach', () => {
+  it('keeps the answer across a restart', () => {
+    const dir = newDir()
+    new AuditLog({ auditRoot: dir }).record(entry({ documentReach: true }))
+
+    const [record] = new AuditLog({ auditRoot: dir }).readMonth(MONTH)
+    expect(record?.documentReach).toBe(true)
+  })
+
+  // Story 31, and the field's whole reason for being optional. Every record roma
+  // wrote before there were Document Reaches lacks it, and none of those Tasks
+  // could have obtained a Document Token — there was no way to. Requiring it
+  // would make all of them unreadable at once: `readRecord` drops a line it
+  // cannot read, a dropped line leaves the month's total, and the month's total
+  // is what the Overflow cap is enforced against. **This is the test protecting
+  // the month.**
+  it('reads a record written before there were documents to reach', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), cloudReach: true, at: new Date().toISOString() })}\n`,
+    )
+
+    const [record] = log.readMonth(MONTH)
+    expect(record?.documentReach).toBeUndefined()
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 0 })
+  })
+
+  // Story 30. A line answering with a number is answering a different question —
+  // the count ADR-0015 §10 refused and ADR-0022 §9 refuses again, because one
+  // token does unlimited work for an hour.
+  it('refuses an answer that is not a yes or a no', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ documentReach: false }))
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), documentReach: 3, at: new Date().toISOString() })}\n`,
+    )
+
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+  })
+
+  // The two fields are independent facts about one Task, and a record that
+  // carries both has to read back as both: a Task that wrote a document while
+  // reaching nothing in the cloud is an ordinary Task, not a contradiction.
+  it('keeps its answer apart from the cloud’s', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ cloudReach: false, documentReach: true }))
+
+    const [record] = log.readMonth(MONTH)
+    expect(record).toMatchObject({ cloudReach: false, documentReach: true })
+  })
+})
+
 describe('whether a Compaction happened inside a Task', () => {
   /** As the reader hands one over, off a real `system/compact_boundary`. */
   const COMPACTION = { trigger: 'auto', preTokens: 61486, postTokens: 1375 } as const

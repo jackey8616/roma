@@ -145,6 +145,20 @@ RUN printf '#!/bin/sh\nexec node /app/dist/github/gh-shim.js "$@"\n' > /usr/loca
 RUN printf '#!/bin/sh\nexec node /app/dist/cloud/cloud-token.js "$@"\n' > /usr/local/bin/roma-cloud-token \
   && chmod 0755 /usr/local/bin/roma-cloud-token
 
+# The Document Shortcut, on the same three lines and every word of the reasoning
+# above (ADR-0022 §4). Installed on every image, including the ones whose
+# deployment has no Document Reach, where it answers in one sentence that there
+# is none — a command that is missing reads as a broken PATH and costs the Turn
+# the Shortcut exists to save.
+#
+# There is no Drive CLI here either, and this one stands in front of nothing: the
+# long way round is the agent writing Google's own API call, which `curl` and
+# Node can already do. What that buys is the thing a whitelist of verbs would
+# have taken away — every verb roma did not think of would otherwise be an image
+# change with nothing behind it.
+RUN printf '#!/bin/sh\nexec node /app/dist/documents/document-token.js "$@"\n' > /usr/local/bin/roma-document-token \
+  && chmod 0755 /usr/local/bin/roma-document-token
+
 # The asymmetry here is the decision, not an oversight.
 #
 # ROMA_WORK_ROOT is defaulted because losing it is by design: a Session's

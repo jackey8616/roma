@@ -141,6 +141,15 @@ That command is installed on **every** image, including the ones whose deploymen
 Cloud Reach, where it exits non-zero saying so. Omitting it would be `command not found`,
 which a model reads as a broken `PATH` and spends a Turn investigating.
 
+`roma-document-token` is the same three lines for the same reason, one product along: a
+Document Token on stdout, `--json` for its expiry and the account, installed on every image
+and answering that there is no Document Reach where a deployment has none. There is no Drive
+CLI either, and this one stands in front of nothing — the long way round is the agent writing
+Google's own API call, and keeping that open is deliberate. roma holding the credential and
+offering a whitelist of verbs was the stronger boundary and was dropped: every verb roma did
+not think of would have been an image change with nothing behind it, and the destruction it
+would have prevented is refused by the Drive role anyway (ADR-0022 §4).
+
 The image is `node:22-slim`, `linux/amd64`, non-root, with `git`, `gh`, `curl`,
 `ca-certificates` and `tini` and nothing else. roma's agent runs arbitrary shell commands, so that list is a
 decision rather than an accident — and `tini` is there because roma spawns `claude`
@@ -287,3 +296,17 @@ Two things have no seam and cannot have one until roma runs against a real Works
 Google's auth library resolving a credential, and the fields a real Chat interaction event
 actually carries. Both live behind a port — `SendChatRequest` and `PubSubSubscription` —
 so what is untested is the edge rather than anything that decides something.
+
+**A third has no seam and is larger than either.** Nothing automated can establish that
+Google behaves as ADR-0022 says it does — that a Contributor on a shared drive cannot trash
+or move, that one per-file scope covers both the Docs and the Sheets API on files the app
+created, that a folder's capabilities come back the way the boot proof expects. Every one of
+those is read out of Google's documentation, and the whole of "the agent cannot destroy
+anything" rests on the first. **The Document Reach shipped with that verification still
+undone**: the tests under `src/documents/` are written from the documentation and each says
+so at the top, which is the footing `src/cloud/google-cloud-minter.test.ts` has stood on
+since ADR-0015. What they establish is roma's half — one scope constant reaching the
+assertion, the boot proof asking the question it claims to ask, three different answers
+producing three different sentences. What they cannot establish is that Google answers any
+of it that way. ADR-0015 was in this position and was reversed twice by measurement inside
+one session; read ADR-0022's Verification status before trusting any table in it.

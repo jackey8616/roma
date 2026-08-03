@@ -8,7 +8,7 @@ import type { CredentialEnvs } from './session-pool.js'
 import type { ChannelAdapter } from './channel-adapter.js'
 import type { SpawnClaudeProcess } from './claude-process.js'
 import type { RetryBudget } from './config.js'
-import { CloudReachUse } from './cloud-reach-use.js'
+import { ReachUse } from './reach-use.js'
 import { Core, type CoreLogRecord } from './core.js'
 import { FreshTokens } from './fresh-tokens.js'
 import { eachReach, type Reach, type Reaches } from './reach.js'
@@ -171,7 +171,8 @@ export interface StartRomaOptions {
    *
    * A deployment with no cloud key has a Cloud Reach all the same — the
    * unavailable one, which announces nothing and answers the Cloud Shortcut that
-   * there is none (ADR-0015 §9).
+   * there is none (ADR-0015 §9). The same is true of the Document Reach, and for
+   * most deployments both of them are that arm (ADR-0022 §8).
    */
   readonly reaches: Reaches
   /** roma's own directory, and the gitconfig every Session runs under. */
@@ -348,10 +349,14 @@ export async function startRoma({
     maxConcurrentTasks === undefined ? {} : { maxConcurrent: maxConcurrentTasks },
   )
   // Between the socket and the Audit Record, and built here because this is the
-  // only place that can see both ends. Made whether or not there is a Cloud
-  // Reach: without one nothing ever puts a Task in it, so every record says no,
-  // which is true.
-  const cloudUse = new CloudReachUse()
+  // only place that can see both ends. One per Reach whose Audit Record field is
+  // a yes or a no, which is two of the three — the forge's answer is a list of
+  // repositories and is a separate ticket.
+  //
+  // Made whether or not the deployment has either Reach: without one nothing ever
+  // puts a Task in it, so every record says no, which is true.
+  const cloudUse = new ReachUse()
+  const documentUse = new ReachUse()
   const shimServer = await ShimServer.listen({
     socketPath,
     // One `FreshTokens` per Reach, never one shared: they hold different
@@ -364,6 +369,7 @@ export async function startRoma({
     // be asked of it (ADR-0020 §6).
     onCredential: (taskId, credential) => {
       if (credential === 'cloud') cloudUse.minted(taskId)
+      if (credential === 'documents') documentUse.minted(taskId)
     },
     // Attribution is by Session, resolved to a Task through the queue — which
     // serialises the Tasks of a Session already, so the answer is unambiguous.
@@ -442,6 +448,7 @@ export async function startRoma({
       audit,
       credential: credential.kind,
       usedCloudReach: (taskId) => cloudUse.takeUsedBy(taskId),
+      usedDocumentReach: (taskId) => documentUse.takeUsedBy(taskId),
       ...(overflow === undefined ? {} : { overflow: { monthlyCapUsd: overflow.monthlyCapUsd } }),
       ...(log === undefined ? {} : { log }),
     }),
@@ -498,5 +505,9 @@ function servedReaches(
     }
   }
 
-  return { code: served(reaches.code), cloud: served(reaches.cloud) }
+  return {
+    code: served(reaches.code),
+    cloud: served(reaches.cloud),
+    documents: served(reaches.documents),
+  }
 }

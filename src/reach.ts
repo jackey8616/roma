@@ -138,15 +138,22 @@ export type Reach<C extends CredentialWanted = CredentialWanted> =
  *
  * `code` is an `AvailableReach` because required means required: there is no
  * development mode that skips the forge credential, and now no way to spell one.
- * `cloud` is the full union because ADR-0015 §9 makes its unavailable arm the
- * ordinary case.
+ * `cloud` and `documents` are the full union because ADR-0015 §9 and ADR-0022 §8
+ * make their unavailable arm the ordinary case — most deployments have neither.
  */
 export interface Reaches {
   readonly code: AvailableReach<'code'>
   readonly cloud: Reach<'cloud'>
+  readonly documents: Reach<'documents'>
 }
 
-/** Every Reach, in the order they are proved and announced. */
+/**
+ * Every Reach, in the order they are proved and announced.
+ *
+ * The order is `code` first, and it is load-bearing rather than alphabetical: a
+ * deployment broken in several ways is told about the free check first, and a
+ * boot with a bad App key makes no network call to Google at all (ADR-0020 §4).
+ */
 export function eachReach(reaches: Reaches): readonly Reach[] {
-  return [reaches.code, reaches.cloud]
+  return [reaches.code, reaches.cloud, reaches.documents]
 }

@@ -133,6 +133,25 @@ describe('the image carries a Cloud Shortcut and no cloud CLI', () => {
   })
 })
 
+/**
+ * ADR-0022's one claim about the image: it gains a program, and that is the
+ * whole of the packaging cost — the third userland entry ADR-0020 §8 priced.
+ *
+ * A deployment running roma from source has no Document Shortcut at all, which
+ * is the asymmetry `ROMA_GH_BIN` already carries and is why this is a claim
+ * about the Dockerfile rather than about roma.
+ */
+describe('the image carries a Document Shortcut', () => {
+  // On every image, for the Cloud Shortcut's reason exactly: a deployment with
+  // no Document Reach gets the command and one sentence saying there is none,
+  // rather than a `command not found` an agent investigates.
+  it('puts the Shortcut on PATH, under a name of roma’s own', () => {
+    expect(dockerfile()).toMatch(
+      /document-token\.js[^\n]*> \/usr\/local\/bin\/roma-document-token/,
+    )
+  })
+})
+
 describe('the image defaults the one path whose loss is by design', () => {
   it('names a work root, the one a weekly reclaim deletes on purpose', () => {
     expect(dockerfile()).toMatch(/^\s*ROMA_WORK_ROOT=\S+/m)

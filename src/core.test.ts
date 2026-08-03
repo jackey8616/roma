@@ -2113,6 +2113,11 @@ describe('the record every Task leaves behind', () => {
         // (ADR-0015 §10). No, here: this Core was built with nothing to ask,
         // which is what a deployment with no Cloud Reach looks like.
         cloudReach: false,
+        // And the same question about the Document Reach, for the same reasons
+        // and one sharper: everything in a Depot is done as one service account,
+        // so this is the only half of "who put this here" that exists at all
+        // (ADR-0022 §9). No, here, for the reason above it.
+        documentReach: false,
         apiKeySource: 'none',
       },
     ])

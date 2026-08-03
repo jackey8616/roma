@@ -211,31 +211,48 @@ describe('the Core, its Channel and its Minter, read as one configuration', () =
     return thing === undefined ? null : { thing }
   }
 
-  it('hands back all four parts', () => {
-    const { roma, channelEnv, minterEnv, cloudEnv } = readConfiguration(
-      { ...MINIMAL, CHANNEL_THING: 'yes', MINTER_THING: 'also yes', CLOUD_THING: 'and yes' },
+  const readDocument = (env: Parameters<typeof readRomaEnv>[0]) => {
+    const thing = env['DOCUMENT_THING']
+    if (thing === 'broken') throw new ConfigurationMissing(['DOCUMENT_THING is nonsense.'])
+    // Most deployments have no Document Reach either.
+    return thing === undefined ? null : { thing }
+  }
+
+  it('hands back all five parts', () => {
+    const { roma, channelEnv, minterEnv, cloudEnv, documentEnv } = readConfiguration(
+      {
+        ...MINIMAL,
+        CHANNEL_THING: 'yes',
+        MINTER_THING: 'also yes',
+        CLOUD_THING: 'and yes',
+        DOCUMENT_THING: 'yes again',
+      },
       readChannel,
       readMinter,
       readCloud,
+      readDocument,
     )
 
     expect(roma.workRoot).toBe('/srv/roma/sessions')
     expect(channelEnv).toEqual({ thing: 'yes' })
     expect(minterEnv).toEqual({ thing: 'also yes' })
     expect(cloudEnv).toEqual({ thing: 'and yes' })
+    expect(documentEnv).toEqual({ thing: 'yes again' })
   })
 
-  // The one part that may legitimately find nothing. A deployment with no Cloud
-  // Reach is not half-configured, so this is not the Overflow shape.
-  it('starts perfectly well with nothing to say about the cloud', () => {
-    const { cloudEnv } = readConfiguration(
+  // The two parts that may legitimately find nothing. A deployment with neither
+  // optional Reach is not half-configured, so this is not the Overflow shape.
+  it('starts perfectly well with nothing to say about the cloud or the documents', () => {
+    const { cloudEnv, documentEnv } = readConfiguration(
       { ...MINIMAL, CHANNEL_THING: 'yes', MINTER_THING: 'also yes' },
       readChannel,
       readMinter,
       readCloud,
+      readDocument,
     )
 
     expect(cloudEnv).toBeNull()
+    expect(documentEnv).toBeNull()
   })
 
   // Somebody standing roma up sets all of it in one go. Told about the Channel's
@@ -243,7 +260,13 @@ describe('the Core, its Channel and its Minter, read as one configuration', () =
   // things they could have been told at once.
   it('refuses once, with what is wrong with any of them', () => {
     try {
-      readConfiguration({ CLOUD_THING: 'broken' }, readChannel, readMinter, readCloud)
+      readConfiguration(
+        { CLOUD_THING: 'broken', DOCUMENT_THING: 'broken' },
+        readChannel,
+        readMinter,
+        readCloud,
+        readDocument,
+      )
       expect.unreachable('should have refused')
     } catch (error) {
       expect((error as ConfigurationMissing).problems).toEqual([
@@ -255,6 +278,7 @@ describe('the Core, its Channel and its Minter, read as one configuration', () =
         'CHANNEL_THING is not set.',
         'MINTER_THING is not set.',
         'CLOUD_THING is nonsense.',
+        'DOCUMENT_THING is nonsense.',
       ])
     }
   })
@@ -271,6 +295,7 @@ describe('the Core, its Channel and its Minter, read as one configuration', () =
         },
         readMinter,
         readCloud,
+        readDocument,
       ),
     ).toThrow(TypeError)
   })

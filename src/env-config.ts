@@ -63,32 +63,35 @@ export class ConfigurationMissing extends Error {
 export type Environment = Readonly<Record<string, string | undefined>>
 
 /**
- * Read the Core's settings, a Channel's, the Minter's and the Cloud Reach's, and
- * refuse once with what is wrong with any of them.
+ * Read the Core's settings, a Channel's, the Minter's, the Cloud Reach's and the
+ * Document Reach's, and refuse once with what is wrong with any of them.
  *
- * One refusal rather than four, because they are one configuration: somebody
+ * One refusal rather than five, because they are one configuration: somebody
  * standing roma up sets all of it in one go, and being told about the missing
  * subscription only after fixing the missing audit root turns that into a
  * sequence of boots. Every other reader is passed in rather than named, and for
  * the same reason in each case — which Channel roma has, which forge it mints
- * against, and which cloud it reaches are not things the Core is allowed to
- * know.
+ * against, which cloud it reaches and whose documents it writes are not things
+ * the Core is allowed to know.
  *
- * The cloud reader is the one that may legitimately find nothing: most
- * deployments have no Cloud Reach, and that is an answer rather than a problem.
- * It is a reader all the same, so that a *broken* one lands in this refusal
- * beside everything else.
+ * The last two are the readers that may legitimately find nothing: most
+ * deployments have neither Reach, and that is an answer rather than a problem.
+ * They are readers all the same, so that a *broken* one lands in this refusal
+ * beside everything else — which for the Document Reach includes a deployment
+ * that named a key and no Depot, or a Depot and no key (ADR-0022 §2).
  */
-export function readConfiguration<ChannelEnv, MinterConfig, CloudConfig>(
+export function readConfiguration<ChannelEnv, MinterConfig, CloudConfig, DocumentConfig>(
   env: Environment,
   readChannelEnv: (env: Environment) => ChannelEnv,
   readMinterEnv: (env: Environment) => MinterConfig,
   readCloudEnv: (env: Environment) => CloudConfig | null,
+  readDocumentEnv: (env: Environment) => DocumentConfig | null,
 ): {
   roma: RomaEnv
   channelEnv: ChannelEnv
   minterEnv: MinterConfig
   cloudEnv: CloudConfig | null
+  documentEnv: DocumentConfig | null
 } {
   const problems: string[] = []
   const roma = attempted(() => readRomaEnv(env), problems)
@@ -99,12 +102,14 @@ export function readConfiguration<ChannelEnv, MinterConfig, CloudConfig>(
   // Reach has nothing to report. Either way the refusal below is what decides
   // whether roma starts.
   const cloudEnv = attempted(() => readCloudEnv(env), problems)
+  const documentEnv = attempted(() => readDocumentEnv(env), problems)
   if (problems.length > 0) throw new ConfigurationMissing(problems)
   return {
     roma: certain(roma),
     channelEnv: certain(channelEnv),
     minterEnv: certain(minterEnv),
     cloudEnv,
+    documentEnv,
   }
 }
 

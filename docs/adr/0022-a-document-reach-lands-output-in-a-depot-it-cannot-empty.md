@@ -4,8 +4,9 @@ Date: 2026-08-03
 
 ## Status
 
-Accepted, and **not built**. This record is the design; nothing in `src/` implements it
-yet.
+Accepted, and implemented by the change that carries it — **with the verification below
+still undone**, which is a departure from what this record asked for and is recorded in
+the section that asked for it.
 
 **Fulfils ADR-0020 §8 rather than amending it.** That section priced a third Reach and
 said the friction was correct — "a member of [`CredentialWanted`] and a Shim or Shortcut
@@ -43,6 +44,33 @@ root to fill (`reach.ts`), the unavailable arm is structural (ADR-0020 §2), and
 **Implementation starts by finding out**, exactly as ADR-0011 said of its own unverified
 premise. The first thing to build is a throwaway that creates a Doc in a real shared drive
 as a Contributor and then tries to trash it.
+
+#### What was actually done, and what is therefore still owed
+
+**It was built before the finding out, and `docs/document-reach-verification.md` does not
+exist.** The measurement above needs a real service account, a real shared drive and a real
+Contributor grant, and none of the three was available to the change that built this. So the
+order this record asked for was inverted, deliberately and with the cost in view.
+
+What was done instead is what ADR-0015 already does for the Cloud Reach: **every Drive-facing
+fixture is written from Google's documentation, and every test file that carries one says so
+at the top** — `src/documents/google-document-minter.test.ts` names the five behaviours it
+takes on documentation's word, `announce.test.ts` says the role table it holds roma to
+stating is the thing most likely to be wrong, and `env-config.test.ts` says its key file is
+the same unverified shape. That is `src/cloud/google-cloud-minter.test.ts`'s existing
+practice, and it is the honest form of what those tests are: assertions about **roma's** half
+— that one scope constant reaches the assertion, that the boot proof asks the question it
+claims to ask, that three answers produce three sentences an operator can act on — sitting on
+top of an unmeasured account of Google's.
+
+What is still owed is the run, unchanged from the paragraph above it: create a Doc and a
+Sheet in the folder, read them back, try to trash one and record what Google says, try to
+move one out and record what Google says, set and query the Conversation tag, and fetch the
+folder's capabilities under a Contributor and under a Viewer. When it happens, the tests that
+were written from documentation should cite it — and the ones it contradicts should be
+changed, which is the outcome ADR-0015's history says to expect.
+
+One decision was made against §7 on the way, and it is in §7's own section rather than here.
 
 ## Context
 
@@ -292,6 +320,22 @@ on a create call; adding it later does not reach backwards.
 it tag anything. The worst case is an untagged file, which loses the affordance and breaks
 nothing — and that is the correct amount of enforcement for something whose value is
 forward-looking.
+
+**What was built tags the Session id, not the Conversation Key**, and this paragraph is the
+amendment rather than a note about one. The Conversation Key never reaches a Session: the
+Session Pool is keyed by Session id throughout, `BuildSessionEnv` takes one, and the only
+identifier in a Session's environment is `ROMA_SESSION_ID`. Putting the key there means
+threading it through `Core`, `SessionPool.send` and `#spawn` — a Core change, which the
+Consequences below say this feature does not make.
+
+Both of the things above survive the substitution, one of them intact. **Attribution
+backwards is untouched**: a Session id is a pure function of the Conversation Key and the
+Session Generation, so every id a Conversation has ever had is computable from the key with
+nothing asked of Drive, and #124 can still attribute an old file to the thread that produced
+it. **Finding a thread's own earlier output is narrowed**: `/clear` moves the Session id,
+so an agent looking for what this thread wrote finds this generation's files and not the
+ones before them. That is the loss, it is smaller than the one this section exists to
+prevent, and it is bought back by a Core change on the day somebody wants it.
 
 ### 8. One Depot for the whole deployment, and everything in it is everybody's
 
