@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { WorkRoot } from './work-root.js'
 import { sessionIdFor } from './session-id.js'
 import { ChosenEfforts, ChosenModels, SessionGenerations } from './session-generation.js'
 
@@ -9,9 +10,17 @@ const KEY = 'conversation-one'
 const OTHER_KEY = 'conversation-two'
 
 let workRoot: string
+// The path as well as the Work Root, because the tests that assert on what
+// landed on disk build the path themselves rather than asking the Work Root
+// where it put things — a test that located a record the way the code does
+// would agree with it by construction. Where the file-not-directory rule is
+// asserted is `work-root.test.ts`; what is checked here is what these three
+// classes do with a record once it is found.
+let work: WorkRoot
 
 beforeEach(() => {
   workRoot = mkdtempSync(join(tmpdir(), 'roma-generations-'))
+  work = new WorkRoot(workRoot)
 })
 
 afterEach(() => {
@@ -19,7 +28,7 @@ afterEach(() => {
 })
 
 function generations(): SessionGenerations {
-  return new SessionGenerations({ workRoot })
+  return new SessionGenerations({ workRoot: work })
 }
 
 /** The model roma runs on where nobody has chosen anything. */
@@ -27,14 +36,14 @@ const PINNED = 'claude-sonnet-5'
 const SESSION = sessionIdFor(KEY)
 
 function models(): ChosenModels {
-  return new ChosenModels({ workRoot, pinnedModel: PINNED })
+  return new ChosenModels({ workRoot: work, pinnedModel: PINNED })
 }
 
 /** The effort roma runs at where nobody has chosen anything. */
 const PINNED_AT = 'high'
 
 function efforts(pinnedEffort = PINNED_AT): ChosenEfforts {
-  return new ChosenEfforts({ workRoot, pinnedEffort })
+  return new ChosenEfforts({ workRoot: work, pinnedEffort })
 }
 
 describe('the Session a Conversation is on', () => {

@@ -177,3 +177,117 @@ describe('reclaiming what nothing has used', () => {
     expect(work.reclaimIdle(new Set())).toEqual([])
   })
 })
+
+describe('where a record goes', () => {
+  it('names each record beside the working directories, not inside one', () => {
+    const { root, work } = newRoot()
+
+    expect(work.generationRecord(A)).toBe(join(root, `${A}.generation`))
+    expect(work.modelRecord(A)).toBe(join(root, `${A}.model`))
+    expect(work.effortRecord(A)).toBe(join(root, `${A}.effort`))
+  })
+
+  // The rule the sweep enforces, read from the other end: a record is a sibling
+  // of the directory it describes and never a child of it, so deleting the
+  // directory cannot take it.
+  it('puts no record inside the Session directory it describes', () => {
+    const { work } = newRoot()
+
+    for (const path of [work.generationRecord(A), work.modelRecord(A), work.effortRecord(A)]) {
+      expect(path.startsWith(`${work.sessionDir(A)}/`)).toBe(false)
+    }
+  })
+})
+
+describe('reading a record', () => {
+  it('answers null where there is none, which is almost every Session', () => {
+    const { work } = newRoot()
+
+    expect(work.readRecord(work.modelRecord(A))).toBeNull()
+  })
+
+  it('trims what it read, so no caller has to remember to', () => {
+    const { work } = newRoot()
+    work.writeRecord(work.modelRecord(A), 'claude-sonnet-5\n')
+
+    expect(work.readRecord(work.modelRecord(A))).toBe('claude-sonnet-5')
+  })
+
+  /**
+   * The distinction the whole fallback rule rests on.
+   *
+   * A record that may exist and cannot be read is not the same as one nobody
+   * wrote. Answering "none" to both is how a Chosen Model disappears with nobody
+   * told — the Conversation quietly returns to the Pinned Model, and the only
+   * evidence is a bill.
+   */
+  it('throws where a record exists and cannot be read', () => {
+    const { work } = newRoot()
+    mkdirSync(work.modelRecord(A), { recursive: true })
+
+    expect(() => work.readRecord(work.modelRecord(A))).toThrow()
+  })
+})
+
+describe('writing a record', () => {
+  it('makes the root a deployment has not mounted yet', () => {
+    const { root, work } = newRoot()
+    rmSync(root, { recursive: true, force: true })
+
+    work.writeRecord(work.generationRecord(A), '1')
+
+    expect(work.readRecord(work.generationRecord(A))).toBe('1')
+  })
+
+  // A rename within one directory is atomic, so a reader sees the old record or
+  // the new one and never a part of either.
+  it('leaves nothing half-written behind it', () => {
+    const { root, work } = newRoot()
+
+    work.writeRecord(work.modelRecord(A), 'claude-sonnet-5')
+
+    expect(readdirSync(root)).toEqual([`${A}.model`])
+  })
+
+  it('replaces a record rather than appending to it', () => {
+    const { work } = newRoot()
+    work.writeRecord(work.effortRecord(A), 'high')
+
+    work.writeRecord(work.effortRecord(A), 'low')
+
+    expect(work.readRecord(work.effortRecord(A))).toBe('low')
+  })
+})
+
+describe('forgetting a record', () => {
+  it('removes one', () => {
+    const { work } = newRoot()
+    work.writeRecord(work.modelRecord(A), 'claude-sonnet-5')
+
+    work.forgetRecord(work.modelRecord(A))
+
+    expect(work.readRecord(work.modelRecord(A))).toBeNull()
+  })
+
+  // `/model default` on a Session nobody ever moved. There is nothing to delete
+  // and that is exactly the state being asked for.
+  it('says nothing where there was no record', () => {
+    const { work } = newRoot()
+
+    expect(() => work.forgetRecord(work.modelRecord(A))).not.toThrow()
+  })
+
+  /**
+   * Deliberately not recursive.
+   *
+   * A directory where a record should be is something roma did not put there and
+   * cannot read. Removing it quietly would have the Command answer that it moved
+   * a Session it did not.
+   */
+  it('refuses to remove a directory standing where a record should be', () => {
+    const { work } = newRoot()
+    mkdirSync(work.modelRecord(A), { recursive: true })
+
+    expect(() => work.forgetRecord(work.modelRecord(A))).toThrow()
+  })
+})

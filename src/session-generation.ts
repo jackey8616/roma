@@ -1,52 +1,24 @@
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { EFFORT_MENU } from './effort-menu.js'
 import { MENU } from './model-menu.js'
 import { sessionIdFor } from './session-id.js'
+import type { WorkRoot } from './work-root.js'
 
 /**
  * The three things roma remembers about a Conversation, in one place.
  *
  * Which Session it is on, since ADR-0014 which model that Session runs on, and
  * since ADR-0016 what effort it runs at. They are here together because they are
- * the same trick and share the same three rules: a record in the work root, a
+ * the same trick and share the same three rules: a record in the Work Root, a
  * file rather than a directory, and a missing one meaning "almost every
  * Conversation" rather than "something is wrong". Everything else roma knows is
  * derived or is Claude Code's.
- */
-
-/**
- * What a record of a Conversation's generation is called, next to the working
- * directories of the Sessions it names.
  *
- * A file rather than a directory, deliberately: `reclaimIdleWorkDirs` walks
- * `workRoot` deleting directories nothing has used for seven days and steps over
- * everything else. A directory here would eventually be reclaimed, and reclaiming
- * this is not the same as reclaiming a working directory — it would send the
- * Conversation back to a Session it was moved off, with the context `/clear` was
- * used to drop.
+ * The first two of those rules are the Work Root's and are argued there — where
+ * the record is named, and why the sweep that walks that tree steps over it.
+ * What is left here is the third, which is the only one that differs between the
+ * three: a missing generation is zero, and a missing model or effort is the
+ * pinned one.
  */
-const SUFFIX = '.generation'
-
-/**
- * What a record of a Session's Chosen Model is called, beside the generations.
- *
- * A file for the same reason, and the stakes are the same shape: reclaimed, a
- * Conversation that went quiet for seven days would come back on the Pinned Model
- * having asked for something else, at a moment nobody can observe.
- */
-const MODEL_SUFFIX = '.model'
-
-/**
- * What a record of a Session's Chosen Effort is called, beside the models.
- *
- * A file for the same reason and at the same stakes: reclaimed, a Conversation
- * that went quiet for seven days would come back at the Pinned Effort having
- * asked for something else, at a moment nobody can observe — and unlike the
- * model, nothing in the stream would say so afterwards, because `system/init`
- * carries no effort field at all (ADR-0016).
- */
-const EFFORT_SUFFIX = '.effort'
 
 /** A generation as it is written down: a whole count and nothing else. */
 const COUNT = /^\d+$/
@@ -56,7 +28,7 @@ const COUNT = /^\d+$/
  *
  * A membership test rather than a pattern, and for one reason now rather than
  * two. It used to also stand in for a torn line — what a machine that lost power
- * mid-write leaves — and `writeRecord` has since made that state unreachable
+ * mid-write leaves — and `WorkRoot.writeRecord` has since made that state unreachable
  * rather than detected. What is left is the reason this could never have been a
  * pattern anyway: a name roma has *stopped* offering. Removing a Menu entry
  * should be a change somebody notices, and a record quietly passed through to
@@ -78,55 +50,16 @@ const OFFERED = new Set(Object.values(MENU))
  */
 const OFFERED_EFFORTS = new Set(EFFORT_MENU)
 
-/**
- * Whether a read failed because there is nothing there, rather than because
- * something is there and could not be read.
- *
- * The distinction is the whole of the fallback rule: no record means a
- * Conversation that has never used `/clear`, which is almost all of them. Every
- * other failure describes a record that may exist.
- */
-function isMissing(error: unknown): boolean {
-  return error instanceof Error && 'code' in error && error.code === 'ENOENT'
-}
-
-/**
- * Write one record so that nothing can ever read half of it.
- *
- * Both readers here refuse a record they cannot make sense of rather than
- * guessing at one — a generation that is not a count, a model that is not on the
- * Menu — and both are right to. That is not the same as the state being
- * unreachable: a `writeFileSync` onto the live name leaves a third thing a
- * reader can observe besides the old contents and the new, and a machine that
- * loses power mid-write is what produces it. What the Conversation gets is a
- * thread that stops working for a write nobody got wrong.
- *
- * A rename within one directory is atomic, so a reader sees the old record or
- * the new one and never a part of either. The temporary name is in that same
- * directory for exactly that reason: across filesystems a rename is a copy, and
- * a copy is the thing being avoided.
- *
- * What it can leave behind is a `.pending` file, where the power went between
- * the write and the rename. It is bounded — one per record, overwritten by the
- * next attempt — and it is not a record: nothing reads that name, and the
- * reclaim sweep steps over files as it does over the records themselves. Litter
- * of the same kind ADR-0014 already accepts, in exchange for a state no reader
- * has to be defended against.
- */
-function writeRecord(path: string, contents: string): void {
-  const pending = `${path}.pending`
-  writeFileSync(pending, contents, 'utf8')
-  renameSync(pending, path)
-}
-
 export interface SessionGenerationsOptions {
   /**
-   * The directory the Session Pool gives Sessions their working directories in.
+   * The Work Root the Session Pool gives Sessions their working directories in.
    *
-   * The same one, so that everything a Conversation has on disk is in one place
-   * and a deployment has one path to mount.
+   * The same one the pool has, so that everything a Conversation leaves on disk
+   * is in one place and a deployment has one path to mount. The Work Root itself
+   * rather than its path, because where a record goes and what a sweep may
+   * delete are one fact and it is kept there.
    */
-  readonly workRoot: string
+  readonly workRoot: WorkRoot
 }
 
 /**
@@ -152,7 +85,7 @@ export interface SessionGenerationsOptions {
  * to find anybody's Session.
  */
 export class SessionGenerations {
-  readonly #workRoot: string
+  readonly #workRoot: WorkRoot
 
   constructor({ workRoot }: SessionGenerationsOptions) {
     this.#workRoot = workRoot
@@ -177,8 +110,7 @@ export class SessionGenerations {
     // The Session id is derived first, so a Conversation Key this cannot name a
     // Session for is refused before anything is written down.
     const sessionId = sessionIdFor(conversationKey, generation)
-    mkdirSync(this.#workRoot, { recursive: true })
-    writeRecord(this.#recordFor(conversationKey), String(generation))
+    this.#workRoot.writeRecord(this.#recordFor(conversationKey), String(generation))
     return sessionId
   }
 
@@ -195,18 +127,14 @@ export class SessionGenerations {
    * Conversation asked to be rid of.
    */
   #generationOf(conversationKey: string): number {
-    let record: string
-    try {
-      record = readFileSync(this.#recordFor(conversationKey), 'utf8')
-    } catch (error) {
-      // Only "there is no record". Every other way a read fails — a permission,
-      // an I/O error, a directory where the file should be — describes a record
-      // that may well exist and cannot be read, and answering zero to those is
-      // handing back the context `/clear` was used to drop.
-      if (isMissing(error)) return 0
-      throw error
-    }
-    const written = record.trim()
+    const written = this.#workRoot.readRecord(this.#recordFor(conversationKey))
+    // No record is generation zero, and only no record. Every other way a read
+    // can fail — a permission, an I/O error, a directory where the file should
+    // be — describes a record that may well exist and cannot be read, and
+    // answering zero to those is handing back the context `/clear` was used to
+    // drop. `readRecord` is what keeps those two apart: it answers null for the
+    // first and throws for the rest.
+    if (written === null) return 0
     if (!COUNT.test(written)) {
       throw new Error(`Session generation for this Conversation is unreadable: ${written}`)
     }
@@ -214,18 +142,17 @@ export class SessionGenerations {
   }
 
   /**
-   * Where a Conversation's generation is written, named by the Session it
-   * started on.
+   * Which Session's name a Conversation's generation record is filed under.
    *
-   * The first generation's id rather than the current one, because this has to
-   * be findable knowing only the Conversation Key — the current generation is
-   * the thing being looked for. The Conversation Key itself is never written
-   * anywhere: it can carry anything a Channel puts in it, and a file named after
-   * one would leak a room name onto disk and break on the first key with a slash
-   * in it.
+   * The first generation's id rather than the current one, because the record
+   * has to be findable knowing only the Conversation Key — the current
+   * generation is the thing being looked for. Deciding that is this class's
+   * business, which is why the Work Root is handed an id rather than a key;
+   * where the file then goes, and why nothing derived from a Conversation Key
+   * may reach a filename, is argued at `WorkRoot.generationRecord`.
    */
   #recordFor(conversationKey: string): string {
-    return join(this.#workRoot, `${sessionIdFor(conversationKey)}${SUFFIX}`)
+    return this.#workRoot.generationRecord(sessionIdFor(conversationKey))
   }
 }
 
@@ -250,8 +177,8 @@ export class ChosenModelNotOffered extends Error {
 }
 
 export interface ChosenModelsOptions {
-  /** The same directory the generations are kept in, for the same reasons. */
-  readonly workRoot: string
+  /** The same Work Root the generations are kept in, for the same reasons. */
+  readonly workRoot: WorkRoot
   /**
    * What a Session runs on when nobody has said otherwise — whatever `ROMA_MODEL`
    * resolved to for this deployment.
@@ -291,7 +218,7 @@ export interface ChosenModelsOptions {
  * disqualifying on its own.
  */
 export class ChosenModels {
-  readonly #workRoot: string
+  readonly #workRoot: WorkRoot
   readonly #pinnedModel: string
 
   constructor({ workRoot, pinnedModel }: ChosenModelsOptions) {
@@ -332,18 +259,12 @@ export class ChosenModels {
    * on whatever the deployment picks next.
    */
   chosenFor(sessionId: string): string | null {
-    let record: string
-    try {
-      record = readFileSync(this.#recordFor(sessionId), 'utf8')
-    } catch (error) {
-      // Only "there is no record" — which is almost every Session. Every other
-      // way a read fails describes a record that may well exist and cannot be
-      // read, and answering the Pinned Model to those is a Chosen Model
-      // disappearing silently.
-      if (isMissing(error)) return null
-      throw error
-    }
-    const written = record.trim()
+    // Null is "there is no record", which is almost every Session, and only
+    // that: `readRecord` throws for every other way a read can fail. So the
+    // Pinned Model `modelFor` falls back to can never be a Chosen Model that
+    // existed and could not be read.
+    const written = this.#workRoot.readRecord(this.#recordFor(sessionId))
+    if (written === null) return null
     if (!OFFERED.has(written)) throw new ChosenModelNotOffered(written)
     return written
   }
@@ -356,8 +277,7 @@ export class ChosenModels {
    * maintains the invariant that a Turn runs on the model its Session is on.
    */
   choose(sessionId: string, model: string): void {
-    mkdirSync(this.#workRoot, { recursive: true })
-    writeRecord(this.#recordFor(sessionId), model)
+    this.#workRoot.writeRecord(this.#recordFor(sessionId), model)
   }
 
   /**
@@ -372,23 +292,12 @@ export class ChosenModels {
    * and the reset Command leave a Conversation in exactly one place.
    */
   usePinnedModel(sessionId: string): void {
-    // `force` for the Session nobody ever moved, where there is nothing to
-    // delete and that is the state being asked for. Deliberately not
-    // `recursive`: a directory where the record should be is something roma did
-    // not put there and cannot read, so this throws rather than quietly removing
-    // it — and the Command answers that it failed instead of saying it moved a
-    // Session it did not.
-    rmSync(this.#recordFor(sessionId), { force: true })
+    this.#workRoot.forgetRecord(this.#recordFor(sessionId))
   }
 
-  /**
-   * Where a Session's Chosen Model is written, named after the Session itself.
-   *
-   * Beside the generation records, so everything roma remembers about a
-   * Conversation is in one directory a deployment has to mount.
-   */
+  /** Named after the Session itself; the Work Root is where that lands. */
   #recordFor(sessionId: string): string {
-    return join(this.#workRoot, `${sessionId}${MODEL_SUFFIX}`)
+    return this.#workRoot.modelRecord(sessionId)
   }
 }
 
@@ -412,8 +321,8 @@ export class ChosenEffortNotOffered extends Error {
 }
 
 export interface ChosenEffortsOptions {
-  /** The same directory the generations and the models are kept in. */
-  readonly workRoot: string
+  /** The same Work Root the generations and the models are kept in. */
+  readonly workRoot: WorkRoot
   /**
    * What a Session runs at when nobody has said otherwise — whatever
    * `ROMA_EFFORT` resolved to for this deployment.
@@ -450,7 +359,7 @@ export interface ChosenEffortsOptions {
  * same litter, at tens of bytes per reset forever, accepted for the same reason.
  */
 export class ChosenEfforts {
-  readonly #workRoot: string
+  readonly #workRoot: WorkRoot
   readonly #pinnedEffort: string
 
   constructor({ workRoot, pinnedEffort }: ChosenEffortsOptions) {
@@ -484,14 +393,8 @@ export class ChosenEfforts {
    * two the moment an operator moves `ROMA_EFFORT`.
    */
   chosenFor(sessionId: string): string | null {
-    let record: string
-    try {
-      record = readFileSync(this.#recordFor(sessionId), 'utf8')
-    } catch (error) {
-      if (isMissing(error)) return null
-      throw error
-    }
-    const written = record.trim()
+    const written = this.#workRoot.readRecord(this.#recordFor(sessionId))
+    if (written === null) return null
     if (!OFFERED_EFFORTS.has(written)) throw new ChosenEffortNotOffered(written)
     return written
   }
@@ -505,8 +408,7 @@ export class ChosenEfforts {
    * down and answered with a sentence rather than turned away.
    */
   choose(sessionId: string, effort: string): void {
-    mkdirSync(this.#workRoot, { recursive: true })
-    writeRecord(this.#recordFor(sessionId), effort)
+    this.#workRoot.writeRecord(this.#recordFor(sessionId), effort)
   }
 
   /**
@@ -518,11 +420,11 @@ export class ChosenEfforts {
    * stranded at the effort roma used to run at.
    */
   usePinnedEffort(sessionId: string): void {
-    rmSync(this.#recordFor(sessionId), { force: true })
+    this.#workRoot.forgetRecord(this.#recordFor(sessionId))
   }
 
-  /** Where a Session's Chosen Effort is written, beside its Chosen Model. */
+  /** Named after the Session itself, beside its Chosen Model. */
   #recordFor(sessionId: string): string {
-    return join(this.#workRoot, `${sessionId}${EFFORT_SUFFIX}`)
+    return this.#workRoot.effortRecord(sessionId)
   }
 }

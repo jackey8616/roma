@@ -402,12 +402,12 @@ export async function startRoma({
   // instance to both is how that is made true rather than hoped for. What must
   // not happen is the pool being built without it: roma would answer `/model`
   // perfectly, write a perfect record, and run every Turn on the Pinned Model.
-  const models = new ChosenModels({ workRoot, pinnedModel })
+  const models = new ChosenModels({ workRoot: work, pinnedModel })
   // Beside them, and handed to both for the same reason and at higher stakes: a
   // pool built without this answers `/effort` perfectly, writes a perfect record,
   // and runs every Turn at the Pinned Effort — with nothing anywhere in the
   // stream to contradict it, because `system/init` carries no effort field.
-  const efforts = new ChosenEfforts({ workRoot, pinnedEffort })
+  const efforts = new ChosenEfforts({ workRoot: work, pinnedEffort })
 
   const pool = new SessionPool({
     workRoot: work,
@@ -434,7 +434,7 @@ export async function startRoma({
     ...(spawn === undefined ? {} : { spawn }),
     ...(log === undefined ? {} : { log }),
   })
-  const sessions = new SessionGenerations({ workRoot })
+  const sessions = new SessionGenerations({ workRoot: work })
   const audit = new AuditLog({ auditRoot })
 
   return {
