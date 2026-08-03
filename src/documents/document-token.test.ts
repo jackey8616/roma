@@ -27,6 +27,13 @@ import { FakeDocumentMinter, fakeServedReaches } from '../../test/support/fake-m
  * so unlike its neighbours this file makes no claim about Google at all. What it
  * asserts is the contract between roma and a shell, which is entirely roma's and
  * is the one thing in this directory that could have been measured and was.
+ *
+ * The program's body is `src/shortcut.ts`, shared with the Cloud Shortcut, and
+ * `src/cloud/cloud-token.test.ts` asserts the same list against the other
+ * command. That is deliberate rather than the duplication the sharing removed:
+ * these are two binaries in the image, and what a shell observes of one is not
+ * evidence about the other — the credential each asks for is the whole point,
+ * and it is the one thing a shared body could get wrong for exactly one of them.
  */
 
 const SHORTCUT = fileURLToPath(new URL('./document-token.ts', import.meta.url))

@@ -21,6 +21,9 @@ import { DepotUnreachable, DocumentRefused, GoogleDocumentMinter } from './googl
  * *says* it answers with:
  *
  * - the JWT-bearer exchange, its form encoding and its `expires_in`;
+ * - `drive.file` covering the Docs API and the Sheets API for files the app
+ *   created, which is what makes "the team wants both formats" cost no extra
+ *   scope — and the claim a real run would be most worth making first;
  * - `files.get` answering `id`, `name` and `capabilities` under `fields`, and
  *   needing `supportsAllDrives` to see a shared drive at all;
  * - `capabilities.canAddChildren` being the answer to "may this identity put

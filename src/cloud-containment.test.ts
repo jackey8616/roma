@@ -61,8 +61,12 @@ const GOOGLE_SPECIFIC = [
  */
 const CLOUD_SPECIFIC = [/\bcloud-platform\b/, /\bgcloud\b/]
 
-/** The other directory bound by a rule of its own — `src/document-containment.test.ts`. */
-const DOCUMENTS = ['documents']
+/**
+ * The other directory a containment rule already binds —
+ * `src/document-containment.test.ts`. Named for what it is to *this* rule rather
+ * than for what is in it: an exemption from the list above, and from nothing else.
+ */
+const BOUND_BY_ANOTHER_RULE = ['documents']
 
 /**
  * Every way roma could stop loading the key by the exact path it was given.
@@ -89,7 +93,7 @@ describe('everything that knows which cloud this is lives in one directory', () 
   // it holds the second service account key and the second JWT-bearer exchange,
   // and it is bound by a rule of its own.
   it('names Google nowhere a rule does not bind', () => {
-    const offenders = containment('cloud', DOCUMENTS).outside.filter(({ source }) =>
+    const offenders = containment('cloud', BOUND_BY_ANOTHER_RULE).outside.filter(({ source }) =>
       GOOGLE_SPECIFIC.some((pattern) => pattern.test(code(source))),
     )
 

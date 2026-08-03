@@ -70,6 +70,23 @@ folder's capabilities under a Contributor and under a Viewer. When it happens, t
 were written from documentation should cite it — and the ones it contradicts should be
 changed, which is the outcome ADR-0015's history says to expect.
 
+Two smaller departures, recorded here so the list is the whole list:
+
+**One enumerated boot-seam assertion is at the module seam instead.** The spec lists *"a
+deployment with one variable refuses, naming the other"* under the boot seam. It cannot be
+there: `startRoma` takes built `Reaches` and never an `Environment`, so the both-or-neither
+refusal fires in `readDocumentEnv` before a Reach exists at all. It is asserted in
+`src/documents/env-config.test.ts`, and `startup.test.ts` says where it went. Every other
+boot-seam bullet is where the spec put it.
+
+**Two of the three refusals share one sentence, because Drive shares one status.** §6 asks
+for three: a folder that is not there, one the account cannot see, and one it can see and
+cannot write. Drive answers `notFound` for the first two — a file this identity cannot see
+does not exist as far as the API is concerned — so the sentence names both fixes rather than
+guessing which one an operator needs, and the third case has its own. Read from
+documentation, unmeasured, and first on the list of things a real run could improve: if
+`files.get` turns out to distinguish them, this becomes three sentences.
+
 One decision was made against §7 on the way, and it is in §7's own section rather than here.
 
 ## Context
