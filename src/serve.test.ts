@@ -36,7 +36,7 @@ const KEY = 'conversation-one'
  * none of the compiler's output.
  */
 function said(text: string, conversationKey = KEY): IngressMessage {
-  return { conversationKey, caller: 'ada', callerName: 'Ada', text, enclosures: [] }
+  return { conversationKey, caller: 'ada', callerName: 'Ada', text, enclosures: [], quotation: null }
 }
 
 let running: Serving[] = []

@@ -359,6 +359,180 @@ describe('what somebody sent along with a message', () => {
   })
 })
 
+describe('the message a message quotes', () => {
+  /**
+   * A quoted message as Chat documents one on the Message resource.
+   *
+   * `quotedMessageSnapshot` is the whole of what roma reads, and the `name`
+   * beside it — the link back to the quoted message — is deliberately left in
+   * the fixture and never read: following it is what ADR-0021 refuses.
+   */
+  function quoting(
+    snapshot: Record<string, unknown> | null,
+    metadata: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return {
+      quotedMessageMetadata: {
+        name: `${SPACE}/messages/msg-0`,
+        lastUpdateTime: '2026-08-01T09:00:00Z',
+        ...(snapshot === null ? {} : { quotedMessageSnapshot: snapshot }),
+        ...metadata,
+      },
+    }
+  }
+
+  const SAID = { sender: 'users/99', text: 'the deploy failed at step 3' }
+
+  it('carries the snapshot’s words and its author', () => {
+    const { adapter } = newAdapter()
+
+    const message = adapter.toIngress(inSpace('why did this happen?', quoting(SAID)))
+
+    expect(message?.quotation).toEqual({
+      text: 'the deploy failed at step 3',
+      author: 'users/99',
+    })
+    expect(message?.text).toBe('why did this happen?')
+  })
+
+  // `quoteType` is not read at all, which is why it is asserted by its absence
+  // mattering nowhere: `REPLY` quotes inside a thread, `FORWARD` brings a message
+  // in from a space roma is not in, and Chat populates the two fields roma reads
+  // for both. Telling them apart would buy nothing roma acts on and would add a
+  // third guess about a payload nobody has seen (ADR-0021).
+  it('reads the same quotation however the message was quoted', () => {
+    const { adapter } = newAdapter()
+    const expected = { text: 'the deploy failed at step 3', author: 'users/99' }
+
+    for (const quoteType of ['REPLY', 'FORWARD', undefined]) {
+      const event = inSpace('why?', quoting(SAID, quoteType === undefined ? {} : { quoteType }))
+      expect(adapter.toIngress(event)?.quotation).toEqual(expected)
+    }
+  })
+
+  // A Channel is entitled to have no name for somebody. What roma must not do is
+  // invent one — an unattributed passage in front of the model is read as the
+  // Caller's own words, which is the misattribution the whole tag exists for.
+  it('says nobody wrote it where the snapshot named nobody', () => {
+    const { adapter } = newAdapter()
+
+    const message = adapter.toIngress(inSpace('why?', quoting({ text: 'no author here' })))
+
+    expect(message?.quotation).toEqual({ text: 'no author here', author: null })
+  })
+
+  it('quotes nothing for a message that quoted nothing', () => {
+    const { adapter } = newAdapter()
+
+    expect(adapter.toIngress(inSpace('just words'))?.quotation).toBeNull()
+  })
+
+  // ADR-0011's rule, restated for a Quotation: what is not a request is a message
+  // with *nothing* in it, and pointing at a message is the most ordinary thing
+  // there is to do in a chat window.
+  it('answers an @-mention whose only content is a quotation', () => {
+    const { adapter } = newAdapter()
+
+    const message = adapter.toIngress(inSpace('', { argumentText: '  ', ...quoting(SAID) }))
+
+    expect(message?.text).toBe('')
+    expect(message?.quotation?.text).toBe('the deploy failed at step 3')
+  })
+
+  // The bytes are fetched exactly as the Caller's own are, over the same
+  // `media.download` and the same `chat.bot`: ADR-0021's "never fetches" is about
+  // the quoted *message*, and an attachment is not it. What it must not do is
+  // arrive looking like something the Caller attached.
+  it('carries a quoted message’s attachment as an Enclosure, marked as theirs', async () => {
+    const { adapter, api } = newAdapter()
+    api.holds('attachments/att-1', 'PNG')
+
+    const message = adapter.toIngress(
+      inSpace('what is this?', quoting({ ...SAID, attachments: [UPLOADED] })),
+    )
+
+    expect(message?.enclosures.map(({ name, from }) => ({ name, from }))).toEqual([
+      { name: 'screenshot.png', from: 'users/99' },
+    ])
+    expect(api.downloads).toEqual([])
+    expect(await message?.enclosures[0]?.redeem()).toEqual(new TextEncoder().encode('PNG'))
+  })
+
+  it('keeps the Caller’s own Enclosures ahead of the quoted message’s', () => {
+    const { adapter } = newAdapter()
+
+    const message = adapter.toIngress(
+      inSpace('mine and theirs', {
+        attachment: [IN_DRIVE],
+        ...quoting({ ...SAID, attachments: [UPLOADED] }),
+      }),
+    )
+
+    expect(message?.enclosures.map(({ name, from }) => ({ name, from }))).toEqual([
+      { name: 'design.fig', from: null },
+      { name: 'screenshot.png', from: 'users/99' },
+    ])
+  })
+
+  // A quotation that is only an attachment is not a tag with nothing in it. The
+  // Enclosure already stands on its own, marked with who sent it.
+  it('makes no empty quotation out of a snapshot with no words', () => {
+    const { adapter } = newAdapter()
+
+    const message = adapter.toIngress(
+      inSpace('look', quoting({ sender: 'users/99', attachments: [UPLOADED] })),
+    )
+
+    expect(message?.quotation).toBeNull()
+    expect(message?.enclosures).toHaveLength(1)
+  })
+
+  // The instrument the whole feature rests on. Chat's snapshot is documented on
+  // the *resource*, and whether an interaction event carries one is a question
+  // nothing here can answer — so a wrong reading has to be loud, or it is
+  // indistinguishable from the roma that ignored quotations entirely.
+  it('says so when a quoted message arrived and nothing was read out of it', () => {
+    const { adapter, logged } = newAdapter()
+
+    const message = adapter.toIngress(
+      inSpace('why?', quoting({ someFutureField: 'x' }, { quoteType: 'REPLY' })),
+    )
+
+    expect(message?.quotation).toBeNull()
+    expect(logged).toEqual([
+      {
+        event: 'quote-unread',
+        keys: [
+          'name',
+          'lastUpdateTime',
+          'quotedMessageSnapshot',
+          'quoteType',
+          'quotedMessageSnapshot.someFutureField',
+        ],
+      },
+    ])
+  })
+
+  // The two faults have different repairs — one is a payload with no snapshot in
+  // it at all, the other is a snapshot roma cannot read — so the keys have to
+  // tell them apart rather than merely say something was wrong.
+  it('says which of the two shapes arrived', () => {
+    const { adapter, logged } = newAdapter()
+
+    adapter.toIngress(inSpace('why?', quoting(null)))
+
+    expect(logged).toEqual([{ event: 'quote-unread', keys: ['name', 'lastUpdateTime'] }])
+  })
+
+  it('says nothing to an operator when it understood the quotation', () => {
+    const { adapter, logged } = newAdapter()
+
+    adapter.toIngress(inSpace('why?', quoting(SAID)))
+
+    expect(logged).toEqual([])
+  })
+})
+
 describe('replying in Chat', () => {
   // An app cannot create a thread of its own, so replying into the caller's
   // thread with this option is the only way a thread ever comes to exist. It is

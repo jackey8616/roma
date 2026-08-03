@@ -77,6 +77,12 @@ misattribution it exists to prevent — and roma's part is tagged and comes
 anybody can type something that looks like this. Said as "tagged" rather than
 "the first line" because an Enclosure adds a second tag above the same message,
 and a rule counting lines would have to be restated every time one is added.
+What makes the rule statable at all is that roma writes **nothing after** what
+somebody typed, so there is one untrusted region and it is last — and a Quotation
+is the second, which is why it is the one string roma escapes. Two untrusted
+regions cannot both be last; whichever order they go in, roma writes a tag
+between them, and the one that is not last therefore may not be able to express a
+tag at all (ADR-0021).
 A Relay moves it, and one kind of Relay drops it; both are bounded and argued. A
 Relay that is the whole message carries the marker *after* the command, which is
 safe only because the Caller supplied no text at all (ADR-0012). A Relay carrying
@@ -92,8 +98,9 @@ one is the Channel's way of addressing a person and is not this. Also: reading a
 Caller typed, and nothing tells it apart from one roma wrote
 
 **Ingress Message**:
-What an Adapter hands the Core: a Conversation Key, a Caller, the text, and any
-Enclosures. Everything else the Channel knew is gone by this point.
+What an Adapter hands the Core: a Conversation Key, a Caller, the text, any
+Enclosures, and the Quotation where the message quoted one. Everything else the
+Channel knew is gone by this point.
 _Avoid_: event, payload, request
 
 **Enclosure**:
@@ -107,9 +114,35 @@ nothing in it at all. One kind of request carries none of them, though: a Relay
 goes on the wire as a command and has nowhere to name a file, so an Enclosure
 sent with one is never fetched — bytes paid for and then mentioned to nobody is
 the alternative, and the request there is the command (ADR-0018).
+One may name **who it came from**, and nearly none of them do: the Caller Marker
+above the message already says who sent it, so that is written only where the
+answer is somebody else — a Quotation of a forwarded message brings its own, and
+"the screenshot Ada sent" and "the screenshot Ada forwarded from Bob" are
+otherwise one sentence (ADR-0021).
 _Avoid_: attachment (that is the Channel's word for the thing upstream, and the
 two are not the same object — an Enclosure is named by roma and the Channel's is
 not), file (so is everything else in a Working Directory), upload, payload
+
+**Quotation**:
+Somebody else's words, carried into a message by whoever sent it rather than
+typed by them — the passage as it stood when it was quoted, and who the Channel
+says wrote it. Chat hands over a link to the quoted message beside the words and
+roma does not take it: what roma reads is the **snapshot**, which costs no round
+trip, needs no scope beyond the one roma already has, and goes on saying what was
+quoted after somebody edits the original (ADR-0021). Not an Enclosure — that is
+bytes, sized by whoever sent them, named by roma and written to the Working
+Directory; this is a passage, and it has an author. A message carrying one is a
+request whether or not anybody typed anything, on the same argument an Enclosure
+is: pointing at a message is what a chat window is for. A Relay carries none, and
+**not** for the reason it carries no Enclosure — a Quotation costs nothing, so
+what stops it is that a command's wire format has nowhere to put one: above the
+command turns it into prose, and below it becomes the argument. The one thing
+roma puts in front of the model that roma escapes rather than merely carries; the
+Caller Marker's entry is where that is argued.
+_Avoid_: quote (that is Chat's word for the action, and for the link it keeps —
+a Quotation is the words), quoted message (that is the message upstream, which
+roma never reads and may not be able to), reply, citation, excerpt (there is no
+fuller version roma can reach)
 
 **Outbound Instruction**:
 What the Core hands back to an Adapter — the result of a Task, why there isn't

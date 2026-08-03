@@ -1,4 +1,4 @@
-import type { IngressMessage } from './channel-adapter.js'
+import type { IngressMessage, Quotation } from './channel-adapter.js'
 import type { WrittenEnclosure } from './enclosures.js'
 import type { RelayRequest } from './relays.js'
 
@@ -47,12 +47,24 @@ const CLOSE = '</from>'
  * until Enclosures gave the prefix a second tag (ADR-0011). The rule did not
  * weaken — the tags were always what bounded roma's part, and counting lines
  * was shorthand that happened to be exact while there was only one.
+ *
+ * **A Quotation is why the prefix now contains content, and why that content is
+ * escaped.** Until it, everything the model read as content had been typed by
+ * the person who sent it, so there was exactly one untrusted region and it ran
+ * from the blank line to the end — roma wrote nothing after it, and a forged tag
+ * was therefore always behind a genuine one. A quotation is a second untrusted
+ * region, and two of them cannot both be last: whichever order they go in, roma
+ * writes a tag *between* them, and that tag is the thing a forgery would have to
+ * be mistaken for. So the quotation goes inside the prefix and is escaped there
+ * (`quoted` below), which leaves the invariant exactly as it was — roma's part
+ * is the tagged prefix, it comes first, and the one region roma does not escape
+ * is still the last thing in the string (ADR-0021).
  */
 export function attributed(
-  { caller, callerName, text }: IngressMessage,
+  { caller, callerName, text, quotation }: IngressMessage,
   enclosures: readonly WrittenEnclosure[] = [],
 ): string {
-  return `${OPEN}${named(caller, callerName)}${CLOSE}${enclosed(enclosures)}\n\n${text}`
+  return `${OPEN}${named(caller, callerName)}${CLOSE}${enclosed(enclosures)}${quoted(quotation)}\n\n${text}`
 }
 
 /**
@@ -72,8 +84,70 @@ export function attributed(
  */
 function enclosed(enclosures: readonly WrittenEnclosure[]): string {
   return enclosures
-    .map(({ path, name }) => `\n<enclosure path="${path}" name="${attribute(name)}" />`)
+    .map(
+      ({ path, name, from }) =>
+        `\n<enclosure path="${path}" name="${attribute(name)}"${fromAttribute(from)} />`,
+    )
     .join('')
+}
+
+/**
+ * Who somebody else's contribution is from, on the tag that carries it.
+ *
+ * Absent on nearly all of them and load-bearing on the rest. A forwarded message
+ * brings its own attachments, and they are written into the same Working
+ * Directory and named on the same kind of tag as the ones the Caller attached
+ * themselves — so without this, "the screenshot Ada sent" and "the screenshot
+ * Ada forwarded from Bob" are one sentence, which is the misattribution the
+ * Caller Marker exists to prevent, one level down (ADR-0021).
+ *
+ * Nothing is written for the Caller's own, rather than `from` naming them: the
+ * marker above the message already says who sent it, and repeating it on every
+ * tag would make the ordinary case noisier to buy nothing.
+ */
+function fromAttribute(from: string | null): string {
+  return from === null ? '' : ` from="${attribute(from)}"`
+}
+
+/**
+ * The Quotation on a message, framed and escaped, under roma's other tags.
+ *
+ * **The one string roma escapes rather than merely carries.** Everything else
+ * the model reads as content is last in the message, so it can contain whatever
+ * a person typed and still be behind roma's own tags. This one has roma's text
+ * after it — the blank line, and then what the Caller actually said — so an
+ * unescaped `</quoted>` in somebody else's words would end roma's frame early
+ * and leave the rest of the quotation reading as though roma had written it.
+ * Escaped, it cannot express a tag at all, which is what keeps the whole prefix
+ * roma's.
+ *
+ * That is a rule about the agent not being confused rather than a privilege
+ * boundary, the same as every other rule in this file: ADR-0008 has everyone who
+ * can reach roma reaching the whole Installation, so there is no privilege here
+ * to forge. What it buys is that a passage somebody else wrote cannot be made to
+ * look like roma's frame, or like a different person's message — including to a
+ * Caller who quoted something without reading it.
+ *
+ * The author is on the tag rather than absent, because a quotation with no
+ * author named reads as the Caller saying it themselves.
+ */
+function quoted(quotation: Quotation | null): string {
+  if (quotation === null) return ''
+  const { text, author } = quotation
+  return `\n<quoted${fromAttribute(author)}>${content(text)}</quoted>`
+}
+
+/**
+ * One element's content, escaped enough that nothing inside it can parse as a
+ * tag roma wrote.
+ *
+ * Three replacements rather than four: a quote is harmless between tags, and
+ * escaping it would turn every quotation of somebody saying "hello" into
+ * `&quot;hello&quot;` for nothing. `attribute` adds the fourth, where it is not
+ * harmless.
+ */
+function content(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 }
 
 /**
@@ -91,11 +165,7 @@ function enclosed(enclosures: readonly WrittenEnclosure[]): string {
  * sent the message.
  */
 function attribute(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
+  return content(value).replaceAll('"', '&quot;')
 }
 
 /**

@@ -30,6 +30,25 @@ export interface PendingEnclosure {
    */
   readonly name: string
   /**
+   * Who sent this along, where that is somebody other than the Caller, and null
+   * where the Caller attached it themselves.
+   *
+   * The Caller's own is the ordinary case and says nothing here: the Caller
+   * Marker above the message already names them, and repeating it on every
+   * Enclosure would be roma answering a question nobody asked. What this
+   * answers is the question a Quotation makes askable — a forwarded message
+   * brings its own attachments, and an Enclosure that arrived that way sits in
+   * the same list as one the Caller picked out of their own file browser
+   * (ADR-0021).
+   *
+   * Named the same way a Quotation's author is, because it is the same person
+   * and a reader comparing the two tags should not have to work that out.
+   * Required rather than optional, so that a Channel with somebody to name says
+   * so rather than forgetting to — the argument `callerName` and `enclosures`
+   * both make below.
+   */
+  readonly from: string | null
+  /**
    * Obtain the bytes.
    *
    * Called at most once per Task, and allowed to reject: a Channel that cannot
@@ -40,6 +59,43 @@ export interface PendingEnclosure {
    * the normal one rather than an edge case.
    */
   redeem(): Promise<Uint8Array>
+}
+
+/**
+ * Somebody else's words, carried into a message rather than typed into it.
+ *
+ * The other half of what a person can put in front of the agent without writing
+ * it: an Enclosure is bytes, and this is a passage somebody else wrote and the
+ * Caller pointed at. A Channel that lets one message quote another produces
+ * these — Chat's quoted reply and its forward are both one — and what roma takes
+ * is the **snapshot**: the words as they stood when they were quoted, and who
+ * the Channel says wrote them. Never a handle to be followed. Chat hands over a
+ * link as well and roma does not take it, which is what keeps this free, keeps
+ * roma's credentials where they are, and keeps a quotation of an edited message
+ * saying what was actually quoted (ADR-0021).
+ *
+ * Untrusted in a way nothing before it was. Everything else the model reads as
+ * content was typed by the person who sent it, so it arrives last with nothing
+ * of roma's after it; a Quotation is content roma **frames**, and it is
+ * therefore the one string roma escapes before writing it down. See
+ * `attributed`.
+ */
+export interface Quotation {
+  /** The passage itself, exactly as the Channel snapshotted it. */
+  readonly text: string
+  /**
+   * Whoever the Channel says wrote it, or null where it said nothing.
+   *
+   * Read as a Caller is read and printed as a Caller is printed: nothing parses
+   * it, compares it, or decides anything by it. Chat's is a bare string of
+   * undocumented shape — an id in one reading and a display name in the other —
+   * and roma is correct either way precisely because it only ever prints it.
+   *
+   * Null rather than a stand-in, because a Quotation whose author roma invented
+   * is worse than one with no author named: the whole reason to carry this is
+   * that unattributed words in front of the model are read as the Caller's own.
+   */
+  readonly author: string | null
 }
 
 /**
@@ -93,6 +149,21 @@ export interface IngressMessage {
    * makes every Channel answer the question.
    */
   readonly enclosures: readonly PendingEnclosure[]
+  /**
+   * The passage this message quotes, or null where it quotes none.
+   *
+   * Beside the text rather than folded into it, and that is the whole of why the
+   * Core learns a word for this at all. An Adapter that spliced a quotation into
+   * `text` would be composing what the model reads — which is the Core's, and
+   * only the Core's, because `readCommand` matches the **whole** message:
+   * quoting something and typing `/stop` would quietly stop meaning `/stop`, on
+   * the one Channel that had done it (ADR-0021).
+   *
+   * Required and nullable for the reason `callerName` is: a Channel that had one
+   * and forgot to hand it over is indistinguishable from a Channel whose
+   * messages never quote anything.
+   */
+  readonly quotation: Quotation | null
 }
 
 /**
