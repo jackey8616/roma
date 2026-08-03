@@ -395,11 +395,16 @@ export async function startRoma({
   }
 
   // The tree every Session's Working Directory sits in, and every record roma
-  // keeps about a Conversation beside them. One instance because the layout is
-  // one fact — a directory is a Session, a file is a record — though nothing
-  // here holds state, so two over the same path would behave identically. It is
-  // built once so that #128 can hand this same object to the record classes and
-  // to the Core without either of them being told a path to join for itself.
+  // keeps about a Conversation beside them. Built once and handed to all five
+  // things under it — the pool, the three record classes and the Core — so none
+  // of them is told a path to join for itself.
+  //
+  // What they have to agree on is the *path*, not this object: nothing here is
+  // held between calls, so two of these over one root behave identically. One
+  // instance is how that agreement is made rather than hoped for, which is the
+  // argument `ChosenModels` makes for itself below. Two over *different* roots
+  // is the failure, and `CoreOptions.workRoot` is where what it costs is
+  // written down.
   const work = new WorkRoot(workRoot)
 
   // Beside the generations, and handed to both the pool and the Core. What has
@@ -450,6 +455,9 @@ export async function startRoma({
     core: new Core({
       channel,
       pool,
+      // The same Work Root the pool was given, which is what makes an Enclosure
+      // land where the Session that was told about it will look.
+      workRoot: work,
       queue,
       sessions,
       models,

@@ -411,7 +411,7 @@ export interface AuditLogOptions {
   /**
    * Where the records go.
    *
-   * Deliberately not under the Session Pool's work root: that directory is
+   * Deliberately not under the Work Root: that tree is
    * walked by a reclaim that deletes anything nothing has touched for seven
    * days, and these records are exactly what has to survive a quiet week.
    */

@@ -48,6 +48,7 @@ import {
   type Compaction,
 } from './stream-events.js'
 import type { TaskQueue } from './task-queue.js'
+import type { WorkRoot } from './work-root.js'
 
 /**
  * Metered billing, and the ceiling on it. Absent means roma has no Overflow at
@@ -175,6 +176,32 @@ export interface CoreOptions {
    */
   readonly channel: ChannelAdapter
   readonly pool: SessionPool
+  /**
+   * Where a Session works, asked of the Work Root rather than of the pool.
+   *
+   * The Core needs one path and needs it for one thing: an Enclosure has to be
+   * on disk before the Turn that reads it (ADR-0011), and the Session it belongs
+   * to may never have been spawned — the first message to a Conversation is as
+   * likely to carry an Enclosure as any other. That is a question about where
+   * roma keeps things, not about what is running, and the Session Pool only ever
+   * answered it because it happened to be holding the path.
+   *
+   * Writing here still *creates* the Working Directory, and that is safe for a
+   * reason this has nothing to do with: the pool stopped reading a directory's
+   * existence as the record that a Session had been spawned, and reads
+   * `.roma-session` instead (#105). Asking the Work Root rather than the pool
+   * neither caused that nor fixes it — it is named here only so a reader does
+   * not go looking for the guard in the wrong module.
+   *
+   * **The same one the pool has.** Given different Work Roots the two agree
+   * about nothing, and roma reports none of it — see
+   * `startup.test.ts`'s "writes an Enclosure into the directory it spawns the
+   * Session in", which is where that agreement is made and the only place it can
+   * be broken. Free until now, because the Core asked the pool and could not
+   * disagree with it; something the composition root keeps true from here on,
+   * exactly as it already does for `models` and `efforts`.
+   */
+  readonly workRoot: WorkRoot
   /**
    * Shared with every other Core, exactly as the pool is.
    *
@@ -389,6 +416,7 @@ interface Parked {
 export class Core {
   readonly #channel: ChannelAdapter
   readonly #pool: SessionPool
+  readonly #workRoot: WorkRoot
   readonly #queue: TaskQueue
   readonly #sessions: SessionGenerations
   readonly #models: ChosenModels
@@ -412,6 +440,7 @@ export class Core {
   constructor({
     channel,
     pool,
+    workRoot,
     queue,
     sessions,
     models,
@@ -435,6 +464,7 @@ export class Core {
     }
     this.#channel = channel
     this.#pool = pool
+    this.#workRoot = workRoot
     this.#queue = queue
     this.#sessions = sessions
     this.#models = models
@@ -1123,7 +1153,7 @@ export class Core {
       const enclosures =
         relay !== null || message.enclosures.length === 0
           ? []
-          : await writeEnclosures(message.enclosures, this.#pool.cwdFor(sessionId))
+          : await writeEnclosures(message.enclosures, this.#workRoot.sessionDir(sessionId))
 
       // Named above what they said rather than handed over beside it, because
       // the line written to stdin is the only per-Turn channel there is — see

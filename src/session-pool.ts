@@ -526,24 +526,6 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   }
 
   /**
-   * Where a Session's Working Directory is, resident or not.
-   *
-   * Here because the pool owns the work root and nothing else knows it, and the
-   * Core needs the path to write an Enclosure into before the Turn that reads
-   * it (ADR-0011). A pure derivation: it makes no directory and asks the
-   * filesystem nothing, so a Session that has never run has an answer too —
-   * which is the case that matters, since the first message to a Conversation
-   * is as likely to carry an Enclosure as any other.
-   *
-   * Answered by the Work Root, which is where the derivation lives now. Still
-   * offered here because the Core reaches it through the pool; #128 moves that
-   * call to the Work Root directly and this goes with it.
-   */
-  cwdFor(sessionId: string): string {
-    return this.#workRoot.sessionDir(sessionId)
-  }
-
-  /**
    * Send one message to a Session and wait for the Turn it drives.
    *
    * The Session is made resident first — resumed or created as needed — and is
