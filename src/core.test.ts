@@ -152,6 +152,7 @@ function newCore({
   const core = new Core({
     channel: adapter,
     pool,
+    workRoot: work,
     queue,
     sessions,
     models,
@@ -213,6 +214,7 @@ function newCore({
     poolLog,
     queue,
     sessions,
+    work,
     workRoot,
     procFor,
     say,
@@ -257,6 +259,7 @@ function coreOver(shared: ReturnType<typeof newCore>, channel: ChannelAdapter): 
   return new Core({
     channel,
     pool: shared.pool,
+    workRoot: shared.work,
     queue: shared.queue,
     sessions: shared.sessions,
     models: shared.models,

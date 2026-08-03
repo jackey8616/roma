@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import { monthOf } from './audit-log.js'
 import type { Credential } from './build-env.js'
@@ -155,6 +156,65 @@ describe('starting roma', () => {
     )
   })
 
+  /**
+   * The ADR-0011 half of that wiring, and the only place it can go wrong.
+   *
+   * The Core no longer asks the pool where a Session works — it is handed a Work
+   * Root of its own — so the two agreeing is something this function does rather
+   * than something the types make impossible. Handed different ones, roma writes
+   * every Enclosure where no Session ever looks, names the agent a path that is
+   * not there, and reports nothing at all: the write succeeds, the Turn runs, and
+   * the answer is simply about a file the model could not read.
+   *
+   * Asserted here rather than in `core.test.ts`, where the harness hands one
+   * object to both and divergence is unreachable without editing the harness.
+   * This is the composition root, so this is where the agreement is made and the
+   * only place it can be broken.
+   */
+  it('writes an Enclosure into the directory it spawns the Session in', async () => {
+    const roma = boot()
+    await roma.answerProbe()
+    const { core } = await roma.starting
+
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'what is this?',
+      quotation: null,
+      enclosures: [
+        {
+          name: 'screenshot.png',
+          // The ordinary case since ADR-0021: the Caller attached it themselves,
+          // so the Caller Marker above the message already names them.
+          from: null,
+          redeem: () => Promise.resolve(new TextEncoder().encode('PNG')),
+        },
+      ],
+    })
+    // The Enclosure is written before the spawn and that is real filesystem
+    // work, so this waits on elapsed time rather than counting `flush`es — a
+    // count of event-loop turns is not a duration, and under a loaded machine
+    // the turns run out before the write lands. Waited on by asking for the
+    // Session's own process rather than by counting spawns, because the probe
+    // has already spawned once by the time any of this runs.
+    let session
+    for (let waited = 0; waited < 5_000 && session === undefined; waited += 5) {
+      await flush()
+      try {
+        session = roma.procFor(KEY)
+      } catch {
+        await sleep(5)
+      }
+    }
+    feed(session!, OK)
+    await handled
+
+    const cwd = roma.claude.lastSpawn.cwd
+    const [file] = readdirSync(join(cwd, '.enclosures'))
+    expect(readFileSync(join(cwd, '.enclosures', file!), 'utf8')).toBe('PNG')
+  })
+
   // The ADR-0014 half of that wiring. The Core writes a Chosen Model down and
   // the pool reads it at the next spawn, so `/model` means something only if
   // `startRoma` hands the record to the pool at all. Left out, roma answers
@@ -219,7 +279,7 @@ describe('starting roma', () => {
         apiKeySource: 'none',
       },
     ])
-    // Under a directory of its own rather than the Session Pool's work root,
+    // Under a directory of its own rather than the Work Root,
     // which is walked by a reclaim that deletes what has gone a week untouched.
     expect(readdirSync(roma.auditRoot)).toEqual([`${month}.jsonl`])
   })
