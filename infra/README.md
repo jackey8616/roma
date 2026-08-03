@@ -249,6 +249,12 @@ it is one row apart from the thing you do not want:
 So roma fills the Depot and only a person empties it. That is deliberate, and it means
 **the Depot grows until somebody tidies it** — nothing roma has can reclaim anything there.
 
+**That table is read out of Google's documentation and has never been run against a real
+shared drive.** It is the one claim here worth checking yourself before you rely on it, since
+the whole of "the agent cannot destroy anything" rests on the Contributor row — create a file
+as the account and try to trash it. ADR-0022's Verification status is the standing note, and
+ADR-0015 was in the same position and was reversed twice by measurement.
+
 By hand — the service account in whichever project you like, the shared drive in Google
 Drive:
 

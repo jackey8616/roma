@@ -6,9 +6,15 @@ import { GoogleChatAdapter } from './google-chat-adapter.js'
 import { HttpChatApi, type ChatRequest } from './http-chat-api.js'
 import { PubSubTransport } from './pubsub-transport.js'
 import { flush } from '../../../test/support/fake-claude.js'
-import { FakeCloudMinter, FakeMinter, fakeShims } from '../../../test/support/fake-minter.js'
+import {
+  FakeCloudMinter,
+  FakeDocumentMinter,
+  FakeMinter,
+  fakeShims,
+} from '../../../test/support/fake-minter.js'
 import { githubReach } from '../../github/reach.js'
 import { cloudReach, noCloudReach } from '../../cloud/reach.js'
+import { documentReach, noDocumentReach } from '../../documents/reach.js'
 import type { Reach } from '../../reach.js'
 import { askMinter } from '../../shim-client.js'
 import { socketPathIn } from '../../shim-protocol.js'
@@ -62,7 +68,10 @@ function mentioned(text: string): Record<string, unknown> {
 let running: Serving[] = []
 let fixtures: RomaFixture[] = []
 
-async function boot({ cloud }: { cloud?: Reach<'cloud'> } = {}) {
+async function boot({
+  cloud,
+  documents,
+}: { cloud?: Reach<'cloud'>; documents?: Reach<'documents'> } = {}) {
   const fixture = romaFixture('wiring')
   fixtures.push(fixture)
 
@@ -92,7 +101,11 @@ async function boot({ cloud }: { cloud?: Reach<'cloud'> } = {}) {
     // The real Reaches over Minters with no provider behind them: what a Session
     // is told it can reach is assembled here out of the same parts production
     // uses, announcement included.
-    reaches: { code: githubReach(minter), cloud: cloud ?? noCloudReach() },
+    reaches: {
+      code: githubReach(minter),
+      cloud: cloud ?? noCloudReach(),
+      documents: documents ?? noDocumentReach(),
+    },
     shims,
     overflow: { credential: METERED, monthlyCapUsd: 100 },
     channel: new GoogleChatAdapter({ api }),
@@ -347,6 +360,26 @@ describe('reaching the code, out of the real parts', () => {
 
     const { args } = roma.claude.lastSpawn
     expect(args[args.indexOf('--append-system-prompt') + 1]).toContain('roma-cloud-token')
+
+    feed(roma.procFor(), OK)
+  })
+
+  // The same join for the third capability, and no more than that: a Document
+  // Reach that does not assemble is what this file catches, and where its
+  // behaviour is asserted is `startup.test.ts` and `src/documents/`. The whole
+  // Reach is real here — both halves of its boot proof run — so a Depot proved at
+  // boot and then never announced would fail here.
+  it('tells the Session about the Document Reach, where the deployment has one', async () => {
+    const roma = await boot({ documents: documentReach(new FakeDocumentMinter()) })
+    roma.subscription.publishJson(mentioned('write that up for us'), 'msg-1')
+    await flush()
+
+    const { args } = roma.claude.lastSpawn
+    const announced = args[args.indexOf('--append-system-prompt') + 1] ?? ''
+    expect(announced).toContain('roma-document-token')
+    // The Depot the proof found, rather than a folder roma was told about and
+    // never reached: `announce` reads what `prove` returned.
+    expect(announced).toContain('FOLDER_ID')
 
     feed(roma.procFor(), OK)
   })

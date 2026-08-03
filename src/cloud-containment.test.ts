@@ -27,21 +27,46 @@ import { code, containment } from '../test/support/sources.js'
  */
 
 /**
- * Every way `src/` could name the agent's cloud outside the one directory.
+ * Every way `src/` could name Google outside a directory some rule binds.
  *
  * Deliberately narrow, and deliberately not the bare word "cloud": Cloud Reach,
  * Cloud Token and Cloud Shortcut are `CONTEXT.md`'s vocabulary and the Core is
  * *supposed* to use them. What must not leak is the provider — the endpoint, the
- * scope, the shape of the key, the CLI that is not installed.
+ * shape of the key, the grant the exchange takes.
+ *
+ * **Two lists rather than one, since there is a second Google directory.**
+ * `src/documents/` reads a service account key and signs a JWT-bearer assertion
+ * exactly as this one does, duplicated on ADR-0022's instruction — sharing the
+ * exchange would put a factory for Google credentials in a directory no rule
+ * binds, which is what ADR-0020 §7 moved the cloud's construction *inside* this
+ * one to prevent. So these patterns are bound to "a directory a containment rule
+ * binds" and the list below is bound to this one alone.
  */
-const CLOUD_SPECIFIC = [
+const GOOGLE_SPECIFIC = [
   /oauth2\.googleapis/i,
-  /\bcloud-platform\b/,
   /\bservice_account\b/,
   /\bclient_email\b/,
-  /\bgcloud\b/,
   /jwt-bearer/i,
 ]
+
+/**
+ * Every way `src/` could name *this* cloud, including from the other Google
+ * directory.
+ *
+ * Unrelaxed, and that is the point of splitting the list: ADR-0022 says neither
+ * Google directory may take its scope from anywhere but its own constant, so
+ * `cloud-platform` appearing under `src/documents/` would be that rule broken
+ * rather than knowledge legitimately shared. `gcloud` is the CLI ADR-0015 §1
+ * refuses to ship, and it belongs to the same one directory.
+ */
+const CLOUD_SPECIFIC = [/\bcloud-platform\b/, /\bgcloud\b/]
+
+/**
+ * The other directory a containment rule already binds —
+ * `src/document-containment.test.ts`. Named for what it is to *this* rule rather
+ * than for what is in it: an exemption from the list above, and from nothing else.
+ */
+const BOUND_BY_ANOTHER_RULE = ['documents']
 
 /**
  * Every way roma could stop loading the key by the exact path it was given.
@@ -64,7 +89,21 @@ const RESOLVES_A_CREDENTIAL = [
 ]
 
 describe('everything that knows which cloud this is lives in one directory', () => {
-  it('names it nowhere else', () => {
+  // The vendor-generic half, which `src/documents/` may legitimately name too —
+  // it holds the second service account key and the second JWT-bearer exchange,
+  // and it is bound by a rule of its own.
+  it('names Google nowhere a rule does not bind', () => {
+    const offenders = containment('cloud', BOUND_BY_ANOTHER_RULE).outside.filter(({ source }) =>
+      GOOGLE_SPECIFIC.some((pattern) => pattern.test(code(source))),
+    )
+
+    expect(offenders.map(({ file }) => file)).toEqual([])
+  })
+
+  // Not relaxed for the other Google directory, deliberately: a scope is the one
+  // thing neither of them may take from anywhere but its own constant, and the
+  // CLI ADR-0015 refuses to ship is this directory's business alone.
+  it('names this cloud nowhere else at all, the documents directory included', () => {
     const offenders = containment('cloud').outside.filter(({ source }) =>
       CLOUD_SPECIFIC.some((pattern) => pattern.test(code(source))),
     )
@@ -72,12 +111,12 @@ describe('everything that knows which cloud this is lives in one directory', () 
     expect(offenders.map(({ file }) => file)).toEqual([])
   })
 
-  // Without this the test above passes for the wrong reason the day somebody
-  // narrows the denylist or breaks the comment stripping: a rule that matches
+  // Without this the tests above pass for the wrong reason the day somebody
+  // narrows a denylist or breaks the comment stripping: a rule that matches
   // nothing anywhere reports containment it is not checking.
   it('would notice, which is why the directory it excludes trips it', () => {
     const named = containment('cloud').inside.filter(({ source }) =>
-      CLOUD_SPECIFIC.some((pattern) => pattern.test(code(source))),
+      [...GOOGLE_SPECIFIC, ...CLOUD_SPECIFIC].some((pattern) => pattern.test(code(source))),
     )
 
     expect(named.length).toBeGreaterThan(0)

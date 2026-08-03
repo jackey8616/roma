@@ -503,20 +503,23 @@ Installation and a name should not claim otherwise), GitHub token, PAT, secret
 **Minter**:
 The only thing that holds a long-lived key, and therefore the only thing that can
 produce something short-lived from one: the App's private key and an Installation
-Token, and — where a deployment has a Cloud Reach — the service account key and a
-Cloud Token. Named because it carries the one absolute rule in this area — a
+Token, and — where a deployment has one — the Cloud Reach's service account key
+and a Cloud Token, and the Document Reach's service account key and a Document
+Token. Named because it carries the one absolute rule in this area — a
 long-lived key never enters the space the agent can reach — and a term that is the
-whole of a security property should be a term. One term for both because it is one
-rule; what differs is which provider is on the other end, and that is the Minter's
-business and nobody else's. The Core sees a port for obtaining a credential and
-nothing else. One half of a Reach, and the half holding the key. It may be what
+whole of a security property should be a term. One term for all three because it is
+one rule; what differs is which provider is on the other end, and that is the
+Minter's business and nobody else's. The Core sees a port for obtaining a credential
+and nothing else. One half of a Reach, and the half holding the key. It may be what
 *fetches* what a Reach reaches — asking the forge is the same round trip as proving
-the key, so one call does both — but what a Session is told is the Reach's and
+the key, so one call does both, and the Document Reach's does the same for the
+Depot — but what a Session is told is the Reach's and
 never a Minter's: nothing here composes a sentence or decides what is worth
 announcing.
 _Avoid_: token service, credential provider, GitHub client (it is not a general
-client for the product; it does this and nothing else), and naming one of the two
-keys as *the* private key now that there are two
+client for the product; it does this and nothing else), and naming any one of the
+three keys as *the* private key — or either service account key as *the* service
+account key, now that two providers' worth of them exist
 
 **Credential Shim**:
 The thin client in the agent's userland that asks the Minter for an Installation

@@ -10,6 +10,8 @@ import { githubReachFrom } from '../../github/reach.js'
 import { gitConfig } from '../../github/shims.js'
 import { readCloudEnv } from '../../cloud/env-config.js'
 import { cloudReachFrom } from '../../cloud/reach.js'
+import { readDocumentEnv } from '../../documents/env-config.js'
+import { documentReachFrom } from '../../documents/reach.js'
 import type { PoolLogRecord } from '../../session-pool.js'
 import type { ShimLogRecord } from '../../shim-server.js'
 import type { ReachLogRecord } from '../../startup.js'
@@ -89,7 +91,8 @@ export async function startGoogleChatRoma(
     channelEnv: chat,
     minterEnv,
     cloudEnv,
-  } = readConfiguration(env, readChatEnv, readMinterEnv, readCloudEnv)
+    documentEnv,
+  } = readConfiguration(env, readChatEnv, readMinterEnv, readCloudEnv, readDocumentEnv)
   const { shimDir, ...core } = roma
 
   // Application Default Credentials: a key file named by
@@ -122,26 +125,27 @@ export async function startGoogleChatRoma(
     maxExtensionTime: Duration.from({ minutes: chat.maxLeaseMinutes }),
   })
 
-  // The one place a forge is named, and now the one place the agent's cloud is,
-  // for the reason a Channel is named here and nowhere else: assembling roma
-  // means saying what it is assembled out of, and `src/` proper is not allowed
-  // to know any of the three answers. `src/github-containment.test.ts` and
-  // `src/cloud-containment.test.ts` are what hold the rest of the tree to that.
+  // The one place a forge is named, the one place the agent's cloud is, and the
+  // one place the team's documents are, for the reason a Channel is named here
+  // and nowhere else: assembling roma means saying what it is assembled out of,
+  // and `src/` proper is not allowed to know any of the four answers.
+  // `src/github-containment.test.ts`, `src/cloud-containment.test.ts` and
+  // `src/document-containment.test.ts` are what hold the rest of the tree to that.
   //
-  // Note what this page does **not** do any more: construct the Cloud Reach's
-  // Minter. `cloudReachFrom` takes the key `readCloudEnv` read from the path the
-  // deployment named and nothing else, and it lives inside `src/cloud/`, which
-  // `src/cloud-containment.test.ts` binds against every way of asking a library
-  // to find a credential — so the substitution ADR-0015 §4 forbids cannot be
-  // written here, because the constructor is not named here (ADR-0020 §7). The
-  // `GoogleAuth` above is roma's own identity and is deliberately unrelated to
-  // the agent's: two credentials on one page, and only one of them is the
-  // agent's.
+  // Note what this page does **not** do: construct either Google Minter.
+  // `cloudReachFrom` and `documentReachFrom` each take the key their own reader
+  // read from the path the deployment named and nothing else, and each lives
+  // inside a directory bound against every way of asking a library to find a
+  // credential — so the substitution ADR-0015 §4 forbids cannot be written here,
+  // because neither constructor is named here (ADR-0020 §7). The `GoogleAuth`
+  // above is roma's own identity and is deliberately unrelated to the agent's
+  // two: three credentials on one page, and only two of them are the agent's.
   return await serve({
     ...core,
     reaches: {
       code: githubReachFrom(minterEnv),
       cloud: cloudReachFrom(cloudEnv),
+      documents: documentReachFrom(documentEnv),
     },
     shims: { dir: shimDir, gitConfig: gitConfig() },
     channel: new GoogleChatAdapter({ api: new HttpChatApi({ send, download }), log }),

@@ -248,6 +248,22 @@ export interface CoreOptions {
    * right for a deployment with no Cloud Reach, where no Task can have used one.
    */
   readonly usedCloudReach?: (taskId: string) => boolean
+  /**
+   * Whether one Task obtained a Document Token, asked once as its record is
+   * written.
+   *
+   * The question beside it, and a second question rather than one asked about a
+   * provider: the Core prints two answers and cannot be asked whether there is a
+   * Google. Omitted, every record says no — which is exactly right for a
+   * deployment with no Document Reach, where no Task can have used one.
+   *
+   * What it answers is sharper than the cloud's. Everything the agent does in a
+   * Depot is done as one service account, so Drive's own record of what happened
+   * there names the account and never the person — and the Audit Record is the
+   * only place a Caller exists at all (ADR-0002). Neither log answers "who put
+   * this here" alone; joined on the Task's window, they narrow it (ADR-0022 §9).
+   */
+  readonly usedDocumentReach?: (taskId: string) => boolean
   readonly log?: CoreLog
 }
 
@@ -381,6 +397,7 @@ export class Core {
   readonly #credential: CredentialKind
   readonly #overflow: OverflowOptions | null
   readonly #usedCloudReach: (taskId: string) => boolean
+  readonly #usedDocumentReach: (taskId: string) => boolean
   readonly #log: CoreLog
   /**
    * The Tasks this Core has taken on and not yet answered — queued ones
@@ -403,6 +420,7 @@ export class Core {
     credential,
     overflow,
     usedCloudReach,
+    usedDocumentReach,
     log,
   }: CoreOptions) {
     if (!channel.capabilities.stableConversationKey) {
@@ -425,6 +443,7 @@ export class Core {
     this.#credential = credential
     this.#overflow = overflow ?? null
     this.#usedCloudReach = usedCloudReach ?? (() => false)
+    this.#usedDocumentReach = usedDocumentReach ?? (() => false)
     this.#log = log ?? writeToStderr
   }
 
@@ -615,6 +634,7 @@ export class Core {
       // it does can mint, but the answer is read-and-forget and a hard `false`
       // here would be roma writing down a fact it declined to check.
       cloudReach: this.#usedCloudReach(taskId),
+      documentReach: this.#usedDocumentReach(taskId),
       apiKeySource: null,
     })
 
@@ -1150,9 +1170,10 @@ export class Core {
     const outcome = outcomeOf(instruction)
     // Asked once, outside the loop. A Task can produce two records — one per
     // credential that paid — and both describe the same Task, so both say the
-    // same thing about the cloud. Asking inside would have the second record
-    // report a Cloud Token the first one had already consumed the answer for.
+    // same thing about each Reach. Asking inside would have the second record
+    // report a token the first one had already consumed the answer for.
     const cloudReach = this.#usedCloudReach(taskId)
+    const documentReach = this.#usedDocumentReach(taskId)
     for (const credential of [answeredOn, ...attempts.credentials().filter((c) => c !== answeredOn)]) {
       const paid = attempts.spentOn(credential)
       // The Task's own record is written whatever it spent, including nothing.
@@ -1205,6 +1226,7 @@ export class Core {
           running?.effort ?? this.#efforts.pinnedEffort,
         ),
         cloudReach,
+        documentReach,
         // Only where one happened, which is what "absent means no Compaction"
         // asks of the writer. On the record of the credential that paid for it:
         // a Task blocked on the Shared Window and rerun on Overflow spent that

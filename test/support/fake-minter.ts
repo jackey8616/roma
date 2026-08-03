@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { CloudMinter } from '../../src/cloud/google-cloud-minter.js'
 import { cloudReach, noCloudReach, NO_CLOUD_REACH } from '../../src/cloud/reach.js'
+import type { Depot, DocumentMinter } from '../../src/documents/depot.js'
+import { documentReach, noDocumentReach, NO_DOCUMENT_REACH } from '../../src/documents/reach.js'
 import { FreshTokens } from '../../src/fresh-tokens.js'
 import type { Installation, InstallationMinter } from '../../src/github/installation.js'
 import type { AvailableReach, MintedToken, Reach, Reaches } from '../../src/reach.js'
@@ -123,6 +125,79 @@ export class FakeCloudMinter implements CloudMinter {
   }
 }
 
+export interface FakeDocumentMinterOptions {
+  readonly account?: string
+  readonly depot?: Depot
+  /** What every mint fails with, where minting is meant to fail. */
+  readonly failsWith?: Error
+  /** What reaching the Depot fails with. The boot proof's second half. */
+  readonly depotFailsWith?: Error
+  readonly lifetimeMs?: number
+  readonly now?: () => number
+}
+
+/**
+ * A Document Reach with no Drive behind it.
+ *
+ * The third of these, and the first with two things to prove: the key mints, and
+ * the Depot answers that this identity may add to it. Both can fail
+ * independently and a test needs to say which, because the whole point of the
+ * second half of that proof is that a typo'd folder id and a Viewer role are
+ * different mistakes (ADR-0022 §6).
+ *
+ * Tokens are `document-token-1`, `document-token-2`, deliberately unlike the
+ * other two fakes': every test asserting that a documents request was not
+ * answered with a Cloud Token rests on telling them apart at a glance.
+ */
+export class FakeDocumentMinter implements DocumentMinter {
+  readonly account: string
+  /** Every token this has produced, in order. */
+  readonly minted: MintedToken[] = []
+  /** How many times the Depot has been asked about. */
+  depots = 0
+  /** Set to make the next mint, and every mint after it, fail. */
+  failsWith: Error | null
+  /** Set to make the Depot unreachable, the way a real refusal would. */
+  depotFailsWith: Error | null
+
+  readonly #depot: Depot
+  readonly #lifetimeMs: number
+  readonly #now: () => number
+
+  constructor({
+    account = 'writer@a-project.iam.gserviceaccount.com',
+    depot = { id: 'FOLDER_ID', name: 'Team documents' },
+    failsWith,
+    depotFailsWith,
+    lifetimeMs = HOUR_MS,
+    now = Date.now,
+  }: FakeDocumentMinterOptions = {}) {
+    this.account = account
+    this.#depot = depot
+    this.failsWith = failsWith ?? null
+    this.depotFailsWith = depotFailsWith ?? null
+    this.#lifetimeMs = lifetimeMs
+    this.#now = now
+  }
+
+  mint(): Promise<MintedToken> {
+    if (this.failsWith !== null) return Promise.reject(this.failsWith)
+    const minted: MintedToken = {
+      token: `document-token-${String(this.minted.length + 1)}`,
+      expiresAt: this.#now() + this.#lifetimeMs,
+    }
+    this.minted.push(minted)
+    return Promise.resolve(minted)
+  }
+
+  depot(): Promise<Depot> {
+    this.depots += 1
+    if (this.depotFailsWith !== null) return Promise.reject(this.depotFailsWith)
+    if (this.failsWith !== null) return Promise.reject(this.failsWith)
+    return Promise.resolve(this.#depot)
+  }
+}
+
 /**
  * roma's Reach on the forge, with a fake announcement and nothing real.
  *
@@ -160,15 +235,36 @@ export function fakeCloudReach(minter: FakeCloudMinter | null): Reach<'cloud'> {
   return { ...cloudReach(minter), announce: () => `acts as ${minter.account}` }
 }
 
-/** One Reach per credential, with nothing real behind either. */
+/**
+ * roma's Reach on the team's documents, or the one a deployment without a key
+ * has.
+ *
+ * Null gives the real unavailable Reach rather than a stand-in, because the
+ * sentence it carries is what several tests assert against.
+ */
+export function fakeDocumentReach(minter: FakeDocumentMinter | null): Reach<'documents'> {
+  if (minter === null) return noDocumentReach()
+  // The real Reach, with only the announcement swapped. How it proves — both
+  // halves of it — and how it refuses are what these tests are about, and a
+  // fixture that reimplemented either would be asserting itself.
+  return { ...documentReach(minter), announce: () => `writes as ${minter.account}` }
+}
+
+/** One Reach per credential, with nothing real behind any of them. */
 export function fakeReaches({
   minter = new FakeMinter(),
   cloudMinter = null,
+  documentMinter = null,
 }: {
   readonly minter?: FakeMinter
   readonly cloudMinter?: FakeCloudMinter | null
+  readonly documentMinter?: FakeDocumentMinter | null
 } = {}): Reaches {
-  return { code: fakeCodeReach(minter), cloud: fakeCloudReach(cloudMinter) }
+  return {
+    code: fakeCodeReach(minter),
+    cloud: fakeCloudReach(cloudMinter),
+    documents: fakeDocumentReach(documentMinter),
+  }
 }
 
 /**
@@ -186,20 +282,22 @@ export function fakeShims(overrides: Partial<ShimsOptions> = {}): ShimsOptions {
 }
 
 /**
- * What the socket serves, with nothing real behind either Reach.
+ * What the socket serves, with nothing real behind any Reach.
  *
  * `startRoma` builds this from the Reaches it proved; a test that is about the
- * socket rather than about the boot builds it directly. No cloud minter gives the
- * unavailable arm carrying roma's real sentence, because what several of those
- * tests assert is exactly that sentence.
+ * socket rather than about the boot builds it directly. A minter left out gives
+ * the unavailable arm carrying roma's real sentence, because what several of
+ * those tests assert is exactly that sentence.
  */
 export function fakeServedReaches({
   minter = new FakeMinter(),
   cloudMinter = null,
+  documentMinter = null,
   account = 'a-team',
 }: {
   readonly minter?: FakeMinter
   readonly cloudMinter?: FakeCloudMinter | null
+  readonly documentMinter?: FakeDocumentMinter | null
   readonly account?: string | null
 } = {}): ServedReaches {
   return {
@@ -208,5 +306,9 @@ export function fakeServedReaches({
       cloudMinter === null
         ? { unavailable: NO_CLOUD_REACH }
         : { tokens: new FreshTokens({ minter: cloudMinter }), account: cloudMinter.account },
+    documents:
+      documentMinter === null
+        ? { unavailable: NO_DOCUMENT_REACH }
+        : { tokens: new FreshTokens({ minter: documentMinter }), account: documentMinter.account },
   }
 }

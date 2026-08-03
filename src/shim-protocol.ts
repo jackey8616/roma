@@ -9,14 +9,23 @@
  */
 
 /**
- * Which of roma's two credentials is being asked for.
+ * Which of roma's three credentials is being asked for.
  *
- * The narrowest addition that works, and it is a word rather than a product:
- * `code` is what reaches anybody's code and `cloud` is what reaches the Cloud
- * Reach. Naming either provider here would put GitHub and Google in the Core,
- * which is the one thing this file exists on the near side of.
+ * A word rather than a product, every time: `code` is what reaches anybody's
+ * code, `cloud` is what reaches the Cloud Reach, and `documents` is what reaches
+ * the things people read and edit by hand. Naming a provider here would put
+ * GitHub and Google in the Core, which is the one thing this file exists on the
+ * near side of — and it is why the third member is not `drive`, `sheets` or
+ * `google`. `workspace` fails twice over: it is Google's product name *and* the
+ * first entry in CONTEXT.md's list of things not to call a Working Directory
+ * (ADR-0022 §1).
+ *
+ * A closed union, which is what makes `Reaches` total by construction: adding a
+ * member here is a compile error at the composition root until it is wired. That
+ * is the friction ADR-0020 §8 priced and called correct, and it should not be
+ * worked around.
  */
-export type CredentialWanted = 'code' | 'cloud'
+export type CredentialWanted = 'code' | 'cloud' | 'documents'
 
 /**
  * What something in the agent's userland asks roma for, one JSON object on one
@@ -62,10 +71,10 @@ export interface ShimRequest {
    * Optional so that the two Credential Shims, which predate there being a
    * second credential and ask for the only one they can use, need not say so.
    * The existing fields keep their meanings exactly: `path` stays null for a
-   * cloud request, because unlike `git` naming a repository there is no
-   * destination to announce — a Cloud Token reaches the whole Cloud Reach and
-   * asking the agent to declare a target would record an unverifiable
-   * self-report (ADR-0015 §10).
+   * cloud or documents request, because unlike `git` naming a repository there
+   * is no destination to announce — either token reaches the whole of its own
+   * Reach, and asking the agent to declare a target would record an unverifiable
+   * self-report (ADR-0015 §10, ADR-0022 §9).
    */
   readonly credential?: CredentialWanted
 }

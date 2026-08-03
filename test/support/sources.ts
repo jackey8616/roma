@@ -55,19 +55,38 @@ export const COMPOSITION_ROOTS = [['channels', 'google-chat', 'main.ts'].join(se
  * anywhere reports containment it is not checking, so each rule asserts that
  * the directory it excludes trips it.
  *
- * Here rather than in each test because there are two of these now — GitHub and
- * the agent's cloud — and the copy that drifts first would be this splitting
- * rather than either denylist. What is deliberately *not* here is the denylists
- * themselves or the reasons for them: those are the whole content of a
- * containment test, and a helper that held them would leave the test a call.
+ * Here rather than in each test because there are three of these now — GitHub,
+ * the agent's cloud, and the team's documents — and the copy that drifts first
+ * would be this splitting rather than any denylist. What is deliberately *not*
+ * here is the denylists themselves or the reasons for them: those are the whole
+ * content of a containment test, and a helper that held them would leave the
+ * test a call.
+ *
+ * `alsoBound` is for the case two directories share a vendor. `src/documents/`
+ * reads a service account key and signs a JWT-bearer assertion exactly as
+ * `src/cloud/` does — duplicated on ADR-0022's instruction, because the sharing
+ * that would remove it is a factory for Google credentials in a directory no
+ * rule binds — so the *vendor-generic* half of the cloud's denylist has two
+ * legitimate homes. Naming the other directory here says "bound by a rule of its
+ * own", which is a different claim from the exclusion `COMPOSITION_ROOTS` makes:
+ * that one is a file no rule can bind. What must **not** be passed this way is a
+ * pattern only one directory may name — a scope, a product's CLI — and each rule
+ * keeps a second, unrelaxed list for exactly those.
  */
-export function containment(directory: string): { inside: Source[]; outside: Source[] } {
-  const owns = ({ file }: Source) => file.split(sep).includes(directory)
+export function containment(
+  directory: string,
+  alsoBound: readonly string[] = [],
+): { inside: Source[]; outside: Source[] } {
+  const under = (source: Source, dir: string) => source.file.split(sep).includes(dir)
+  const owns = (source: Source) => under(source, directory)
   const all = sources()
   return {
     inside: all.filter(owns),
     outside: all.filter(
-      (source) => !owns(source) && !COMPOSITION_ROOTS.includes(source.file),
+      (source) =>
+        !owns(source) &&
+        !alsoBound.some((dir) => under(source, dir)) &&
+        !COMPOSITION_ROOTS.includes(source.file),
     ),
   }
 }

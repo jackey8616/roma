@@ -26,11 +26,12 @@ export type ShimLogRecord =
       /**
        * A tool asked, and was given a credential.
        *
-       * `credential` says which of the two, because they are different events to
-       * an operator: one is somebody's `git` doing its job, and the other is a
-       * Cloud Token being minted against an identity whose Google Cloud bill
-       * somebody pays. A mint storm on either is visible here, and telling them
-       * apart is the first thing anybody looking would want.
+       * `credential` says which of the three, because they are different events
+       * to an operator: one is somebody's `git` doing its job, one is a Cloud
+       * Token minted against an identity whose Google Cloud bill somebody pays,
+       * and one is a Document Token about to write into a folder a team shares. A
+       * mint storm on any of them is visible here, and telling them apart is the
+       * first thing anybody looking would want.
        */
       readonly event: 'credential'
       readonly sessionId: string
@@ -134,9 +135,10 @@ export interface ShimServerOptions {
    * Every credential rather than one of them. Which of them is interesting is not
    * the socket's question — what a Task reached for is a property of the requests
    * that crossed it, and the shapes worth keeping differ per credential: whether
-   * the Cloud Reach was used is a yes or a no and never a count (ADR-0015 §10),
-   * and which repositories a Task minted for is a list accumulated from `path`.
-   * One observer serves both (ADR-0020 §6).
+   * the Cloud Reach or the Document Reach was used is a yes or a no and never a
+   * count (ADR-0015 §10, ADR-0022 §9), and which repositories a Task minted for
+   * is a list accumulated from `path`. One observer serves all three
+   * (ADR-0020 §6).
    */
   readonly onCredential?: (
     taskId: string | null,
@@ -361,10 +363,15 @@ function readRequest(line: string): ShimRequest {
     throw new Error(`unknown operation ${JSON.stringify(operation)}`)
   }
   // Absent is `code`, which is what the two Credential Shims send and what every
-  // request sent before there was a second credential meant. A value that is
-  // neither is refused rather than defaulted: defaulting it would answer a
-  // request for a credential roma does not have with one it does.
-  if (credential !== undefined && credential !== 'code' && credential !== 'cloud') {
+  // request sent before there was a second credential meant. A value that is not
+  // one of the three is refused rather than defaulted: defaulting it would answer
+  // a request for a credential roma does not have with one it does.
+  if (
+    credential !== undefined &&
+    credential !== 'code' &&
+    credential !== 'cloud' &&
+    credential !== 'documents'
+  ) {
     throw new Error(`unknown credential ${JSON.stringify(credential)}`)
   }
   return {

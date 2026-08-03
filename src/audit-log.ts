@@ -224,6 +224,35 @@ export interface AuditRecord {
    */
   readonly cloudReach?: boolean
   /**
+   * Whether this Task obtained a Document Token.
+   *
+   * A yes or a no, and deliberately **not a count**, for `cloudReach`'s reasons
+   * unchanged: one token does unlimited work for an hour, and the request
+   * carries no destination for roma to record (ADR-0022 §9).
+   *
+   * **What it is for is sharper than the field above.** Everything the agent does
+   * in a Depot is done as one service account, so Drive's own audit log can say
+   * what happened and never who asked — and the Audit Record is the only place a
+   * Caller exists at all (ADR-0002). Neither log answers "who put this here"
+   * alone; joined on the Task's own window, they narrow it. Given that one Depot
+   * holds every Conversation's work, that question will be asked.
+   *
+   * The window is wider than the Task: a Document Token outlives the Task that
+   * minted it by up to an hour. Recording the moment of the mint would narrow it
+   * and is deliberately not done — it would be a third kind of field in an area
+   * where only counts and destinations have been argued about, and the accuracy
+   * has no question waiting for it.
+   *
+   * Optional, and **absent means no** — which is what every record roma wrote
+   * before there were Document Reaches means, since there was no way to obtain
+   * one. That is `cloudReach`'s reasoning exactly, and it is not a formality:
+   * `readRecord` drops a line it cannot read, a dropped line leaves the month's
+   * total, and the month's total is what the Overflow cap is enforced against, so
+   * a required field would silently reset the month across the deploy that added
+   * it.
+   */
+  readonly documentReach?: boolean
+  /**
    * The Compaction that happened inside this Task, where one did.
    *
    * Here because it is the largest unexplained variation there is in what a Task
@@ -605,6 +634,12 @@ function readRecord(line: string): AuditRecord | null {
   // line that answers it with a number is answering a different question — the
   // count ADR-0015 refused.
   if (record['cloudReach'] !== undefined && typeof record['cloudReach'] !== 'boolean') return null
+  // Absent is a no, which is what every record written before there were Document
+  // Reaches means, and unreadable for anything that is not a yes or a no — the
+  // line above's reasoning, for the field beside it.
+  if (record['documentReach'] !== undefined && typeof record['documentReach'] !== 'boolean') {
+    return null
+  }
   // Absent is no Compaction, which is what every record written before roma
   // could see one says. Present and not readable as one is a torn line rather
   // than a record with a hole in it, for `cloudReach`'s reason: this field is the
