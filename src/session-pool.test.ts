@@ -21,6 +21,7 @@ import {
   withTotalCostUsd,
 } from '../test/support/recorded-stream.js'
 import type { ClaudeEvent } from './stream-events.js'
+import { WorkRoot } from './work-root.js'
 
 const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
@@ -50,13 +51,19 @@ function spawnedBefore(workRoot: string, id: string): void {
 let pools: SessionPool[] = []
 let workRoots: string[] = []
 
-function newPool(options: Partial<SessionPoolOptions> = {}) {
+// The path rather than the Work Root, because almost every test below asserts on
+// where something landed and does that by building the path itself. Handing the
+// helper a string and letting it wrap one keeps those assertions independent of
+// the module under test — a test that located a directory with `sessionDir`
+// would agree with it by construction.
+function newPool(
+  options: Partial<Omit<SessionPoolOptions, 'workRoot'>> & { readonly workRoot?: string } = {},
+) {
   const claude = new FakeClaude({ exitOnKill: true })
   const workRoot = options.workRoot ?? mkdtempSync(join(tmpdir(), 'roma-pool-'))
   workRoots.push(workRoot)
   const log: PoolLogRecord[] = []
   const pool = new SessionPool({
-    workRoot,
     envs: {
       // A function of the Session, because two of the variables a real one
       // carries are the Session's own. Nothing here needs them, so the Session
@@ -75,6 +82,8 @@ function newPool(options: Partial<SessionPoolOptions> = {}) {
     spawn: claude.spawn,
     log: (record) => log.push(record),
     ...options,
+    // After the spread: `options.workRoot` is a path and this one is the object.
+    workRoot: new WorkRoot(workRoot),
   })
   pools.push(pool)
 

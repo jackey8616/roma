@@ -17,6 +17,7 @@ import type { RetryBudget } from './config.js'
 import { ChosenEfforts, ChosenModels, SessionGenerations } from './session-generation.js'
 import { sessionIdFor } from './session-id.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
+import { WorkRoot } from './work-root.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { TaskQueue } from './task-queue.js'
 import { flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
@@ -114,7 +115,7 @@ function newCore({
   const efforts = new ChosenEfforts({ workRoot, pinnedEffort: PINNED_EFFORT })
   const poolLog: PoolLogRecord[] = []
   const pool = new SessionPool({
-    workRoot,
+    workRoot: new WorkRoot(workRoot),
     models,
     efforts,
     envs: {
