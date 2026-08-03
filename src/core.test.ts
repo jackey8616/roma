@@ -108,15 +108,18 @@ function newCore({
   fixtures.push(fixture)
   const { claude, procFor, procIn } = fixture
   const { workRoot, auditRoot } = fixture.dirs
+  // One Work Root for everything under it: the pool, the generation record, and
+  // both Chosen records. They agreed on a path before; now they agree on a layout.
+  const work = new WorkRoot(workRoot)
   // Shared by the pool and the Core, which is what makes `/model` observable: the
   // Core writes what somebody chose and the pool reads it at the next spawn.
-  const models = new ChosenModels({ workRoot, pinnedModel: PINNED_MODEL })
+  const models = new ChosenModels({ workRoot: work, pinnedModel: PINNED_MODEL })
   // The same instance to both, for the same reason: the Core writes what somebody
   // chose and the pool reads it at the next spawn.
-  const efforts = new ChosenEfforts({ workRoot, pinnedEffort: PINNED_EFFORT })
+  const efforts = new ChosenEfforts({ workRoot: work, pinnedEffort: PINNED_EFFORT })
   const poolLog: PoolLogRecord[] = []
   const pool = new SessionPool({
-    workRoot: new WorkRoot(workRoot),
+    workRoot: work,
     models,
     efforts,
     envs: {
@@ -142,7 +145,7 @@ function newCore({
 
   // The real cap, so what the tests below see is what roma does.
   const queue = new TaskQueue()
-  const sessions = new SessionGenerations({ workRoot })
+  const sessions = new SessionGenerations({ workRoot: work })
   const adapter = new RecordingAdapter(capabilities)
   const audit = new AuditLog({ auditRoot })
   const log: CoreLogRecord[] = []
