@@ -6,12 +6,9 @@ import type { PendingEnclosure } from './channel-adapter.js'
 /**
  * Where Enclosures live inside a Working Directory.
  *
- * A subdirectory rather than the root, because the root is the agent's: ADR-0008
- * has it cloning what it was asked about, and a file dropped beside a clone is a
- * file somebody has to work out the provenance of. Dot-prefixed so that it
- * cannot collide with a repository of the same name and so it stays out of the
- * agent's way in a listing — discovery is not the point, since every Enclosure's
- * path is named to the agent explicitly.
+ * A subdirectory, never the root, which is the agent's to clone into (ADR-0008).
+ * Dot-prefixed so it cannot collide with a repository of the same name;
+ * discovery is not the point, since every Enclosure's path is named explicitly.
  */
 const DIRECTORY = '.enclosures'
 
@@ -102,19 +99,15 @@ export class EnclosureUnreadable extends Error {
 /**
  * A filename roma chose, carrying nothing of the sender's but the extension.
  *
- * The name is minted rather than taken because `contentName` is chosen by
- * whoever sent the message: used as a path it is a traversal, a collision
- * between two people sending `screenshot.png` into one Conversation, and
- * whatever a filesystem makes of 200 characters of Unicode. A UUID is none of
- * those things, and what the sender called it is not lost — it rides beside the
- * path as a string (see `WrittenEnclosure`).
+ * Minted, never taken: `contentName` is the sender's, and as a path it is a
+ * traversal, a collision between two people sending `screenshot.png`, and
+ * whatever a filesystem makes of 200 characters of Unicode. What they called it
+ * rides beside the path as a string (see `WrittenEnclosure`).
  *
- * The extension is the one thing carried across, because tools dispatch on it
- * and an image called `.bin` may simply not be read as one. It is carried under
- * a whitelist rather than sanitised: a bounded charset and a bounded length
- * cannot express a separator, a parent, or a leading dot, so there is nothing
- * left to strip. Anything that does not match gets no extension at all, which
- * is a worse read for the agent and never a worse file for roma.
+ * The extension carries across under a **whitelist, never a sanitiser**: a
+ * bounded charset and length cannot express a separator, a parent or a leading
+ * dot, so there is nothing left to strip. No match means no extension, which is
+ * a worse read for the agent and never a worse file for roma.
  */
 function mintedName(declared: string): string {
   const dot = declared.lastIndexOf('.')

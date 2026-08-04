@@ -16,10 +16,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
  * Joins a Conversation Key to a Session generation without either being able to
  * spell the other.
  *
- * A printable separator would let one Conversation name another's later
- * generation: with `#`, a Channel that minted the key `a#1` would derive the
- * same id as generation 1 of the key `a` — one Conversation reading and writing
- * another's Session, with nothing anywhere saying so. A NUL is the one byte a
+ * Never a printable separator: with `#`, a Channel that minted the key `a#1`
+ * derives the same id as generation 1 of the key `a` — one Conversation reading
+ * and writing another's Session with nothing saying so. NUL is the one byte a
  * Channel's own identifiers cannot carry.
  */
 const GENERATION_SEPARATOR = '\u0000'
