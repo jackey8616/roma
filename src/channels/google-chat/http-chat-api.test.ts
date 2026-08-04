@@ -251,7 +251,6 @@ interface ButtonWidget {
 /** The widgets of the one card a message carries, or nothing if it carries none. */
 function buttonWidgetsOf(body: Readonly<Record<string, unknown>> | undefined): ButtonWidget[] {
   const cards = body?.['cardsV2'] as
-    | readonly { card: { sections: readonly { widgets: ButtonWidget[] }[] } }[]
-    | undefined
+    readonly { card: { sections: readonly { widgets: ButtonWidget[] }[] } }[] | undefined
   return cards?.[0]?.card.sections[0]?.widgets ?? []
 }
