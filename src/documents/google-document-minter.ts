@@ -6,25 +6,18 @@ import type { Depot, DocumentMinter } from './depot.js'
 /**
  * What a Document Token is scoped to, every time, for everybody.
  *
- * Two constants and not a setting (ADR-0022 §3, on ADR-0015 §5's argument): a
- * scope a deployment could widen is a second boundary, invisible from where the
- * first one is administered. Nothing here takes a scope from outside, and no
- * caller has a way to ask for a wider credential than the deployment intended.
+ * Constants, never a setting (ADR-0022 §3, ADR-0015 §5): a scope a deployment
+ * could widen is a second boundary, invisible from where the first is
+ * administered. Nothing here takes a scope from outside.
  *
- * `drive.file` is **per-file**: it reaches what this app created and nothing
- * else, which is the whole of the write side and is enough for both a Doc and a
- * Sheet, because the Docs API and the Sheets API each accept it for files the
- * app created. That is also what makes the write side immune to somebody in the
- * organisation sharing a document with this identity — `drive.file` does not
- * care what was shared, only what was created.
+ * `drive.file` is per-file — what this app created and nothing else — which is
+ * what makes the write side immune to somebody sharing a document with this
+ * identity.
  *
- * `drive.readonly` is the read side and does **not** have that property: it
- * reaches everything shared with the account. It is here for two things, and the
- * second is invisible from the code that would delete it — somebody may leave
- * reference material in the Depot, and **the boot proof depends on it**. The
- * Depot folder was not created by this app, so `drive.file` cannot read it.
- * Removing this line as unused removes `depot()` below with it, and the finding
- * out happens at the next deployment rather than at the edit (ADR-0022 §3).
+ * **Do not delete `drive.readonly` as unused.** The Depot folder was not created
+ * by this app, so `drive.file` cannot read it: removing this line removes
+ * `depot()` with it, and the finding out happens at the next deployment rather
+ * than at the edit (ADR-0022 §3).
  */
 const SCOPES = [
   'https://www.googleapis.com/auth/drive.file',

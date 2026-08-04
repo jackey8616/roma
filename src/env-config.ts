@@ -203,31 +203,21 @@ export function readRomaEnv(env: Environment): RomaEnv {
 /**
  * The Pinned Effort, or null where the deployment did not name one.
  *
- * **Validated here, locally, against roma's own levels, with no process
- * involved** — and this is the one part of ADR-0016 that is a check rather than a
- * mechanism. Claude Code will not do it: an unrecognised `--effort` warns on
- * stderr, the process starts, and it runs on the build's own default. So a
- * deployment that mistyped `ROMA_EFFORT` would be wrong about the effort of every
- * Session roma serves, on every Audit Record roma writes, and nothing would stop.
- * The measurement that settled this is the `bananas` row in ADR-0016.
+ * **Validated locally, with no process involved.** Claude Code will not do it:
+ * an unrecognised `--effort` warns on stderr and the process runs on the build's
+ * own default, so a mistyped `ROMA_EFFORT` would be wrong about every Session
+ * and every Audit Record with nothing stopping (ADR-0016's `bananas` row).
  *
- * Optional, which is the opposite of what `ROMA_OVERFLOW_MONTHLY_CAP_USD` does,
- * and the difference is what the variable authorises: the Overflow cap opens a
- * *new* way to spend money, so ADR-0002 will not let roma assume consent for it.
- * Effort is money already being spent under another name. Requiring this would
- * stop every existing deployment from booting in exchange for a signature on a
- * default they are already paying for.
+ * Optional, unlike `ROMA_OVERFLOW_MONTHLY_CAP_USD`, because effort is money
+ * already being spent under another name where the Overflow cap opens a new way
+ * to spend it (ADR-0002).
  *
- * `ultracode` is accepted here and only here. It is not a level — it is `xhigh`
- * plus dynamic workflow orchestration, which turns one Task into a fleet — so it
- * is off the Effort Menu and no Caller may reach it. An operator may pin it, for
- * the reason `ROMA_MODEL` may already name a model off the Model Menu: the Menu
- * bounds Callers and never the operator.
+ * `ultracode` is accepted here and only here — it is `xhigh` plus workflow
+ * orchestration, which turns one Task into a fleet, so it stays off the Effort
+ * Menu. The Menu bounds Callers and never the operator.
  *
- * Compared exactly rather than case-folded or trimmed. `ROMA_MODEL` above is not
- * normalised either, and a variable this refuses loudly is better than one it
- * quietly repairs — the repair would be roma guessing at a value whose whole
- * purpose is to be the thing somebody decided.
+ * Compared exactly, never folded or trimmed: the repair would be roma guessing
+ * at a value whose whole purpose is to be the thing somebody decided.
  */
 function readEffort(env: Environment, problems: string[]): string | null {
   const found = envValue(env, 'ROMA_EFFORT')
@@ -247,17 +237,12 @@ function readEffort(env: Environment, problems: string[]): string | null {
 /**
  * Metered billing, which exists only when both halves of it do.
  *
- * Both or neither, and never one: a key with no cap is a credential with nothing
- * bounding what it spends, which makes ADR-0002's "off by default" ceremony
- * rather than protection; a cap with no key would have roma offer a valve there
- * is nothing behind, which is a button somebody presses while already waiting.
+ * Both or neither, never one: a key with no cap spends unbounded, and a cap with
+ * no key offers a valve with nothing behind it.
  *
- * The key is read from a name of roma's own rather than from `ANTHROPIC_API_KEY`.
- * That name is set on developer machines and in CI images for reasons that have
- * nothing to do with roma, and reading it would turn metered billing on for a
- * whole deployment because a shell profile mentioned it — the same stray-key
- * failure the startup self-check exists to catch, arriving through roma's own
- * front door.
+ * Read from a name of roma's own, never `ANTHROPIC_API_KEY` — that is set on
+ * developer machines and in CI images for unrelated reasons, and reading it
+ * would turn metered billing on because a shell profile mentioned it.
  */
 function readOverflow(
   env: Environment,

@@ -18,13 +18,10 @@ export interface CloudMinter extends MintsTokens {
 /**
  * What a Cloud Token is scoped to, every time, for everybody.
  *
- * A constant and not a setting (ADR-0015 §5). `cloud-platform` means "whatever
- * the roles allow", which is the Cloud Reach's definition — the boundary is
- * meant to be the IAM roles, visible to whoever deployed roma and auditable in
- * Google's own console. A configurable scope would be a second boundary,
- * invisible from there, whose failures present as "roma is broken" rather than
- * as "that scope is narrow". There is deliberately no environment variable for
- * it, and a caller cannot ask for a wider one because nothing takes a scope.
+ * A constant, never a setting (ADR-0015 §5). The boundary is meant to be the IAM
+ * roles, auditable in Google's own console; a configurable scope would be a
+ * second boundary invisible from there, whose failures present as "roma is
+ * broken" rather than as "that scope is narrow".
  */
 const SCOPE = 'https://www.googleapis.com/auth/cloud-platform'
 
