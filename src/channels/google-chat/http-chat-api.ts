@@ -94,7 +94,7 @@ export class HttpChatApi implements ChatApi {
       body: {
         text: message.text,
         ...(message.thread === null ? {} : { thread: { name: message.thread } }),
-        ...(message.action === undefined ? {} : { cardsV2: [cardFor(message.action)] }),
+        ...(message.actions === undefined ? {} : { cardsV2: [cardFor(message.actions)] }),
       },
     })
 
@@ -140,18 +140,22 @@ export class HttpChatApi implements ChatApi {
 }
 
 /**
- * One action as the smallest card that can carry a button.
+ * Some actions as the smallest card that can carry them.
  *
  * The one place ADR-0004's "messages are plain text" gives way: Chat has no way
  * to put a button on plain text.
  *
+ * One `buttonList` holding all of them rather than one widget each, because that
+ * is Chat's own grouping — it wraps a row across lines, which is what a
+ * six-level Effort Menu needs on a phone.
+ *
  * `action.function` and `action.parameters` are the round trip, which is why
- * roma remembers nothing between offering Overflow and its being taken. Going
+ * roma remembers nothing between offering something and its being taken. Going
  * out they must be `{key, value}` pairs; the click may return either that shape
  * or an object, and `chat-events.ts` reads both.
  * https://developers.google.com/workspace/chat/read-form-data
  */
-function cardFor(action: ChatAction): unknown {
+function cardFor(actions: readonly ChatAction[]): unknown {
   return {
     cardId: 'roma-action',
     card: {
@@ -160,20 +164,18 @@ function cardFor(action: ChatAction): unknown {
           widgets: [
             {
               buttonList: {
-                buttons: [
-                  {
-                    text: action.label,
-                    onClick: {
-                      action: {
-                        function: action.action,
-                        parameters: Object.entries(action.parameters).map(([key, value]) => ({
-                          key,
-                          value,
-                        })),
-                      },
+                buttons: actions.map((action) => ({
+                  text: action.label,
+                  onClick: {
+                    action: {
+                      function: action.action,
+                      parameters: Object.entries(action.parameters).map(([key, value]) => ({
+                        key,
+                        value,
+                      })),
                     },
                   },
-                ],
+                })),
               },
             },
           ],

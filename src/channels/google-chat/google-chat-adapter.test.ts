@@ -812,11 +812,13 @@ describe('a Task the Shared Window has blocked', () => {
       to(THREAD, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: true }, 'task-77'),
     )
 
-    expect(api.messages[0]?.posted.action).toEqual({
-      label: 'Run it on metered billing',
-      action: 'takeOverflow',
-      parameters: { taskId: 'task-77' },
-    })
+    expect(api.messages[0]?.posted.actions).toEqual([
+      {
+        label: 'Run it on metered billing',
+        action: 'takeOverflow',
+        parameters: { taskId: 'task-77' },
+      },
+    ])
   })
 
   // A button that cannot work is worse than no button: somebody waiting on a
@@ -828,7 +830,7 @@ describe('a Task the Shared Window has blocked', () => {
       to(THREAD, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: false }),
     )
 
-    expect(api.messages[0]?.posted.action).toBeUndefined()
+    expect(api.messages[0]?.posted.actions).toBeUndefined()
   })
 
   // The round trip: what went out as a parameter on the button comes back as one
@@ -867,8 +869,11 @@ describe('a Task the Shared Window has blocked', () => {
     expect(adapter.toOverflowTaken(inSpace())).toBeNull()
   })
 
-  // A click is not a message. Answering one as though it were would spend a Turn
-  // asking Claude Code what to make of a button press.
+  // *This* click is not a message. Taking Overflow is an answer to an offer roma
+  // made about one Task, so reading it as one would spend a Turn asking Claude
+  // Code what to make of a button press. A Menu press is the other case and is
+  // read as a message deliberately — see "choosing a model or an effort by
+  // pressing" (ADR-0023).
   it('reads a click as no ingress message either', () => {
     const { adapter } = newAdapter()
 
@@ -1020,5 +1025,183 @@ describe('addressing the person who asked', () => {
     await adapter.deliver(to(DM, { kind: 'result', text: 'the answer' }))
 
     expect(api.texts).toEqual([`<${SENDER}> the answer`])
+  })
+})
+
+/**
+ * The Menu as something a Caller can press instead of type (ADR-0023).
+ *
+ * Chat events here are written from Google's documented shape rather than
+ * captured, like every other event in this file: nothing in this repository can
+ * produce a real interaction event.
+ */
+describe('choosing a model or an effort by pressing', () => {
+  /** A press on one Menu button, as Chat documents an interaction event. */
+  function press(
+    chooses: string,
+    option: string,
+    { key = THREAD, direct = false }: { key?: string; direct?: boolean } = {},
+  ): ChatEvent {
+    return {
+      type: 'CARD_CLICKED',
+      // Whoever pressed. Never the card's own sender, which is roma.
+      user: { name: SENDER, displayName: 'Ada', type: 'HUMAN' },
+      space: direct
+        ? { name: SPACE, type: 'DM', spaceType: 'DIRECT_MESSAGE' }
+        : { name: SPACE, type: 'ROOM', spaceType: 'SPACE' },
+      // roma's own card, which is what a press arrives carrying.
+      message: {
+        name: `${SPACE}/messages/msg-9`,
+        sender: { name: 'users/roma', displayName: 'roma', type: 'BOT' },
+        text: 'This conversation is on sonnet (claude-sonnet-5).',
+        ...(direct ? {} : { thread: { name: key } }),
+      },
+      common: { invokedFunction: 'choose', parameters: { chooses, option } },
+    }
+  }
+
+  const MODEL_MENU = {
+    kind: 'choice',
+    text: 'This conversation is on sonnet (claude-sonnet-5). You can choose: opus, sonnet, haiku, default.',
+    chooses: 'model',
+    options: ['opus', 'sonnet', 'haiku', 'default'],
+    refused: null,
+  } as const
+
+  it('posts one button per name on the Menu, labelled by the name', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, MODEL_MENU))
+
+    // The bare name and nothing around it, unlike the Overflow button, whose
+    // label has to carry what pressing it costs. It is also the string a Caller
+    // would type, so the card teaches the typed form rather than replacing it.
+    expect(api.messages[0]?.posted.actions).toEqual([
+      { label: 'opus', action: 'choose', parameters: { chooses: 'model', option: 'opus' } },
+      { label: 'sonnet', action: 'choose', parameters: { chooses: 'model', option: 'sonnet' } },
+      { label: 'haiku', action: 'choose', parameters: { chooses: 'model', option: 'haiku' } },
+      { label: 'default', action: 'choose', parameters: { chooses: 'model', option: 'default' } },
+    ])
+  })
+
+  // The text is the whole answer already — it names the Menu in words — so a
+  // Channel that rendered no buttons would still have posted it.
+  it('posts the words as well as the buttons', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, MODEL_MENU))
+
+    expect(api.texts).toEqual([`${TO}${MODEL_MENU.text}`])
+  })
+
+  /**
+   * The whole of the design: a press is the message the Caller would have typed
+   * (ADR-0023).
+   *
+   * It is what makes a card from three weeks ago safe to press — it means *send
+   * this now* rather than carrying a decision forward — and why nothing has to be
+   * remembered between posting a card and its being pressed.
+   */
+  it('reads a press as the Command the Caller would have typed', () => {
+    const { adapter } = newAdapter()
+
+    expect(adapter.toIngress(press('model', 'opus'))).toEqual({
+      conversationKey: THREAD,
+      caller: SENDER,
+      callerName: 'Ada',
+      text: '/model opus',
+      enclosures: [],
+      quotation: null,
+    })
+  })
+
+  it('reads an effort press the same way', () => {
+    const { adapter } = newAdapter()
+
+    expect(adapter.toIngress(press('effort', 'xhigh'))?.text).toBe('/effort xhigh')
+  })
+
+  /**
+   * The trap this arrangement exists to foreclose.
+   *
+   * The message on a press event is roma's own card, whose sender is an app.
+   * Reading the Caller off it would credit the choice to roma; routing the event
+   * through `readIngressMessage` at all would meet the bot guard that stops two
+   * apps answering each other forever. Whoever pressed is on `event.user`.
+   */
+  it('takes the Caller from whoever pressed, not from the card roma posted', () => {
+    const { adapter } = newAdapter()
+
+    const message = adapter.toIngress(press('model', 'opus'))
+
+    expect(message?.caller).toBe(SENDER)
+    expect(message?.caller).not.toBe('users/roma')
+  })
+
+  // The same key derivation a message gets, from one reading — two would be two
+  // things that can drift, and a Conversation Key that drifts is a Session that
+  // loses its context.
+  it('lands in the thread it was pressed in, and in the space in a DM', () => {
+    const { adapter } = newAdapter()
+
+    expect(adapter.toIngress(press('model', 'opus'))?.conversationKey).toBe(THREAD)
+    expect(adapter.toIngress(press('model', 'opus', { direct: true }))?.conversationKey).toBe(SPACE)
+  })
+
+  // Chat's older parameter shape, for the same reason the Overflow button reads
+  // both: which one arrives depends on how the event was delivered, and reading
+  // one would make the buttons do nothing for half of them, silently.
+  it('reads the older parameter shape too', () => {
+    const { adapter } = newAdapter()
+
+    expect(
+      adapter.toIngress({
+        ...press('model', 'opus'),
+        common: undefined,
+        action: {
+          actionMethodName: 'choose',
+          parameters: [
+            { key: 'chooses', value: 'model' },
+            { key: 'option', value: 'haiku' },
+          ],
+        },
+      })?.text,
+    ).toBe('/model haiku')
+  })
+
+  // Only the two Commands that have a Menu. A parameter naming anything else is
+  // a press roma did not put out, and synthesising `/stop` or `/clear` from one
+  // would let a crafted event reach a Command through a door meant for a Menu.
+  it('reads a press naming any other Command as no message at all', () => {
+    const { adapter } = newAdapter()
+
+    expect(adapter.toIngress(press('clear', 'anything'))).toBeNull()
+    expect(adapter.toIngress(press('config', 'model=opus'))).toBeNull()
+  })
+
+  it('reads an Overflow press as no choice, and a choice press as no Overflow', () => {
+    const { adapter } = newAdapter()
+
+    expect(
+      adapter.toIngress({
+        type: 'CARD_CLICKED',
+        common: { invokedFunction: 'takeOverflow', parameters: { taskId: 'task-77' } },
+      }),
+    ).toBeNull()
+    expect(adapter.toOverflowTaken(press('model', 'opus'))).toBeNull()
+  })
+
+  // On the last message rather than every one. An answer long enough to split
+  // would otherwise repeat the whole Menu under each piece.
+  it('puts the buttons under the last message when the text has to split', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, { ...MODEL_MENU, text: 'word '.repeat(2000) }))
+
+    expect(api.messages.length).toBeGreaterThan(1)
+    expect(api.messages.at(-1)?.posted.actions).toHaveLength(4)
+    for (const message of api.messages.slice(0, -1)) {
+      expect(message.posted.actions).toBeUndefined()
+    }
   })
 })

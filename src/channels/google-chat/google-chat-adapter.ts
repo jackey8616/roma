@@ -6,6 +6,10 @@ import type {
 } from '../../channel-adapter.js'
 import type { ChatAction, ChatApi, ChatMessage } from './chat-api.js'
 import {
+  CHOOSE,
+  CHOOSES_PARAMETER,
+  OPTION_PARAMETER,
+  readChosenOption,
   readIngressMessage,
   readOverflowTaken,
   TASK_ID_PARAMETER,
@@ -26,7 +30,7 @@ const REPLY_OR_START_THREAD = 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD'
  * the same question: a blocked Task has been told something and is still
  * running, and its acknowledgement is still the message it will keep editing.
  */
-const ENDS_THE_TASK = new Set(['result', 'failure', 'stopped', 'command-outcome'])
+const ENDS_THE_TASK = new Set(['result', 'failure', 'stopped', 'command-outcome', 'choice'])
 
 /** Whether a path segment names something, rather than being absent or empty. */
 function named(segment: string | undefined): segment is string {
@@ -107,13 +111,21 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
    * sender and an @-mention have become a key, a Caller and some text.
    */
   toIngress(event: ChatEvent): IngressMessage | null {
-    return readIngressMessage(event, {
-      // Bound rather than called: `toIngress` stays synchronous, and what an
-      // Enclosure costs is paid once the Core knows the Session and knows the
-      // bytes are wanted (ADR-0011).
-      download: (resourceName) => this.#api.download(resourceName),
-      ...(this.#log === undefined ? {} : { log: this.#log }),
-    })
+    return (
+      readIngressMessage(event, {
+        // Bound rather than called: `toIngress` stays synchronous, and what an
+        // Enclosure costs is paid once the Core knows the Session and knows the
+        // bytes are wanted (ADR-0011).
+        download: (resourceName) => this.#api.download(resourceName),
+        ...(this.#log === undefined ? {} : { log: this.#log }),
+      }) ??
+      // A press on a Menu button is a message the Caller did not have to type, so
+      // it arrives here rather than through a reader of its own on this interface
+      // — pressing is typing (ADR-0023). A second reader rather than a branch
+      // inside the first: the message on a press event is roma's own card, and
+      // that reader must go on refusing anything an app said.
+      readChosenOption(event)
+    )
   }
 
   /**
@@ -158,17 +170,27 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
     // Task started again. Dropped before the messages are posted rather than
     // after, so that a post that throws still leaves nothing behind.
     if (ENDS_THE_TASK.has(instruction.kind)) this.#acknowledgements.delete(taskId)
-    // Only the message that reports a block can carry one, and only when the
-    // valve is on offer — ADR-0002 puts it at the moment of blocking rather than
-    // in a setting somebody turns on in advance.
-    const offer =
+
+    // Two messages can carry buttons and they are never the same message: the
+    // block that offers Overflow (ADR-0002 puts the valve at the moment of
+    // blocking rather than in a setting), and the Menu somebody may choose from
+    // (ADR-0023).
+    const actions =
       instruction.kind === 'blocked' && instruction.overflowOffered
-        ? this.#offer(taskId)
-        : undefined
-    for (const text of outcomeMessages(instruction)) {
+        ? [this.#offer(taskId)]
+        : instruction.kind === 'choice'
+          ? this.#choices(instruction.chooses, instruction.options)
+          : undefined
+
+    // On the last message rather than on every one. An answer long enough to
+    // split would otherwise repeat the whole Menu under each piece, and buttons
+    // belong under the text that explains them.
+    const messages = outcomeMessages(instruction)
+    for (const [at, text] of messages.entries()) {
+      const last = at === messages.length - 1
       await this.#api.post({
         ...this.#addressed(conversationKey, text),
-        ...(offer === undefined ? {} : { action: offer }),
+        ...(actions === undefined || !last ? {} : { actions }),
       })
     }
   }
@@ -189,6 +211,26 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
       action: TAKE_OVERFLOW,
       parameters: { [TASK_ID_PARAMETER]: taskId },
     }
+  }
+
+  /**
+   * One button per name on a Menu.
+   *
+   * Labelled with the name itself and nothing around it, unlike the Overflow
+   * button, whose label had to carry what pressing it costs. These cost nothing,
+   * and the bare name is also the string a Caller would type — so the card
+   * teaches the typed form rather than replacing it.
+   *
+   * Named by the Command and the name rather than by the Conversation: the press
+   * comes back as `/model opus`, which means what it means wherever and whenever
+   * it is pressed, so nothing here has to be scoped or expired (ADR-0023).
+   */
+  #choices(chooses: string, options: readonly string[]): readonly ChatAction[] {
+    return options.map((option) => ({
+      label: option,
+      action: CHOOSE,
+      parameters: { [CHOOSES_PARAMETER]: chooses, [OPTION_PARAMETER]: option },
+    }))
   }
 
   /** Post the acknowledgement, or edit the one this Task already has. */

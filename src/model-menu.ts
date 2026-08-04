@@ -69,10 +69,14 @@ export type ModelRequest =
        * Which model this Session is on, and what else it may be on.
        *
        * `/model` with no argument. Claude Code's own no-argument `/model` is an
-       * interactive picker, which a Channel cannot render — reporting is what
-       * that gesture can honestly mean in a text channel, and roma can answer it
-       * without a process, without a Turn and without money, because it owns the
-       * answer.
+       * interactive picker, and roma answers it with one: the Menu in words,
+       * which every Channel can post, plus the same Menu as something a Channel
+       * may render as pressable (ADR-0023). This said a Channel could not render
+       * a picker, which stopped being true the day ADR-0002's offer became a
+       * button.
+       *
+       * Either way roma owns the answer, so it costs no process, no Turn and no
+       * money.
        */
       readonly kind: 'report'
     }

@@ -12,6 +12,10 @@ Matrix, `ChosenEfforts` in `src/session-generation.ts` holds the record,
 reproduces the three gates quoted below by name, `claude-mythos-5` on the
 allowing branch included.
 
+**Amended 2026-08-04** by ADR-0023, in the way ADR-0002 and ADR-0003 were: the
+decision stands and the Matrix's list of uses was incomplete. It had two; there
+are three. Marked inline below.
+
 Repeats ADR-0014's shape for a second per-Session setting, and the repetition is
 the point: `/effort` fails as a relay for the same reason `/model` does, and the
 machinery that solved it is already here. What is **not** repeated is how roma
@@ -282,6 +286,15 @@ roma uses the Matrix for exactly two things:
   reply that the setting will not apply until the model changes.
 - **It records so.** The Audit Record says the effort did not apply, rather than
   naming a level nothing ran at.
+- **Amended 2026-08-04 — it shows so** (ADR-0023). Where the Matrix says the model
+  takes no effort, an `/effort` reply carries no Menu buttons. Still not a
+  refusal: `/effort max` on such a model is accepted, recorded and answered
+  exactly as before, and the typed Command is untouched. What roma declines is to
+  *invite* an action it has, in the same message, just called inert — a button
+  beside that sentence undoes the sentence. It keys on the Matrix answering
+  `false`; a model it has never been read about answers `null` and gets the
+  buttons, because roma may not withhold an offer on the strength of a reading it
+  never made.
 
 **It refuses nothing.** Setting `max` on haiku costs no more than `low` does —
 the harm is a false belief, and a false belief is answered with a sentence. The

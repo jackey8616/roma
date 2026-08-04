@@ -102,6 +102,23 @@ export function commandSpellings(): readonly string[] {
 }
 
 /**
+ * The message that chooses one name off a Menu — what a Caller would have typed,
+ * written out for a Channel that let them press it instead (ADR-0023).
+ *
+ * Here rather than in a Channel because a Command's spelling is this module's,
+ * and this one has to survive `readCommand` reading it back: a name that does
+ * not round-trip becomes a message that falls through as work, and somebody is
+ * billed for a Turn. `commands.test.ts` drives it over both Menus, which is the
+ * only thing standing between a re-audited Menu and a button that costs money.
+ */
+export function commandFor(
+  command: Extract<Command, 'model' | 'effort'>,
+  argument: string,
+): string {
+  return `/${command} ${argument}`
+}
+
+/**
  * Read a message as a Command, or null if it is work.
  *
  * The whole message has to be the Command, or a listed head and exactly one

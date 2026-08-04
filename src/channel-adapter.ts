@@ -459,6 +459,56 @@ export type OutboundInstruction = TaskAddress &
          */
         readonly carriedOut: boolean
       }
+    | {
+        /**
+         * Say what a Conversation may choose, and offer the choices themselves.
+         *
+         * What `/model` and `/effort` answer with when somebody asked what is on
+         * offer, or named something that is not. The other two things each can
+         * mean — a name on the Menu, and `default` — are a `result`, because
+         * somebody who has just chosen is not being asked to choose again.
+         *
+         * **The text is the whole answer already.** It names the Menu in words,
+         * so a Channel that cannot render a choice posts the text and is
+         * *correct* rather than degraded — which is what lets this exist without
+         * a `ChannelCapabilities` flag, and what a second Channel inherits by
+         * doing nothing.
+         *
+         * Its own kind rather than a field on `result` and another on `failure`,
+         * because a name roma does not offer is not a Task failing (ADR-0023).
+         */
+        readonly kind: 'choice'
+        /** The answer in words, Menu included. Posted as a `result`'s text is. */
+        readonly text: string
+        /**
+         * Which Command a choice would be made with.
+         *
+         * An Adapter that offers a choice has to say what taking it means, and
+         * the whole of that is this plus one of `options` — `/model opus`. There
+         * is no third vocabulary: taking a choice is sending the Command the
+         * Caller would otherwise have typed, which is what makes it need no new
+         * authority, no expiry and nothing remembered (ADR-0023).
+         */
+        readonly chooses: Extract<Command, 'model' | 'effort'>
+        /**
+         * Every name that may be chosen, in the order the Menu lists them.
+         *
+         * Never empty: where roma has nothing to offer it sends a `result` or a
+         * `failure` instead, so an Adapter never has to render an offer of
+         * nothing.
+         */
+        readonly options: readonly string[]
+        /**
+         * The name roma was asked for and does not offer, or null where nothing
+         * was refused.
+         *
+         * Here because the two messages that carry choices answer different
+         * questions — *what is on offer*, and *the thing you asked for is not* —
+         * and this is the only thing that tells them apart. Without it an Adapter
+         * would be reading the Core's own sentence to find out.
+         */
+        readonly refused: string | null
+      }
   )
 
 /**

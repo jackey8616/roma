@@ -290,6 +290,66 @@ describe('the Overflow offer, out on a card and back on a click', () => {
   })
 })
 
+describe('a Menu, out on a card and back on a press', () => {
+  /**
+   * The design's whole safety argument, and it crosses both seams: *pressing is
+   * typing* (ADR-0023).
+   *
+   * Neither seam can see it alone. Seam 1 knows the Core answers `/model opus` by
+   * moving the Session; seam 3 knows a press becomes the text `/model opus`. What
+   * neither proves is that the button roma actually posted carries the two
+   * parameters the reader actually reads — an Adapter emitting a button its own
+   * reader cannot read back gives you a roma that runs perfectly and answers
+   * nobody, which is the failure this file exists for.
+   */
+  it('moves the Session onto the model whose button came back', async () => {
+    const roma = await boot()
+    // Counted rather than assumed zero: booting spawns the Startup Self-Check's
+    // own probe, and what matters here is that answering `/model` adds nothing to
+    // it — roma owns the answer, so no process, no Turn and no money.
+    const atBoot = roma.claude.processes.length
+
+    roma.subscription.publishJson(mentioned('/model'), 'msg-1')
+    await flush()
+
+    // The Menu, as buttons on the message that reports it.
+    const card = roma.requests.findLast(({ body }) => body['cardsV2'] !== undefined)
+    expect(labelsOf(card)).toEqual(['opus', 'sonnet', 'haiku', 'default'])
+    expect(roma.claude.processes).toHaveLength(atBoot)
+
+    // The press, in the shape Chat's current interaction event uses. Nothing of
+    // roma's is remembered between the card going out and this arriving.
+    roma.subscription.publishJson(pressOf(card, 'opus'), 'msg-2')
+    await flush()
+
+    // And the Session is on it, by the same path a typed `/model opus` takes.
+    const message = roma.subscription.publishJson(mentioned('hello'), 'msg-3')
+    await flush()
+    feed(roma.procFor(), OK)
+    await until(() => message.settlements.length > 0)
+
+    expect(roma.claude.lastSpawn.args).toContain('claude-opus-5')
+  })
+
+  // The other half of the same claim: a press is answered in the Conversation it
+  // was pressed in, addressed to whoever pressed, exactly as the typed Command
+  // would have been.
+  it('answers the press in the thread, addressed to whoever pressed', async () => {
+    const roma = await boot()
+
+    roma.subscription.publishJson(mentioned('/effort'), 'msg-1')
+    await flush()
+    const card = roma.requests.findLast(({ body }) => body['cardsV2'] !== undefined)
+    expect(labelsOf(card)).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'default'])
+
+    roma.subscription.publishJson(pressOf(card, 'xhigh'), 'msg-2')
+    await flush()
+
+    expect(roma.texts().at(-1)).toContain(TO)
+    expect(roma.texts().at(-1)).toContain('xhigh')
+  })
+})
+
 describe('a message that is not one', () => {
   it('finishes with bytes that are not JSON, and keeps serving', async () => {
     const roma = await boot()
@@ -431,4 +491,59 @@ async function until(condition: () => boolean, attempts = 500): Promise<void> {
     await flush()
   }
   throw new Error('gave up waiting')
+}
+
+/** Just enough of a posted card to read its buttons back out. */
+interface PostedCard {
+  readonly card: {
+    readonly sections: readonly {
+      readonly widgets: readonly {
+        readonly buttonList: {
+          readonly buttons: readonly {
+            readonly text: string
+            readonly onClick: {
+              readonly action: { readonly parameters: readonly { key: string; value: string }[] }
+            }
+          }[]
+        }
+      }[]
+    }[]
+  }
+}
+
+/** What a posted card's buttons say, in the order Chat was asked to show them. */
+function buttonsOf(request: ChatRequest | undefined) {
+  const cards = request?.body['cardsV2'] as readonly PostedCard[] | undefined
+  const buttons = cards?.[0]?.card.sections[0]?.widgets[0]?.buttonList.buttons
+  if (buttons === undefined) throw new Error('no card with buttons was posted')
+  return buttons
+}
+
+function labelsOf(request: ChatRequest | undefined): string[] {
+  return buttonsOf(request).map(({ text }) => text)
+}
+
+/**
+ * A press on one of the buttons roma actually posted.
+ *
+ * Built from the card's own parameters rather than from strings a test wrote, so
+ * that a button carrying something the reader cannot read fails here.
+ */
+function pressOf(request: ChatRequest | undefined, label: string): Record<string, unknown> {
+  const button = buttonsOf(request).find(({ text }) => text === label)
+  if (button === undefined) throw new Error(`no button labelled ${label}`)
+  const parameters = Object.fromEntries(
+    button.onClick.action.parameters.map(({ key, value }) => [key, value]),
+  )
+  return {
+    type: 'CARD_CLICKED',
+    user: { name: SENDER, displayName: 'Ada', type: 'HUMAN' },
+    space: { name: SPACE, type: 'ROOM', spaceType: 'SPACE' },
+    message: {
+      name: `${SPACE}/messages/msg-card`,
+      sender: { name: 'users/roma', displayName: 'roma', type: 'BOT' },
+      thread: { name: THREAD },
+    },
+    common: { invokedFunction: 'choose', parameters },
+  }
 }
