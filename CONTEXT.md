@@ -188,15 +188,32 @@ Code processes. Knows nothing about which Channel a message came from.
 _Avoid_: backend, server, bridge, engine
 
 **Session**:
-The Claude Code state backing one Conversation: a Transcript, a session id, and a
-working directory.
+One Runtime's state backing one Conversation: a Transcript, a session id, and a
+working directory. Which Runtime is the Session's own property, chosen at its
+start (ADR-0024).
 _Avoid_: context, history, conversation
 
+**Runtime**:
+The agent CLI serving one Session's Turns — Claude Code or Codex. A Session has
+exactly one, chosen by a person when the Session starts and fixed for its life:
+changing it is `/clear`, because that is a new Session, and the choice is asked
+there again. A property of a Session and never of a Conversation or a Caller —
+the same thread runs on Codex today and Claude Code after a `/clear`, and
+nobody's identity decides which (ADR-0024). Each Runtime brings its own pinned
+model and its own subscription credential, so a sentence about "the" model or
+"the" window now has to say which Runtime it is about.
+_Avoid_: engine, backend (both already refused for the Core), provider (that is
+a Reach's word for the company on the other end), agent (that is what does the
+work inside a Turn, whichever Runtime runs it), CLI (its shape, not its role),
+and thread (that is Codex's own word for what backs a Session, as session is
+Claude Code's — both are the Runtime's words, not roma's)
+
 **Transcript**:
-Claude Code's own record of a Session, holding every event of every Turn it has
-served. Not roma's: roma names the directory it lives in, reads nothing out of
-it, deletes nothing from it, and writes no second copy — so this is the only
-account there is of what an agent actually did. It therefore outlives the
+A Runtime's own record of a Session, holding every event of every Turn it has
+served — Claude Code's transcript files, Codex's rollout files; one kind of
+thing under two spellings. Not roma's: roma names the directory it lives in,
+reads nothing out of it, deletes nothing from it, and writes no second copy —
+so this is the only account there is of what an agent actually did. It therefore outlives the
 Session's working directory, which ADR-0003 reclaims after seven idle days —
 deliberately, and ADR-0006 is where that asymmetry was decided rather than
 inherited.
@@ -431,10 +448,11 @@ invocation instead
 
 **Pinned Model**:
 The model roma runs every Session on, unless that Session has a Chosen Model. One
-per deployment, fixed before boot, and proved at startup against what Claude Code
-says it resolved to — because the model follows the credential and moves without
-saying so (ADR-0003). Not a fallback and not Claude Code's own default, which
-never runs: this is what roma insists on.
+per Runtime per deployment, fixed before boot, and proved at startup against what
+the Runtime says it resolved to — because the model follows the credential and
+moves without saying so (ADR-0003). Not a fallback and not the Runtime's own
+default, which never runs: this is what roma insists on, on both Runtimes
+(ADR-0025).
 _Avoid_: default model (that is the argument `/model default` takes, not the name
 of the thing it returns to), the model, configured model
 
@@ -467,8 +485,8 @@ How hard roma asks the model to think, on every Session that has not been moved.
 The Pinned Model's opposite number and argued the same way: it is a thing that was
 always being set — by a settings file roma neither writes nor reads — and pinning
 it does not change what happens, it makes roma able to say what happens
-(ADR-0016). One per deployment, fixed before boot, and carried on every spawn so
-that no Session runs on an effort nobody chose.
+(ADR-0016). One per Runtime per deployment, fixed before boot, and carried on
+every spawn so that no Session runs on an effort nobody chose (ADR-0025).
 _Avoid_: default effort (that is the argument `/effort default` takes, not the
 name of the thing it returns to), effort setting, reasoning level
 
@@ -714,23 +732,30 @@ workspace, and using this for what the Reach reaches
 ### Paying for it
 
 **Shared Window**:
-The rolling subscription quota everyone draws on, because everyone shares one
-token. When it is spent, everyone is blocked at once — including the token's
-owner.
+The rolling subscription quota everyone on one Runtime draws on, because
+everyone shares that Runtime's one credential. When it is spent, everyone on
+that Runtime is blocked at once — including the credential's owner. One per
+Runtime, so a sentence about the window has to say whose: Claude Code's and
+Codex's are separate quotas on separate credentials, and spending one leaves
+the other's Sessions untouched (ADR-0024).
 _Avoid_: rate limit, quota, budget
 
 **Overflow**:
 Running one blocked Task on metered API billing instead of the Shared Window.
 Off by default and offered per-Task at the moment of blocking. Mechanically it is
 not a mode: it is the other environment map, chosen per Turn, and it moves back
-on its own for the Conversation's next message.
+on its own for the Conversation's next message. Claude Code's alone: a Codex
+Task that hits its window fails with the reason instead, and ADR-0025 is where
+that asymmetry is argued rather than an oversight.
 _Avoid_: fallback, API mode, paid mode, spillover
 
 **Parked**:
-What a Task is between the Shared Window being spent and it coming back: kept,
-said out loud, holding no concurrency slot and no process, and stoppable
-throughout. Distinct from queued — the Task Queue decides what may run now, and a
-parked Task is waiting on the provider rather than on roma.
+What a Task is while it waits on something that is neither roma nor the queue:
+kept, said out loud, holding no concurrency slot and no process, and stoppable
+throughout. Two things park one today — the Shared Window being spent, where the
+wait is on the provider, and a Session awaiting its Runtime, where the wait is
+on a person (ADR-0024). Distinct from queued — the Task Queue decides what may
+run now, and a parked Task is not asking it yet.
 _Avoid_: paused, retrying, backing off, queued (that word is the Task Queue's)
 
 **Audit Record**:
