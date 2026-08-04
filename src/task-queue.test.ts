@@ -210,9 +210,15 @@ describe('telling a waiting caller where it is', () => {
     const first = pending()
     const second = pending()
 
-    const runningTask = queue.run(A, running.run, { notice: (position) => void positions.push(position) })
-    const firstTask = queue.run(B, first.run, { notice: (position) => void positions.push(position) })
-    const secondTask = queue.run(C, second.run, { notice: (position) => void positions.push(position) })
+    const runningTask = queue.run(A, running.run, {
+      notice: (position) => void positions.push(position),
+    })
+    const firstTask = queue.run(B, first.run, {
+      notice: (position) => void positions.push(position),
+    })
+    const secondTask = queue.run(C, second.run, {
+      notice: (position) => void positions.push(position),
+    })
     await flush()
 
     expect(positions).toEqual([1, 2])
@@ -235,8 +241,12 @@ describe('telling a waiting caller where it is', () => {
     const running = pending()
     const behind = pending()
 
-    const runningTask = queue.run(A, running.run, { notice: (position) => void positions.push(position) })
-    const behindTask = queue.run(A, behind.run, { notice: (position) => void positions.push(position) })
+    const runningTask = queue.run(A, running.run, {
+      notice: (position) => void positions.push(position),
+    })
+    const behindTask = queue.run(A, behind.run, {
+      notice: (position) => void positions.push(position),
+    })
     await flush()
 
     expect(positions).toEqual([1])

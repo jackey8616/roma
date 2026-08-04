@@ -277,7 +277,6 @@ describe('the startup self-check', () => {
   })
 })
 
-
 /**
  * The one condition the check notices and does not refuse over.
  *
@@ -410,9 +409,7 @@ describe('what the probe says about its effort', () => {
 
       expect(report.apiKeySource).toBe('none')
       expect(report.effort).toMatchObject({ reported: null, agrees: false })
-      expect(log).toEqual([
-        { event: 'effort-unverified', pinned: PINNED_EFFORT, reported: null },
-      ])
+      expect(log).toEqual([{ event: 'effort-unverified', pinned: PINNED_EFFORT, reported: null }])
     } finally {
       vi.useRealTimers()
     }

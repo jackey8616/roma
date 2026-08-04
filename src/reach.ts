@@ -123,8 +123,7 @@ export type UnavailableReach<C extends CredentialWanted = CredentialWanted> = Re
 }
 
 export type Reach<C extends CredentialWanted = CredentialWanted> =
-  | AvailableReach<C>
-  | UnavailableReach<C>
+  AvailableReach<C> | UnavailableReach<C>
 
 /**
  * One Reach per credential roma can be asked for.

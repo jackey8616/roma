@@ -146,9 +146,7 @@ describe('the image carries a Document Shortcut', () => {
   // no Document Reach gets the command and one sentence saying there is none,
   // rather than a `command not found` an agent investigates.
   it('puts the Shortcut on PATH, under a name of roma’s own', () => {
-    expect(dockerfile()).toMatch(
-      /document-token\.js[^\n]*> \/usr\/local\/bin\/roma-document-token/,
-    )
+    expect(dockerfile()).toMatch(/document-token\.js[^\n]*> \/usr\/local\/bin\/roma-document-token/)
   })
 })
 

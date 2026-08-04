@@ -61,7 +61,9 @@ function googleAnswering(reply: () => { status?: number; body: unknown }) {
   }
 }
 
-const A_TOKEN = () => ({ body: { access_token: 'ya29.a-token', expires_in: 3599, token_type: 'Bearer' } })
+const A_TOKEN = () => ({
+  body: { access_token: 'ya29.a-token', expires_in: 3599, token_type: 'Bearer' },
+})
 
 /** The assertion, read back apart from its signature. */
 function claimsOf(assertion: string): Record<string, unknown> {

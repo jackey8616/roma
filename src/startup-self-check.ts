@@ -109,7 +109,11 @@ export class StartupSelfCheckFailed extends Error {
   constructor(failures: readonly SelfCheckFailure[]) {
     super(
       ['roma refused to start — the startup self-check failed.']
-        .concat(failures.map(({ condition, detail, check }) => `  [${condition}] ${detail}\n    ${check}`))
+        .concat(
+          failures.map(
+            ({ condition, detail, check }) => `  [${condition}] ${detail}\n    ${check}`,
+          ),
+        )
         .join('\n'),
     )
     this.name = 'StartupSelfCheckFailed'
@@ -422,11 +426,7 @@ function names(message: string, word: string): boolean {
   return new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(message)
 }
 
-function checkInit(
-  init: SystemInit,
-  credential: Credential,
-  model: string,
-): SelfCheckFailure[] {
+function checkInit(init: SystemInit, credential: Credential, model: string): SelfCheckFailure[] {
   const failures: SelfCheckFailure[] = []
   const expectedSource = apiKeySourceFor(credential.kind)
 

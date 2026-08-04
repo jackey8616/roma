@@ -66,9 +66,9 @@ describe('a deployment with a Cloud Reach', () => {
     expect(readCloudEnv({ [CLOUD_KEY_FILE_VAR]: named })?.tokenEndpoint).toBe(
       'https://elsewhere.test/token',
     )
-    expect(readCloudEnv({ [CLOUD_KEY_FILE_VAR]: keyFile(JSON.stringify(silent)) })?.tokenEndpoint).toBe(
-      'https://oauth2.googleapis.com/token',
-    )
+    expect(
+      readCloudEnv({ [CLOUD_KEY_FILE_VAR]: keyFile(JSON.stringify(silent)) })?.tokenEndpoint,
+    ).toBe('https://oauth2.googleapis.com/token')
   })
 })
 
@@ -91,8 +91,16 @@ describe('a Cloud Reach that was meant and does not work', () => {
     ['a path that is not there', () => join(scratch(), 'gone.json'), /could not read/],
     ['a file with nothing in it', () => keyFile('   \n'), /empty/],
     ['a file that is not JSON', () => keyFile('-----BEGIN PRIVATE KEY-----\n'), /not JSON/],
-    ['JSON that is not a service account key', () => keyFile('{"hello":"world"}'), /not a service account key/],
-    ['a key with no private half', () => keyFile(JSON.stringify({ ...A_KEY, private_key: '' })), /not a service account key/],
+    [
+      'JSON that is not a service account key',
+      () => keyFile('{"hello":"world"}'),
+      /not a service account key/,
+    ],
+    [
+      'a key with no private half',
+      () => keyFile(JSON.stringify({ ...A_KEY, private_key: '' })),
+      /not a service account key/,
+    ],
   ])('refuses %s', (_what, named, complaint) => {
     const path = named()
 

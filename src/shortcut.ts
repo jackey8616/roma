@@ -70,8 +70,10 @@ export async function shortcut({
     // Refused rather than ignored. A silently ignored `--jsno` hands back a bare
     // token to something that was about to parse it, and the failure surfaces as
     // unreadable JSON several steps away from the typo that caused it.
-    err.write(`${name}: ${JSON.stringify(unknown[0])} is not something it takes. ` +
-      `Run it with no arguments for the token, or with --json for the token, its expiry and the account.\n`)
+    err.write(
+      `${name}: ${JSON.stringify(unknown[0])} is not something it takes. ` +
+        `Run it with no arguments for the token, or with --json for the token, its expiry and the account.\n`,
+    )
     return MISUSED
   }
 

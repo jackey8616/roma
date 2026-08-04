@@ -140,9 +140,7 @@ describe('adding a calendar month up', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ credential: 'shared-window', apiKeySource: 'none', costUsd: 0.01 }))
-    log.record(
-      entry({ credential: 'overflow', apiKeySource: 'ANTHROPIC_API_KEY', costUsd: 0.9 }),
-    )
+    log.record(entry({ credential: 'overflow', apiKeySource: 'ANTHROPIC_API_KEY', costUsd: 0.9 }))
 
     expect(log.totalFor(MONTH, 'overflow')).toMatchObject({ tasks: 1, costUsd: 0.9 })
     expect(log.totalFor(MONTH)).toMatchObject({ tasks: 2, costUsd: 0.91 })

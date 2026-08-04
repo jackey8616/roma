@@ -98,9 +98,9 @@ describe('deciding whether Overflow can even be offered', () => {
 
   // Nothing said about overage is not permission to spend metered money.
   it('is not offered where the event says nothing about overage', () => {
-    expect(
-      overflowOffer(readSharedWindow(withStatus('rejected', { overageStatus: null }))!),
-    ).toBe(false)
+    expect(overflowOffer(readSharedWindow(withStatus('rejected', { overageStatus: null }))!)).toBe(
+      false,
+    )
   })
 
   // Already on metered billing: there is nothing left to offer, and offering it

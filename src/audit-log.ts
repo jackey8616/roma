@@ -1,4 +1,12 @@
-import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync } from 'node:fs'
+import {
+  appendFileSync,
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { apiKeySourceFor, type CredentialKind } from './build-env.js'
 import { writeToStderr } from './operator-log.js'
@@ -34,9 +42,7 @@ function isCompaction(value: unknown): boolean {
   if (typeof value !== 'object' || value === null) return false
   const { trigger, preTokens, postTokens } = value as Record<string, unknown>
   return (
-    (trigger === null || typeof trigger === 'string') &&
-    isFigure(preTokens) &&
-    isFigure(postTokens)
+    (trigger === null || typeof trigger === 'string') && isFigure(preTokens) && isFigure(postTokens)
   )
 }
 

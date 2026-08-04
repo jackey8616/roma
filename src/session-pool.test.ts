@@ -1116,7 +1116,9 @@ describe('running a Turn on the other credential', () => {
   // record lying about which credential paid.
   it('refuses a credential it has no environment for', async () => {
     const { pool } = newPool({
-      envs: { 'shared-window': () => ({ PATH: '/usr/bin', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' }) },
+      envs: {
+        'shared-window': () => ({ PATH: '/usr/bin', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' }),
+      },
     })
 
     await expect(pool.send(A, 'hello', 'overflow')).rejects.toThrow(/overflow/i)

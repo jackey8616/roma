@@ -130,15 +130,16 @@ async function boot({
     roma,
     /** Everything roma posted into Chat, in order. */
     texts: () =>
-      requests
-        .filter(({ method }) => method === 'POST')
-        .map(({ body }) => body['text'] as string),
+      requests.filter(({ method }) => method === 'POST').map(({ body }) => body['text'] as string),
     procFor: (conversationKey = THREAD) => fixture.procFor(conversationKey),
   }
 }
 
 afterEach(async () => {
-  await teardownRoma(running, fixtures.flatMap(({ roots }) => roots))
+  await teardownRoma(
+    running,
+    fixtures.flatMap(({ roots }) => roots),
+  )
   running = []
   fixtures = []
 })
@@ -268,7 +269,9 @@ describe('the Overflow offer, out on a card and back on a click', () => {
     feed(roma.procFor(), BLOCKED_WITH_OVERAGE)
     await flush()
 
-    const taskId = buttonTaskIdOf(roma.requests.findLast(({ body }) => body['cardsV2'] !== undefined))
+    const taskId = buttonTaskIdOf(
+      roma.requests.findLast(({ body }) => body['cardsV2'] !== undefined),
+    )
     roma.subscription.publishJson(
       {
         type: 'CARD_CLICKED',
@@ -408,8 +411,8 @@ function buttonTaskIdOf(request: ChatRequest | undefined): string {
         },
       ]
     | undefined
-  const parameters = cards?.[0].card.sections[0].widgets[0].buttonList.buttons[0].onClick.action
-    .parameters
+  const parameters =
+    cards?.[0].card.sections[0].widgets[0].buttonList.buttons[0].onClick.action.parameters
   const taskId = parameters?.find(({ key }) => key === 'taskId')?.value
   if (taskId === undefined) throw new Error('no Overflow button was posted')
   return taskId

@@ -60,7 +60,9 @@ interface Reading {
 function read(path: string): Reading {
   return {
     bytes: statSync(path).size,
-    lines: readFileSync(path, 'utf8').split('\n').filter((line) => line !== '').length,
+    lines: readFileSync(path, 'utf8')
+      .split('\n')
+      .filter((line) => line !== '').length,
   }
 }
 

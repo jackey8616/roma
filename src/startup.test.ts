@@ -97,7 +97,10 @@ function announcedTo(spawn: { args: readonly string[] }): string {
 }
 
 afterEach(async () => {
-  await teardownRoma(started, fixtures.flatMap(({ roots }) => roots))
+  await teardownRoma(
+    started,
+    fixtures.flatMap(({ roots }) => roots),
+  )
   started = []
   fixtures = []
 })
@@ -146,7 +149,14 @@ describe('starting roma', () => {
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [], quotation: null })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
     await flush()
     feed(roma.procFor(KEY), OK)
     await handled
@@ -264,7 +274,14 @@ describe('starting roma', () => {
     await roma.answerProbe()
     const { core, audit } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [], quotation: null })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
     await flush()
     feed(roma.procFor(KEY), OK)
     await handled
@@ -272,7 +289,8 @@ describe('starting roma', () => {
     const month = monthOf(new Date())
     expect(audit.readMonth(month)).toMatchObject([
       {
-        caller: 'someone', callerName: 'Someone',
+        caller: 'someone',
+        callerName: 'Someone',
         sessionId: sessionIdFor(KEY),
         outcome: 'result',
         credential: 'shared-window',
@@ -404,7 +422,9 @@ describe('proving the Cloud Reach before anything can ask to use it', () => {
   })
 
   it('reports which identity the agent acts as, for the boot log', async () => {
-    const roma = boot({ cloudMinter: new FakeCloudMinter({ account: 'agent@a-project.iam.gserviceaccount.com' }) })
+    const roma = boot({
+      cloudMinter: new FakeCloudMinter({ account: 'agent@a-project.iam.gserviceaccount.com' }),
+    })
     await roma.answerProbe()
     await roma.starting
 
@@ -479,7 +499,9 @@ describe('proving the Document Reach before anything can ask to use it', () => {
   it('refuses to start when the Depot answers and will not take children', async () => {
     const roma = boot({
       documentMinter: new FakeDocumentMinter({
-        depotFailsWith: new Error('roma can see the Depot "FOLDER_ID" and cannot add anything to it'),
+        depotFailsWith: new Error(
+          'roma can see the Depot "FOLDER_ID" and cannot add anything to it',
+        ),
       }),
     })
 
@@ -514,7 +536,9 @@ describe('proving the Document Reach before anything can ask to use it', () => {
 
   it('reports which identity the agent writes as, for the boot log', async () => {
     const roma = boot({
-      documentMinter: new FakeDocumentMinter({ account: 'writer@a-project.iam.gserviceaccount.com' }),
+      documentMinter: new FakeDocumentMinter({
+        account: 'writer@a-project.iam.gserviceaccount.com',
+      }),
     })
     await roma.answerProbe()
     await roma.starting
@@ -541,7 +565,9 @@ describe('proving the Document Reach before anything can ask to use it', () => {
   // line beside this one is written per *request*, and the Shortcut asks on every
   // invocation by design.
   it('records a mint of a Document Token, and not the asks it served from cache', async () => {
-    const documentMinter = new FakeDocumentMinter({ account: 'writer@a-project.iam.gserviceaccount.com' })
+    const documentMinter = new FakeDocumentMinter({
+      account: 'writer@a-project.iam.gserviceaccount.com',
+    })
     const roma = boot({ documentMinter })
     await roma.answerProbe()
     await roma.starting
@@ -624,12 +650,21 @@ describe('telling a Session about the documents', () => {
   it('names the Document Reach in the system prompt, beside the other two', async () => {
     const roma = boot({
       cloudMinter: new FakeCloudMinter(),
-      documentMinter: new FakeDocumentMinter({ account: 'writer@a-project.iam.gserviceaccount.com' }),
+      documentMinter: new FakeDocumentMinter({
+        account: 'writer@a-project.iam.gserviceaccount.com',
+      }),
     })
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [], quotation: null })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
     await flush()
     const spawn = roma.claude.lastSpawn
     feed(roma.procFor(KEY), OK)
@@ -648,7 +683,14 @@ describe('telling a Session about the documents', () => {
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [], quotation: null })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
     await flush()
     const spawn = roma.claude.lastSpawn
     feed(roma.procFor(KEY), OK)
@@ -670,7 +712,14 @@ describe('whether a Task used the Document Reach', () => {
     await roma.answerProbe()
     const { core, audit } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [], quotation: null })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
     await flush()
     await askMinter(socketPathIn(roma.shims.dir), {
       session: sessionIdFor(KEY),
@@ -695,7 +744,14 @@ describe('whether a Task used the Document Reach', () => {
     await roma.answerProbe()
     const { core, audit } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [], quotation: null })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
     await flush()
     await askMinter(socketPathIn(roma.shims.dir), {
       session: sessionIdFor(KEY),
@@ -717,7 +773,14 @@ describe('whether a Task used the Document Reach', () => {
     await roma.answerProbe()
     const { core, audit } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [], quotation: null })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
     await flush()
     feed(roma.procFor(KEY), OK)
     await handled
@@ -798,11 +861,20 @@ describe('telling a Session about the cloud', () => {
   // Turn, a Session remembers nothing, and that is a Turn paid once per Session
   // to save Turns.
   it('names the Cloud Reach in the system prompt, beside what it can reach on the forge', async () => {
-    const roma = boot({ cloudMinter: new FakeCloudMinter({ account: 'agent@a-project.iam.gserviceaccount.com' }) })
+    const roma = boot({
+      cloudMinter: new FakeCloudMinter({ account: 'agent@a-project.iam.gserviceaccount.com' }),
+    })
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [], quotation: null })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
     await flush()
     const spawn = roma.claude.lastSpawn
     feed(roma.procFor(KEY), OK)
@@ -819,7 +891,14 @@ describe('telling a Session about the cloud', () => {
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [], quotation: null })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
     await flush()
     const spawn = roma.claude.lastSpawn
     feed(roma.procFor(KEY), OK)
@@ -841,7 +920,14 @@ describe('whether a Task used the Cloud Reach', () => {
     await roma.answerProbe()
     const { core, audit } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [], quotation: null })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
     await flush()
     await askMinter(socketPathIn(roma.shims.dir), {
       session: sessionIdFor(KEY),
@@ -864,7 +950,14 @@ describe('whether a Task used the Cloud Reach', () => {
     await roma.answerProbe()
     const { core, audit } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [], quotation: null })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
     await flush()
     await askMinter(socketPathIn(roma.shims.dir), {
       session: sessionIdFor(KEY),
@@ -883,7 +976,14 @@ describe('whether a Task used the Cloud Reach', () => {
     await roma.answerProbe()
     const { core, audit } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [], quotation: null })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
     await flush()
     feed(roma.procFor(KEY), OK)
     await handled
@@ -898,7 +998,14 @@ describe('putting a credential in front of a Session’s tools', () => {
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [], quotation: null })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
     await flush()
     const spawn = roma.claude.lastSpawn
     feed(roma.procFor(KEY), OK)
@@ -912,7 +1019,14 @@ describe('putting a credential in front of a Session’s tools', () => {
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [], quotation: null })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
     await flush()
     const { env } = roma.claude.lastSpawn
     feed(roma.procFor(KEY), OK)
@@ -933,9 +1047,7 @@ describe('putting a credential in front of a Session’s tools', () => {
     await roma.starting
 
     expect(existsSync(socketPathIn(roma.shims.dir))).toBe(true)
-    expect(readFileSync(join(roma.shims.dir, 'gitconfig'), 'utf8')).toBe(
-      roma.shims.gitConfig,
-    )
+    expect(readFileSync(join(roma.shims.dir, 'gitconfig'), 'utf8')).toBe(roma.shims.gitConfig)
     expect(readdirSync(roma.workRoot)).toEqual([])
   })
 
@@ -947,7 +1059,14 @@ describe('putting a credential in front of a Session’s tools', () => {
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const handled = core.handle({ conversationKey: KEY, caller: 'someone', callerName: 'Someone', text: 'hello', enclosures: [], quotation: null })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
     await flush()
     const { env } = roma.claude.lastSpawn
     feed(roma.procFor(KEY), OK)

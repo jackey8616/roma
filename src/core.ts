@@ -1141,7 +1141,10 @@ export class Core {
     // report a token the first one had already consumed the answer for.
     const cloudReach = this.#usedCloudReach(taskId)
     const documentReach = this.#usedDocumentReach(taskId)
-    for (const credential of [answeredOn, ...attempts.credentials().filter((c) => c !== answeredOn)]) {
+    for (const credential of [
+      answeredOn,
+      ...attempts.credentials().filter((c) => c !== answeredOn),
+    ]) {
       const paid = attempts.spentOn(credential)
       // The Task's own record is written whatever it spent, including nothing.
       // A second one exists only where a second credential really paid for part

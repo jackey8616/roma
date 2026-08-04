@@ -291,7 +291,6 @@ export async function startRoma({
     log?.({ event: 'reach', credential: reach.credential, account })
   }
 
-
   // What the deployment pinned, named once rather than defaulted in each of the
   // three places that need it. `/model default` returns a Session to *this*
   // rather than to a literal, which is the whole of why `ROMA_MODEL` and a Chosen

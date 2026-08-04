@@ -120,7 +120,10 @@ export async function credentialFor(
   try {
     answer = await askMinter(shim.socketPath, { ...request, session: shim.sessionId })
   } catch (error) {
-    return { token: null, complaint: `roma could not be reached for a credential: ${reasonOf(error)}` }
+    return {
+      token: null,
+      complaint: `roma could not be reached for a credential: ${reasonOf(error)}`,
+    }
   }
 
   if (answer.token !== null) return { token: answer.token, complaint: null }

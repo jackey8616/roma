@@ -118,9 +118,9 @@ describe('answering a Credential Shim', () => {
     expect(answer.token).toBeNull()
     expect(log).toContainEqual(expect.objectContaining({ event: 'shim-unreadable' }))
     // Still serving: one bad line is not the end of every credential in roma.
-    expect(
-      (await askMinter(server.socketPath, { session: SESSION, operation: 'get' })).token,
-    ).toBe('token-1')
+    expect((await askMinter(server.socketPath, { session: SESSION, operation: 'get' })).token).toBe(
+      'token-1',
+    )
   })
 })
 
@@ -332,9 +332,9 @@ describe('the socket itself', () => {
     })
     servers.push(server)
 
-    expect(
-      (await askMinter(server.socketPath, { session: SESSION, operation: 'get' })).token,
-    ).toBe('token-1')
+    expect((await askMinter(server.socketPath, { session: SESSION, operation: 'get' })).token).toBe(
+      'token-1',
+    )
   })
 
   it('is gone once roma has stopped answering on it', async () => {

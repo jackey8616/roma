@@ -36,7 +36,14 @@ const KEY = 'conversation-one'
  * none of the compiler's output.
  */
 function said(text: string, conversationKey = KEY): IngressMessage {
-  return { conversationKey, caller: 'ada', callerName: 'Ada', text, enclosures: [], quotation: null }
+  return {
+    conversationKey,
+    caller: 'ada',
+    callerName: 'Ada',
+    text,
+    enclosures: [],
+    quotation: null,
+  }
 }
 
 let running: Serving[] = []
@@ -93,7 +100,10 @@ async function booted(options?: { overflow?: boolean }) {
 }
 
 afterEach(async () => {
-  await teardownRoma(running, fixtures.flatMap(({ roots }) => roots))
+  await teardownRoma(
+    running,
+    fixtures.flatMap(({ roots }) => roots),
+  )
   running = []
   fixtures = []
 })

@@ -88,7 +88,8 @@ const NAMES_A_CONFIG_DIR = /\b(configDir|CLAUDE_CONFIG_DIR|CLAUDE_SECURESTORAGE_
  * for the "reads nothing out of it" half, which is ADR-0005's and older than
  * this decision.
  */
-const ENTERS = /\b(join|resolve|relative|basename|dirname|rmSync|rm|rmdirSync|unlinkSync|unlink|readdirSync|readFileSync|createReadStream|existsSync|statSync|globSync)\b/
+const ENTERS =
+  /\b(join|resolve|relative|basename|dirname|rmSync|rm|rmdirSync|unlinkSync|unlink|readdirSync|readFileSync|createReadStream|existsSync|statSync|globSync)\b/
 
 /**
  * A config directory used in a way that enters it.

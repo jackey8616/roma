@@ -167,10 +167,7 @@ export function quotaEvent(info: Record<string, unknown> = {}): ClaudeEvent {
  * read rather than measured. What is measured is that a code survives the trip
  * unchanged, which is what `too_few_groups` did.
  */
-export function withCompactionError(
-  events: readonly ClaudeEvent[],
-  code: string,
-): ClaudeEvent[] {
+export function withCompactionError(events: readonly ClaudeEvent[], code: string): ClaudeEvent[] {
   return events.map((event) =>
     event['compact_result'] === 'failed' ? { ...event, compact_error: code } : event,
   )
@@ -188,8 +185,10 @@ export function withCompactionError(
 export function withoutCompactionTokens(events: readonly ClaudeEvent[]): ClaudeEvent[] {
   return events.map((event) => {
     if (event['subtype'] !== 'compact_boundary') return event
-    const { pre_tokens, post_tokens, ...metadata } = (event['compact_metadata'] ??
-      {}) as Record<string, unknown>
+    const { pre_tokens, post_tokens, ...metadata } = (event['compact_metadata'] ?? {}) as Record<
+      string,
+      unknown
+    >
     void pre_tokens
     void post_tokens
     return { ...event, compact_metadata: metadata }
@@ -374,9 +373,7 @@ export const COMPACTED: readonly ClaudeEvent[] = recordedStream('compaction-auto
  * normally at $0.0104. `withCompactionError` is how a test reaches the codes that
  * mean the other thing.
  */
-export const COMPACTION_FAILED: readonly ClaudeEvent[] = recordedStream(
-  'compaction-failed',
-).turn(2)
+export const COMPACTION_FAILED: readonly ClaudeEvent[] = recordedStream('compaction-failed').turn(2)
 
 /**
  * A `/compact` somebody asked for, exactly as captured — ADR-0018's paid Relay.
@@ -392,9 +389,8 @@ export const COMPACTION_FAILED: readonly ClaudeEvent[] = recordedStream(
  * `modelUsage` because nothing else can see this, and roma writes the reply
  * because Claude Code sends none.
  */
-export const COMPACTED_MANUALLY: readonly ClaudeEvent[] = recordedStream(
-  'manual-compaction',
-).turn(4)
+export const COMPACTED_MANUALLY: readonly ClaudeEvent[] =
+  recordedStream('manual-compaction').turn(4)
 
 /**
  * A `/compact` on a thread with too little in it to summarise, exactly as

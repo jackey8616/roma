@@ -105,7 +105,8 @@ export function readCloudEnv(env: Environment): CloudEnv | null {
     ])
   }
 
-  const key = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {}
+  const key =
+    typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {}
   const account = key['client_email']
   const privateKey = key['private_key']
   // Checked against what minting needs rather than against the whole documented
@@ -113,7 +114,12 @@ export function readCloudEnv(env: Environment): CloudEnv | null {
   // would be roma inventing a requirement the exchange does not have. What is
   // named in the refusal is the two fields that are load-bearing, so that
   // somebody who pointed this at the wrong JSON is told which file to look for.
-  if (typeof account !== 'string' || account === '' || typeof privateKey !== 'string' || privateKey === '') {
+  if (
+    typeof account !== 'string' ||
+    account === '' ||
+    typeof privateKey !== 'string' ||
+    privateKey === ''
+  ) {
     throw new ConfigurationMissing([
       `${CLOUD_KEY_FILE_VAR} is "${keyFile}", which is JSON but not a service account key — ` +
         'roma found no `client_email` and `private_key` in it.',

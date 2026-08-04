@@ -1,6 +1,10 @@
 import { generateKeyPairSync, createPublicKey, createVerify } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { DepotUnreachable, DocumentRefused, GoogleDocumentMinter } from './google-document-minter.js'
+import {
+  DepotUnreachable,
+  DocumentRefused,
+  GoogleDocumentMinter,
+} from './google-document-minter.js'
 
 /**
  * The Minter, against a fake of Google's token endpoint and of Drive.
@@ -49,7 +53,8 @@ const DEPOT = 'FOLDER_ID'
 const NOW = Date.parse('2026-08-03T12:00:00Z')
 
 /** Both scopes, in the order the constant lists them, and nothing else. */
-const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly'
+const SCOPES =
+  'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly'
 
 interface Exchange {
   readonly url: string
@@ -310,7 +315,13 @@ describe('a Depot roma cannot write into', () => {
     const { minter } = googleAnswering({
       depot: () => ({
         status: 404,
-        body: { error: { code: 404, message: `File not found: ${DEPOT}.`, errors: [{ reason: 'notFound' }] } },
+        body: {
+          error: {
+            code: 404,
+            message: `File not found: ${DEPOT}.`,
+            errors: [{ reason: 'notFound' }],
+          },
+        },
       }),
     })
 
@@ -366,7 +377,9 @@ describe('a Depot roma cannot write into', () => {
   // an answer that did not say yes, and treating it as one would put the whole
   // point of this proof behind an optional field.
   it('refuses an answer that says nothing about capabilities at all', async () => {
-    const { minter } = googleAnswering({ depot: () => ({ body: { id: DEPOT, name: 'Team documents' } }) })
+    const { minter } = googleAnswering({
+      depot: () => ({ body: { id: DEPOT, name: 'Team documents' } }),
+    })
 
     await expect(minter.depot()).rejects.toThrow(DepotUnreachable)
   })

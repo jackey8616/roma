@@ -47,9 +47,7 @@ export function sessionIdFor(conversationKey: string, generation = 0): string {
     throw new Error(`a Session generation counts from zero: ${generation}`)
   }
   const name =
-    generation === 0
-      ? conversationKey
-      : `${conversationKey}${GENERATION_SEPARATOR}${generation}`
+    generation === 0 ? conversationKey : `${conversationKey}${GENERATION_SEPARATOR}${generation}`
   return uuidv5(name, ROMA_NAMESPACE)
 }
 

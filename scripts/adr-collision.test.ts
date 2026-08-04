@@ -17,10 +17,7 @@ import { collisionMessage, collisionsOnMerge } from './adr-collision.js'
  */
 
 /** `docs/adr/` before either branch existed. */
-const BEFORE = [
-  '0008-the-agent-clones-roma-only-mints.md',
-  '0009-a-conversation-says-who-asked.md',
-]
+const BEFORE = ['0008-the-agent-clones-roma-only-mints.md', '0009-a-conversation-says-who-asked.md']
 
 describe('the number a branch adds is checked against the tree the merge makes', () => {
   it('passes a branch taking the next free number', () => {
