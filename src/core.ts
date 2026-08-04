@@ -1160,10 +1160,7 @@ export class Core {
     const answeredOn = attempts.answeredOn() ?? this.#credential
     const durationMs = Date.now() - startedAt
     const outcome = outcomeOf(instruction)
-    // Asked once, outside the loop. A Task can produce two records — one per
-    // credential that paid — and both describe the same Task, so both say the
-    // same thing about each Reach. Asking inside would have the second record
-    // report a token the first one had already consumed the answer for.
+    // Never move these inside the loop: the answer is read-and-forget.
     const cloudReach = this.#usedCloudReach(taskId)
     const documentReach = this.#usedDocumentReach(taskId)
     for (const credential of [

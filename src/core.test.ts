@@ -107,6 +107,8 @@ function newCore({
    * read about.
    */
   pinnedModel?: string
+  /** Omitted for the deployment with no Cloud Reach, which is every other test here. */
+  usedCloudReach?: (taskId: string) => boolean
 } = {}) {
   const fixture = romaFixture(
     'core',
@@ -168,6 +170,7 @@ function newCore({
     credential: 'shared-window',
     log: (record) => log.push(record),
     ...(overflow === null ? {} : { overflow }),
+    ...(options.usedCloudReach === undefined ? {} : { usedCloudReach: options.usedCloudReach }),
   })
 
   /**
@@ -2933,6 +2936,29 @@ describe('what Overflow is taken for', () => {
       { credential: 'shared-window', compaction: { trigger: 'auto' } },
     ])
     expect(recordsIn(audit).at(0)).not.toHaveProperty('compaction')
+  })
+
+  // Both records describe one Task, so both have to say the same thing about a
+  // Reach — and the answer is consumed by asking, because `ReachUse.takeUsedBy`
+  // deletes. Asked inside the loop instead, the second record reports no for a
+  // token the first one already accounted for, and a Task that spent somebody's
+  // Google Cloud bill is filed half saying so with nothing anywhere disagreeing.
+  it('asks each Reach once, so both of a Task’s records carry the same answer', async () => {
+    let asked = 0
+    const { adapter, audit, core, start, procFor } = newCore({
+      usedCloudReach: () => asked++ === 0,
+    })
+
+    const { task, proc } = await start('hello')
+    feed(proc, [...ofKind(COMPACTED, 'system/compact_boundary'), ...BLOCKED_WITH_OVERAGE])
+    await flush()
+    await core.takeOverflow(taskIdOf(adapter))
+    await flush()
+    feed(procFor(KEY), OK)
+    await task
+
+    expect(asked).toBe(1)
+    expect(recordsIn(audit)).toMatchObject([{ cloudReach: true }, { cloudReach: true }])
   })
 
   // The money the window refused is the subscription's, and it is charged to the
