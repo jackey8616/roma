@@ -24,6 +24,10 @@ jobs:
   # `typecheck` and `build` are not redundant. `build` compiles `src` alone, so
   # it would not typecheck the tests; `typecheck` covers everything and emits
   # nothing.
+  # Do not add `format` to this job's name: the name is the string a branch
+  # protection rule requires, so editing it retires the check the rule waits for
+  # and every pull request blocks on one that never reports again. The name is
+  # allowed to under-describe the steps; the rule is not allowed to go stale.
   checks:
     name: typecheck, test, build
     runs-on: ubuntu-latest
@@ -36,6 +40,11 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # First because it is the cheapest thing here that can fail, and because a
+      # formatting diff is the one failure a reader fixes without reading a log:
+      # `npm run format`.
+      - run: npm run format:check
 
       - run: npm run typecheck
 
