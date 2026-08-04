@@ -185,16 +185,12 @@ interface IngressOptions<Event> {
 /**
  * The subscriber's half of the wiring: one event in, one settled delivery out.
  *
- * Everything hard is on either side of it — the Adapter reads the event, the
- * Core runs the work — and what is left here is the decision neither of them can
- * make: whether the queue is finished with this message. Three answers, and the
- * difference between them is whether trying again could ever help.
+ * The one decision neither side can make: whether the queue is finished with
+ * this message. Three answers, split on whether trying again could ever help.
  *
- * - **Answered.** The Conversation was told how it went, including that it went
- *   badly. Acknowledge.
- * - **Not for roma, or unreadable.** Nothing to do, now or on any later attempt.
- *   Acknowledge, or the same event is redelivered for as long as the
- *   subscription keeps it.
+ * - **Answered**, badly or well. Acknowledge.
+ * - **Not for roma, or unreadable.** Acknowledge, or it is redelivered for as
+ *   long as the subscription keeps it.
  * - **Nobody was told.** The Channel was unreachable. Hand it back.
  */
 class Ingress<Event> {
@@ -272,17 +268,13 @@ class Ingress<Event> {
   /**
    * What one event asks roma to do, or null where it asks for nothing.
    *
-   * Two questions of every event, because a Channel can deliver two kinds of
-   * thing and only one of them is a message. The second is somebody answering an
-   * offer roma made about a Task it is already holding — it drives no Turn and
-   * starts no Task, so routing it as an ingress message would be a second piece
-   * of work in a Conversation that is waiting on the first.
+   * Two questions of every event: the second is somebody answering an offer
+   * about a Task roma already holds, and routing it as an ingress message would
+   * be a second piece of work in a Conversation waiting on the first.
    *
-   * Reading the event and running the work are kept apart so that the two
-   * failures stay apart — which is why this hands back the work rather than
-   * doing it. An Adapter that throws has been handed something it cannot make
-   * sense of, and no number of redeliveries will change that; a Core that
-   * rejects has failed to reach the Channel, which another attempt might not.
+   * Hands the work back rather than doing it, so the two failures stay apart:
+   * an Adapter that throws was handed something no redelivery will fix, where a
+   * Core that rejects failed to reach the Channel and might not next time.
    */
   #workFor(event: Event, deliveryId: string): Promise<unknown> | null {
     let message: IngressMessage | null

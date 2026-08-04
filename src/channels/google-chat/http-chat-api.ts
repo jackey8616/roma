@@ -142,17 +142,13 @@ export class HttpChatApi implements ChatApi {
 /**
  * One action as the smallest card that can carry a button.
  *
- * Chat has no way to put a button on a plain-text message, so ADR-0004's
- * "messages are plain text" gives way exactly here and nowhere else — the offer
- * of Overflow is the one thing in roma anybody can answer with something other
- * than a message, and a card is what Chat makes that out of.
+ * The one place ADR-0004's "messages are plain text" gives way: Chat has no way
+ * to put a button on plain text.
  *
- * `action.function` and `action.parameters` are the round trip: they go out on
- * the button and come back on the click, which is what `readOverflowTaken` reads
- * and why roma needs to remember nothing between offering Overflow and its being
- * taken. Parameters are a list of `{key, value}` pairs here, which is the shape
- * Chat wants going out — the click may bring them back either as that or as an
- * object, and `chat-events.ts` reads both.
+ * `action.function` and `action.parameters` are the round trip, which is why
+ * roma remembers nothing between offering Overflow and its being taken. Going
+ * out they must be `{key, value}` pairs; the click may return either that shape
+ * or an object, and `chat-events.ts` reads both.
  * https://developers.google.com/workspace/chat/read-form-data
  */
 function cardFor(action: ChatAction): unknown {

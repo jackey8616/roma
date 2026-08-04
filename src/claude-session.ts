@@ -82,13 +82,11 @@ export interface Turn {
 /**
  * What Claude Code calls a Turn that was interrupted.
  *
- * Measured, not assumed: the prototype's in-band interrupt ended the Turn with
- * `subtype: "error_during_execution"`, `terminal_reason: "aborted_streaming"`
- * and `is_error: true` — the capture is `interrupted-turn.jsonl`, and ADR-0003
- * records the run. `terminal_reason` rather than `subtype` because
- * `error_during_execution` is what any error during execution says, and only
- * this field distinguishes the ending somebody asked for from the ones nobody
- * did.
+ * Measured, not assumed — `interrupted-turn.jsonl`, ADR-0003's run.
+ *
+ * Read from `terminal_reason`, never `subtype`: `error_during_execution` is what
+ * any error during execution says, and only this field tells the ending somebody
+ * asked for from the ones nobody did.
  */
 const ABORTED = 'aborted_streaming'
 
@@ -320,38 +318,28 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
    * The last `total_cost_usd` seen. Turn cost is the difference between
    * consecutive values.
    *
-   * Starts at zero for every process, including a resumed one. Seam 2 measured
-   * that on Claude Code v2.1.220: a Session that had spent $0.0822846 reported
-   * $0.0105342 on its first Turn after being evicted and resumed, so the total
-   * is cumulative for the *process* rather than for the Session. A resumed
-   * process therefore has nothing to carry forward.
+   * Zero for every process, resumed ones included: seam 2 measured a Session
+   * that had spent $0.0822846 reporting $0.0105342 on its first Turn after
+   * resuming, so the total is the *process's* and there is nothing to carry.
    */
   #cumulativeCostUsd = 0
   /**
    * The high-water mark of `modelUsage`'s output-token total, summed across
    * models. Turn output is what a terminal event reports above it.
    *
-   * Zero for every process for the reason `#cumulativeCostUsd` is: the totals are
-   * the process's rather than the Session's, so a resumed process has nothing to
-   * carry forward.
+   * Zero for every process, for `#cumulativeCostUsd`'s reason.
    *
-   * **A high-water mark rather than the last value, and `total_cost_usd` is not
-   * treated this way.** `modelUsage` is a per-model breakdown, and the breakdown
-   * is not stable across a process's life: in `three-turns-one-process.jsonl` —
-   * one process, the pinned build — the third Turn drops the `claude-haiku-4-5`
-   * entry altogether and reports fewer `outputTokens` for `claude-sonnet-5` than
-   * the Turn before it did, while `total_cost_usd` climbs as it should. Read as a
-   * plain delta that is a *negative* Turn, which is harmless in itself; what is
-   * not harmless is the baseline it would leave behind, because the next Turn to
-   * report normally would then show a large positive delta and the drift check
-   * would accuse an innocent entry. A check that cries wolf is a check somebody
-   * mutes.
+   * **A high-water mark, never a plain delta** — unlike `total_cost_usd`.
+   * `modelUsage` is a breakdown that is not stable across a process's life: in
+   * `three-turns-one-process.jsonl` the third Turn drops a model entry and
+   * reports fewer `outputTokens` than the Turn before, while `total_cost_usd`
+   * climbs as it should. A plain delta reads that as negative, and the baseline
+   * it leaves makes the *next* normal Turn a large positive delta that the drift
+   * check would blame on an innocent entry.
    *
-   * So a reading that goes backwards is treated as a reading roma cannot use: the
-   * mark holds, and that Turn's output is reported as zero. What it costs is that
-   * real work done immediately after such a reading is under-counted, which is
-   * the right way round for a one-directional alarm — it can fail to fire, and it
-   * cannot fire wrongly.
+   * So a backwards reading is one roma cannot use: the mark holds and that
+   * Turn reports zero. Work immediately after is under-counted, which is the
+   * right way round for a one-directional alarm.
    */
   #outputTokenMark = 0
 

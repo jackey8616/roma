@@ -64,18 +64,14 @@ export type ChatEvent = Readonly<Record<string, unknown>>
 /**
  * The two ways an event says "this is a 1:1 conversation".
  *
- * The distinction the Conversation Key turns on, and it is asked of the space
- * rather than of the message. `spaceType` is the current field and `type` is its
- * deprecated predecessor; both are read because which one an event carries
- * depends on how it was delivered, and neither is worth being wrong about — a
- * DM read as a space would make every message its own Conversation, and a space
- * read as a DM would merge everybody in it into one.
+ * Asked of the space, never the message. Both `spaceType` and its deprecated
+ * predecessor `type` are read, because which one an event carries depends on how
+ * it was delivered: a DM read as a space makes every message its own
+ * Conversation, and a space read as a DM merges everybody into one.
  *
- * **Not** `spaceThreadingState`, which is the obvious-looking field and the
- * wrong one twice over: it is documented output-only on the Space resource, so
- * an event payload need not carry it at all, and `GROUPED_MESSAGES` spaces have
- * threads as surely as `THREADED_MESSAGES` ones do. Keying on it would have sent
- * every space message down the DM path.
+ * **Never** `spaceThreadingState`, the obvious-looking field: it is documented
+ * output-only, so an event need not carry it, and `GROUPED_MESSAGES` spaces have
+ * threads too — keying on it sends every space message down the DM path.
  * https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces
  */
 const DIRECT_MESSAGE = 'DIRECT_MESSAGE'
@@ -181,22 +177,14 @@ const NOTHING_QUOTED: QuotedMessage = { quotation: null, enclosures: [] }
  * Read the message this one quotes, as a Quotation and whatever came attached
  * to it.
  *
- * **The snapshot and never the link.** Chat's `quotedMessageMetadata` carries
- * both: `name` points at the quoted message, and `quotedMessageSnapshot` is the
- * words as they stood when somebody quoted them. roma reads the second and
- * ignores the first, which is ADR-0021's decision and is three things at once —
- * it is free where following the link is a round trip, it needs no scope beyond
- * the `chat.bot` roma already has (`spaces.messages.get` under that scope
- * reaches only messages the app was addressed in, and reaching further wants
- * `chat.app.messages.readonly` and an administrator), and it is the *more*
- * faithful of the two, because a message edited after it was quoted should not
- * change what roma says Bob said.
+ * **The snapshot and never the link** (ADR-0021). `name` points at the quoted
+ * message and following it costs a round trip, wants a scope beyond the
+ * `chat.bot` roma has, and is *less* faithful — a message edited after it was
+ * quoted must not change what roma says Bob said.
  *
- * `quoteType` is deliberately unread. Chat has two — `REPLY` within a thread and
- * `FORWARD` from somewhere else entirely — and both populate the two fields this
- * reads. Telling them apart would buy roma nothing it acts on and would add a
- * third guess about a payload nobody has seen, against this file's own rule of
- * reading only what it can survive being wrong about.
+ * `quoteType` stays unread: `REPLY` and `FORWARD` both populate the two fields
+ * this reads, so telling them apart adds a guess about a payload nobody has seen
+ * and buys nothing roma acts on.
  * https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces.messages
  */
 function readQuotation(
@@ -258,21 +246,16 @@ export interface ReadOptions {
 /**
  * Chat's two ways of attaching something, and roma's reach into each.
  *
- * `attachmentDataRef` is Chat's own storage and is fetched with the app's
- * credentials. `driveDataRef` names a file in the **sender's** Drive, which roma
- * has no scope for and no consent to read — so an Enclosure is still made for
- * one, and it fails when redeemed. Made rather than dropped deliberately: the
- * Task then ends with a reason the person can read, where dropping it silently
- * would put roma back to ignoring what somebody sent.
+ * `attachmentDataRef` is Chat's own storage. `driveDataRef` names a file in the
+ * **sender's** Drive, which roma has no scope for — an Enclosure is still made
+ * and fails when redeemed, so the Task ends with a reason the person can read
+ * rather than roma silently ignoring what somebody sent.
  *
- * Both are read, and neither is assumed, for the reason every other pair in this
- * file is read that way — `spaceType`/`type`, `event.space`/`message.space`,
- * `common.parameters`/`action.parameters`. The envelope depends on how the event
- * was delivered, and nothing here has ever seen a real one.
+ * Both read, neither assumed, like every other pair in this file: the envelope
+ * depends on how the event was delivered.
  *
- * `from` is who sent these along, and it is null for the Caller's own — the
- * message itself and a quoted message's snapshot both come through here, and an
- * Enclosure that arrived on somebody else's message has to say so (ADR-0021).
+ * `from` is null for the Caller's own — a quoted message's snapshot comes
+ * through here too, and its Enclosures have to say so (ADR-0021).
  */
 function readEnclosures(
   message: Readonly<Record<string, unknown>>,

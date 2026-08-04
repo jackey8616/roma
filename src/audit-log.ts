@@ -25,11 +25,10 @@ function isFigure(value: unknown): boolean {
 /**
  * Whether a written Compaction is one this can be read back.
  *
- * Every field of it is nullable on the way in — the stream is not roma's and a
- * version that stopped reporting the trigger would still have compacted — so
- * what is checked is the *shape*, which is the part a torn line loses. A record
- * saying a Compaction happened and nothing about it is still the answer to why
- * this Task cost five times its neighbours.
+ * Checks the *shape*, never the fields: every one is nullable on the way in,
+ * because the stream is not roma's. The shape is what a torn line loses, and a
+ * record saying only that a Compaction happened still answers why this Task cost
+ * five times its neighbours.
  */
 function isCompaction(value: unknown): boolean {
   if (typeof value !== 'object' || value === null) return false
@@ -589,15 +588,12 @@ function endsWhole(file: string): boolean {
 /**
  * Read one line back, or null if it is not a record.
  *
- * Checked against what a record is *for* rather than against what a total needs
- * to arithmetic its way through. A line that lost `caller` still adds up
- * perfectly and answers none of the questions this file exists to answer, so it
- * is unreadable here rather than a record with a hole in it — the same reasoning
- * as a missing cost, which would otherwise be summed as a Task that was free.
+ * Checked against what a record is *for*, never against what a total needs: a
+ * line that lost `caller` adds up perfectly and answers nothing, and a missing
+ * cost would be summed as a Task that was free.
  *
- * A half-written last line is the case this is really for: a machine that lost
- * power mid-append leaves one, and it must cost the month one record rather than
- * all of them.
+ * The case it is really for is a half-written last line, which must cost the
+ * month one record rather than all of them.
  */
 function readRecord(line: string): AuditRecord | null {
   let parsed: unknown

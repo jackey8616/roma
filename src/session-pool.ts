@@ -26,28 +26,16 @@ const RECLAIM_INTERVAL_MS = 60 * 60_000
 /**
  * The file that says this Session has been spawned before.
  *
- * The Working Directory used to answer that by existing, and it stopped being
- * able to the moment anything else could create it: ADR-0011 has an Enclosure
- * written before the Turn, so a first message carrying an attachment made the
- * directory and the next line read it as a Session that already existed. Every
- * message in that Conversation then resumed a Transcript nobody had written
+ * Never the Working Directory existing, which is what this replaced: ADR-0011
+ * writes an Enclosure before the Turn, so a first message carrying an attachment
+ * made the directory and the next line read it as a Session that already
+ * existed. Every later message then resumed a Transcript nobody had written
  * (#105).
  *
- * On disk rather than in memory for the reason the directory was: the rule has
- * to hold across a restart of roma, where every Session is one that already
- * exists and nothing is remembered. Inside the Working Directory rather than
- * beside it so the seven-day reclaim takes it along with everything else — a
- * Session whose directory was reclaimed must go on being spawned as new and
- * recovered by `transcript-survived`, which is measured working.
- *
- * Dot-prefixed for `.enclosures`' reason: the root of that directory is the
- * agent's, and roma's own bookkeeping should stay out of a listing.
- *
- * A directory left by a version that predates this file reads as a Session that
- * has never been spawned, so its next message goes out as `--session-id` at an
- * id Claude Code still holds a Transcript for — refused, and recovered by
- * `transcript-survived`. One wasted spawn, once per Conversation, on the path
- * that exists for exactly that refusal.
+ * On disk, so the rule survives a restart; *inside* the Working Directory, so
+ * the seven-day reclaim takes it along — a Session whose directory was
+ * reclaimed must go on being spawned as new and recovered by
+ * `transcript-survived`. Dot-prefixed to stay out of the agent's listing.
  */
 const SPAWN_FILE = '.roma-session'
 /**
@@ -205,11 +193,10 @@ export type PoolLogRecord =
 /**
  * A spawn that guessed wrong about whether the Session exists, and what to do.
  *
- * `reason` is carried rather than read off the process when the record is
- * written, because the two are not always the same thing: the refusal roma
- * meets in production settles the Turn from a terminal event, and whether the
- * process's stderr has been delivered by then is not guaranteed — separate
- * pipes. Without this, the one record added for that case is blank in it.
+ * `reason` is carried, never read off the process at write time: the refusal
+ * roma meets in production settles the Turn from a terminal event, and stderr
+ * arrives on a separate pipe with no guarantee of having landed. Without this
+ * the record added for that case is blank in it.
  */
 interface Correction {
   readonly event: 'resume-lost' | 'transcript-survived'
@@ -938,12 +925,10 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   /**
    * Stop waiting on a Turn that is only retrying, and give its slot back.
    *
-   * The process goes rather than the Turn being interrupted. An interrupt is
-   * measured against a process that is *working* — ~20ms, and it stays alive —
-   * and says nothing about one asleep in a 35-second backoff. This cap exists
-   * precisely for the case where the process is not doing what roma hopes, so
-   * it uses the ending that does not depend on the process agreeing to it. The
-   * Session survives: the next message resumes it from the transcript on disk.
+   * The process goes; the Turn is never interrupted. An interrupt is measured
+   * against a process that is *working* — ~20ms, and it stays alive — and says
+   * nothing about one asleep in a 35-second backoff, which is exactly the case
+   * this cap exists for. The Session survives on the transcript on disk.
    */
   #abandon(resident: Resident, limit: 'retries' | 'window'): void {
     const watch = resident.retry
@@ -1005,9 +990,8 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   /**
    * Mark a Session as the most recently used one.
    *
-   * Re-inserting is what makes this Map an LRU list — the first entry is then
-   * the Session that has gone longest without being touched, which is the one
-   * eviction takes.
+   * Re-inserting is what makes this Map an LRU list: the first entry is then the
+   * Session eviction takes.
    */
   #markUsed(resident: Resident): void {
     // Identity, not presence — the same check `#forget` makes, and for the same
@@ -1033,19 +1017,14 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * A spawn refused because the flag was wrong about whether the Session exists,
    * and which flag to try instead. Null for every other failure.
    *
-   * The working directory is the pool's record of existence, and it can be wrong
-   * both ways. It exists before the first spawn, so a Session that died before
-   * Claude Code wrote its transcript looks created and is not — `--resume` finds
-   * nothing. It is deleted by the seven-day reclaim while the transcript stays,
-   * so a Conversation that went quiet looks new and is not — `--session-id` hits
-   * a transcript that is still there. Left alone either one poisons that
-   * Conversation for good, because every later message repeats the same spawn.
+   * The record of existence can be wrong both ways, and left alone either one
+   * poisons the Conversation for good, because every later message repeats the
+   * same spawn: a Session that died before its transcript was written looks
+   * created, and one whose directory the reclaim took looks new.
    *
-   * Reacting to what the CLI said rather than reading the transcript's own path
-   * to decide up front: that path is
-   * `$CLAUDE_CONFIG_DIR/projects/<slug-of-cwd>/<id>.jsonl`, undocumented and
-   * Claude Code's to change, and ADR-0006 keeps the pool from knowing the config
-   * directory at all. A wasted spawn costs a process that exits immediately.
+   * Read off what the CLI said, never off the transcript's own path — that path
+   * is undocumented and Claude Code's to change, and ADR-0006 keeps the pool
+   * from knowing the config directory at all. A wasted spawn exits immediately.
    */
   #wrongFlag(resident: Resident, error: unknown): Correction | null {
     // The shape production actually produces, and the branch that fires in a
@@ -1076,10 +1055,9 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
 /**
  * Whether a running process was started for the terms the next Turn needs.
  *
- * A function rather than three comparisons inline, so that a fourth term added
- * to `SpawnTerms` cannot be checked at the spawn and forgotten here — which is
- * the failure with no symptom: the Session would be served by a process started
- * for something else, and nothing would say so.
+ * A function rather than three inline comparisons, so a fourth term added to
+ * `SpawnTerms` cannot be checked at the spawn and forgotten here — the failure
+ * with no symptom, a Session served by a process started for something else.
  */
 function sameTerms(resident: Resident, { credential, model, effort }: SpawnTerms): boolean {
   return (
@@ -1091,11 +1069,9 @@ function sameTerms(resident: Resident, { credential, model, effort }: SpawnTerms
  * How the CLI refused, for the Operator Log: everything it wrote, plus the
  * reason where that is not already in it.
  *
- * Both halves, rather than one or the other. Preferring stderr loses the reason
- * the moment the process writes anything else first — a warning is enough, and
- * then the record is a line about something unrelated in exactly the case it was
- * added for. Preferring the reason throws away whatever else the process had to
- * say, which for a refusal nobody has met yet is the only clue there is.
+ * Both halves, never one: stderr alone loses the reason as soon as the process
+ * writes a warning first, and the reason alone throws away the only clue there
+ * is about a refusal nobody has met yet.
  */
 function refusalOf(stderr: string, reason: string): string {
   if (stderr.includes(reason)) return stderr

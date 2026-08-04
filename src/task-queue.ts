@@ -212,18 +212,16 @@ export class TaskQueue {
   /**
    * Start whatever the queue can now start.
    *
-   * Arrival order, but a Task whose Session is busy is stepped over rather than
-   * waited for. Strict head-of-line order would let one chatty Conversation hold
-   * every other Conversation behind a Session that is simply not free yet.
+   * Arrival order, stepping over a Task whose Session is busy: strict
+   * head-of-line order lets one chatty Conversation hold every other behind a
+   * Session that is simply not free yet.
    *
-   * The slot is claimed here rather than by the Task itself, so that two
-   * admissions in one pass cannot both take the last one.
+   * The slot is claimed here, never by the Task, so two admissions in one pass
+   * cannot both take the last one.
    *
-   * The whole list is walked rather than stopping once the cap is full: an
-   * uncapped entry behind a full cap is still admissible, and a loop that
-   * stopped there would hold every free Relay hostage to exactly the busy period
-   * they exist to ask about. `#claim` is where the two rules are applied, so
-   * this only has to stop deciding for it.
+   * Walks the whole list, never stopping at a full cap — an uncapped entry
+   * behind one is still admissible, and stopping would hold every free Relay
+   * hostage to exactly the busy period they exist to ask about.
    */
   #pump(): void {
     for (let i = 0; i < this.#waiting.length; ) {

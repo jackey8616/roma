@@ -18,17 +18,13 @@ const PROBE = 'Reply with OK and nothing else. Do not use any tools.'
 /**
  * The command roma relays to the probe once the Turn has passed.
  *
- * Claude Code's own `/effort`, sent as itself rather than as prose. It is the
- * only place in roma that asks a process about effort, and it is asked once per
- * deployment rather than once per spawn — measured at `num_turns: 0`,
- * `total_cost_usd: 0`, and answered with no credential at all.
+ * Asked once per deployment, not per spawn — measured at `num_turns: 0`,
+ * `total_cost_usd: 0`, answered with no credential at all.
  *
- * **Deliberately not named a Relay.** CONTEXT.md's entry for that term lists
- * `/effort` under what it must never be used for: a Relay is something roma
- * relays *on a Caller's behalf, to their Session*, and `/effort` is roma's own
- * Command precisely so that it never reaches one. This is a boot probe asking a
- * throwaway process about itself, with no Caller, no Session anybody is on and
- * no Task — which is why `relayCommand` describes itself by subtraction.
+ * **Never call this a Relay.** A Relay goes to a Caller's Session on their
+ * behalf, and `/effort` is roma's own Command precisely so it never reaches one.
+ * This is a boot probe with no Caller, no Session and no Task, which is why
+ * `relayCommand` describes itself by subtraction.
  */
 const EFFORT_QUESTION = '/effort current'
 
@@ -36,23 +32,20 @@ const EFFORT_QUESTION = '/effort current'
  * The word roma's Pinned Effort is never allowed to be, however the sentence is
  * worded around it.
  *
- * The build says `Effort level: auto (currently high)` when nothing pinned one —
- * which contains `high`, and would therefore satisfy a bare level-word match on
- * the default deployment. Since roma always passes `--effort`, an `auto` in the
- * answer is the wiring failure this check exists to catch, wearing the level's
- * own clothes.
+ * The build says `Effort level: auto (currently high)` when nothing pinned one,
+ * so a bare level-word match would pass on the default deployment. roma always
+ * passes `--effort`, so an `auto` here is the wiring failure this exists to
+ * catch, wearing the level's own clothes.
  */
 const UNPINNED = 'auto'
 
 /**
  * How long roma will wait for the probe Turn before refusing to start.
  *
- * The same minute the retry budget allows a Turn, and for the same reason: a
- * credential that is wrong in a way `system/init` cannot see does not fail
- * fast. It retries — ten times across 182 seconds, in the prototype's capture —
- * and a boot that waits for that is a boot nobody can tell from a hang. Seam 2
- * measured this Turn at 3682ms against a healthy Shared Window, so the budget is
- * about sixteen times what passing actually takes.
+ * The retry budget's minute, for its reason: a credential wrong in a way
+ * `system/init` cannot see does not fail fast — it retries ten times across 182
+ * seconds in the prototype's capture, and a boot waiting for that is one nobody
+ * can tell from a hang. Seam 2 measures this Turn at 3682ms when healthy.
  */
 const DEFAULT_TIMEOUT_MS = 60_000
 

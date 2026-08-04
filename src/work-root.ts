@@ -17,12 +17,10 @@ const WORK_DIR_TTL_MS = 7 * 24 * 60 * 60_000
  * What a record of a Conversation's generation is called, next to the working
  * directories of the Sessions it names.
  *
- * A file rather than a directory, deliberately: `reclaimIdle` walks this root
- * deleting directories nothing has used for seven days and steps over everything
- * else. A directory here would eventually be reclaimed, and reclaiming this is
- * not the same as reclaiming a working directory — it would send the
- * Conversation back to a Session it was moved off, with the context `/clear` was
- * used to drop.
+ * A file, never a directory: `reclaimIdle` deletes directories nothing has used
+ * for seven days and steps over everything else, so a directory here would be
+ * reclaimed — sending the Conversation back to the Session it was moved off,
+ * with the context `/clear` was used to drop.
  */
 const GENERATION_SUFFIX = '.generation'
 
@@ -38,11 +36,10 @@ const MODEL_SUFFIX = '.model'
 /**
  * What a record of a Session's Chosen Effort is called, beside the models.
  *
- * A file for the same reason and at the same stakes: reclaimed, a Conversation
- * that went quiet for seven days would come back at the Pinned Effort having
- * asked for something else, at a moment nobody can observe — and unlike the
- * model, nothing in the stream would say so afterwards, because `system/init`
- * carries no effort field at all (ADR-0016).
+ * A file for the same reason, at higher stakes: reclaimed, a Conversation that
+ * went quiet comes back at the Pinned Effort having asked for something else,
+ * and nothing in the stream would say so — `system/init` carries no effort
+ * field at all (ADR-0016).
  */
 const EFFORT_SUFFIX = '.effort'
 

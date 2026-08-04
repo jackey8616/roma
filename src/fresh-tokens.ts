@@ -3,35 +3,25 @@ import type { MintsTokens, MintedToken } from './reach.js'
 /**
  * How long before expiry a token is treated as spent.
  *
- * Five minutes, and the number is doing two things. It keeps roma from handing
- * out a credential that will die in the middle of the clone it was fetched for —
- * a `git clone` of anything substantial outlasts a few seconds — and it means the
- * refresh happens while the old token is still good, so a mint that fails has not
- * already left roma with nothing.
- *
- * Against a token that lasts an hour this costs one extra mint every twelve
- * hours, which is not a rate limit anybody will notice.
+ * Five minutes, doing two things: a credential handed out must not die in the
+ * middle of the clone it was fetched for, and the refresh has to happen while
+ * the old token is still good, so a failed mint leaves roma with something.
  */
 const REFRESH_MARGIN_MS = 5 * 60_000
 
 /**
  * How long after honouring one rejection roma stops honouring others.
  *
- * One token serves everybody, and `git` reports a rejection for reasons that
- * have nothing to do with the credential — the commonest being a repository the
- * Installation does not reach, which authenticates fine and 404s. Without a
- * floor, an agent looping on a name that does not exist would discard the token
- * every other Session is using, once per attempt, and roma would mint on every
- * failed clone. That is the round trip and the rate limit this class exists to
- * avoid, arriving by the back door.
+ * One token serves everybody, and `git` reports rejections that say nothing
+ * about the credential — commonest is a repository the Installation cannot
+ * reach, which authenticates fine and 404s. Without a floor, an agent looping on
+ * a name that does not exist discards the token every other Session is using,
+ * once per attempt, and roma mints on every failed clone.
  *
- * A minute is enough to bound it at one mint per minute while leaving the case
- * the discard is *for* intact: an App whose key was rotated has its dead token
- * dropped on the first rejection, and the replacement is in hand before the
- * agent's next command. What is given up is the second rejection inside the
- * minute — and by then roma is already serving a token minted *after* the first
- * one, so a rejection of that is evidence about the request rather than about
- * the credential.
+ * A minute leaves the case the discard is *for* intact: a rotated key has its
+ * dead token dropped on the first rejection. What is given up is the second
+ * rejection inside the minute, by which point roma is already serving a token
+ * minted after the first.
  */
 const DISCARD_COOLDOWN_MS = 60_000
 
@@ -110,11 +100,9 @@ export class FreshTokens {
   /**
    * The mint in flight, or null.
    *
-   * Three Tasks run at once by design, and a Session's agent can start as many
-   * `git` processes as it likes inside one — so the first refresh after an hour
-   * of quiet can be asked for by several Shims in the same tick. Without this
-   * they would each mint, which is the round trip this class exists to avoid
-   * happening at all, arriving all at once.
+   * Three Tasks run at once and an agent can start any number of `git`
+   * processes inside one, so the first refresh after an hour of quiet can be
+   * asked for by several Shims in the same tick. Without this they each mint.
    */
   #minting: Promise<MintedToken> | null = null
   /** When roma last threw a token away because it was told to. */

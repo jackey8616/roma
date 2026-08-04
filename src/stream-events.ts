@@ -338,17 +338,13 @@ export function readTerminalResult(event: ClaudeEvent): TerminalResult | null {
  * Output tokens across every model in one `modelUsage` object, or null if there
  * is no such object.
  *
- * Summed rather than read per model, because what the drift check asks is
- * whether *any* model did work — and the answer is spread across entries the
- * caller has no reason to know the names of. A `/compact` charges the
- * summarisation to whichever model Claude Code picked for it, which is not
- * necessarily the one the Session runs on: the measured capture has a
- * `claude-haiku-4-5` entry beside the Session's own `claude-sonnet-5`.
+ * Summed, never read per model: the drift check asks whether *any* model did
+ * work, and a `/compact` charges the summarisation to whichever model Claude
+ * Code picked — the measured capture has a `claude-haiku-4-5` entry beside the
+ * Session's own `claude-sonnet-5`.
  *
- * A model whose entry carries no `outputTokens` contributes nothing rather than
- * making the whole sum null. The check this feeds fires on movement, so an
- * unreadable entry should be able to hide work it did — not to hide work another
- * entry did.
+ * An entry with no `outputTokens` contributes nothing rather than nulling the
+ * sum: an unreadable entry may hide work it did, never work another entry did.
  */
 function outputTokensIn(value: unknown): number | null {
   if (typeof value !== 'object' || value === null) return null
@@ -459,11 +455,9 @@ function streamDelta(event: ClaudeEvent): Record<string, unknown> | null {
  * The fields of an object an event nests inside itself, or `{}` where it carries
  * none.
  *
- * Several of these events keep what roma reads one level down —
- * `rate_limit_info`, `compact_metadata` — and the reading is the same each time:
- * absent, null, or not an object all mean the same thing, which is that every
- * field below is missing. Written once so that a reader added later gets the
- * three-way coercion right by not having to write it.
+ * Absent, null, and not-an-object all mean the same thing here — every field
+ * below is missing. Written once so a reader added later gets the three-way
+ * coercion right by not having to write it.
  */
 function fieldsOf(value: unknown): Record<string, unknown> {
   return (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>

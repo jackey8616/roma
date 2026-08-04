@@ -119,15 +119,13 @@ interface RelayEntry {
  * Every string roma relays, what each is expected to cost, and what may follow
  * it.
  *
- * The cost class is a claim about the pinned build and is checked two ways: a
- * seam 2 case per entry, which fires before a deploy, and the drift check the
- * Core runs on every free Relay, which fires after. Both are needed —
- * `/autocompact`'s own gate is a remote experiment flag, so Claude Code's
- * behaviour can move under a fixed binary, and a pin-move ritual alone assumes
+ * The cost class is a claim about the pinned build, and both checks on it are
+ * needed: a seam 2 case per entry before a deploy, and the Core's drift check on
+ * every free Relay after. `/autocompact`'s gate is a remote experiment flag, so
+ * behaviour can move under a fixed binary and a pin-move ritual alone assumes
  * the binary is the whole contract.
  *
- * The table does not grow on its own, and that is the whole of the guarantee:
- * adding a string is an act somebody writes down, not something a rule infers.
+ * The table never grows on its own, which is the whole of the guarantee.
  */
 const RELAYS: Readonly<Record<string, RelayEntry>> = {
   // Show current context usage: how full this Session's context window is.
@@ -221,17 +219,13 @@ export function readRelay(text: string): RelayRequest | null {
 /**
  * One entry of the table, and **only** an entry roma wrote there.
  *
- * `RELAYS[word]` alone is not that question. An object literal inherits
- * `Object.prototype`, so `RELAYS['constructor']` answers with a function rather
- * than with `undefined` — and a message that is the single word `constructor`
- * would be read as a Relay whose cost is nothing at all, put on the wire as a
- * command, and audited as one. Every table roma matches a typed message against
- * needs this, `commands.ts` included, and neither had it.
+ * Not `RELAYS[word]`: an object literal inherits `Object.prototype`, so
+ * `RELAYS['constructor']` answers with a function, and the single word
+ * `constructor` would go on the wire as a free Relay and be audited as one.
  *
  * `Object.hasOwn` rather than a null-prototype table, because the guard belongs
- * where the lookup is: a table declared safe is one a later reader has to trace
- * back to its declaration to know it is safe, and a second table added beside it
- * inherits nothing.
+ * at the lookup — a table declared safe has to be traced back to its
+ * declaration, and a second table added beside it inherits nothing.
  */
 function entryFor(spelling: string): RelayEntry | undefined {
   return Object.hasOwn(RELAYS, spelling) ? RELAYS[spelling] : undefined

@@ -7,11 +7,10 @@ import type { Compaction, SharedWindow } from './stream-events.js'
  * How long a Task may be held waiting for the Shared Window before roma answers
  * it instead.
  *
- * Two, and the reason is neither the concurrency cap nor patience: a parked Task
- * holds no slot, so it cannot halt roma. It is that a third "still blocked"
- * message lands on a Conversation that stopped watching hours ago, and that a
- * Task which never ends is one nobody can be told anything about. Answered and
- * re-sendable beats held for ever.
+ * Two, and not for the concurrency cap — a parked Task holds no slot. It is that
+ * a third "still blocked" message lands on a Conversation that stopped watching
+ * hours ago, and a Task that never ends is one nobody can be told anything
+ * about.
  */
 const MAX_PARKS = 2
 

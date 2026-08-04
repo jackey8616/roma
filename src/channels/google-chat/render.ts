@@ -35,17 +35,12 @@ export type TaskOutcome = NotProgress<OutboundInstruction>
  * How Chat says "this message is for you", and the space that separates it from
  * what follows.
  *
- * `<users/{user}>` is Google's documented syntax and a Conversation Key is not
- * involved: `caller` is already a Chat user resource name, so the mention is the
- * identity in angle brackets and nothing else.
+ * `caller` is already a Chat user resource name, so the mention is the identity
+ * in angle brackets and nothing else — no Conversation Key involved.
  * https://developers.google.com/workspace/chat/identify-reference-users
  *
- * It earns its noise in a thread, which is the ordinary case: everybody there
- * shares one Conversation, so two acknowledgements can sit side by side
- * mutating for minutes with nothing to say which is whose, and an answer
- * quoted months later has no owner. A DM gets one too — the Adapter could tell
- * from the Conversation Key and deliberately does not, because a rule with an
- * exception in it is a rule somebody has to remember.
+ * A DM gets one too, though the Adapter could tell from the Conversation Key: a
+ * rule with an exception in it is a rule somebody has to remember.
  */
 function addressedTo(caller: string): string {
   return `<${caller}> `
@@ -131,11 +126,9 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
 /**
  * What a blocked Task's message says.
  *
- * Plainly that quota is spent, and when it comes back — from the event's own
- * `resetsAt` rather than an estimate, which is the only reason a time is worth
- * quoting. That the Task is kept is said too: told only that quota is spent,
- * people send the message again, which is the behaviour the whole
- * acknowledgement design exists to prevent.
+ * The time comes from the event's own `resetsAt`, never an estimate. That the
+ * Task is kept is said too: told only that quota is spent, people send the
+ * message again — the resend the acknowledgement design exists to prevent.
  */
 function blockedText(resetsAt: number): string {
   const at = new Date(resetsAt * 1000).toISOString().replace('T', ' ').slice(0, 16)
@@ -211,22 +204,14 @@ export function fitted(text: string, budget: number): string {
 /**
  * How much of a tool's command the acknowledgement quotes.
  *
- * A judgement rather than a measurement, and said so because the other numbers
- * near it are not: the throttle has a measured worst gap of 2641ms behind it,
- * and `MAX_TEXT` is Chat's own. What is behind this one is two recorded
- * `task_started` descriptions — `sleep 45` at 8 characters and an `awk`
- * one-liner at 56 — which is enough to say the ordinary case is never cut, and
- * nothing at all about the tail.
+ * A judgement, not a measurement — unlike the throttle's 2641ms and `MAX_TEXT`,
+ * which is Chat's own. Behind it are two recorded `task_started` descriptions at
+ * 8 and 56 characters, which says the ordinary case is never cut and nothing
+ * about the tail.
  *
- * Its distance from `MAX_TEXT` is the point rather than an accident. The two
- * bounds answer different questions: this one asks what can be read at a
- * glance, and `fitted` asks what Chat will accept.
- *
- * They count differently for the same reason. `fitted` spends the ellipsis out
- * of its budget, because that budget is a hard limit somebody else set and one
- * character over is a message refused. This is a limit roma set for its own
- * reading, so it counts the command alone and the phrase around it comes to 129
- * — there is nothing to be one character over.
+ * Counts the command alone, where `fitted` spends its ellipsis out of the
+ * budget: that budget is somebody else's hard limit where one character over is
+ * a refused message, and this one is roma's own reading limit.
  */
 const MAX_TOOL_CHARS = 120
 
@@ -293,14 +278,11 @@ function commandText(command: Command, carriedOut: boolean): string {
 /**
  * One answer as the messages Chat will accept.
  *
- * Broken at a blank line where there is one, then at a line ending, then at a
- * space — a paragraph boundary is where a reader would have broken it too, and
- * cutting mid-word makes a long answer read as corrupted rather than as
- * continued.
+ * Broken at a blank line, then a line ending, then a space: cutting mid-word
+ * makes a long answer read as corrupted rather than as continued.
  *
- * The prefix goes on the first message and is counted against the limit rather
- * than added after it, so that mentioning the Caller cannot be what makes Chat
- * refuse an answer that would otherwise have fitted.
+ * The prefix is counted against the limit, never added after it, so mentioning
+ * the Caller cannot be what makes Chat refuse an answer that would have fitted.
  */
 function split(prefix: string, text: string): string[] {
   // A Turn can finish having written nothing. Posting nothing at all would make

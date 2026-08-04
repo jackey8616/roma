@@ -47,35 +47,17 @@ export interface CommandRequest {
 /**
  * How each Command is written when it takes nothing. Nothing else is one.
  *
- * The reset answers to three strings, and the ADR-0013 reason is the one
- * `relays.ts` already gives for carrying `/cost` and `/stats`: a spelling roma
- * leaves unclaimed is one somebody is billed for. `clear` is Claude Code's own
- * name for this and `reset` and `new` are the two aliases it declares on it, so
- * all three are strings a person arrives already typing — and roma held only the
- * alias, which left the name falling to a Task that costs money to answer
- * nothing.
+ * Every spelling Claude Code declares for one of these is claimed, aliases
+ * included: one roma leaves unclaimed costs a Turn to answer nothing
+ * (ADR-0013, ADR-0017).
  *
- * `/clear` is the one that mattered, and not for the five cents. Relaying it as
- * a Relay is the obvious repair and is the worst move available: Claude Code's
- * `/clear` moves its process onto a session roma is not tracking, so the next
- * `--resume` resolves to a session roma believes in and Claude Code has left.
- * Being a Command puts it out of reach of that by construction — `readCommand`
- * answers before `readRelay` is consulted — so whitelisting it later would
- * mean deleting it from here first, which is a deliberate act and reads as one.
+ * `/clear` must never become a Relay instead. Claude Code's own moves its
+ * process onto a session roma is not tracking, so the next `--resume` resolves
+ * to a session roma believes in and Claude Code has left; `readCommand`
+ * answering before `readRelay` is what keeps it out of reach.
  *
- * `/config` answers to `/settings` for the same reason, and it is the same
- * reason twice over: `settings` is the alias Claude Code declares on its own
- * `/config`, so it is a string people arrive already typing, and left unclaimed
- * it costs a Turn to answer nothing. ADR-0017 is the ruling; `/config` itself
- * had never been claimed at all.
- *
- * `/model`, `/effort` and `/config` are here as well as below, because each with
- * nothing after it is the Command asking roma to report rather than a Caller
- * forgetting the argument.
- *
- * These strings are roma's outright. Nothing is relayed and nothing is compared
- * against Claude Code, so a release that drops `new` from its aliases changes
- * nothing here.
+ * The three argument-taking heads repeat in `TAKES_AN_ARGUMENT` on purpose —
+ * dropping them from here would stop `/model` on its own being a Command.
  */
 const COMMANDS: Readonly<Record<string, Command>> = {
   '/stop': 'stop',
@@ -91,28 +73,12 @@ const COMMANDS: Readonly<Record<string, Command>> = {
 /**
  * The heads that may be followed by an argument, and nothing else may.
  *
- * ADR-0003 rejected prefix matching and the rejection is kept here, narrowed
- * rather than dropped. What it rejected was a *general* rule — "begins with a
- * slash and looks like ours" — and the reason was growth: such a rule inherits
- * every command a later Claude Code release adds. It is the Relay whitelist's
- * shape: it fails closed, and adding a string to it is a deliberate act somebody
- * has to write down.
+ * Never a prefix match: ADR-0003 rejected "begins with a slash and looks like
+ * ours" because such a rule inherits every command a later Claude Code release
+ * adds. A named list fails closed instead.
  *
- * The sentence ADR-0003 defended the whole-message rule with — "Neither of roma's
- * two takes an argument, so there is nothing this rule turns away that was meant
- * for roma" — stopped being true at ADR-0014. So did the observation that made
- * "a named list does not grow on its own" comforting: this has gone from one
- * entry to three across three ADRs, by hand, each time deliberately. The list
- * still does not grow on its own, and that is the whole of the guarantee — the
- * check on it is that adding a string is an act somebody writes down, not that
- * the number stays small.
- *
- * `/settings` is deliberately absent, so `/settings key=value` is not a Command
- * and falls through to a Task. That is the same opening `/clear foo` has had
- * since ADR-0013 and `/config foo bar` has by ADR-0017: closing it means
- * deciding what the argument means to roma, and on the alias it would mean
- * exactly what `/config key=value` means, which is a refusal. Recorded rather
- * than fixed, because ADR-0017 counted the heads here at three.
+ * `/settings` is absent on purpose, so `/settings key=value` falls through to a
+ * Task — a gap ADR-0017 records rather than fixes, and `commands.test.ts` pins.
  */
 const TAKES_AN_ARGUMENT: Readonly<Record<string, Command>> = {
   '/model': 'model',
@@ -181,16 +147,10 @@ export function readCommand(text: string): CommandRequest | null {
  * What one of these tables says about a spelling, and **only** what roma wrote
  * there.
  *
- * `COMMANDS[message]` alone is not that question, and the difference is a bug
- * rather than pedantry: an object literal inherits `Object.prototype`, so
- * `COMMANDS['constructor']` answers with a function. A person who typed the
- * single word `constructor` was getting a `command-outcome` posted about a
- * Command that does not exist, instead of an answer from the agent — and
- * `__proto__` the same. Ordinary English words, swallowed silently.
- *
- * Older than the Relay list and found while giving that one the same guard.
- * `relays.ts` carries the reasoning for putting it at the lookup rather than
- * declaring the table safe.
+ * Not `table[spelling]`: an object literal inherits `Object.prototype`, so
+ * `COMMANDS['constructor']` answers with a function, and the single word
+ * `constructor` was swallowed as a Command that does not exist instead of
+ * reaching the agent. `__proto__` the same.
  */
 function named(table: Readonly<Record<string, Command>>, spelling: string): Command | undefined {
   return Object.hasOwn(table, spelling) ? table[spelling] : undefined

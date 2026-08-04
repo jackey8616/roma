@@ -3,10 +3,8 @@ import type { WrittenEnclosure } from './enclosures.js'
 import type { RelayRequest } from './relays.js'
 
 /**
- * The marker's two halves.
- *
- * Bounded rather than bare — `[Ada]` would be indistinguishable from something
- * somebody typed — and short enough that a Turn is not mostly ceremony.
+ * The marker's two halves. Bounded rather than bare, because `[Ada]` would be
+ * indistinguishable from something somebody typed.
  */
 const OPEN = '<from>'
 const CLOSE = '</from>'
@@ -70,17 +68,11 @@ export function attributed(
 /**
  * The Enclosures on a message, named to the agent one tag to a line.
  *
- * Under the Caller Marker and above what was typed, which is what makes the
- * rule statable: roma's part of the frame is the tagged prefix and comes first.
- * That was always what "only the first line is roma's" meant — see `attributed`
- * — and a second tag is what stops the shorthand being usable, not what stops
- * it being true. Anybody can type a line that looks like one of these, and it
- * buys them nothing: everyone sharing a Conversation shares one Session and one
- * Working Directory, so a forged tag names a file they could have asked for in
- * prose (ADR-0008, ADR-0011).
- *
- * The written Enclosures rather than the pending ones, because by here the
- * bytes are on disk and the path is the only thing worth saying.
+ * Under the Caller Marker and above what was typed — roma's part of the frame is
+ * the tagged prefix and must come first (see `attributed`). A forged tag buys
+ * nothing: everyone sharing a Conversation shares one Session and one Working
+ * Directory, so it names a file they could have asked for in prose (ADR-0008,
+ * ADR-0011).
  */
 function enclosed(enclosures: readonly WrittenEnclosure[]): string {
   return enclosures
@@ -94,16 +86,13 @@ function enclosed(enclosures: readonly WrittenEnclosure[]): string {
 /**
  * Who somebody else's contribution is from, on the tag that carries it.
  *
- * Absent on nearly all of them and load-bearing on the rest. A forwarded message
- * brings its own attachments, and they are written into the same Working
- * Directory and named on the same kind of tag as the ones the Caller attached
- * themselves — so without this, "the screenshot Ada sent" and "the screenshot
- * Ada forwarded from Bob" are one sentence, which is the misattribution the
+ * Absent on nearly all of them and load-bearing on the rest: a forwarded
+ * message's attachments land in the same Working Directory on the same kind of
+ * tag as the Caller's own, so without this "the screenshot Ada sent" and "the
+ * screenshot Ada forwarded from Bob" are one sentence — the misattribution the
  * Caller Marker exists to prevent, one level down (ADR-0021).
  *
- * Nothing is written for the Caller's own, rather than `from` naming them: the
- * marker above the message already says who sent it, and repeating it on every
- * tag would make the ordinary case noisier to buy nothing.
+ * Nothing is written for the Caller's own; the marker above already says who.
  */
 function fromAttribute(from: string | null): string {
   return from === null ? '' : ` from="${attribute(from)}"`
@@ -112,21 +101,11 @@ function fromAttribute(from: string | null): string {
 /**
  * The Quotation on a message, framed and escaped, under roma's other tags.
  *
- * **The one string roma escapes rather than merely carries.** Everything else
- * the model reads as content is last in the message, so it can contain whatever
- * a person typed and still be behind roma's own tags. This one has roma's text
- * after it — the blank line, and then what the Caller actually said — so an
- * unescaped `</quoted>` in somebody else's words would end roma's frame early
- * and leave the rest of the quotation reading as though roma had written it.
- * Escaped, it cannot express a tag at all, which is what keeps the whole prefix
- * roma's.
- *
- * That is a rule about the agent not being confused rather than a privilege
- * boundary, the same as every other rule in this file: ADR-0008 has everyone who
- * can reach roma reaching the whole Installation, so there is no privilege here
- * to forge. What it buys is that a passage somebody else wrote cannot be made to
- * look like roma's frame, or like a different person's message — including to a
- * Caller who quoted something without reading it.
+ * **The one string roma escapes rather than merely carries**, and it must stay
+ * escaped. Everything else the model reads as content is last in the message, so
+ * it can say anything and still sit behind roma's tags. This one has roma's text
+ * after it, so an unescaped `</quoted>` would end roma's frame early and leave
+ * the rest of the quotation reading as though roma had written it.
  *
  * The author is on the tag rather than absent, because a quotation with no
  * author named reads as the Caller saying it themselves.
@@ -153,16 +132,13 @@ function content(value: string): string {
 /**
  * One attribute value, escaped enough to stay one.
  *
- * The sender chose this string and a filename may contain a quote, so an
- * unescaped one would end the attribute early and leave the rest of somebody's
- * filename reading as markup roma wrote. Not a privilege boundary — there is
- * none here to cross — but a tag that parses as what it is costs four
- * replacements, and a mangled one is a frame the agent has to guess at.
+ * The sender chose this string and a filename may contain a quote, which
+ * unescaped would end the attribute early and leave the rest reading as markup
+ * roma wrote.
  *
- * `callerName` is deliberately not escaped this way: it comes from the
- * Channel's own directory of people rather than from an upload, and ADR-0009
- * settled its shape. Escaping is applied where the string was chosen by whoever
- * sent the message.
+ * `callerName` is deliberately not escaped this way — it comes from the
+ * Channel's directory of people rather than from an upload (ADR-0009). Escaping
+ * goes where the string was chosen by whoever sent the message.
  */
 function attribute(value: string): string {
   return content(value).replaceAll('"', '&quot;')

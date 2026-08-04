@@ -295,23 +295,17 @@ export interface CoreOptions {
 }
 
 /**
- * How a parked Task came to be running again, or not.
- *
- * A blocked Task waits for exactly three things and there is no fourth: the
- * window comes back, somebody buys their way past it, or somebody gives up.
+ * How a parked Task came to be running again, or not: the window comes back,
+ * somebody buys their way past it, or somebody gives up. There is no fourth.
  */
 type Resumption = 'reset' | 'overflow' | 'stopped'
 
 /**
  * One Task this Core is in the middle of, as `/stop` needs to see it.
  *
- * Kept because neither of the other two places knows enough on its own. The
- * pool knows which Sessions have a Turn in flight, but not which Conversation
- * asked for one, and not about a Task whose process is still starting; the
- * queue knows what is waiting, but only as opaque keys. This is the Core's own
- * record of the work it has taken on, and it is what makes `/stop` mean "the
- * work I asked for" rather than "whatever is running in the Session I am on
- * now".
+ * Not derivable from the other two: the pool knows which Sessions have a Turn
+ * in flight but not which Conversation asked, nor about a Task whose process is
+ * still starting; the queue holds only opaque keys.
  */
 interface RunningTask extends TaskAddress {
   /**
@@ -727,26 +721,13 @@ export class Core {
   /**
    * Say which model this Conversation is on, or move it, and say so.
    *
-   * Answered here rather than relayed, and that is the whole of ADR-0014: a
-   * `/model` handed to the process would be a choice living inside something that
-   * ends for reasons nobody using it can observe — an Eviction, a Reaping, a
-   * deploy — so what a Caller would get is not model switching but a setting that
+   * Never relayed to the process instead (ADR-0014): a process ends at an
+   * Eviction, a Reaping or a deploy, so a Caller would get a setting that
    * reverts at a moment they cannot see, on a bill nobody can attribute.
    *
-   * **Nothing is torn down.** This writes the record and answers; the Session
-   * Pool is what makes the next Turn run on it. So a Task already running
-   * finishes on the model it started under and still answers the person who asked
-   * — which is the reset Command's behaviour and is right for the same reason.
-   * The reply has to say that out loud, though: a bare acknowledgement while a
-   * Task is running would be read as having changed that Task.
-   *
-   * An answer rather than a `command-outcome`, because "it was carried out" is
-   * not what any of these say. It is a `result` for the same reason a Relay's
-   * output is one: text to be posted as its own message, which an Adapter already
-   * knows how to do. A refusal is a `failure`, whose reason an Adapter passes
-   * through — so a name roma does not offer is refused in the reply to the
-   * message that contained it, addressed to whoever typed it, and Claude Code is
-   * never asked about it.
+   * Nothing is torn down — this writes the record, and the Session Pool is what
+   * makes the *next* Turn run on it. The reply has to say so out loud: a bare
+   * acknowledgement while a Task is running reads as having changed that Task.
    */
   #answerModel(
     request: ModelRequest,
@@ -799,17 +780,12 @@ export class Core {
    * The sentence a `/model` owes when it has just made a Chosen Effort inert, or
    * nothing.
    *
-   * Only where there is a Chosen Effort to strand: a Session running at the
-   * Pinned Effort has chosen nothing, so telling its Caller that a level will not
-   * apply would be answering a question they did not ask about a setting they did
-   * not make. And only where the Matrix positively says the model takes none —
-   * `takesEffort` returns null for a model it has never been read about, and
-   * roma says nothing rather than asserting either way.
+   * `!== false` rather than a falsy check: `takesEffort` answers null for a model
+   * the Matrix has never been read about, and roma says nothing rather than
+   * asserting a model takes no effort when nobody measured it.
    *
-   * Said at all because the Matrix's whole licence is to speak rather than
-   * refuse. Nothing here prevents the move, and nothing rewrites the record: the
-   * Chosen Effort survives, inert, and applies again the moment the Session goes
-   * back onto a model that takes one.
+   * Nothing is prevented and nothing is rewritten — the Chosen Effort survives
+   * inert and applies again on the next model that takes one.
    */
   #effortStranded(sessionId: string, model: string): string {
     if (takesEffort(model) !== false) return ''
@@ -820,18 +796,13 @@ export class Core {
   /**
    * Say what effort this Conversation runs at, or move it, and say so.
    *
-   * `#answerModel`'s twin, and answered here rather than relayed for a reason the
-   * build states from its own side: `Set effort level to max (this session
-   * only)`. A session is a process, and processes end at Eviction, at Reaping and
-   * at a deploy — moments `CONTEXT.md` defines as unobservable to the person
-   * using the Session. Relayed, `/effort` is not a setting; it is a setting that
-   * reverts at a time nobody can see (ADR-0016).
+   * `#answerModel`'s twin, never relayed for the same reason (ADR-0016) — the
+   * build calls it `this session only`, and a session is a process.
    *
-   * Sharper than the model's, in one way that does not show here and shows
-   * everywhere else: `--model` is echoed in `system/init` and `--effort` is
-   * echoed nowhere at all. So this reply is not roma reporting an observation. It
-   * is roma saying what it will send, which is why the Audit Record spells the
-   * effort as weaker evidence than the model beside it.
+   * `--effort` is echoed nowhere in the stream, where `--model` comes back in
+   * `system/init`. So this reply is roma saying what it will send rather than
+   * reporting what it saw, which is why the Audit Record spells the effort as
+   * weaker evidence than the model beside it.
    */
   #answerEffort(
     request: EffortRequest,
@@ -875,12 +846,8 @@ export class Core {
   /**
    * What effort this Session runs at, and what else it may run at.
    *
-   * `#modelReport`'s shape, minus its two spellings: a level is a level, and the
-   * name a Caller types is the string roma passes to `--effort`. What it keeps is
-   * the distinction between choosing and following — a Session with no record
-   * *follows* the Pinned Effort, and one whose record names the same level does
-   * not, which is one string today and two the moment an operator moves
-   * `ROMA_EFFORT`.
+   * `#modelReport`'s shape minus its two spellings: the name a Caller types is
+   * the string roma passes to `--effort`.
    */
   #effortReport(sessionId: string): string {
     return (
@@ -893,17 +860,14 @@ export class Core {
   /**
    * This Session's effort as a person would say it back.
    *
-   * `chosenFor` rather than `effortFor`, because the two states that answer the
-   * same string are not the same answer: a Session nobody moved *follows* the
-   * Pinned Effort and is named for it, and one moved to the level the deployment
-   * happens to pin follows nothing. Calling the second "default" would tell
-   * somebody who typed `/effort high` that an operator moving `ROMA_EFFORT` will
-   * take them along — which is the one thing their record guarantees will not
-   * happen.
+   * `chosenFor`, never `effortFor`: the two answer the same string for a Session
+   * that follows the Pinned Effort and one moved to that same level, and naming
+   * the second "default" would tell somebody who typed `/effort high` that an
+   * operator moving `ROMA_EFFORT` takes them along — the one thing their record
+   * guarantees will not happen.
    *
-   * Its own method because two sentences need it and they must not come to
-   * describe different Sessions: `/effort` reports it alone, and `/config`
-   * reports it beside the model.
+   * Its own method because `/effort` and `/config` both say it, and two readings
+   * of one record can disagree.
    */
   #effortNamed(sessionId: string): string {
     const chosen = this.#efforts.chosenFor(sessionId)
@@ -914,10 +878,9 @@ export class Core {
    * The sentence an `/effort` owes when this Session's model takes none, or
    * nothing.
    *
-   * `#effortStranded` pointing the other way, and it does not ask whether
-   * anything was chosen: somebody who just typed `/effort max` is owed the
-   * sentence whether or not the record already existed, and somebody who typed
-   * `/effort` to ask is owed it because the answer is otherwise misleading.
+   * `#effortStranded` pointing the other way, and deliberately without its
+   * chosen-effort check: somebody who just typed `/effort max` is owed the
+   * sentence whether or not a record already existed.
    */
   #modelTakesNone(sessionId: string): string {
     const model = this.#models.modelFor(sessionId)
@@ -927,23 +890,13 @@ export class Core {
   /**
    * Say what this Session is set to, and refuse to set anything else.
    *
-   * Claimed rather than left to fall through, on ADR-0013's rule applied to two
-   * more spellings: a spelling roma leaves unclaimed is one somebody is billed
-   * for. Answered rather than merely refused, on ADR-0014's test: Claude Code's
-   * own no-argument `/config` is a settings panel, a panel has no form in a chat
-   * message, and *show me what this conversation is set to* is what that gesture
-   * can honestly mean in one — which roma owns the answer to, with no process, no
-   * Turn and no money (ADR-0017).
+   * Claimed and answered rather than left to fall through (ADR-0017).
    *
-   * **An argument is refused rather than honoured, and rather than passed on.**
-   * Honouring it means one Conversation reconfiguring every Session in the
-   * deployment: roma passes one `CLAUDE_CONFIG_DIR` to every spawn, so a settings
-   * write from one thread persists for everybody across restarts — and the key
-   * list is not cosmetic, since `model=…|sonnet[1m]|opusplan` is a second door
-   * onto exactly what the Model Menu bounds and `workflows` is the switch the
-   * Effort Menu keeps `ultracode` away from Callers for. Passing it on is the
-   * fault this exists to fix. So the refusal names what roma *does* let a
-   * Conversation set, which is the two Commands that own those two facts.
+   * An argument is refused — never honoured, never passed on. roma hands one
+   * `CLAUDE_CONFIG_DIR` to every spawn, so a settings write from one thread
+   * persists for everybody across restarts; and the keys are not cosmetic, since
+   * `model=…|sonnet[1m]|opusplan` is a second door onto what the Model Menu
+   * bounds and `workflows` is the switch that keeps `ultracode` from Callers.
    */
   #answerConfig(
     argument: string | null,
@@ -972,11 +925,9 @@ export class Core {
   /**
    * Which model this Session is on, and what else it may be on.
    *
-   * Both spellings of the model, because they are answers to two different
-   * questions a person has at once: the id is what the Audit Record and the
-   * Operator Log call it, and the name is the only thing they may actually type —
-   * the id is refused, deliberately, so a report that named it alone would offer
-   * a list nothing in the sentence above it belonged to.
+   * Both spellings: the id is what the Audit Record calls it, and the name is
+   * the only thing a Caller may type — an id alone would offer a list nothing in
+   * the sentence above it belonged to.
    */
   #modelReport(sessionId: string): string {
     return `This conversation is on ${this.#modelNamed(sessionId)}. You can choose: ${MENU_LIST}.`
@@ -986,16 +937,8 @@ export class Core {
    * This Session's model in both spellings, or the id alone where the Menu has
    * no name for it.
    *
-   * `chosenFor` rather than `modelFor`, because the two states that answer the
-   * same string are not the same answer. A Session nobody moved *follows* the
-   * Pinned Model and is named for it; one that was moved to the model the
-   * deployment happens to pin follows nothing, and calling it "default" would
-   * tell somebody who typed `/model sonnet` that an operator moving `ROMA_MODEL`
-   * will take them along — which is the one thing their record guarantees will
-   * not happen.
-   *
-   * Its own method for `#effortNamed`'s reason: `/model` and `/config` both say
-   * it, and two readings of one record are two things that can disagree.
+   * `chosenFor`, never `modelFor`, and its own method — `#effortNamed`'s two
+   * reasons exactly, for `/model` and `/config`.
    */
   #modelNamed(sessionId: string): string {
     const chosen = this.#models.chosenFor(sessionId)
@@ -1026,20 +969,14 @@ export class Core {
   /**
    * End this Conversation's work, and say whether there was any.
    *
-   * Aimed at the Tasks roma is actually in the middle of rather than at the
-   * Session the Conversation is on now, because those are not always the same
-   * Session: a `/clear` between the message and the `/stop` moves the Conversation
-   * on while the work it was asked to stop carries on where it started. Asking
-   * the generation would answer about an empty Session and leave the Task
-   * running with the person told there was nothing to stop.
+   * Reads `#running`, never the generation: a `/clear` in between moves the
+   * Conversation while its Task carries on where it started, so the generation
+   * would answer about an empty Session and leave the Task running with the
+   * person told there was nothing to stop.
    *
-   * A Task is stopped whether or not it has reached Claude Code yet. Between
-   * arriving and its first token a Task can be queued behind three others and
-   * then waiting on a cold start, which is minutes in which it is visibly
-   * running, `/stop` is exactly what a person would send, and there is no Turn
-   * to interrupt. Marking it is what covers that window: a Task stopped before
-   * it starts never starts, and one stopped while its process is still coming up
-   * is interrupted the moment its Turn begins.
+   * Marked whether or not the Task has reached Claude Code. It can sit queued
+   * behind three others and then on a cold start — minutes in which it is
+   * visibly running and there is no Turn to interrupt.
    */
   #stop(conversationKey: string): boolean {
     const mine = [...this.#running].filter((task) => task.conversationKey === conversationKey)
@@ -1494,50 +1431,30 @@ export class Core {
   /**
    * A Compaction inside this Task failed, and roma decides what that is worth.
    *
-   * The whole judgement is `severityOf`, and this is only what follows from it.
-   * Three answers rather than the one #98 was written with, because the
-   * measurement contradicted the issue: a failed Compaction is *usually* fine,
-   * and built as specified roma would have told a Caller their thread was full
-   * in the middle of a Turn that cost two cents and worked.
+   * Three severities rather than the one #98 specified: measurement said a failed
+   * Compaction is *usually* fine, and as specified roma would have told a Caller
+   * their thread was full in the middle of a Turn that cost two cents and worked.
    *
-   * The Caller is told only for `unreducible`, and only once per Task, and that
-   * is the whole of what makes this worth saying at all: they are watching Tasks
-   * fail, roma knows the remedy, and the remedy is a Command they can type. The
-   * operator hears about `unexplained` too, and hears about every occurrence,
-   * because a code roma cannot read is exactly the thing an operator should see
-   * before it becomes a rule.
+   * The Caller hears only `unreducible`, once per Task, because the remedy is a
+   * Command they can type; the operator also hears every `unexplained`.
    *
-   * **roma does not `/clear` it.** ADR-0002's precedent: Overflow is *offered*
-   * at the moment of blocking rather than taken on somebody's behalf, and
-   * auto-clearing is roma deciding to discard a person's context unbidden.
+   * roma never `/clear`s it — that is discarding a person's context unbidden,
+   * where ADR-0002 has Overflow *offered* at the moment of blocking.
    *
-   * Not awaited, because this arrives on a stream listener in the middle of a
-   * Turn and the Turn is what everything else is waiting for. `#tell` absorbs
-   * its own failures, so there is nothing here for a rejection to reach.
+   * Never awaited: this arrives on a stream listener in the middle of the Turn
+   * everything else is waiting for, and `#tell` absorbs its own failures.
    *
-   * **None of it applies to a Compaction somebody asked for**, and that is the
-   * seam ADR-0018 left for its implementation to close. `severityOf` reads a
-   * *code*, which is what the auto path sends; the manual path sends a
-   * **sentence** — `"Not enough messages to compact."` — so every failure of a
-   * `/compact` would land in `unexplained` and write an operator line about a
-   * Turn that was fine. That is not a wrong answer, it is noise, and it would
-   * arrive every time somebody typed `/compact` into a short thread, which is
-   * how a log that records decisions turns into one that records traffic.
+   * The `task.relay` guard is load-bearing. `severityOf` reads a *code*, which
+   * only the auto path sends; the manual path sends a sentence, so without the
+   * guard every failed `/compact` lands in `unexplained` and writes an operator
+   * line about a Turn that was fine — every time somebody `/compact`s a short
+   * thread. Asked as *whose Compaction is this*, because enumerating sentences
+   * is the `shared-window.ts` mistake in a new hat.
    *
-   * Closed by asking **whose Compaction this is** rather than by enumerating
-   * sentences — that would be the `shared-window.ts` mistake in a new hat, and
-   * only one of the manual path's five failures has ever been observed. roma
-   * knows the answer for free: a Compaction failing inside a Relay roma sent is
-   * the one the Relay asked for. There is nothing here to classify because there
-   * is nothing here for roma to decide — the Caller asked, the Caller is told, in
-   * Claude Code's own words, by `#runTask`'s reply.
-   *
-   * What that gives up is named rather than hidden. An `exhausted` on this path
-   * reaches the Caller as Claude Code's sentence without roma's own "and
-   * `/clear` is the way out" beside it, and no operator line is written. The
-   * repair is not lost, only deferred: a Session that genuinely cannot be reduced
-   * fails the *next* ordinary message in that Conversation on the auto path,
-   * where the code is a code and ADR-0019's machinery reads it properly.
+   * What it gives up: an `exhausted` here reaches the Caller in Claude Code's
+   * words without roma's remedy beside it, and is deferred rather than lost —
+   * the next ordinary message in that Conversation fails on the auto path, where
+   * ADR-0019's machinery reads the code properly.
    */
   #compactionFailed(task: RunningTask, code: string | null): void {
     if (task.relay !== null) return
@@ -1653,23 +1570,16 @@ export class Core {
 /**
  * What roma says about a Task that failed on roma's side rather than in the Turn.
  *
- * Deliberately plain and deliberately fixed. The alternative is forwarding the
- * error's own message, and those are written for whoever is reading the code:
- * "claude exited mid-Turn (code=1, signal=null)", or a Session uuid the person
- * in the Conversation has never seen and cannot act on. What a Conversation
- * needs from this is that the Task is dead, so that nobody waits on it. The
- * detail is an operator's, and the pool already writes the process's side of it
- * — an `exit` record with the code and the signal — where operators look.
+ * Fixed, never the error's own message: those are written for whoever reads the
+ * code — "claude exited mid-Turn (code=1, signal=null)", or a Session uuid the
+ * Conversation has never seen and cannot act on. The detail is an operator's,
+ * and the pool already writes it as an `exit` record.
  */
 const ROMA_FAILED = 'roma could not run this Task.'
 
 /**
- * The same, for a Command.
- *
- * Its own sentence because "Task" is the wrong word for `/stop`, and because
- * what the person does next differs: a Task can be sent again, and a Command
- * that roma could not carry out will fail the same way until somebody looks at
- * it.
+ * The same, for a Command — its own sentence because a Task can be sent again
+ * and a Command will fail the same way until somebody looks at it.
  */
 const ROMA_FAILED_COMMAND = 'roma could not carry out that command.'
 
@@ -1677,28 +1587,15 @@ const ROMA_FAILED_COMMAND = 'roma could not carry out that command.'
  * What a Caller is told about a Relay that ran, from the Compaction it produced
  * and whatever Claude Code itself said.
  *
- * Two answers to what looks like one question, and the thing that separates them
- * is structural rather than a string: **a Compaction happened, or it did not.**
- * Nothing here matches on an error code, on a sentence, or on which entry of the
- * list this was, which is what keeps it off the ground ADR-0018 named as the
- * `shared-window.ts` mistake — `compact_error` is a code on one path and a
- * sentence on the other, and roma parses neither.
+ * Split on whether a Compaction happened, never on a string. `compact_error` is
+ * a code on one path and a sentence on the other, and matching either is the
+ * `shared-window.ts` mistake ADR-0018 named.
  *
- * **On failure roma relays what Claude Code already wrote.** Measured: the
- * sentence arrives in the terminal event's own `result`, addressed to a person,
- * at no cost, on a Turn that reported no error at all. There is nothing for roma
- * to improve and a paraphrase would only be a second build's worth of drift.
- *
- * **On success roma has to speak, because Claude Code does not.** Also measured,
- * and not something anybody anticipated: a successful `/compact` returns
- * `result: ""`. Silence after half a minute and five cents is not restraint — it
- * is a Caller wondering whether anything happened, which is what ADR-0003 names
- * as producing a resend. The figures are the boundary's own (`pre_tokens`,
- * `post_tokens`), so nothing is computed and nothing parallel is maintained: it
- * is still Claude Code's reading, relayed.
- *
- * The third case is a Relay that neither compacted nor said anything, which no
- * capture roma holds shows and which would otherwise be silence by omission.
+ * On failure roma relays Claude Code's own sentence, which measurement puts in
+ * the terminal event's `result` at no cost. On success roma has to speak,
+ * because a successful `/compact` returns `result: ""` — measured — and silence
+ * after half a minute and five cents produces a resend. The figures are the
+ * boundary's own, so nothing parallel is computed.
  */
 function relayReply(compaction: Compaction | null, text: string): string {
   const { preTokens = null, postTokens = null } = compaction ?? {}
@@ -1715,38 +1612,31 @@ function relayReply(compaction: Compaction | null, text: string): string {
 /**
  * A token count as somebody in a Conversation reads it, which is in thousands.
  *
- * Written out rather than left to `toLocaleString`, whose grouping and separator
- * follow whichever locale the process happens to be running under — and this
- * sentence is one Conversation's, not one deployment's machine's.
+ * Not `toLocaleString`: its grouping and separator follow whatever locale the
+ * process runs under, and this sentence is a Conversation's rather than a
+ * machine's.
  */
 function readableTokens(tokens: number): string {
   return String(tokens).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
 /**
- * What roma says when a Conversation has been put on a model.
- *
- * The one thing it must not leave out is *when*. `/model` is aimed at what the
- * next message reaches, and a bare acknowledgement sent while a Task is running
- * would be read as having changed that Task — so the sentence says both halves,
- * whether or not there is anything running to be confused about.
- *
- * Prose written by the Core, which an Outbound Instruction otherwise avoids. It
- * is here for the reason a failure's reason is: this reads the same on every
- * Channel, and the alternative is every Adapter growing its own copy of the Menu
- * and of this sentence.
- */
-/**
- * The Menu as a sentence names it.
- *
- * Held once rather than joined at each of the two places that quote it, so a
- * report and a refusal cannot come to describe different Menus.
+ * The Menu as a sentence names it, joined once so that a report and a refusal
+ * cannot come to describe different Menus.
  */
 const MENU_LIST = MENU_NAMES.join(', ')
 
 /** The Effort Menu as a sentence names it, held once for `MENU_LIST`'s reason. */
 const EFFORT_LIST = EFFORT_NAMES.join(', ')
 
+/**
+ * What roma says when a Conversation has been put on a model.
+ *
+ * Must not leave out *when*: `/model` is aimed at what the next message reaches,
+ * and a bare acknowledgement sent while a Task is running reads as having
+ * changed that Task. Said in the Core rather than an Adapter so that every
+ * Channel reads the same and no Adapter grows its own copy of the Menu.
+ */
 function fromNextMessage(name: string, model: string): string {
   return (
     `This conversation runs on ${named(name, model)} from your next message. ` +
@@ -1755,14 +1645,10 @@ function fromNextMessage(name: string, model: string): string {
 }
 
 /**
- * The same, for the effort.
- *
- * Its own sentence rather than a parameterised one, because the two differ in
- * the half that matters: a model has two spellings and an effort has one, and
- * "the model it started under" is not a phrase about effort. What it must not
- * leave out is the same thing — *when* — because `/effort` is aimed at what the
- * next message reaches, and a bare acknowledgement sent while a Task is running
- * would be read as having changed that Task.
+ * The same, for the effort — its own sentence rather than a parameterised one,
+ * because a model has two spellings and an effort has one, and "the model it
+ * started under" is not a phrase about effort. Carries *when* for the same
+ * reason `fromNextMessage` does.
  */
 function atNextMessage(name: string, effort: string): string {
   return (
@@ -1774,17 +1660,12 @@ function atNextMessage(name: string, effort: string): string {
 /**
  * What roma says where the Effort Matrix says this model takes no effort.
  *
- * The whole of what the Matrix is for on this side: it says so, and it refuses
- * nothing. Setting `max` on a model that strips it costs no more than `low`
- * does, so the harm is a false belief and a false belief is answered with a
- * sentence.
+ * Says so and refuses nothing — the harm is a false belief, not a cost.
  *
- * It says what roma *read*, not what roma watched. Nothing observable
- * contradicts a level on such a model — the build echoes back every level on
- * every model identically — so the only account of this is a reading of a
- * minified binary, and one that has already been wrong once. The sentence
- * promises no more than that, and it names the way out rather than describing
- * the fault.
+ * Claims only what roma *read*, never what roma watched: the build echoes every
+ * level on every model identically, so the only account of this is a reading of
+ * a minified binary that has already been wrong once. Do not strengthen the
+ * sentence past that.
  */
 function takesNoEffort(model: string, chosen?: string): string {
   const setting = chosen === undefined ? 'Effort' : `The effort this conversation is at (${chosen})`
@@ -1797,15 +1678,10 @@ function takesNoEffort(model: string, chosen?: string): string {
 /**
  * What roma says about a level it does not offer.
  *
- * `unknownModelReason`'s shape and its reasons: named back so it can be
- * corrected in the next message, the Menu quoted so the correction needs no
- * looking up, and "nothing has changed" said out loud because a Conversation is
- * shared and the people in it are owed the difference between an effort that
- * moved and a typo that did not move one.
+ * `unknownModelReason`'s shape and its reasons.
  *
- * `ultracode` arrives here like any other unknown name, and is answered like
- * one. Explaining that it exists and is the operator's would be roma advertising
- * something no Caller can have.
+ * `ultracode` arrives here like any other unknown name and must stay that way —
+ * naming it would advertise something no Caller can have.
  */
 function unknownEffortReason(name: string): string {
   return (
@@ -1817,12 +1693,9 @@ function unknownEffortReason(name: string): string {
 /**
  * What roma says to a `/config key=value`.
  *
- * A refusal that names the alternatives rather than a bare no, because the
- * person typing it knows the tool and is reaching for something real: Claude
- * Code's `/config` sets 35 keys. What they cannot have is any of them, and the
- * reason is worth one clause — roma passes one config dir to every spawn, so
- * that write would be a write for every Session in the deployment, persisting
- * across restarts.
+ * Names the alternatives rather than a bare no: the person typing it is reaching
+ * for one of the 35 keys Claude Code's own `/config` sets, and can have none of
+ * them, because roma passes one config dir to every spawn.
  */
 const CONFIG_SETS_NOTHING =
   'roma does not set Claude Code settings — every Session in this deployment shares one ' +
@@ -1830,12 +1703,9 @@ const CONFIG_SETS_NOTHING =
   'What you can set for this conversation is “/model” and “/effort”. Nothing has changed.'
 
 /**
- * One model, in both spellings a person needs.
- *
- * The name is what they may type and the id is what every record roma keeps calls
- * it, so a sentence carrying one of them sends somebody looking for the other.
- * The id alone where the Menu has no name for the model, which is what a
- * deployment that pinned something off the Menu has.
+ * One model, in both spellings a person needs: the name is what they may type
+ * and the id is what every record calls it. The id alone where the Menu has no
+ * name for it, which is a deployment pinned off the Menu.
  */
 function named(name: string | null, model: string): string {
   return name === null ? model : `${name} (${model})`
@@ -1844,10 +1714,9 @@ function named(name: string | null, model: string): string {
 /**
  * What roma says about a name it does not offer.
  *
- * Named back, so it can be corrected in the next message, and the Menu is quoted
- * so the correction does not need looking up. That nothing changed is said
- * because a Conversation is shared: the people in it are owed the difference
- * between a model that moved and a typo that did not move one.
+ * "Nothing has changed" is load-bearing: a Conversation is shared, and the
+ * people in it are owed the difference between a model that moved and a typo
+ * that did not move one.
  */
 function unknownModelReason(name: string): string {
   return (
@@ -1857,11 +1726,8 @@ function unknownModelReason(name: string): string {
 }
 
 /**
- * A Task that was stopped before it ever reached Claude Code.
- *
- * The other way a stopped Task ends. A Turn that was interrupted says so itself,
- * on the Turn; one that never began has no Turn to say anything, and the Task
- * still has to end as stopped rather than as a failure.
+ * A Task that was stopped before it ever reached Claude Code — it has no Turn to
+ * say so itself, and must still end as stopped rather than as a failure.
  */
 class TaskStopped extends Error {
   constructor() {
@@ -1873,15 +1739,10 @@ class TaskStopped extends Error {
 /**
  * Which Task an instruction is about and whose it is, in one place.
  *
- * A function rather than four fields spread by hand at each of the nine places
- * an instruction is built. The failure it forecloses is a quiet one: an
- * instruction that forgot the Caller would still typecheck as long as some other
- * variable of the right name were in scope, and what an Adapter would do with it
- * is address somebody else's answer to whoever asked last.
- *
- * It takes anything that is already an address — a `RunningTask`, or an ingress
- * message with a freshly minted Task id spread onto it — and keeps only the four
- * fields an instruction carries.
+ * A function rather than four fields spread by hand at nine build sites, and the
+ * failure it forecloses is quiet: an instruction that forgot the Caller still
+ * typechecks whenever another variable of that name is in scope, and an Adapter
+ * would then address somebody else's answer to whoever asked last.
  */
 function addressOf({ taskId, conversationKey, caller, callerName }: TaskAddress): TaskAddress {
   return { taskId, conversationKey, caller, callerName }
@@ -1890,15 +1751,11 @@ function addressOf({ taskId, conversationKey, caller, callerName }: TaskAddress)
 /**
  * What the Audit Record says a Turn was asked to think at.
  *
- * The level roma sent, unless the Effort Matrix says this model takes none — in
- * which case the record says *that*, because naming a level nothing ran at would
- * be the ledger asserting the opposite of what roma has read. Only a positive
- * `false` changes the answer: a model the Matrix has never been read about gets
- * the level, since roma has no ground to claim otherwise.
+ * Only a positive `false` changes the answer — a model the Matrix has never been
+ * read about keeps the level, since roma has no ground to claim otherwise.
  *
- * The ADR-0016 line this keeps: what is written down here is what roma *sent*,
- * boot-verified once, interpreted through a reading of a binary. It is not an
- * observation, and nothing anywhere in roma can make it one.
+ * What lands here is what roma *sent*, never an observation (ADR-0016), and
+ * nothing in roma can make it one.
  */
 function effortOn(model: string, effort: string): string {
   return takesEffort(model) === false ? EFFORT_NOT_APPLIED : effort
@@ -1907,10 +1764,8 @@ function effortOn(model: string, effort: string): string {
 /**
  * How a Task ended, as the audit record names it.
  *
- * Taken from the instruction the Conversation is about to be given rather than
- * remembered separately, so that the two can never disagree about how a Task
- * went. The other two instruction kinds cannot arrive here: `progress` is not an
- * ending, and a `command-outcome` belongs to a Command, which is not a Task.
+ * Read off the instruction the Conversation is about to be given, never
+ * remembered separately, so the two cannot disagree about how a Task went.
  */
 function outcomeOf(instruction: OutboundInstruction): TaskOutcome {
   if (instruction.kind === 'result') return 'result'
@@ -1921,11 +1776,9 @@ function outcomeOf(instruction: OutboundInstruction): TaskOutcome {
 /**
  * Whether a Task ended because `/stop` reached it.
  *
- * Read off the ending rather than remembered from the Command: the Command is
- * carried out on another Task's behalf and returns immediately, so what stopped
- * a Task and what the Task's own outcome was would be two separate stories to
- * keep in step. There is no third party to consider either — roma interrupts a
- * Turn nowhere else, and abandons a retry storm by ending the process instead.
+ * Read off the ending, never remembered from the Command: the Command returns
+ * immediately on another Task's behalf, so the two would be separate stories to
+ * keep in step. roma interrupts a Turn nowhere else.
  */
 function wasStopped(error: unknown): boolean {
   if (error instanceof TaskStopped) return true
@@ -1935,9 +1788,8 @@ function wasStopped(error: unknown): boolean {
 /**
  * What to tell the Conversation about a Task that produced no result.
  *
- * A failed Turn usually explains itself in its own text — "Failed to
- * authenticate. API Error: 401 API key is invalid." is Claude Code's sentence,
- * not ours, and it is more use than anything the Core could write about it.
+ * A failed Turn usually explains itself, and Claude Code's own sentence is more
+ * use than anything the Core could write about it.
  */
 function reasonFor(error: unknown): string {
   if (error instanceof RetryStormError) return retryStormReason(error)
@@ -1967,17 +1819,10 @@ function commandReasonFor(error: unknown): string {
 /**
  * What to say to a Conversation whose Chosen Model roma has stopped offering.
  *
- * Named for `retryStormReason`'s reason and one better: this is a failure roma
- * decided on, the person can act on it, and unlike a 401 they can act on it
- * *themselves* — which is why the sentence carries the way out rather than
- * describing the fault.
- *
- * It has to, because the fault is total. Every message in this Conversation
- * fails until the record goes, so a Caller who is not told `/model default`
- * fixes it has a thread that is simply broken, with the reason legible only to
- * whoever removed the Menu entry. Story 38 asked that removing one be noticed;
- * `ROMA_FAILED` on every message is noticed everywhere except where somebody
- * could do something about it.
+ * Carries the way out rather than describing the fault, because the fault is
+ * total: every message in this Conversation fails until the record goes, so a
+ * Caller not told that `/model default` fixes it has a thread that is simply
+ * broken, legible only to whoever removed the Menu entry.
  */
 function chosenModelGoneReason({ model }: ChosenModelNotOffered): string {
   return (
@@ -1990,11 +1835,9 @@ function chosenModelGoneReason({ model }: ChosenModelNotOffered): string {
 /**
  * The same, for a Chosen Effort roma has stopped offering.
  *
- * A narrower hole than the model's, because the Effort Menu holds every level
- * the build has — so the only way here is roma removing one, which is exactly
- * what this sentence exists to make noticeable. The fault is total in the same
- * way and is answered the same way: the way out, rather than a description of
- * the fault, because `/effort default` does not read the record at all.
+ * A narrower hole than the model's — the Effort Menu holds every level the build
+ * has, so the only way here is roma removing one. Total, and answered the same
+ * way, because `/effort default` does not read the record at all.
  */
 function chosenEffortGoneReason({ effort }: ChosenEffortNotOffered): string {
   return (
@@ -2007,18 +1850,14 @@ function chosenEffortGoneReason({ effort }: ChosenEffortNotOffered): string {
 /**
  * What to say to a Conversation whose Session could not be opened at all.
  *
- * Reached only once the pool's own recovery has been tried and refused too — it
- * respawns naming a fresh Session, and this is the Turn that would not have
- * that either. So the sentence cannot promise that sending the message again
- * will work, and it does not: it names the way out, for `chosenModelGoneReason`'s
- * reason. The fault is total until somebody acts, because the Session id is
- * derived from the Conversation Key and never moves on its own, and `/clear` is
- * the one thing that moves it.
+ * Reached only after the pool's own respawn was refused too, so it must not
+ * promise that sending again will work. Total until somebody acts: the Session
+ * id derives from the Conversation Key and `/clear` is the one thing that moves
+ * it.
  *
- * Claude Code's own sentence is deliberately not quoted. "No conversation found
- * with session ID: 64b3f99a…" is true and useless to whoever is in the
- * Conversation — the id is roma's, derived from a key they have never seen —
- * and it is on the `resume-lost` record for the operator who wants it.
+ * Claude Code's sentence must not be quoted here — "No conversation found with
+ * session ID: 64b3f99a…" names an id the Caller has never seen. It is on the
+ * `resume-lost` record for the operator who wants it.
  */
 function transcriptLostReason(): string {
   return (
@@ -2030,14 +1869,12 @@ function transcriptLostReason(): string {
 /**
  * What to say about a Task roma stopped waiting on.
  *
- * Named rather than folded into `ROMA_FAILED`, because this is the one failure
- * where roma made the decision and the person can act on it. A 401 here is a
- * credential someone has to go and fix; a 529 is worth sending again in a
- * minute. Neither is deducible from "roma could not run this Task."
+ * Not folded into `ROMA_FAILED`: a 401 here is a credential somebody must fix
+ * and a 529 is worth resending in a minute, and neither is deducible from "roma
+ * could not run this Task."
  *
- * The status comes from the retry events themselves. The error proper never
- * arrives — it surfaces only once the retries are exhausted, which is precisely
- * the wait that was cut short.
+ * The status comes from the retry events, because the error proper only surfaces
+ * once retries are exhausted — precisely the wait that was cut short.
  */
 function retryStormReason({ retries, lastRetry }: RetryStormError): string {
   const cause = [lastRetry.errorStatus, lastRetry.error].filter((part) => part !== null).join(' ')

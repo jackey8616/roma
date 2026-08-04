@@ -64,18 +64,13 @@ export type CompactionSeverity =
  * The codes roma treats as harmless, and the reason each one is on the list.
  *
  * Read off a single switch in the pinned build (2.1.220, ADR-0007), quoted in
- * #98's second comment, which maps every code to what Claude Code does with it.
- * The five it names are `too_few_groups`, `aborted`, `exhausted`,
- * `media_unstrippable` and `error`, and they split two-three along a line the
- * build draws for itself: the two below throw a plain `Error`, and the other
- * three throw the class reserved for what it shows a user. Two independent
- * signals agreeing is why this split is worth more than either half of it — and
- * roma still has to enumerate, because only the code reaches stdout.
+ * #98's second comment. The split follows a line the build draws for itself:
+ * these throw a plain `Error`, the unreducible ones throw the class reserved for
+ * what it shows a user.
  *
- * **A person's judgement about one build**, like the Relay list, and re-applied
- * when the pin moves. What a new release can do to it is add a code, and an added
- * code lands in `unexplained` — the operator sees it, nobody is told a wrong
- * story about their thread, and somebody decides which list it belongs on.
+ * **A person's judgement about one build**, like the Relay list, re-applied when
+ * the pin moves. A release that adds a code lands it in `unexplained`, where the
+ * operator sees it and nobody is told a wrong story about their thread.
  */
 const BENIGN: readonly string[] = [
   // Not enough conversation to summarise yet. Benign, and on the evidence the
@@ -91,15 +86,10 @@ const BENIGN: readonly string[] = [
 /**
  * The codes that mean the context cannot be reduced below the limit.
  *
- * Read off the same switch and **not measured** — provoking either means filling
- * a real context, which is the expensive path #98 designed its whole measurement
- * to avoid, and the reward would be confirming an explicit `case`. Recorded as
- * read rather than measured, here rather than in a commit message, because that
- * is the one thing a later reader cannot recover.
- *
- * Both are the same fact to a Caller — this Session will not take another
- * message — and both have the same remedy, which is why they share an answer
- * rather than each getting one.
+ * Read off the same switch and **not measured**: provoking either means filling
+ * a real context, and the reward would be confirming an explicit `case`. Said
+ * here rather than in a commit message because it is the one thing a later
+ * reader cannot recover.
  */
 const UNREDUCIBLE: readonly string[] = [
   // "conversation could not be reduced below the context limit".
