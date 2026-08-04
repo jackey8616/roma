@@ -33,8 +33,7 @@ import { ProgressReporter } from './progress-reporter.js'
 import {
   ChosenEffortNotOffered,
   ChosenModelNotOffered,
-  type ChosenEfforts,
-  type ChosenModels,
+  type ChosenRecord,
   type SessionGenerations,
 } from './session-generation.js'
 import { writeToStderr, type OperatorLog } from './operator-log.js'
@@ -232,7 +231,7 @@ export interface CoreOptions {
    * it is the failure with no symptom: `/model` answers, the record is written,
    * and every Turn runs on the Pinned Model.
    */
-  readonly models: ChosenModels
+  readonly models: ChosenRecord<'model'>
   /**
    * What effort each Session runs at, and what the deployment pinned.
    *
@@ -242,7 +241,7 @@ export interface CoreOptions {
    * the record is written, and every Turn runs at the Pinned Effort. Sharper here
    * than for the model, because nothing in the stream would ever contradict it.
    */
-  readonly efforts: ChosenEfforts
+  readonly efforts: ChosenRecord<'effort'>
   /**
    * Where every Task is written down, and shared like everything else here.
    *
@@ -413,8 +412,8 @@ export class Core {
   readonly #workRoot: WorkRoot
   readonly #queue: TaskQueue
   readonly #sessions: SessionGenerations
-  readonly #models: ChosenModels
-  readonly #efforts: ChosenEfforts
+  readonly #models: ChosenRecord<'model'>
+  readonly #efforts: ChosenRecord<'effort'>
   readonly #audit: AuditLog
   readonly #credential: CredentialKind
   readonly #overflow: OverflowOptions | null
@@ -566,8 +565,8 @@ export class Core {
     try {
       const sessionId = this.#sessions.sessionFor(conversationKey)
       session = sessionId
-      model = this.#models.modelFor(sessionId)
-      effort = this.#efforts.effortFor(sessionId)
+      model = this.#models.inForce(sessionId)
+      effort = this.#efforts.inForce(sessionId)
       // Acknowledged only where it cannot be answered at once, which is the
       // whole of ADR-0012's rule about this — and it stays written for the four
       // free entries it was written for. A paid Relay gets the ordinary Task
@@ -652,8 +651,8 @@ export class Core {
       durationMs: Date.now() - startedAt,
       turnMs: turn?.durationMs ?? null,
       credential: this.#credential,
-      model: model ?? this.#models.pinnedModel,
-      effort: effortOn(model ?? this.#models.pinnedModel, effort ?? this.#efforts.pinnedEffort),
+      model: model ?? this.#models.pinned,
+      effort: effortOn(model ?? this.#models.pinned, effort ?? this.#efforts.pinned),
       // Asked rather than assumed false. A free Relay drives no Turn so nothing
       // it does can mint, but the answer is read-and-forget and a hard `false`
       // here would be roma writing down a fact it declined to check.
@@ -752,7 +751,7 @@ export class Core {
         // the slow thing.
         return { kind: 'result', ...address, text: this.#modelReport(sessionId) }
       case 'default':
-        this.#models.usePinnedModel(sessionId)
+        this.#models.usePinned(sessionId)
         // Named as `default` rather than by whatever the deployment pinned it
         // to, because `default` is the word they typed and the word they would
         // type again — and the id beside it says which model that turned out to
@@ -761,8 +760,8 @@ export class Core {
           kind: 'result',
           ...address,
           text:
-            fromNextMessage(PINNED_NAME, this.#models.pinnedModel) +
-            this.#effortStranded(sessionId, this.#models.pinnedModel),
+            fromNextMessage(PINNED_NAME, this.#models.pinned) +
+            this.#effortStranded(sessionId, this.#models.pinned),
         }
       case 'chosen':
         this.#models.choose(sessionId, request.model)
@@ -822,12 +821,12 @@ export class Core {
       case 'report':
         return { kind: 'result', ...address, text: this.#effortReport(sessionId) }
       case 'default':
-        this.#efforts.usePinnedEffort(sessionId)
+        this.#efforts.usePinned(sessionId)
         return {
           kind: 'result',
           ...address,
           text:
-            atNextMessage(PINNED_EFFORT_NAME, this.#efforts.pinnedEffort) +
+            atNextMessage(PINNED_EFFORT_NAME, this.#efforts.pinned) +
             this.#modelTakesNone(sessionId),
         }
       case 'chosen':
@@ -871,7 +870,7 @@ export class Core {
    */
   #effortNamed(sessionId: string): string {
     const chosen = this.#efforts.chosenFor(sessionId)
-    return chosen ?? `${PINNED_EFFORT_NAME} (${this.#efforts.pinnedEffort})`
+    return chosen ?? `${PINNED_EFFORT_NAME} (${this.#efforts.pinned})`
   }
 
   /**
@@ -883,7 +882,7 @@ export class Core {
    * sentence whether or not a record already existed.
    */
   #modelTakesNone(sessionId: string): string {
-    const model = this.#models.modelFor(sessionId)
+    const model = this.#models.inForce(sessionId)
     return takesEffort(model) === false ? ` ${takesNoEffort(model)}` : ''
   }
 
@@ -944,7 +943,7 @@ export class Core {
     const chosen = this.#models.chosenFor(sessionId)
     return named(
       chosen === null ? PINNED_NAME : menuNameFor(chosen),
-      chosen ?? this.#models.pinnedModel,
+      chosen ?? this.#models.pinned,
     )
   }
 
@@ -1060,8 +1059,8 @@ export class Core {
       const task: RunningTask = {
         ...address,
         sessionId,
-        model: this.#models.modelFor(sessionId),
-        effort: this.#efforts.effortFor(sessionId),
+        model: this.#models.inForce(sessionId),
+        effort: this.#efforts.inForce(sessionId),
         stopped: false,
         toldContextFull: false,
         attempts,
@@ -1184,13 +1183,13 @@ export class Core {
         // far as a Session to ask about — the same failure that leaves
         // `sessionId` null — because a row that says nothing is a row the month's
         // spending cannot be read against.
-        model: running?.model ?? this.#models.pinnedModel,
+        model: running?.model ?? this.#models.pinned,
         // And what it was asked to think at, said as weakly as roma knows it:
         // where the Matrix says the model takes no effort, the record says that
         // rather than naming a level nothing ran at.
         effort: effortOn(
-          running?.model ?? this.#models.pinnedModel,
-          running?.effort ?? this.#efforts.pinnedEffort,
+          running?.model ?? this.#models.pinned,
+          running?.effort ?? this.#efforts.pinned,
         ),
         cloudReach,
         documentReach,
@@ -1518,8 +1517,8 @@ export class Core {
     // and what it runs on is whatever the Session is on now — which is not what
     // it was on if this Task queued behind another one and somebody chose in
     // between.
-    task.model = this.#models.modelFor(sessionId)
-    task.effort = this.#efforts.effortFor(sessionId)
+    task.model = this.#models.inForce(sessionId)
+    task.effort = this.#efforts.inForce(sessionId)
     reporter.update({ phase: 'working' })
     const onEvent = (id: string, event: ClaudeEvent): void => {
       if (id !== sessionId) return

@@ -267,13 +267,21 @@ export type CredentialEnvs = Readonly<Partial<Record<CredentialKind, BuildSessio
  * Which model a Session runs on, asked afresh at every spawn.
  *
  * A port rather than the record itself, because what the pool needs is one
- * question answered and not a directory of files: `ChosenModels` is what
+ * question answered and not a directory of files: `ChosenRecord` is what
  * implements it. Asked at spawn rather than handed over per call so the invariant
  * re-establishes itself after a restart — the same reason the pool reads whether
  * a Session is resuming off the filesystem instead of remembering it.
  */
 export interface SessionModels {
-  modelFor(sessionId: string): string
+  /**
+   * Carried so that this port and `SessionEfforts` stay distinct.
+   *
+   * Without it the two are one structural type, and the pool holds them in
+   * adjacent options — swapped, every process spawns with the effort as its
+   * model and nothing anywhere says so.
+   */
+  readonly kind: 'model'
+  inForce(sessionId: string): string
 }
 
 /**
@@ -284,7 +292,9 @@ export interface SessionModels {
  * what makes the invariant re-establish itself after a restart of roma.
  */
 export interface SessionEfforts {
-  effortFor(sessionId: string): string
+  /** Carried for `SessionModels.kind`'s reason. */
+  readonly kind: 'effort'
+  inForce(sessionId: string): string
 }
 
 /**
@@ -702,12 +712,12 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * force without anybody telling the pool about it.
    */
   #modelFor(sessionId: string): string {
-    return this.#models?.modelFor(sessionId) ?? this.#model ?? PINNED_MODEL
+    return this.#models?.inForce(sessionId) ?? this.#model ?? PINNED_MODEL
   }
 
   /** The effort this Session's next process runs at, read for `#modelFor`'s reason. */
   #effortFor(sessionId: string): string {
-    return this.#efforts?.effortFor(sessionId) ?? this.#effort ?? PINNED_EFFORT
+    return this.#efforts?.inForce(sessionId) ?? this.#effort ?? PINNED_EFFORT
   }
 
   async #spawn(sessionId: string, terms: SpawnTerms, resume?: boolean): Promise<Resident> {

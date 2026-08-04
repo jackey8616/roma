@@ -12,7 +12,7 @@ import { ReachUse } from './reach-use.js'
 import { Core, type CoreLogRecord } from './core.js'
 import { FreshTokens } from './fresh-tokens.js'
 import { eachReach, type Reach, type Reaches } from './reach.js'
-import { ChosenEfforts, ChosenModels, SessionGenerations } from './session-generation.js'
+import { chosenEfforts, chosenModels, SessionGenerations } from './session-generation.js'
 import type { OperatorLog } from './operator-log.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
 import { socketPathIn, type CredentialWanted } from './shim-protocol.js'
@@ -402,23 +402,23 @@ export async function startRoma({
   // What they have to agree on is the *path*, not this object: nothing here is
   // held between calls, so two of these over one root behave identically. One
   // instance is how that agreement is made rather than hoped for, which is the
-  // argument `ChosenModels` makes for itself below. Two over *different* roots
+  // argument `ChosenRecord` makes for itself below. Two over *different* roots
   // is the failure, and `CoreOptions.workRoot` is where what it costs is
   // written down.
   const work = new WorkRoot(workRoot)
 
   // Beside the generations, and handed to both the pool and the Core. What has
-  // to be one thing is the *work root* rather than the object — `ChosenModels`
+  // to be one thing is the *work root* rather than the object — `ChosenRecord`
   // keeps nothing between calls, it reads and writes files — and passing one
   // instance to both is how that is made true rather than hoped for. What must
   // not happen is the pool being built without it: roma would answer `/model`
   // perfectly, write a perfect record, and run every Turn on the Pinned Model.
-  const models = new ChosenModels({ workRoot: work, pinnedModel })
+  const models = chosenModels({ workRoot: work, pinnedModel })
   // Beside them, and handed to both for the same reason and at higher stakes: a
   // pool built without this answers `/effort` perfectly, writes a perfect record,
   // and runs every Turn at the Pinned Effort — with nothing anywhere in the
   // stream to contradict it, because `system/init` carries no effort field.
-  const efforts = new ChosenEfforts({ workRoot: work, pinnedEffort })
+  const efforts = chosenEfforts({ workRoot: work, pinnedEffort })
 
   const pool = new SessionPool({
     workRoot: work,
