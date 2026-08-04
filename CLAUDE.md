@@ -37,3 +37,11 @@ user asks for the merge. See `docs/agents/commit-convention.md`.
 ### Domain docs
 
 Single-context — one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Comments
+
+A comment's size is the width of the interface it documents, so an unreachable symbol — one that
+is not exported, or is `#private` — gets **one line**, unless its comment is a guardrail naming
+both a change somebody would make and what it would break. Definitions belong in `CONTEXT.md`,
+decisions in `docs/adr/`, measurements in the seam 2 test that asserts them; cite them, never
+restate them. See `docs/agents/comment-gradient.md`.
