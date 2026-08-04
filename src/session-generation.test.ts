@@ -4,7 +4,13 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { WorkRoot } from './work-root.js'
 import { sessionIdFor } from './session-id.js'
-import { ChosenEfforts, ChosenModels, SessionGenerations } from './session-generation.js'
+import {
+  chosenEfforts,
+  chosenModels,
+  SessionGenerations,
+  type ChosenKind,
+  type ChosenRecord,
+} from './session-generation.js'
 
 const KEY = 'conversation-one'
 const OTHER_KEY = 'conversation-two'
@@ -35,15 +41,15 @@ function generations(): SessionGenerations {
 const PINNED = 'claude-sonnet-5'
 const SESSION = sessionIdFor(KEY)
 
-function models(): ChosenModels {
-  return new ChosenModels({ workRoot: work, pinnedModel: PINNED })
+function models(pinnedModel = PINNED): ChosenRecord<'model'> {
+  return chosenModels({ workRoot: work, pinnedModel })
 }
 
 /** The effort roma runs at where nobody has chosen anything. */
 const PINNED_AT = 'high'
 
-function efforts(pinnedEffort = PINNED_AT): ChosenEfforts {
-  return new ChosenEfforts({ workRoot: work, pinnedEffort })
+function efforts(pinnedEffort = PINNED_AT): ChosenRecord<'effort'> {
+  return chosenEfforts({ workRoot: work, pinnedEffort })
 }
 
 describe('the Session a Conversation is on', () => {
@@ -175,151 +181,177 @@ describe('starting a fresh Session', () => {
  * defence against a disk, an operator or a restore rather than against roma, and
  * a reason to keep it rather than to drop it.
  */
-describe('the model a Session runs on', () => {
-  // Fail loudly rather than fall back to the Pinned Model. Falling back is a
-  // Chosen Model disappearing silently — the Session runs on something nobody
-  // asked for, bills the window everybody shares for it, and the only evidence
-  // is answers that read as if they came from somewhere else.
-  it('refuses to guess when the record it kept is not readable', () => {
-    models().choose(SESSION, 'claude-opus-5')
-    writeFileSync(join(workRoot, `${SESSION}.model`), '{"half a wr')
-
-    expect(() => models().modelFor(SESSION)).toThrow(/chosen model/i)
-  })
-
-  // The same refusal, for the case that is somebody's decision rather than a
-  // machine's accident: a name roma has stopped offering is not passed through to
-  // `--model`, so removing a Menu entry is a change somebody notices rather than
-  // a Session quietly going on running on something the Menu no longer stands
-  // behind.
-  it('refuses a model roma no longer offers', () => {
-    writeFileSync(join(workRoot, `${SESSION}.model`), 'claude-something-else')
-
-    expect(() => models().modelFor(SESSION)).toThrow(/offers/i)
-  })
-
-  // "There is no record" is one specific failure — every Session nobody has
-  // moved, which is almost all of them — and only it means the Pinned Model. A
-  // read that failed for any other reason describes a record that is there and
-  // could not be read.
-  it('refuses to guess when the record cannot be read at all', () => {
-    mkdirSync(join(workRoot, `${SESSION}.model`))
-
-    expect(() => models().modelFor(SESSION)).toThrow()
-    expect(models().modelFor(sessionIdFor(OTHER_KEY))).toBe(PINNED)
-  })
-
-  // A file rather than a directory, which is the whole of why a Chosen Model
-  // outlives the working directory's seven days: `reclaimIdleWorkDirs` deletes
-  // directories nothing has used and steps over everything else. Reclaimed, a
-  // Conversation that went quiet for a week would come back on the Pinned Model
-  // having asked for something else, at a moment nobody can observe.
-  it('is a file, so the reclaim that empties the work root steps over it', () => {
-    models().choose(SESSION, 'claude-opus-5')
-
-    const written = readdirSync(workRoot, { withFileTypes: true })
-    expect(written.map((entry) => entry.name)).toEqual([`${SESSION}.model`])
-    expect(written.every((entry) => entry.isFile())).toBe(true)
-  })
-})
-
 /**
- * The same three rules again, for the effort — and the stakes are higher by one
- * thing that does not appear anywhere in this file.
+ * The rules every Chosen Record keeps, whichever of the two it is.
  *
- * `--model` is echoed in `system/init` and the startup self-check asserts on it,
- * so a Chosen Model that went missing would eventually contradict something.
- * `--effort` is echoed nowhere at all. What is written here is the only account
- * roma has of what a Session was asked to run at, which is why the failures
- * below refuse rather than fall back.
+ * Written once and run twice, because the record is written once and used twice
+ * — and because the two suites had already drifted apart while the two classes
+ * were separate: the effort's asserted six things the model's did not, on an
+ * implementation that was byte-identical.
+ *
+ * Only what is genuinely shared. `ultracode`, and the two records sitting beside
+ * each other, are each one kind's own and stay in its own block below.
  */
-describe('the effort a Session runs at', () => {
-  it('is the Pinned Effort until somebody chooses, and writes nothing down for that', () => {
-    expect(efforts().effortFor(SESSION)).toBe(PINNED_AT)
-    expect(efforts().chosenFor(SESSION)).toBeNull()
+function behavesLikeAChosenRecord({
+  make,
+  suffix,
+  pinned,
+  otherPinned,
+  chosen,
+  offMenu,
+  refusal,
+}: {
+  make: (pinned?: string) => ChosenRecord<ChosenKind>
+  suffix: string
+  pinned: string
+  otherPinned: string
+  chosen: string
+  offMenu: string
+  refusal: RegExp
+}): void {
+  // Built inside each case rather than here: `workRoot` is minted by `beforeEach`
+  // and this function body runs while vitest is still collecting.
+  const record = (): string => join(workRoot, `${SESSION}${suffix}`)
+
+  it('is the pinned one until somebody chooses, and writes nothing down for that', () => {
+    expect(make().inForce(SESSION)).toBe(pinned)
+    expect(make().chosenFor(SESSION)).toBeNull()
     expect(readdirSync(workRoot)).toEqual([])
   })
 
   it('is what somebody chose, from the moment they chose it', () => {
-    efforts().choose(SESSION, 'max')
+    make().choose(SESSION, chosen)
 
-    expect(efforts().effortFor(SESSION)).toBe('max')
+    expect(make().inForce(SESSION)).toBe(chosen)
   })
 
-  // The distinction `effortFor` collapses and a report needs: a Session with no
-  // record *follows* the Pinned Effort, and one whose record names the same
-  // level does not. One string today, two the moment an operator moves
-  // `ROMA_EFFORT`.
-  it('tells choosing the pinned level apart from never having chosen', () => {
-    efforts().choose(SESSION, PINNED_AT)
+  // The distinction `inForce` collapses and a report needs: a Session with no
+  // record *follows* the pinned value, and one whose record names that same
+  // value does not. One string today, two the moment an operator moves it.
+  it('tells choosing the pinned one apart from never having chosen', () => {
+    make().choose(SESSION, pinned)
 
-    expect(efforts().chosenFor(SESSION)).toBe(PINNED_AT)
+    expect(make().chosenFor(SESSION)).toBe(pinned)
     // Which is what makes the two answer differently when the deployment moves.
-    expect(efforts('low').effortFor(SESSION)).toBe(PINNED_AT)
-    expect(efforts('low').effortFor(sessionIdFor(OTHER_KEY))).toBe('low')
+    expect(make(otherPinned).inForce(SESSION)).toBe(pinned)
+    expect(make(otherPinned).inForce(sessionIdFor(OTHER_KEY))).toBe(otherPinned)
   })
 
-  // Forgetting the record rather than writing the pinned level into it. A
-  // Session that asked for "default" must follow a deployment that moves
-  // `ROMA_EFFORT`; one carrying a literal would be stranded at the effort roma
-  // used to run at.
-  it('goes back to the Pinned Effort by forgetting, not by writing it down', () => {
-    efforts().choose(SESSION, 'max')
-    efforts().usePinnedEffort(SESSION)
+  // Forgetting the record rather than writing the pinned value into it. A
+  // Session that asked for "default" must follow a deployment that moves it;
+  // one carrying a literal would be stranded on what roma used to run.
+  it('goes back to the pinned one by forgetting, not by writing it down', () => {
+    make().choose(SESSION, chosen)
+    make().usePinned(SESSION)
 
-    expect(efforts('low').effortFor(SESSION)).toBe('low')
+    expect(make(otherPinned).inForce(SESSION)).toBe(otherPinned)
     expect(readdirSync(workRoot)).toEqual([])
   })
 
   it('is happy to go back where nobody ever moved it', () => {
-    expect(() => efforts().usePinnedEffort(SESSION)).not.toThrow()
+    expect(() => make().usePinned(SESSION)).not.toThrow()
   })
 
   // Keyed by the Session id, which is what makes `/clear` revert it by
   // arithmetic: the reset moves the generation, so a cleared Conversation asks
   // about a Session id that has no record.
   it('is left behind by the reset, without anything being deleted', () => {
-    efforts().choose(SESSION, 'max')
+    make().choose(SESSION, chosen)
     const fresh = generations().freshSession(KEY)
 
-    expect(efforts().effortFor(fresh)).toBe(PINNED_AT)
-    expect(efforts().effortFor(SESSION)).toBe('max')
+    expect(make().inForce(fresh)).toBe(pinned)
+    expect(make().inForce(SESSION)).toBe(chosen)
   })
 
+  // Fail loudly rather than fall back. Falling back is a choice disappearing
+  // silently — the Session runs on something nobody asked for, bills the window
+  // everybody shares for it, and the only evidence is answers that read as if
+  // they came from somewhere else.
   it('refuses to guess when the record it kept is not readable', () => {
-    writeFileSync(join(workRoot, `${SESSION}.effort`), '{"half a wr')
+    writeFileSync(record(), '{"half a wr')
 
-    expect(() => efforts().effortFor(SESSION)).toThrow(/chosen effort/i)
+    expect(() => make().inForce(SESSION)).toThrow(refusal)
   })
 
-  // A narrower hole than the model's, because the Effort Menu holds every level
-  // the build has — so the only way here is roma *removing* one, which is
-  // exactly what this refusal exists to make noticeable.
-  it('refuses a level roma no longer offers', () => {
-    writeFileSync(join(workRoot, `${SESSION}.effort`), 'ludicrous')
+  // The same refusal, for the case that is somebody's decision rather than a
+  // machine's accident: a value roma has stopped offering is not passed through
+  // to the CLI, so removing a Menu entry is a change somebody notices rather
+  // than a Session quietly going on running on what the Menu no longer stands
+  // behind.
+  it('refuses one roma no longer offers', () => {
+    writeFileSync(record(), offMenu)
 
-    expect(() => efforts().effortFor(SESSION)).toThrow(/offers/i)
+    expect(() => make().inForce(SESSION)).toThrow(/offers/i)
+  })
+
+  // "There is no record" is one specific failure — every Session nobody has
+  // moved, which is almost all of them — and only it means the pinned value. A
+  // read that failed for any other reason describes a record that is there and
+  // could not be read.
+  it('refuses to guess when the record cannot be read at all', () => {
+    mkdirSync(record())
+
+    expect(() => make().inForce(SESSION)).toThrow()
+    expect(make().inForce(sessionIdFor(OTHER_KEY))).toBe(pinned)
+  })
+
+  // A file rather than a directory, which is the whole of why a choice outlives
+  // the working directory's seven days: `reclaimIdle` deletes directories
+  // nothing has used and steps over everything else. Reclaimed, a Conversation
+  // that went quiet for a week would come back on the pinned value having asked
+  // for something else, at a moment nobody can observe.
+  it('is a file, so the reclaim that empties the work root steps over it', () => {
+    make().choose(SESSION, chosen)
+
+    const written = readdirSync(workRoot, { withFileTypes: true })
+    expect(written.map((entry) => entry.name)).toEqual([`${SESSION}${suffix}`])
+    expect(written.every((entry) => entry.isFile())).toBe(true)
+  })
+}
+
+describe('the model a Session runs on', () => {
+  behavesLikeAChosenRecord({
+    make: models,
+    suffix: '.model',
+    pinned: PINNED,
+    otherPinned: 'claude-haiku-4-5',
+    chosen: 'claude-opus-5',
+    offMenu: 'claude-something-else',
+    refusal: /chosen model/i,
+  })
+})
+
+/**
+ * The same rules again, for the effort — and the stakes are higher by one thing
+ * that does not appear anywhere in this file.
+ *
+ * `--model` is echoed in `system/init` and the startup self-check asserts on it,
+ * so a Chosen Model that went missing would eventually contradict something.
+ * `--effort` is echoed nowhere at all. What is written here is the only account
+ * roma has of what a Session was asked to run at, which is why the failures
+ * refuse rather than fall back.
+ */
+describe('the effort a Session runs at', () => {
+  behavesLikeAChosenRecord({
+    make: efforts,
+    suffix: '.effort',
+    pinned: PINNED_AT,
+    otherPinned: 'low',
+    chosen: 'max',
+    offMenu: 'ludicrous',
+    refusal: /chosen effort/i,
   })
 
   // `ultracode` reaches roma through `ROMA_EFFORT` and never through a record,
   // so a record naming it is one nothing in roma wrote — and is refused like any
-  // other level off the Menu.
+  // other level off the Menu. The model has no equivalent: every Pinned Model
+  // roma accepts is one a record may also name.
   it('refuses a record naming ultracode, which no Caller can have written', () => {
     writeFileSync(join(workRoot, `${SESSION}.effort`), 'ultracode')
 
-    expect(() => efforts().effortFor(SESSION)).toThrow(/offers/i)
+    expect(() => efforts().inForce(SESSION)).toThrow(/offers/i)
   })
 
-  it('refuses to guess when the record cannot be read at all', () => {
-    mkdirSync(join(workRoot, `${SESSION}.effort`))
-
-    expect(() => efforts().effortFor(SESSION)).toThrow()
-    expect(efforts().effortFor(sessionIdFor(OTHER_KEY))).toBe(PINNED_AT)
-  })
-
-  // A file rather than a directory, beside the model's, for the reason the
-  // model's is one: `reclaimIdleWorkDirs` deletes directories nothing has used
-  // for seven days and steps over everything else.
   it('is a file beside the model’s, so the reclaim steps over both', () => {
     models().choose(SESSION, 'claude-opus-5')
     efforts().choose(SESSION, 'max')
