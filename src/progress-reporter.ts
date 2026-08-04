@@ -12,11 +12,9 @@ import {
 /**
  * How often an acknowledgement may be updated, at most.
  *
- * The floor of ADR-0003's 5–10 second range, because the measurement says the
- * floor costs nothing: with `--include-partial-messages` the longest a renderer
- * waited for new content during a 72-second generating Turn was 2641ms, so every
- * 5-second tick has something new to show and none of them is a wasted Channel
- * call. Slower would only make a live Task look less alive.
+ * The floor of ADR-0003's 5–10 second range, because the floor costs nothing:
+ * with `--include-partial-messages` the longest measured wait for new content
+ * was 2641ms, so every tick has something to show and none is a wasted call.
  */
 const PROGRESS_INTERVAL_MS = 5_000
 

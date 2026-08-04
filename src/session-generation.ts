@@ -26,17 +26,10 @@ const COUNT = /^\d+$/
 /**
  * Every model a record may name: the Menu's own, and nothing else.
  *
- * A membership test rather than a pattern, and for one reason now rather than
- * two. It used to also stand in for a torn line — what a machine that lost power
- * mid-write leaves — and `WorkRoot.writeRecord` has since made that state unreachable
- * rather than detected. What is left is the reason this could never have been a
- * pattern anyway: a name roma has *stopped* offering. Removing a Menu entry
- * should be a change somebody notices, and a record quietly passed through to
- * `--model` would let a Session go on running on something the Menu no longer
- * stands behind.
- *
- * Nothing else can get in here: the only thing that writes a record is a `/model`
- * whose argument was on the Menu.
+ * A membership test, never a pattern: what it catches is a name roma has
+ * *stopped* offering. Removing a Menu entry should be noticed, and a record
+ * passed through to `--model` would let a Session go on running on something the
+ * Menu no longer stands behind.
  */
 const OFFERED = new Set(Object.values(MENU))
 
@@ -117,14 +110,11 @@ export class SessionGenerations {
   /**
    * How many times this Conversation has been given a fresh Session.
    *
-   * Zero for almost every Conversation, and zero is not written down — a
-   * Conversation that has never used `/clear` is one that has left no record, so
-   * the derivation stands on its own for everybody who never asked for anything
-   * else.
+   * Zero is not written down: a Conversation that never used `/clear` leaves no
+   * record.
    *
-   * Anything else on disk is an error rather than a reason to fall back. Falling
-   * back means generation zero, and generation zero is the context this
-   * Conversation asked to be rid of.
+   * An unreadable record must throw, never fall back — falling back means
+   * generation zero, which is the context this Conversation asked to be rid of.
    */
   #generationOf(conversationKey: string): number {
     const written = this.#workRoot.readRecord(this.#recordFor(conversationKey))
@@ -144,12 +134,10 @@ export class SessionGenerations {
   /**
    * Which Session's name a Conversation's generation record is filed under.
    *
-   * The first generation's id rather than the current one, because the record
-   * has to be findable knowing only the Conversation Key — the current
-   * generation is the thing being looked for. Deciding that is this class's
-   * business, which is why the Work Root is handed an id rather than a key;
-   * where the file then goes, and why nothing derived from a Conversation Key
-   * may reach a filename, is argued at `WorkRoot.generationRecord`.
+   * The first generation's id, never the current one: the record has to be
+   * findable knowing only the Conversation Key, and the current generation is
+   * the thing being looked for. See `WorkRoot.generationRecord` for why nothing
+   * derived from a Conversation Key may reach a filename.
    */
   #recordFor(conversationKey: string): string {
     return this.#workRoot.generationRecord(sessionIdFor(conversationKey))
