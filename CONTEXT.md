@@ -176,6 +176,19 @@ The Claude Code state backing one Conversation: a Transcript, a session id, and 
 working directory.
 _Avoid_: context, history, conversation
 
+**Runtime**:
+The agent CLI serving one Session's Turns — Claude Code or Codex. A Session has
+exactly one, chosen by a person when the Session starts and fixed for its life:
+changing it is `/clear`, because that is a new Session, and the choice is asked
+there again. A property of a Session and never of a Conversation or a Caller —
+the same thread runs on Codex today and Claude Code after a `/clear`, and
+nobody's identity decides which. Each Runtime brings its own pinned model and
+its own subscription credential, so a sentence about "the" model or "the"
+window now has to say which Runtime it is about.
+_Avoid_: engine, backend (both already refused for the Core), provider (that is
+a Reach's word for the company on the other end), agent (that is what does the
+work inside a Turn, whichever Runtime runs it), CLI (its shape, not its role)
+
 **Transcript**:
 Claude Code's own record of a Session, holding every event of every Turn it has
 served. Not roma's: roma names the directory it lives in, reads nothing out of
