@@ -68,6 +68,31 @@ Phrase a surviving guardrail as the rule it enforces — **"Never `X`: …"**, *
 A citation is one clause. `(ADR-0018)` is enough — if the reader needs the argument, the ADR is
 where the argument lives, and it is the version that gets amended.
 
+## The same guardrail at two widths
+
+One rule can be true at more than one symbol — the field an operator reads, and the class that
+computes it. The **widest** symbol carries the argument. The narrow ones keep only what is about
+their own shape, and cite.
+
+```ts
+// audit-log.ts — a field in the record roma writes to disk. Carries the argument.
+/**
+ * A yes or a no, and deliberately **not a count** (ADR-0015 §10). One token does
+ * unlimited API calls for an hour, so a number of mints is not a measure of what
+ * was done and would be read as one.
+ */
+
+// reach-use.ts — the class behind it, one importer. Keeps only its own shape.
+/**
+ * **Never turn this into a tally.** A `Set` is the shape that cannot accidentally
+ * become one; why a count would be wrong is `audit-log.ts`'s `cloudReach`.
+ */
+```
+
+Width is the audience, not the file. Copying an argument down the call graph puts it where
+fewest people read it and most copies drift, and the copy that survives longest is rarely the
+one that gets amended.
+
 ## Scope
 
 `src/` only. Tests are deliberately not covered yet: a comment above a test is often the thing
