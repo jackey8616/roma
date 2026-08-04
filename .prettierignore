@@ -1,0 +1,22 @@
+# Prettier reads `.gitignore` as well as this file, so `node_modules/`, `dist/`,
+# `coverage/` and `.tmp/` are already out. What belongs here is the rest: paths git
+# tracks that Prettier still should not own.
+
+# Vendored from `mattpocock/skills` and pinned by `skills-lock.json`. Formatting these
+# puts a diff between every file and its upstream, which `npx skills update` then has
+# to merge through on every pull.
+.claude/skills/
+
+# npm's file, not ours. Prettier reformats it and the next `npm install` writes it
+# straight back, so `format:check` fails on a tree nobody edited.
+package-lock.json
+
+# The recorded `claude -p` streams. Prettier has no `.jsonl` parser today and skips
+# them, but a fixture is a recording — one reformatted by a future release would no
+# longer be the bytes the stream contract was read from.
+test/fixtures/claude-stream/
+
+# Prose is hand-wrapped here — `CONTEXT.md`, the ADRs, `docs/agents/`. Prettier is
+# scoped to code for now; widening it to Markdown is a deliberate change with its own
+# commit, not something that arrives as a side effect of formatting a `.ts` file.
+*.md
