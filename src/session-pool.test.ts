@@ -1148,7 +1148,7 @@ describe('running a Turn on the other credential', () => {
   it('starts a new process when the Session has been moved to another model', async () => {
     const chosen = new Map<string, string>()
     const { log, send, claude } = newPool({
-      models: { modelFor: (sessionId) => chosen.get(sessionId) ?? 'claude-sonnet-5' },
+      models: { kind: 'model', inForce: (sessionId) => chosen.get(sessionId) ?? 'claude-sonnet-5' },
     })
     await send(A, 'first', OK)
 
@@ -1179,7 +1179,7 @@ describe('running a Turn on the other credential', () => {
   it('starts a new process when the Session has been moved to another effort', async () => {
     const chosen = new Map<string, string>()
     const { log, send, claude } = newPool({
-      efforts: { effortFor: (sessionId) => chosen.get(sessionId) ?? 'high' },
+      efforts: { kind: 'effort', inForce: (sessionId) => chosen.get(sessionId) ?? 'high' },
     })
     await send(A, 'first', OK)
 
@@ -1204,8 +1204,8 @@ describe('running a Turn on the other credential', () => {
     const model = new Map<string, string>()
     const effort = new Map<string, string>()
     const { log, send } = newPool({
-      models: { modelFor: (id) => model.get(id) ?? 'claude-sonnet-5' },
-      efforts: { effortFor: (id) => effort.get(id) ?? 'high' },
+      models: { kind: 'model', inForce: (id) => model.get(id) ?? 'claude-sonnet-5' },
+      efforts: { kind: 'effort', inForce: (id) => effort.get(id) ?? 'high' },
     })
     await send(A, 'first', OK)
 
@@ -1232,7 +1232,7 @@ describe('running a Turn on the other credential', () => {
   // Asked because the comparison is made at every acquisition, and one that read
   // the record wrongly would present as a cold start on every message.
   it('keeps the process when the effort has not moved', async () => {
-    const { log, send } = newPool({ efforts: { effortFor: () => 'high' } })
+    const { log, send } = newPool({ efforts: { kind: 'effort', inForce: () => 'high' } })
 
     await send(A, 'first', OK)
     await send(A, 'and again', OK)
@@ -1241,7 +1241,7 @@ describe('running a Turn on the other credential', () => {
   })
 
   it('keeps the process when the model has not moved', async () => {
-    const { log, send } = newPool({ models: { modelFor: () => 'claude-sonnet-5' } })
+    const { log, send } = newPool({ models: { kind: 'model', inForce: () => 'claude-sonnet-5' } })
 
     await send(A, 'first', OK)
     await send(A, 'and again', OK)
@@ -1258,7 +1258,7 @@ describe('running a Turn on the other credential', () => {
   it('names the model when the credential moved too, and leaves the credential to the spawn', async () => {
     const chosen = new Map<string, string>()
     const { log, send } = newPool({
-      models: { modelFor: (sessionId) => chosen.get(sessionId) ?? 'claude-sonnet-5' },
+      models: { kind: 'model', inForce: (sessionId) => chosen.get(sessionId) ?? 'claude-sonnet-5' },
     })
     await send(A, 'first', OK)
 

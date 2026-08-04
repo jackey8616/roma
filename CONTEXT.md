@@ -459,6 +459,20 @@ anything being deleted.
 _Avoid_: override, preference, thinking budget (that is the provider's word for
 one mechanism behind this, not roma's word for the choice)
 
+**Chosen Record**:
+What roma keeps a Chosen Model or a Chosen Effort in, and the pinned value it
+falls back to when there is none. One idea written once and used twice: a file in
+the Work Root named for the Session, absent for almost every Session, refusing
+rather than falling back when it is there and cannot be read or names something
+roma no longer offers. The two are the same rules to the letter, which is why
+they are one thing with two adapters rather than two classes that have to be kept
+in step — they had already drifted once, in what each was tested for. What varies
+is only which values are offered, which file the Work Root names, which refusal
+is raised, and what the deployment pinned.
+_Avoid_: setting, preference, config (a Chosen Record is what somebody chose for
+one Session, not what a deployment configured), and using this for the Session
+Generation, which is a count rather than a choice and has nothing pinned behind it
+
 **Effort Menu**:
 The levels a Caller may pick a Chosen Effort from — every level the pinned build
 has, which is what makes it unlike the Model Menu. It is still a spending boundary

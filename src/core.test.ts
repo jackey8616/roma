@@ -15,7 +15,7 @@ import type {
 import { PINNED_EFFORT, PINNED_MODEL } from './claude-session.js'
 import { EFFORT_NOT_APPLIED } from './effort-menu.js'
 import type { RetryBudget } from './config.js'
-import { ChosenEfforts, ChosenModels, SessionGenerations } from './session-generation.js'
+import { chosenEfforts, chosenModels, SessionGenerations } from './session-generation.js'
 import { sessionIdFor } from './session-id.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
 import { WorkRoot } from './work-root.js'
@@ -113,10 +113,10 @@ function newCore({
   const work = new WorkRoot(workRoot)
   // Shared by the pool and the Core, which is what makes `/model` observable: the
   // Core writes what somebody chose and the pool reads it at the next spawn.
-  const models = new ChosenModels({ workRoot: work, pinnedModel: PINNED_MODEL })
+  const models = chosenModels({ workRoot: work, pinnedModel: PINNED_MODEL })
   // The same instance to both, for the same reason: the Core writes what somebody
   // chose and the pool reads it at the next spawn.
-  const efforts = new ChosenEfforts({ workRoot: work, pinnedEffort: PINNED_EFFORT })
+  const efforts = chosenEfforts({ workRoot: work, pinnedEffort: PINNED_EFFORT })
   const poolLog: PoolLogRecord[] = []
   const pool = new SessionPool({
     workRoot: work,
@@ -1440,7 +1440,7 @@ describe('the model a Conversation runs on', () => {
     // litter — tens of bytes under a Session id nothing will use again — and it
     // is accepted over a deletion that has to be remembered.
     expect(readdirSync(workRoot)).toContain(`${sessionIdFor(KEY)}.model`)
-    expect(models.modelFor(sessionIdFor(KEY))).toBe(OPUS)
+    expect(models.inForce(sessionIdFor(KEY))).toBe(OPUS)
   })
 
   // Held in memory this would be undone by a deploy nobody in the Conversation
@@ -1696,7 +1696,7 @@ describe('the effort a Conversation runs at', () => {
 
     expect(effortOf(claude.lastSpawn)).toBe(PINNED_EFFORT)
     expect(readdirSync(workRoot)).toContain(`${sessionIdFor(KEY)}.effort`)
-    expect(efforts.effortFor(sessionIdFor(KEY))).toBe('max')
+    expect(efforts.inForce(sessionIdFor(KEY))).toBe('max')
   })
 
   it('treats a message that merely begins with /effort as work', async () => {

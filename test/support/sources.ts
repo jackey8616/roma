@@ -40,11 +40,9 @@ export function sources(): Source[] {
  */
 export const COMPOSITION_ROOTS = [['channels', 'google-chat', 'main.ts'].join(sep)]
 
-// A reader for one composition root used to live here, for the single rule that
-// watched `main.ts` — the source match ADR-0020 §7 deleted. It is gone with its
-// only caller rather than left as an export nothing reaches. Rebuilding a rule
-// about the composition root means bringing it back, which the ADR records as
-// removed rather than never built.
+// The reader for one composition root is gone with its only caller. Rebuilding a
+// rule about the composition root means bringing it back, which ADR-0020 §7
+// records as removed rather than never built.
 
 /**
  * The sources a containment rule binds, split by the directory that owns the
@@ -105,6 +103,26 @@ export function containment(
  * Line comments are recognised only at the start of a line, so that a `//`
  * inside a URL in real code is not mistaken for one.
  */
+/**
+ * Which of these sources name any of these things, comments stripped first.
+ *
+ * The shape every containment rule ends in, held once because there are three of
+ * them and the copy that drifts first would be this rather than any denylist —
+ * `containment` is beside it for the same reason.
+ *
+ * Strips, which is what makes it wrong for two rules that look like this and are
+ * not: `provisioning.test.ts` and the Core's Channel rule match the raw source
+ * on purpose, so a violation written in a comment still trips them. Routing
+ * either through here would loosen it silently, and a loosened rule of that kind
+ * fails by going quiet.
+ */
+export function matching(
+  sources: readonly Source[],
+  patterns: readonly RegExp[],
+): readonly Source[] {
+  return sources.filter(({ source }) => patterns.some((pattern) => pattern.test(code(source))))
+}
+
 export function code(source: string): string {
   let inBlock = false
   return source

@@ -232,7 +232,7 @@ describe('starting roma', () => {
   // Model — a failure with no symptom at either end taken on its own.
   //
   // What this does not catch, said so that nobody reads more into it:
-  // `ChosenModels` holds nothing between calls, so a second instance beside the
+  // `ChosenRecord` holds nothing between calls, so a second instance beside the
   // first is the same object in every way that matters, and one built over the
   // *wrong* work root is invisible here because the Core and the pool would
   // agree about the wrong place. That the record lands beside the generations is

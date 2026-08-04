@@ -164,142 +164,15 @@ export class ChosenModelNotOffered extends Error {
   }
 }
 
-export interface ChosenModelsOptions {
-  /** The same Work Root the generations are kept in, for the same reasons. */
-  readonly workRoot: WorkRoot
-  /**
-   * What a Session runs on when nobody has said otherwise — whatever `ROMA_MODEL`
-   * resolved to for this deployment.
-   *
-   * Held here rather than looked up by each caller, so that "which model is this
-   * Session on" has one answer and `/model default` returns to what the
-   * deployment actually pinned rather than to a name written down somewhere else.
-   */
-  readonly pinnedModel: string
-}
-
-/**
- * Which model each Session runs on, and how somebody changes it.
- *
- * roma's rather than the process's, and that is the whole decision (ADR-0014). A
- * model handed to a process lives and dies with it: `--model` is fixed at spawn,
- * and processes end for reasons — Eviction, Reaping, a deploy — that `CONTEXT.md`
- * defines as unobservable to the person using the Session. A choice kept there
- * would be a setting that reverts at a moment nobody can see.
- *
- * **Keyed by the Session id, not by the Conversation Key**, and the difference is
- * how reverting works. The Session id derives from the Conversation Key and the
- * Session Generation, and the reset Command moves the generation — so a cleared
- * Conversation asks about a Session id that has no record and is on the Pinned
- * Model, without anything being deleted. Reverting is arithmetic rather than an
- * action somebody has to remember to perform, and forgetting that action is
- * exactly the failure this feature exists to prevent: the context cleared and the
- * model still Opus.
- *
- * The price is litter. Every reset leaves a record under a Session id nothing
- * will use again, and records are never reclaimed — which is what keeps
- * generations safe — so this accumulates at tens of bytes per reset forever.
- * Accepted over a deletion that has to be remembered.
- *
- * Not in the Working Directory: the agent clones into it and runs `git add -A`
- * there (ADR-0008), and it is reclaimed after seven idle days. Either one is
- * disqualifying on its own.
- */
-export class ChosenModels {
-  readonly #workRoot: WorkRoot
-  readonly #pinnedModel: string
-
-  constructor({ workRoot, pinnedModel }: ChosenModelsOptions) {
-    this.#workRoot = workRoot
-    this.#pinnedModel = pinnedModel
-  }
-
-  /** What a Session runs on when nobody has chosen anything. */
-  get pinnedModel(): string {
-    return this.#pinnedModel
-  }
-
-  /**
-   * The model this Session runs on: its Chosen Model, or the Pinned Model.
-   *
-   * The Pinned Model for almost every Session, and that is not written down — a
-   * Session nobody has moved is one that has left no record, so the answer stands
-   * on its own for everybody who never asked for anything else.
-   *
-   * Anything else on disk is an error rather than a reason to fall back, for the
-   * reason a generation's is: falling back means running on a model nobody chose
-   * and billing the Shared Window for it, with the only evidence being answers
-   * that read as if they came from somewhere else.
-   */
-  modelFor(sessionId: string): string {
-    return this.chosenFor(sessionId) ?? this.#pinnedModel
-  }
-
-  /**
-   * The model this Session was moved to, or null where nobody moved it.
-   *
-   * The distinction `modelFor` collapses, kept because saying which model a
-   * Session is on needs it and running a Turn does not. A Session with no record
-   * *follows* the Pinned Model; a Session whose record happens to name the same
-   * model does not follow anything. They are one string today and two the moment
-   * an operator moves `ROMA_MODEL`, and a report that called both of them
-   * "default" would be telling somebody who typed `/model sonnet` that they are
-   * on whatever the deployment picks next.
-   */
-  chosenFor(sessionId: string): string | null {
-    // Null is "there is no record", which is almost every Session, and only
-    // that: `readRecord` throws for every other way a read can fail. So the
-    // Pinned Model `modelFor` falls back to can never be a Chosen Model that
-    // existed and could not be read.
-    const written = this.#workRoot.readRecord(this.#recordFor(sessionId))
-    if (written === null) return null
-    if (!OFFERED.has(written)) throw new ChosenModelNotOffered(written)
-    return written
-  }
-
-  /**
-   * Put this Session on one of the Menu's models.
-   *
-   * Nothing is torn down and nothing is checked against a running process: this
-   * is aimed at what the *next* message reaches, and the Session Pool is what
-   * maintains the invariant that a Turn runs on the model its Session is on.
-   */
-  choose(sessionId: string, model: string): void {
-    this.#workRoot.writeRecord(this.#recordFor(sessionId), model)
-  }
-
-  /**
-   * Put this Session back on the Pinned Model.
-   *
-   * Forgetting the record rather than writing the pinned name into it, and the
-   * difference shows the day a deployment moves `ROMA_MODEL`: a Session that
-   * asked for "default" must follow that move, and one carrying a literal would
-   * be stranded on the model roma used to run.
-   *
-   * The same state a fresh Session is in, which is the point — `/model default`
-   * and the reset Command leave a Conversation in exactly one place.
-   */
-  usePinnedModel(sessionId: string): void {
-    this.#workRoot.forgetRecord(this.#recordFor(sessionId))
-  }
-
-  /** Named after the Session itself; the Work Root is where that lands. */
-  #recordFor(sessionId: string): string {
-    return this.#workRoot.modelRecord(sessionId)
-  }
-}
-
 /**
  * A Session's Chosen Effort record names a level roma does not offer.
  *
- * `ChosenModelNotOffered`'s twin, and it exists for the same one reason: this is
- * a failure a *Caller* can clear, and they can only do it if somebody tells them
- * how. `/effort default` is the way out and does not read the record at all, so
- * the sentence the Core builds from this can promise it.
+ * `ChosenModelNotOffered`'s twin, and a class of its own rather than one error
+ * carrying a kind: the Core routes on `instanceof` to two different sentences,
+ * because `/model default` and `/effort default` are two different ways out.
  *
- * It is a narrower hole than the model's, because the Effort Menu holds every
- * level the build has — so the only way to arrive here is roma *removing* a
- * level, which is the case `OFFERED_EFFORTS` exists to make noticeable.
+ * A narrower hole than the model's — the Effort Menu holds every level the build
+ * has, so the only way to arrive here is roma *removing* one.
  */
 export class ChosenEffortNotOffered extends Error {
   constructor(readonly effort: string) {
@@ -308,111 +181,228 @@ export class ChosenEffortNotOffered extends Error {
   }
 }
 
+/** The two things a Session can be moved onto, one Chosen Record each. */
+export type ChosenKind = 'model' | 'effort'
+
+export interface ChosenRecordOptions<K extends ChosenKind> {
+  readonly kind: K
+  /** The same Work Root the generations are kept in, for the same reasons. */
+  readonly workRoot: WorkRoot
+  /** Where this kind of record is filed, which is the Work Root's to decide. */
+  readonly recordFor: (sessionId: string) => string
+  /**
+   * Every value a record may name.
+   *
+   * Gates the *record* and never `pinned`: an operator may pin something off the
+   * Menu — `ROMA_EFFORT=ultracode` is the live case — and that must go on running
+   * while a record naming it is still refused.
+   */
+  readonly offered: ReadonlySet<string>
+  /**
+   * What a Session runs on, or at, when nobody has said otherwise.
+   *
+   * Held here rather than looked up by each caller, so that "what is this Session
+   * on" has one answer and `default` returns to what the deployment actually
+   * pinned rather than to a name written down somewhere else.
+   */
+  readonly pinned: string
+  /** How this kind refuses a record naming something off the Menu. */
+  readonly notOffered: (written: string) => Error
+}
+
+/**
+ * What one Session was moved onto, kept by roma rather than by the process.
+ *
+ * Written once and paid back twice — `chosenModels` and `chosenEfforts` below are
+ * the two adapters, and this knows about neither. That is the whole of what makes
+ * it a seam: nothing here imports a Menu or an error class.
+ *
+ * roma's rather than the process's, and that is the decision both ADR-0014 and
+ * ADR-0016 make. A choice handed to a process lives and dies with it — `--model`
+ * and `--effort` are fixed at spawn, and processes end at an Eviction, a Reaping
+ * or a deploy, which `CONTEXT.md` defines as unobservable to the person using the
+ * Session. Kept there, a choice would be a setting that reverts at a moment
+ * nobody can see.
+ *
+ * **Keyed by the Session id, never by the Conversation Key.** The Session id
+ * derives from the Conversation Key and the Session Generation, and the reset
+ * Command moves the generation — so a cleared Conversation asks about a Session
+ * id with no record and is back on the pinned value, without anything being
+ * deleted. Reverting is arithmetic rather than an action somebody has to
+ * remember, and forgetting that action is the failure this exists to prevent:
+ * the context cleared and the model still Opus.
+ *
+ * The price is litter. Every reset leaves a record under a Session id nothing
+ * will use again, and records are never reclaimed — which is what keeps
+ * generations safe — so this accumulates at tens of bytes per reset forever.
+ *
+ * Never in the Working Directory: the agent clones into it and runs `git add -A`
+ * there (ADR-0008), and it is reclaimed after seven idle days.
+ */
+export class ChosenRecord<K extends ChosenKind> {
+  /**
+   * Which of the two this is.
+   *
+   * **Never remove this, and never replace it with an empty named subclass.** `K`
+   * has to appear on a member of the class: without it `ChosenRecord<'model'>`
+   * and `ChosenRecord<'effort'>` are structurally identical, and `CoreOptions`
+   * holds them in adjacent fields — swapping the two compiles clean, and a
+   * Conversation is then told the effort it runs at as the model it runs on.
+   * Measured both ways: with this field the swap is a TS2322, and empty named
+   * subclasses do *not* fix it, because they share this class's `#private` and
+   * add nothing structural.
+   */
+  readonly kind: K
+
+  readonly #workRoot: WorkRoot
+  readonly #recordFor: (sessionId: string) => string
+  readonly #offered: ReadonlySet<string>
+  readonly #pinned: string
+  readonly #notOffered: (written: string) => Error
+
+  constructor({
+    kind,
+    workRoot,
+    recordFor,
+    offered,
+    pinned,
+    notOffered,
+  }: ChosenRecordOptions<K>) {
+    this.kind = kind
+    this.#workRoot = workRoot
+    this.#recordFor = recordFor
+    this.#offered = offered
+    this.#pinned = pinned
+    this.#notOffered = notOffered
+  }
+
+  /** What a Session runs on when nobody has chosen anything. */
+  get pinned(): string {
+    return this.#pinned
+  }
+
+  /**
+   * What this Session actually runs on: what somebody chose, or the pinned value.
+   *
+   * The pinned value for almost every Session, and that is not written down — a
+   * Session nobody moved has left no record, so the answer stands on its own for
+   * everybody who never asked for anything else.
+   *
+   * Anything else on disk is an error rather than a reason to fall back: falling
+   * back means running on something nobody chose and billing the Shared Window
+   * for it, with the only evidence being answers that read as if they came from
+   * somewhere else.
+   */
+  inForce(sessionId: string): string {
+    return this.chosenFor(sessionId) ?? this.#pinned
+  }
+
+  /**
+   * What this Session was moved onto, or null where nobody moved it.
+   *
+   * The distinction `inForce` collapses, kept because saying what a Session is on
+   * needs it and running a Turn does not. A Session with no record *follows* the
+   * pinned value; one whose record names that same value follows nothing. They
+   * are one string today and two the moment an operator moves `ROMA_MODEL` or
+   * `ROMA_EFFORT`, and a report calling both "default" would tell somebody who
+   * typed `/model sonnet` that they are on whatever the deployment picks next.
+   */
+  chosenFor(sessionId: string): string | null {
+    // Null is "there is no record", which is almost every Session, and only
+    // that: `readRecord` throws for every other way a read can fail. So the
+    // pinned value `inForce` falls back to can never be a choice that existed
+    // and could not be read.
+    const written = this.#workRoot.readRecord(this.#recordFor(sessionId))
+    if (written === null) return null
+    if (!this.#offered.has(written)) throw this.#notOffered(written)
+    return written
+  }
+
+  /**
+   * Move this Session onto one of the Menu's values.
+   *
+   * Nothing is torn down and nothing is checked against a running process: this
+   * is aimed at what the *next* message reaches, and the Session Pool is what
+   * maintains the invariant that a Turn runs on what its Session is on. Nothing
+   * is checked against the Session's other record either — the Effort Matrix
+   * reports and never refuses, so a `max` on a model that takes none is written
+   * down and answered with a sentence rather than turned away.
+   */
+  choose(sessionId: string, value: string): void {
+    this.#workRoot.writeRecord(this.#recordFor(sessionId), value)
+  }
+
+  /**
+   * Put this Session back on the pinned value.
+   *
+   * Forgetting the record, never writing the pinned value into it: a Session that
+   * asked for "default" must follow a deployment that moves `ROMA_MODEL` or
+   * `ROMA_EFFORT`, and one carrying a literal would be stranded on what roma used
+   * to run.
+   *
+   * The same state a fresh Session is in, which is the point — `default` and the
+   * reset Command leave a Conversation in exactly one place.
+   */
+  usePinned(sessionId: string): void {
+    this.#workRoot.forgetRecord(this.#recordFor(sessionId))
+  }
+}
+
+export interface ChosenModelsOptions {
+  readonly workRoot: WorkRoot
+  /** Whatever `ROMA_MODEL` resolved to for this deployment. */
+  readonly pinnedModel: string
+}
+
+/**
+ * The Chosen Model record: which model each Session runs on.
+ *
+ * One of the two adapters over `ChosenRecord`. What it supplies is the whole of
+ * what makes a model's record a model's: the Model Menu, the file the Work Root
+ * files a model under, and the error a record off the Menu raises.
+ */
+export function chosenModels({
+  workRoot,
+  pinnedModel,
+}: ChosenModelsOptions): ChosenRecord<'model'> {
+  return new ChosenRecord({
+    kind: 'model',
+    workRoot,
+    recordFor: (sessionId) => workRoot.modelRecord(sessionId),
+    offered: OFFERED,
+    pinned: pinnedModel,
+    notOffered: (written) => new ChosenModelNotOffered(written),
+  })
+}
+
 export interface ChosenEffortsOptions {
-  /** The same Work Root the generations and the models are kept in. */
   readonly workRoot: WorkRoot
   /**
-   * What a Session runs at when nobody has said otherwise — whatever
-   * `ROMA_EFFORT` resolved to for this deployment.
-   *
-   * Held here rather than looked up by each caller, for `pinnedModel`'s reason:
-   * "what effort is this Session at" has one answer, and `/effort default`
-   * returns to what the deployment actually pinned rather than to a name written
-   * down somewhere else. It may be `ultracode`, which is off the Menu — the same
-   * shape a Pinned Model off the Model Menu has, and handled the same way.
+   * Whatever `ROMA_EFFORT` resolved to for this deployment. May be `ultracode`,
+   * which is off the Menu — the same shape a Pinned Model off the Model Menu has,
+   * and handled the same way: `offered` gates the record and never this.
    */
   readonly pinnedEffort: string
 }
 
 /**
- * What effort each Session runs at, and how somebody changes it.
+ * The Chosen Effort record: what effort each Session runs at.
  *
- * roma's rather than the process's, and that is the whole decision (ADR-0016).
- * Claude Code's own `/effort` says it in its own words — `Set effort level to max
- * (this session only)` — and a session is a process. Eviction, Reaping and a
- * deploy all end processes at moments `CONTEXT.md` defines as unobservable to
- * the person using the Session, so a choice kept there would not be effort
- * switching; it would be a setting that reverts at a time nobody can see.
- *
- * Sharper here than for the model, because there is no second opinion to fall
- * back on: `--model` is echoed in `system/init` and the startup self-check
- * asserts on it, and `--effort` is echoed nowhere at all. What roma wrote down is
- * the only account there is of what a Session was asked to run at.
- *
- * **Keyed by the Session id, not by the Conversation Key**, and every word of
- * `ChosenModels`' argument for that holds unchanged: the reset Command moves the
- * generation, so a cleared Conversation asks about a Session id that has no
- * record and is at the Pinned Effort, without anything being deleted. Reverting
- * is arithmetic rather than an action somebody has to remember. The price is the
- * same litter, at tens of bytes per reset forever, accepted for the same reason.
+ * `chosenModels`' twin, and sharper in one way that shows nowhere here: `--model`
+ * is echoed back in `system/init` and the startup self-check asserts on it, where
+ * `--effort` is echoed nowhere at all. What roma wrote down is the only account
+ * there is of what a Session was asked to run at.
  */
-export class ChosenEfforts {
-  readonly #workRoot: WorkRoot
-  readonly #pinnedEffort: string
-
-  constructor({ workRoot, pinnedEffort }: ChosenEffortsOptions) {
-    this.#workRoot = workRoot
-    this.#pinnedEffort = pinnedEffort
-  }
-
-  /** What a Session runs at when nobody has chosen anything. */
-  get pinnedEffort(): string {
-    return this.#pinnedEffort
-  }
-
-  /**
-   * The effort this Session runs at: its Chosen Effort, or the Pinned Effort.
-   *
-   * The Pinned Effort for almost every Session, and that is not written down.
-   * Anything else on disk is an error rather than a reason to fall back, for
-   * `modelFor`'s reason: falling back means running at an effort nobody chose and
-   * billing the Shared Window for it, with no evidence anywhere that it happened.
-   */
-  effortFor(sessionId: string): string {
-    return this.chosenFor(sessionId) ?? this.#pinnedEffort
-  }
-
-  /**
-   * The effort this Session was moved to, or null where nobody moved it.
-   *
-   * The distinction `effortFor` collapses, kept for `ChosenModels.chosenFor`'s
-   * reason: a Session with no record *follows* the Pinned Effort and a Session
-   * whose record names the same level does not, and they are one string today and
-   * two the moment an operator moves `ROMA_EFFORT`.
-   */
-  chosenFor(sessionId: string): string | null {
-    const written = this.#workRoot.readRecord(this.#recordFor(sessionId))
-    if (written === null) return null
-    if (!OFFERED_EFFORTS.has(written)) throw new ChosenEffortNotOffered(written)
-    return written
-  }
-
-  /**
-   * Put this Session at one of the Menu's levels.
-   *
-   * Nothing is torn down and nothing is checked against a running process, and
-   * nothing is checked against the Session's model either: the Effort Matrix
-   * reports and never refuses, so a `max` on a model that takes none is written
-   * down and answered with a sentence rather than turned away.
-   */
-  choose(sessionId: string, effort: string): void {
-    this.#workRoot.writeRecord(this.#recordFor(sessionId), effort)
-  }
-
-  /**
-   * Put this Session back at the Pinned Effort.
-   *
-   * Forgetting the record rather than writing the pinned level into it, for
-   * `usePinnedModel`'s reason: a Session that asked for "default" must follow a
-   * deployment that moves `ROMA_EFFORT`, and one carrying a literal would be
-   * stranded at the effort roma used to run at.
-   */
-  usePinnedEffort(sessionId: string): void {
-    this.#workRoot.forgetRecord(this.#recordFor(sessionId))
-  }
-
-  /** Named after the Session itself, beside its Chosen Model. */
-  #recordFor(sessionId: string): string {
-    return this.#workRoot.effortRecord(sessionId)
-  }
+export function chosenEfforts({
+  workRoot,
+  pinnedEffort,
+}: ChosenEffortsOptions): ChosenRecord<'effort'> {
+  return new ChosenRecord({
+    kind: 'effort',
+    workRoot,
+    recordFor: (sessionId) => workRoot.effortRecord(sessionId),
+    offered: OFFERED_EFFORTS,
+    pinned: pinnedEffort,
+    notOffered: (written) => new ChosenEffortNotOffered(written),
+  })
 }
