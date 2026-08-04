@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { code, containment } from '../test/support/sources.js'
+import { containment, matching } from '../test/support/sources.js'
 
 /**
  * Google Drive is named under `src/documents/`, and nowhere else — and roma
@@ -70,9 +70,7 @@ const RESOLVES_A_CREDENTIAL = [
 
 describe('everything that knows the documents are in Drive lives in one directory', () => {
   it('names it nowhere else', () => {
-    const offenders = containment('documents').outside.filter(({ source }) =>
-      DOCUMENTS_SPECIFIC.some((pattern) => pattern.test(code(source))),
-    )
+    const offenders = matching(containment('documents').outside, DOCUMENTS_SPECIFIC)
 
     expect(offenders.map(({ file }) => file)).toEqual([])
   })
@@ -81,9 +79,7 @@ describe('everything that knows the documents are in Drive lives in one director
   // narrows the denylist or breaks the comment stripping: a rule that matches
   // nothing anywhere reports containment it is not checking.
   it('would notice, which is why the directory it excludes trips it', () => {
-    const named = containment('documents').inside.filter(({ source }) =>
-      DOCUMENTS_SPECIFIC.some((pattern) => pattern.test(code(source))),
-    )
+    const named = matching(containment('documents').inside, DOCUMENTS_SPECIFIC)
 
     expect(named.length).toBeGreaterThan(0)
   })
@@ -95,20 +91,15 @@ describe('roma mints from the key it was given, never from a resolution chain', 
   // and only on production hosts. A Document Reach that resolved would be roma's
   // own identity holding whatever that identity holds in Drive.
   it('has no code under src/documents/ that could ask a library to find a credential', () => {
-    const offenders = containment('documents').inside.filter(({ source }) =>
-      RESOLVES_A_CREDENTIAL.some((pattern) => pattern.test(code(source))),
-    )
+    const offenders = matching(containment('documents').inside, RESOLVES_A_CREDENTIAL)
 
     expect(offenders.map(({ file }) => file)).toEqual([])
   })
 
   /**
-   * **There is deliberately no source match against the composition root.**
-   *
-   * `documentReachFrom(env: DocumentEnv | null)` lives inside this containment,
-   * so the rule above binds the construction site and the composition root never
-   * names the constructor — which is the arrangement ADR-0020 §7 arrived at for
-   * the cloud after deleting exactly such a match. Adding one here would be
-   * rebuilding the thing that record removed; read it first.
+   * **There is deliberately no source match against the composition root**, for
+   * the reason `src/cloud-containment.test.ts` gives: construction lives inside
+   * this containment, so the rule above binds it. Adding one would rebuild what
+   * ADR-0020 §7 removed; read it first.
    */
 })
