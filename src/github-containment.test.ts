@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { code, containment } from '../test/support/sources.js'
+import { containment, matching } from '../test/support/sources.js'
 
 /**
  * GitHub is named under `src/github/`, and nowhere else.
@@ -20,23 +20,18 @@ import { code, containment } from '../test/support/sources.js'
 /**
  * Every way `src/` could name the forge outside `src/github/`.
  *
- * `JWT` **used to be on this list and is not**, and the removal is the decision
- * rather than a weakening. It was only ever a proxy — a JWT is not GitHub's, it
- * is a signed token format — and it held while GitHub was the only thing roma
- * signed one for. ADR-0015 gave the agent's cloud a second Minter that signs an
- * assertion of exactly the same shape, so keeping the word here would have made
- * `src/cloud/` unable to spell the grant type Google's own exchange requires,
- * and the way round it would have been an obfuscation with a comment apologising
- * for itself. The four that remain name the product rather than a technique,
- * which is what this rule was always about.
+ * **Never put `JWT` back on this list.** It was only ever a proxy — a JWT is a
+ * signed token format rather than GitHub's — and since ADR-0015 the agent's
+ * cloud signs an assertion of exactly the same shape, so the word here would
+ * leave `src/cloud/` unable to spell the grant type Google's exchange requires.
+ * These four name the product rather than a technique, which is what this rule
+ * was always about.
  */
 const GITHUB_SPECIFIC = [/github/i, /\bgh\b/, /x-access-token/, /\bpull request\b/i]
 
 describe('everything that knows GitHub exists lives in one directory', () => {
   it('names it nowhere else', () => {
-    const offenders = containment('github').outside.filter(({ source }) =>
-      GITHUB_SPECIFIC.some((pattern) => pattern.test(code(source))),
-    )
+    const offenders = matching(containment('github').outside, GITHUB_SPECIFIC)
 
     expect(offenders.map(({ file }) => file)).toEqual([])
   })
@@ -45,9 +40,7 @@ describe('everything that knows GitHub exists lives in one directory', () => {
   // narrows the denylist or breaks the comment stripping: a rule that matches
   // nothing anywhere reports containment it is not checking.
   it('would notice, which is why the directory it excludes trips it', () => {
-    const named = containment('github').inside.filter(({ source }) =>
-      GITHUB_SPECIFIC.some((pattern) => pattern.test(code(source))),
-    )
+    const named = matching(containment('github').inside, GITHUB_SPECIFIC)
 
     expect(named.length).toBeGreaterThan(0)
   })

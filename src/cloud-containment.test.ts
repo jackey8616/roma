@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { code, containment } from '../test/support/sources.js'
+import { containment, matching } from '../test/support/sources.js'
 
 /**
  * Google Cloud is named under `src/cloud/`, and nowhere else — and roma never
@@ -93,9 +93,7 @@ describe('everything that knows which cloud this is lives in one directory', () 
   // it holds the second service account key and the second JWT-bearer exchange,
   // and it is bound by a rule of its own.
   it('names Google nowhere a rule does not bind', () => {
-    const offenders = containment('cloud', BOUND_BY_ANOTHER_RULE).outside.filter(({ source }) =>
-      GOOGLE_SPECIFIC.some((pattern) => pattern.test(code(source))),
-    )
+    const offenders = matching(containment('cloud', BOUND_BY_ANOTHER_RULE).outside, GOOGLE_SPECIFIC)
 
     expect(offenders.map(({ file }) => file)).toEqual([])
   })
@@ -104,9 +102,7 @@ describe('everything that knows which cloud this is lives in one directory', () 
   // thing neither of them may take from anywhere but its own constant, and the
   // CLI ADR-0015 refuses to ship is this directory's business alone.
   it('names this cloud nowhere else at all, the documents directory included', () => {
-    const offenders = containment('cloud').outside.filter(({ source }) =>
-      CLOUD_SPECIFIC.some((pattern) => pattern.test(code(source))),
-    )
+    const offenders = matching(containment('cloud').outside, CLOUD_SPECIFIC)
 
     expect(offenders.map(({ file }) => file)).toEqual([])
   })
@@ -115,9 +111,7 @@ describe('everything that knows which cloud this is lives in one directory', () 
   // narrows a denylist or breaks the comment stripping: a rule that matches
   // nothing anywhere reports containment it is not checking.
   it('would notice, which is why the directory it excludes trips it', () => {
-    const named = containment('cloud').inside.filter(({ source }) =>
-      [...GOOGLE_SPECIFIC, ...CLOUD_SPECIFIC].some((pattern) => pattern.test(code(source))),
-    )
+    const named = matching(containment('cloud').inside, [...GOOGLE_SPECIFIC, ...CLOUD_SPECIFIC])
 
     expect(named.length).toBeGreaterThan(0)
   })
@@ -128,32 +122,18 @@ describe('roma mints from the key it was given, never from a resolution chain', 
   // failure it prevents is silent, arrives by *doing nothing*, and only on
   // production hosts.
   it('has no code under src/cloud/ that could ask a library to find a credential', () => {
-    const offenders = containment('cloud').inside.filter(({ source }) =>
-      RESOLVES_A_CREDENTIAL.some((pattern) => pattern.test(code(source))),
-    )
+    const offenders = matching(containment('cloud').inside, RESOLVES_A_CREDENTIAL)
 
     expect(offenders.map(({ file }) => file)).toEqual([])
   })
 
   /**
-   * **The source match that used to live here is deleted (ADR-0020 §7).**
+   * **Nothing here binds the composition root, and that is deliberate.**
    *
-   * It asserted that the composition root contained `new
-   * GoogleCloudMinter(cloudEnv)` — because that file is the one place the
-   * substitution §4 forbids could be written, and the rule above deliberately
-   * does not bind it: it holds a live `GoogleAuth` on purpose, which is how roma
-   * resolves its *own* credential for Pub/Sub and Chat.
-   *
-   * The construction moved into `src/cloud/reach.ts`, behind `cloudReachFrom(env:
-   * CloudEnv | null)`. That file is *inside* this containment, so the rule above
-   * now binds the construction site for the first time — and the composition root
-   * no longer names the constructor, so there is nothing there to substitute.
-   * What is left for a caller to get wrong is passing something other than
-   * `readCloudEnv`'s output, and anything of that shape is a private key somebody
-   * already holds rather than the resolution chain §4 is about.
-   *
-   * Do not add a source match back without reading ADR-0020 §7. What went with it
-   * is the only rule aimed at the composition root at all, which the ADR records
-   * as accepted rather than overlooked.
+   * Construction moved inside this containment (`cloudReachFrom`), so the rule
+   * above binds the construction site and the root no longer names the
+   * constructor. Do not add a source match back without reading ADR-0020 §7 —
+   * what went with it is the only rule that ever aimed at the composition root,
+   * which the ADR records as accepted rather than overlooked.
    */
 })
