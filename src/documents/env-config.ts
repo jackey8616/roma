@@ -117,14 +117,20 @@ export function readDocumentEnv(env: Environment): DocumentEnv | null {
     ])
   }
 
-  const key = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {}
+  const key =
+    typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {}
   const account = key['client_email']
   const privateKey = key['private_key']
   // Checked against what minting needs rather than against the whole documented
   // shape, exactly as `readCloudEnv` is: a key missing `project_id` mints
   // perfectly well, and refusing it would be roma inventing a requirement the
   // exchange does not have.
-  if (typeof account !== 'string' || account === '' || typeof privateKey !== 'string' || privateKey === '') {
+  if (
+    typeof account !== 'string' ||
+    account === '' ||
+    typeof privateKey !== 'string' ||
+    privateKey === ''
+  ) {
     throw new ConfigurationMissing([
       `${DOCUMENT_KEY_FILE_VAR} is "${keyFile}", which is JSON but not a service account key — ` +
         'roma found no `client_email` and `private_key` in it.',

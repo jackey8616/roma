@@ -941,10 +941,7 @@ export class Core {
    */
   #modelNamed(sessionId: string): string {
     const chosen = this.#models.chosenFor(sessionId)
-    return named(
-      chosen === null ? PINNED_NAME : menuNameFor(chosen),
-      chosen ?? this.#models.pinned,
-    )
+    return named(chosen === null ? PINNED_NAME : menuNameFor(chosen), chosen ?? this.#models.pinned)
   }
 
   /** Do what the Command asks, and say whether there was anything to do. */
@@ -1140,7 +1137,10 @@ export class Core {
     // report a token the first one had already consumed the answer for.
     const cloudReach = this.#usedCloudReach(taskId)
     const documentReach = this.#usedDocumentReach(taskId)
-    for (const credential of [answeredOn, ...attempts.credentials().filter((c) => c !== answeredOn)]) {
+    for (const credential of [
+      answeredOn,
+      ...attempts.credentials().filter((c) => c !== answeredOn),
+    ]) {
       const paid = attempts.spentOn(credential)
       // The Task's own record is written whatever it spent, including nothing.
       // A second one exists only where a second credential really paid for part

@@ -118,7 +118,9 @@ describe('reading roma out of the environment', () => {
     // and reading it here would turn metered billing on for a whole deployment
     // because somebody's shell profile mentioned it.
     it('ignores a stray ANTHROPIC_API_KEY in roma’s own environment', () => {
-      expect(readRomaEnv({ ...MINIMAL, ANTHROPIC_API_KEY: 'somebody-elses' }).overflow).toBeUndefined()
+      expect(
+        readRomaEnv({ ...MINIMAL, ANTHROPIC_API_KEY: 'somebody-elses' }).overflow,
+      ).toBeUndefined()
     })
   })
 
@@ -195,12 +197,14 @@ describe('reading roma out of the environment', () => {
 
 describe('the Core, its Channel and its Minter, read as one configuration', () => {
   const readChannel = (env: Parameters<typeof readRomaEnv>[0]) => {
-    if (env['CHANNEL_THING'] === undefined) throw new ConfigurationMissing(['CHANNEL_THING is not set.'])
+    if (env['CHANNEL_THING'] === undefined)
+      throw new ConfigurationMissing(['CHANNEL_THING is not set.'])
     return { thing: env['CHANNEL_THING'] }
   }
 
   const readMinter = (env: Parameters<typeof readRomaEnv>[0]) => {
-    if (env['MINTER_THING'] === undefined) throw new ConfigurationMissing(['MINTER_THING is not set.'])
+    if (env['MINTER_THING'] === undefined)
+      throw new ConfigurationMissing(['MINTER_THING is not set.'])
     return { thing: env['MINTER_THING'] }
   }
 

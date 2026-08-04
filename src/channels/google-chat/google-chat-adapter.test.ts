@@ -345,9 +345,7 @@ describe('what somebody sent along with a message', () => {
     const message = adapter.toIngress(inSpace('look', { attachment: [unknownShape] }))
 
     expect(message?.enclosures).toEqual([])
-    expect(logged).toEqual([
-      { event: 'attachment-unread', keys: ['contentName', 'someFutureRef'] },
-    ])
+    expect(logged).toEqual([{ event: 'attachment-unread', keys: ['contentName', 'someFutureRef'] }])
   })
 
   it('says nothing about a message that carried no attachments at all', () => {
@@ -577,7 +575,12 @@ describe('replying in Chat', () => {
   it('refuses a Conversation Key that is not a Chat one', async () => {
     const { adapter } = newAdapter()
 
-    for (const key of ['not-a-chat-key', `${SPACE}/messages/msg-1`, 'spaces/', `${SPACE}/threads/`]) {
+    for (const key of [
+      'not-a-chat-key',
+      `${SPACE}/messages/msg-1`,
+      'spaces/',
+      `${SPACE}/threads/`,
+    ]) {
       await expect(adapter.deliver(to(key, { kind: 'stopped' }))).rejects.toThrow(
         /conversation key/i,
       )
@@ -790,7 +793,9 @@ describe('a Task the Shared Window has blocked', () => {
   it('says quota is spent, when it comes back, and that the Task is kept', async () => {
     const { adapter, api } = newAdapter()
 
-    await adapter.deliver(to(THREAD, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: false }))
+    await adapter.deliver(
+      to(THREAD, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: false }),
+    )
 
     expect(api.texts).toEqual([
       `${TO}The shared Claude quota is spent. It comes back at 2026-07-28 20:40 UTC — I have kept your task and will run it then.`,
@@ -819,7 +824,9 @@ describe('a Task the Shared Window has blocked', () => {
   it('posts no button where the Core did not offer one', async () => {
     const { adapter, api } = newAdapter()
 
-    await adapter.deliver(to(THREAD, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: false }))
+    await adapter.deliver(
+      to(THREAD, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: false }),
+    )
 
     expect(api.messages[0]?.posted.action).toBeUndefined()
   })
@@ -979,7 +986,13 @@ describe('addressing the person who asked', () => {
 
     await adapter.deliver(to(THREAD, { kind: 'progress', progress: { phase: 'working' } }))
     await adapter.deliver(
-      to(THREAD, { kind: 'progress', progress: { phase: 'queued', position: 2 } }, 'task-2', 'users/99', 'Bob'),
+      to(
+        THREAD,
+        { kind: 'progress', progress: { phase: 'queued', position: 2 } },
+        'task-2',
+        'users/99',
+        'Bob',
+      ),
     )
 
     expect(api.texts).toEqual([`<${SENDER}> Working…`, '<users/99> Queued — 2 waiting.'])

@@ -131,7 +131,10 @@ describe('finding the Installation at boot', () => {
   // failure inside somebody's Turn is the whole reason the boot asks at all.
   it('carries GitHub’s refusal, with what was being attempted', async () => {
     const { minter } = githubAnswering({
-      '/app/installations': () => ({ status: 401, body: { message: 'A JWT could not be decoded' } }),
+      '/app/installations': () => ({
+        status: 401,
+        body: { message: 'A JWT could not be decoded' },
+      }),
     })
 
     await expect(minter.installation()).rejects.toThrow(GitHubRefused)

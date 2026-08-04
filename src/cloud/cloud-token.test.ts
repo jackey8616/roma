@@ -37,9 +37,7 @@ afterEach(async () => {
   dirs = []
 })
 
-async function shortcutAgainst({
-  cloudMinter,
-}: { cloudMinter?: FakeCloudMinter } = {}) {
+async function shortcutAgainst({ cloudMinter }: { cloudMinter?: FakeCloudMinter } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'roma-cloud-token-'))
   dirs.push(dir)
 

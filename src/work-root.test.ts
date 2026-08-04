@@ -95,9 +95,7 @@ describe('reclaiming what nothing has used', () => {
     const { work } = newRoot()
     const cwd = sessionUsed(work, A, 8 * DAY)
 
-    expect(work.reclaimIdle(new Set())).toEqual([
-      { sessionId: A, cwd, idleMs: expect.any(Number) },
-    ])
+    expect(work.reclaimIdle(new Set())).toEqual([{ sessionId: A, cwd, idleMs: expect.any(Number) }])
     expect(existsSync(cwd)).toBe(false)
   })
 

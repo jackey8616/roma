@@ -49,9 +49,7 @@ afterEach(async () => {
   dirs = []
 })
 
-async function shortcutAgainst({
-  documentMinter,
-}: { documentMinter?: FakeDocumentMinter } = {}) {
+async function shortcutAgainst({ documentMinter }: { documentMinter?: FakeDocumentMinter } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'roma-document-token-'))
   dirs.push(dir)
 

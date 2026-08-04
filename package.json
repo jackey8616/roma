@@ -14,12 +14,15 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:seam2": "vitest run --config vitest.seam2.config.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "check:adr-collision": "tsx scripts/check-adr-collision.ts",
     "check:claude-code-drift": "tsx scripts/check-claude-code-drift.ts",
     "check:claude-code-effort-matrix": "tsx scripts/check-claude-code-effort-matrix.ts"
   },
   "devDependencies": {
     "@types/node": "^22.18.13",
+    "prettier": "3.9.6",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"

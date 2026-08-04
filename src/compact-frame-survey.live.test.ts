@@ -99,7 +99,7 @@ interface Arm {
 const ARMS: readonly Arm[] = [
   {
     id: 'A',
-    what: "marker, then Caller text — ADR-0018 as written",
+    what: 'marker, then Caller text — ADR-0018 as written',
     reps: 5,
     carriesSentinel: true,
     sendsMarker: true,
@@ -395,36 +395,34 @@ describe('six frames for a relayed /compact', () => {
   for (const arm of ARMS) {
     const slots = PLAN.filter((slot) => slot.arm.id === arm.id)
 
-    it(
-      `arm ${arm.id} — ${arm.what}`,
-      async () => {
-        const readings: Reading[] = []
-        for (const slot of slots) {
-          const reading = await runSlot(arm, slot.rep, slot.sentinel)
-          READINGS.push(reading)
-          readings.push(reading)
-          console.log(
-            `  ${arm.id}${String(slot.rep)} sent ${JSON.stringify(arm.frame(slot.sentinel))}\n` +
-              `     command-args ${JSON.stringify(reading.commandArgs)}\n` +
-              `     summary ${JSON.stringify(reading.summary)}`,
-          )
-        }
+    it(`arm ${arm.id} — ${arm.what}`, async () => {
+      const readings: Reading[] = []
+      for (const slot of slots) {
+        const reading = await runSlot(arm, slot.rep, slot.sentinel)
+        READINGS.push(reading)
+        readings.push(reading)
+        console.log(
+          `  ${arm.id}${String(slot.rep)} sent ${JSON.stringify(arm.frame(slot.sentinel))}\n` +
+            `     command-args ${JSON.stringify(reading.commandArgs)}\n` +
+            `     summary ${JSON.stringify(reading.summary)}`,
+        )
+      }
 
-        // Structural, and nothing else. Every one of these is the pinned build's
-        // decision rather than the model's, so a red here is news.
-        for (const reading of readings) {
-          expect(reading.compacted, `${arm.id}${String(reading.rep)} did not compact`).toBe(true)
-          expect(reading.commandArgs, `${arm.id}${String(reading.rep)} wrote no <command-args>`)
-            .not.toBeNull()
-          expect(reading.markerInCommandArgs).toBe(arm.sendsMarker)
-          expect(reading.forgedInCommandArgs).toBe(arm.sendsForgery)
-        }
+      // Structural, and nothing else. Every one of these is the pinned build's
+      // decision rather than the model's, so a red here is news.
+      for (const reading of readings) {
+        expect(reading.compacted, `${arm.id}${String(reading.rep)} did not compact`).toBe(true)
+        expect(
+          reading.commandArgs,
+          `${arm.id}${String(reading.rep)} wrote no <command-args>`,
+        ).not.toBeNull()
+        expect(reading.markerInCommandArgs).toBe(arm.sendsMarker)
+        expect(reading.forgedInCommandArgs).toBe(arm.sendsForgery)
+      }
 
-        // Whether the summariser obeyed, and whether it distrusted the Caller,
-        // are in the log and in the readings file. They are not assertions here
-        // and must not become any: see the header.
-      },
-      600_000,
-    )
+      // Whether the summariser obeyed, and whether it distrusted the Caller,
+      // are in the log and in the readings file. They are not assertions here
+      // and must not become any: see the header.
+    }, 600_000)
   }
 })

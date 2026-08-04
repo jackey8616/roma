@@ -224,7 +224,7 @@ export class TaskQueue {
    * hostage to exactly the busy period they exist to ask about.
    */
   #pump(): void {
-    for (let i = 0; i < this.#waiting.length; ) {
+    for (let i = 0; i < this.#waiting.length;) {
       const next = this.#waiting[i]
       if (next?.admit == null || !this.#claim(next.key, next.taskId, !next.uncapped)) {
         i += 1

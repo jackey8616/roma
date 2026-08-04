@@ -81,9 +81,7 @@ function adrs(): { file: string; number: string; source: string }[] {
   return readdirSync(path)
     .filter((file) => file.endsWith('.md'))
     .map((file) => ({ file, number: /^(\d+)-/.exec(file)?.[1] }))
-    .filter(
-      (adr): adr is { file: string; number: string } => adr.number !== undefined,
-    )
+    .filter((adr): adr is { file: string; number: string } => adr.number !== undefined)
     .map((adr) => ({ ...adr, source: readFileSync(join(path, adr.file), 'utf8') }))
 }
 

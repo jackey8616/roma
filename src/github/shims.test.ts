@@ -34,9 +34,9 @@ describe('the gitconfig every Session runs under', () => {
   // From `dist/` there is nothing to add, and there must not be: the image is
   // built `--omit=dev` and has no TypeScript loader to ask for.
   it('asks for no loader when the Shim is already JavaScript', () => {
-    expect(gitCredentialHelper('/app/dist/github/git-credential-shim.js', '/usr/bin/node')).not.toMatch(
-      /--import/,
-    )
+    expect(
+      gitCredentialHelper('/app/dist/github/git-credential-shim.js', '/usr/bin/node'),
+    ).not.toMatch(/--import/)
   })
 
   // From a checkout it must, and by absolute URL. Node 22 strips the types
@@ -44,7 +44,10 @@ describe('the gitconfig every Session runs under', () => {
   // by, and `--import` resolves a bare name against git's working directory
   // rather than roma's. Both halves of that were a real from-source failure.
   it('asks for a loader, by absolute URL, when the Shim is TypeScript', () => {
-    const helper = gitCredentialHelper('/checkout/src/github/git-credential-shim.ts', '/usr/bin/node')
+    const helper = gitCredentialHelper(
+      '/checkout/src/github/git-credential-shim.ts',
+      '/usr/bin/node',
+    )
 
     expect(helper).toMatch(/--import \/\S*tsx\S*/)
     expect(helper.endsWith(' /checkout/src/github/git-credential-shim.ts')).toBe(true)

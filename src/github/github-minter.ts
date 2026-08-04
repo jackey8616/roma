@@ -174,9 +174,10 @@ export class GitHubMinter implements InstallationMinter {
    * credential request for the rest of the deployment's life.
    */
   async #onlyInstallation(): Promise<{ id: number; account: string }> {
-    const installations = await this.#asApp<
-      { id: number; account: { login?: string } | null }[]
-    >('/app/installations', 'listing its installations')
+    const installations = await this.#asApp<{ id: number; account: { login?: string } | null }[]>(
+      '/app/installations',
+      'listing its installations',
+    )
 
     const named = installations.map(
       ({ id, account }) => account?.login ?? `installation ${String(id)}`,

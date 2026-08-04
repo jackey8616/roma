@@ -53,10 +53,7 @@ function loaderFor(shim: string): string {
  * executable named `git-credential-something`, and asking the image to install a
  * shebang wrapper for it would be a second file to keep in step.
  */
-export function gitCredentialHelper(
-  shim = shimBesideThisFile(),
-  node = process.execPath,
-): string {
+export function gitCredentialHelper(shim = shimBesideThisFile(), node = process.execPath): string {
   return `!${node}${loaderFor(shim)} ${shim}`
 }
 

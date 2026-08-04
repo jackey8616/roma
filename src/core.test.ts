@@ -323,7 +323,10 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
-  await teardownRoma(pools, fixtures.flatMap(({ roots }) => roots))
+  await teardownRoma(
+    pools,
+    fixtures.flatMap(({ roots }) => roots),
+  )
   pools = []
   fixtures = []
   vi.useRealTimers()
@@ -1515,9 +1518,7 @@ describe('the model a Conversation runs on', () => {
     expect(claude.process.sent.at(-1)).toMatchObject({
       type: 'user',
       message: {
-        content: [
-          { text: '<from>Ada (users/17)</from>\n\n/model the deploy as a state machine' },
-        ],
+        content: [{ text: '<from>Ada (users/17)</from>\n\n/model the deploy as a state machine' }],
       },
     })
     expect(posted(adapter.instructions).at(-1)).toEqual({
@@ -2239,9 +2240,9 @@ describe('the record every Task leaves behind', () => {
     await Promise.all(busy)
     await waiting
 
-    expect(recordsIn(audit).find((record) => record.sessionId === sessionIdFor('four'))).toMatchObject(
-      { outcome: 'stopped', costUsd: 0, turnMs: null },
-    )
+    expect(
+      recordsIn(audit).find((record) => record.sessionId === sessionIdFor('four')),
+    ).toMatchObject({ outcome: 'stopped', costUsd: 0, turnMs: null })
   })
 
   // roma stopped waiting rather than Claude Code finishing, so no terminal event
@@ -2290,7 +2291,9 @@ describe('the record every Task leaves behind', () => {
     feed(procFor(KEY), OK)
     await expect(task).rejects.toThrow('the Channel is down')
 
-    expect(recordsIn(audit)).toMatchObject([{ outcome: 'result', costUsd: expect.closeTo(0.0103129, 7) }])
+    expect(recordsIn(audit)).toMatchObject([
+      { outcome: 'result', costUsd: expect.closeTo(0.0103129, 7) },
+    ])
   })
 
   // Both halves, because they can disagree and the disagreement is the whole
@@ -3355,9 +3358,11 @@ describe('relaying a `/compact`, which costs money', () => {
     const before = progressOf(adapter).length
 
     const { task, proc } = await start('/compact')
-    expect(progressOf(adapter).slice(before).map(({ progress }) => progress)).toEqual([
-      { phase: 'working' },
-    ])
+    expect(
+      progressOf(adapter)
+        .slice(before)
+        .map(({ progress }) => progress),
+    ).toEqual([{ phase: 'working' }])
 
     // And then the acknowledgement keeps moving, on the one event there is
     // between the command going out and the boundary coming back. The throttle

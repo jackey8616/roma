@@ -129,7 +129,7 @@ export function stripesInPng(png: Buffer): StripeColour[] {
   if (!png.subarray(0, SIGNATURE.length).equals(SIGNATURE)) throw new Error('not a PNG')
 
   const chunks = new Map<string, Buffer[]>()
-  for (let at = SIGNATURE.length; at + 12 <= png.length; ) {
+  for (let at = SIGNATURE.length; at + 12 <= png.length;) {
     const length = png.readUInt32BE(at)
     const type = png.toString('ascii', at + 4, at + 8)
     const data = png.subarray(at + 8, at + 8 + length)
