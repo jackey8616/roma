@@ -12,16 +12,13 @@ import type { Installation } from './installation.js'
 /**
  * The most repositories the announcement will name one by one.
  *
- * A cap rather than the whole list, because this text is prepended to every Turn
- * of every Session and an Installation on a thousand repositories would spend
- * more of the context window on a directory than on the work.
+ * A cap, never the whole list: this text is prepended to every Turn of every
+ * Session, and an Installation on a thousand repositories would spend more of
+ * the context window on a directory than on the work.
  *
- * What is capped is the advertisement, not the access, and the text says so: the
- * count is honest and the last line of the list states that the rest are
- * reachable the same way. An agent asked about the hundred-and-fiftieth
- * repository is therefore told to try, which is the behaviour the capability
- * exists for — the failure this whole text prevents is an agent that refuses
- * work it can do.
+ * What is capped is the advertisement, not the access, and the text has to keep
+ * saying so — the failure this whole announcement prevents is an agent that
+ * refuses work it can do.
  */
 const NAMED_AT_MOST = 100
 

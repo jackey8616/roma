@@ -176,14 +176,12 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
   /**
    * The button that takes Overflow for one Task.
    *
-   * Named by the Task rather than by the Conversation, because that is what the
-   * offer is about: a Conversation can have a second Task blocked behind this
-   * one, and a button that meant "the blocked Task here" would spend money on
-   * whichever of them roma looked at first.
+   * Named by the Task, never by the Conversation: a Conversation can have a
+   * second Task blocked behind this one, and "the blocked Task here" would spend
+   * money on whichever roma looked at first.
    *
-   * Anyone in the Conversation may press it, which is ADR-0002's decision rather
-   * than an oversight — restricting it to an admin turns a person into an
-   * approval queue and strands urgent work whenever they are offline.
+   * Anyone in the Conversation may press it — ADR-0002's decision, not an
+   * oversight.
    */
   #offer(taskId: string): ChatAction {
     return {
@@ -217,15 +215,13 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
   /**
    * Where a message goes, read out of the Conversation Key.
    *
-   * `spaces/{space}/threads/{thread}` is a thread, and roma replies into it with
-   * the option that makes the reply establish the thread if it does not exist
-   * yet — an app cannot create one any other way. `spaces/{space}` on its own is
-   * a DM, which has no threads, so the message is posted plainly.
+   * `spaces/{space}/threads/{thread}` is a thread, replied into with the option
+   * that establishes it if it does not exist — an app cannot create one any
+   * other way. `spaces/{space}` alone is a DM and is posted plainly.
    *
-   * The `threads/` segment is Google's, verified against the API reference
-   * rather than taken from ADR-0004, which had it as `messages/` — that is a
-   * *message's* resource name. A key in the wrong shape is refused here rather
-   * than posted somewhere unintended.
+   * The segment is `threads/`, verified against the API reference and **not**
+   * ADR-0004's `messages/`, which is a *message's* resource name. A key in the
+   * wrong shape is refused here rather than posted somewhere unintended.
    * https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces.messages
    */
   #addressed(conversationKey: string, text: string): ChatMessage {

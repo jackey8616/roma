@@ -132,16 +132,13 @@ function content(value: string): string {
 /**
  * One attribute value, escaped enough to stay one.
  *
- * The sender chose this string and a filename may contain a quote, so an
- * unescaped one would end the attribute early and leave the rest of somebody's
- * filename reading as markup roma wrote. Not a privilege boundary — there is
- * none here to cross — but a tag that parses as what it is costs four
- * replacements, and a mangled one is a frame the agent has to guess at.
+ * The sender chose this string and a filename may contain a quote, which
+ * unescaped would end the attribute early and leave the rest reading as markup
+ * roma wrote.
  *
- * `callerName` is deliberately not escaped this way: it comes from the
- * Channel's own directory of people rather than from an upload, and ADR-0009
- * settled its shape. Escaping is applied where the string was chosen by whoever
- * sent the message.
+ * `callerName` is deliberately not escaped this way — it comes from the
+ * Channel's directory of people rather than from an upload (ADR-0009). Escaping
+ * goes where the string was chosen by whoever sent the message.
  */
 function attribute(value: string): string {
   return content(value).replaceAll('"', '&quot;')

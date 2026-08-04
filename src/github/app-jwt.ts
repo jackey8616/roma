@@ -3,15 +3,12 @@ import { createSign } from 'node:crypto'
 /**
  * How long a JWT roma signs is good for.
  *
- * Nine minutes against a documented maximum of ten, measured from `iat`. The
- * spare minute is the margin: a JWT whose span GitHub reads as more than ten
- * minutes is refused outright, and losing a minute of a credential that is only
- * ever used for one request costs nothing. With the backdating below, what is
- * left in front of the request is eight minutes, which is eight minutes more
- * than it needs.
+ * Nine against a documented maximum of ten, measured from `iat`: a span GitHub
+ * reads as over ten minutes is refused outright, and a credential used for one
+ * request loses nothing by the margin.
  *
- * Unverified here — this is GitHub's documented behaviour and nothing in this
- * repository has driven a real App (`docs/github-app-verification.md`).
+ * Unverified — GitHub's documented behaviour, and nothing here has driven a real
+ * App (`docs/github-app-verification.md`).
  */
 const LIFETIME_S = 9 * 60
 
