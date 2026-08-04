@@ -260,14 +260,7 @@ export class ChosenRecord<K extends ChosenKind> {
   readonly #pinned: string
   readonly #notOffered: (written: string) => Error
 
-  constructor({
-    kind,
-    workRoot,
-    recordFor,
-    offered,
-    pinned,
-    notOffered,
-  }: ChosenRecordOptions<K>) {
+  constructor({ kind, workRoot, recordFor, offered, pinned, notOffered }: ChosenRecordOptions<K>) {
     this.kind = kind
     this.#workRoot = workRoot
     this.#recordFor = recordFor

@@ -941,10 +941,7 @@ export class Core {
    */
   #modelNamed(sessionId: string): string {
     const chosen = this.#models.chosenFor(sessionId)
-    return named(
-      chosen === null ? PINNED_NAME : menuNameFor(chosen),
-      chosen ?? this.#models.pinned,
-    )
+    return named(chosen === null ? PINNED_NAME : menuNameFor(chosen), chosen ?? this.#models.pinned)
   }
 
   /** Do what the Command asks, and say whether there was anything to do. */
