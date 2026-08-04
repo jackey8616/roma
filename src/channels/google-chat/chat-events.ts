@@ -1,4 +1,5 @@
 import type { IngressMessage, PendingEnclosure, Quotation } from '../../channel-adapter.js'
+import { commandFor } from '../../commands.js'
 import type { OperatorLog } from '../../operator-log.js'
 
 /** Fetch the bytes of one thing Chat holds, by the resource name Chat gave it. */
@@ -106,25 +107,8 @@ export function readIngressMessage(
   // field here is read, and roma answers the message either way.
   const callerName = asString(sender?.['displayName'])
 
-  // The event carries the space, and so does the message inside it. Either will
-  // do and neither is always present, so both are tried before giving up.
-  const space = asRecord(event['space']) ?? asRecord(message['space'])
-  const spaceName = asString(space?.['name'])
-  if (spaceName === null) return null
-
-  // A DM has no threads to speak of — Chat still puts one on each message, and
-  // reading it here would make every message in the DM its own Conversation,
-  // which is the opposite of the one long-lived Session per person ADR-0004
-  // wants.
-  const direct =
-    asString(space?.['spaceType']) === DIRECT_MESSAGE || asString(space?.['type']) === DM
-  const thread = asString(asRecord(message['thread'])?.['name'])
-  // A message in a space with no thread on it should not happen. If it ever
-  // does, falling back to the space would put one Conversation's context into
-  // every other Conversation in that space — everybody's work in everybody
-  // else's replies — so it is left unanswered instead, which is at least
-  // visible.
-  if (!direct && thread === null) return null
+  const conversationKey = conversationKeyOf(event, message)
+  if (conversationKey === null) return null
 
   // `argumentText` is the message with roma's @-mention removed, which is what
   // Claude Code should see: the mention is how Chat addresses roma, not part of
@@ -150,18 +134,53 @@ export function readIngressMessage(
   // typing a word is the same act as pasting the screenshot (ADR-0021).
   if (text === '' && enclosures.length === 0 && quoted.quotation === null) return null
 
-  // The Conversation Key doubles as the address a reply goes to, which is what
-  // lets this Adapter store nothing: `spaces/{space}/threads/{thread}` is a
-  // thread, `spaces/{space}` on its own is a DM, and `GoogleChatAdapter` reads
-  // the difference back out of the key months later.
   return {
-    conversationKey: direct || thread === null ? spaceName : thread,
+    conversationKey,
     caller,
     callerName,
     text,
     enclosures,
     quotation: quoted.quotation,
   }
+}
+
+/**
+ * Which Conversation an event is about, or null where roma should not answer it.
+ *
+ * The Conversation Key doubles as the address a reply goes to, which is what lets
+ * this Adapter store nothing: `spaces/{space}/threads/{thread}` is a thread,
+ * `spaces/{space}` on its own is a DM, and `GoogleChatAdapter` reads the
+ * difference back out of the key months later.
+ *
+ * One reading for both kinds of event roma answers — a message, and a button
+ * press on the card roma posted. Two would be two things that can drift, and a
+ * Conversation Key that drifts is a Session that loses its context.
+ *
+ * Never `message.thread` in a DM: Chat puts a thread on those messages too, and
+ * reading it would make every message in the DM its own Conversation — the
+ * opposite of the one long-lived Session per person ADR-0004 wants.
+ *
+ * Never the space as a fallback in a threaded space either. A message there with
+ * no thread on it should not happen, and treating it as the space would put one
+ * Conversation's context into every other Conversation in that space —
+ * everybody's work in everybody else's replies. Unanswered is at least visible.
+ */
+function conversationKeyOf(
+  event: ChatEvent,
+  message: Readonly<Record<string, unknown>>,
+): string | null {
+  // The event carries the space, and so does the message inside it. Either will
+  // do and neither is always present, so both are tried before giving up.
+  const space = asRecord(event['space']) ?? asRecord(message['space'])
+  const spaceName = asString(space?.['name'])
+  if (spaceName === null) return null
+
+  const direct =
+    asString(space?.['spaceType']) === DIRECT_MESSAGE || asString(space?.['type']) === DM
+  const thread = asString(asRecord(message['thread'])?.['name'])
+  if (!direct && thread === null) return null
+
+  return direct || thread === null ? spaceName : thread
 }
 
 /** What one event's quoted message came to, once roma had read it. */
@@ -321,35 +340,107 @@ export const TAKE_OVERFLOW = 'takeOverflow'
 export const TASK_ID_PARAMETER = 'taskId'
 
 /**
+ * The other thing anybody can press: one name off a Menu (ADR-0023).
+ *
+ * Three constants for one round trip, because this button carries two facts
+ * where Overflow's carries one — which Command a press means, and which name off
+ * its Menu.
+ */
+export const CHOOSE = 'choose'
+export const CHOOSES_PARAMETER = 'chooses'
+export const OPTION_PARAMETER = 'option'
+
+/**
  * Read a click on the Overflow button as the Task it was about, or null.
  *
- * Written from Google's documented shape rather than from a capture — like every
- * Chat event in this repo, and for the same reason: nothing here can produce a
- * real one. Both parameter shapes are read because Chat has two. `common.parameters`
- * is an object on the current interaction event; `action.parameters` is a list of
- * `{key, value}` pairs on the older one, and which arrives depends on how the
- * event was delivered. Reading one and not the other would make the button do
- * nothing at all, silently, for whichever half of the deliveries carries the
- * other — and a button that does nothing is worse than no button, because
- * somebody waiting on a blocked Task presses it and then keeps waiting.
- * https://developers.google.com/workspace/chat/read-form-data
+ * The Task id is one roma minted and put on the offer, so this can only ever
+ * answer an offer roma actually made.
+ *
+ * Written from Google's documented shape rather than from a capture, like every
+ * Chat event in this repo: nothing here can produce a real one. `pressed` below
+ * carries what that costs and how it is paid for.
  */
 export function readOverflowTaken(event: ChatEvent): string | null {
+  return pressed(event, TAKE_OVERFLOW, TASK_ID_PARAMETER)
+}
+
+/**
+ * Read a press on a Menu button as the message the Caller would have typed, or
+ * null if this event is not one.
+ *
+ * **Pressing is typing** (ADR-0023). What comes out is an ordinary Ingress
+ * Message carrying `/model opus`, so the press goes down the path every typed
+ * Command goes down and the Core learns nothing new — which is what makes a card
+ * from three weeks ago safe to press, and why nothing has to be remembered
+ * between posting one and its being pressed.
+ *
+ * **Never route this through `readIngressMessage`.** The message on a press
+ * event is roma's *own* card, whose sender is an app: that reader's bot guard
+ * would swallow it, and relaxing the guard to let it through would both re-open
+ * the two-apps-answering-each-other fault and credit the choice to roma. Whoever
+ * pressed is on `event.user`, never on the message's sender.
+ *
+ * Written from Google's documented shape rather than from a capture, like every
+ * other reading in this file, and this one rests on the message travelling with
+ * the press — without it there is no thread and so no Conversation Key, and the
+ * whole arrangement would need revisiting rather than patching (ADR-0023).
+ */
+export function readChosenOption(event: ChatEvent): IngressMessage | null {
+  const chooses = pressed(event, CHOOSE, CHOOSES_PARAMETER)
+  const option = pressed(event, CHOOSE, OPTION_PARAMETER)
+  if (chooses === null || option === null) return null
+  // Only the two Commands that have a Menu. A parameter naming anything else is
+  // a press roma never put out, and synthesising `/stop` or `/clear` from one
+  // would reach a Command through a door meant for a Menu.
+  if (chooses !== 'model' && chooses !== 'effort') return null
+
+  const user = asRecord(event['user'])
+  const caller = asString(user?.['name'])
+  if (caller === null) return null
+
+  const message = asRecord(event['message'])
+  if (message === null) return null
+  const conversationKey = conversationKeyOf(event, message)
+  if (conversationKey === null) return null
+
+  return {
+    conversationKey,
+    caller,
+    callerName: asString(user?.['displayName']),
+    text: commandFor(chooses, option),
+    enclosures: [],
+    quotation: null,
+  }
+}
+
+/**
+ * One parameter off a button press, or null if this event is not that press.
+ *
+ * Both parameter shapes are read because Chat has two. `common.parameters` is an
+ * object on the current interaction event; `action.parameters` is a list of
+ * `{key, value}` pairs on the older one, and which arrives depends on how the
+ * event was delivered. Reading one and not the other would make a button do
+ * nothing at all, silently, for whichever half of the deliveries carries the
+ * other — and a button that does nothing is worse than no button, because
+ * somebody presses it and then keeps waiting.
+ * https://developers.google.com/workspace/chat/read-form-data
+ */
+function pressed(event: ChatEvent, action: string, parameter: string): string | null {
   if (asString(event['type']) !== CARD_CLICKED) return null
 
   const common = asRecord(event['common'])
-  if (asString(common?.['invokedFunction']) === TAKE_OVERFLOW) {
-    const taskId = asString(asRecord(common?.['parameters'])?.[TASK_ID_PARAMETER])
-    if (taskId !== null) return taskId
+  if (asString(common?.['invokedFunction']) === action) {
+    const value = asString(asRecord(common?.['parameters'])?.[parameter])
+    if (value !== null) return value
   }
 
-  const action = asRecord(event['action'])
-  if (asString(action?.['actionMethodName']) !== TAKE_OVERFLOW) return null
-  const parameters = action?.['parameters']
+  const legacy = asRecord(event['action'])
+  if (asString(legacy?.['actionMethodName']) !== action) return null
+  const parameters = legacy?.['parameters']
   if (!Array.isArray(parameters)) return null
   for (const entry of parameters) {
     const pair = asRecord(entry)
-    if (asString(pair?.['key']) === TASK_ID_PARAMETER) return asString(pair?.['value'])
+    if (asString(pair?.['key']) === parameter) return asString(pair?.['value'])
   }
   return null
 }

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { readCommand } from './commands.js'
+import { commandFor, readCommand } from './commands.js'
+import { EFFORT_NAMES, readEffortRequest } from './effort-menu.js'
+import { MENU_NAMES, readModelRequest } from './model-menu.js'
 
 /** Which Command a message is, ignoring what followed it. */
 function commandIn(text: string): string | null {
@@ -173,5 +175,79 @@ describe('reading a message as a Command', () => {
     expect(readCommand('model opus')).toBeNull()
     expect(readCommand('effort max')).toBeNull()
     expect(readCommand('config')).toBeNull()
+  })
+})
+
+/**
+ * Every name roma will put on a button has to survive being written out as a
+ * message and read back (ADR-0023).
+ *
+ * A structural invariant rather than a behaviour test, in the idiom of the
+ * Command/Relay overlap check in `relays.test.ts`, the ADR numbering check and
+ * the containment checks — a claim about this repository, belonging to none of
+ * the three seams.
+ *
+ * It exists because a button is a *message* here, so a Menu name that does not
+ * round-trip does not fail loudly: it produces a message `readCommand` reads as
+ * prose, which falls through to Claude Code and bills somebody for a Turn. That
+ * is the exact fault ADR-0014 built the `/model` Command to remove, arriving
+ * through the door ADR-0023 opened.
+ *
+ * Driven over the real Menus, never a copy. `relays.test.ts` records what a copy
+ * costs: the hardcoded one it replaced held four of eight spellings and went on
+ * passing while covering half the table. So this also needs that check's second
+ * half — both Menus named outright, so an emptied Menu fails rather than passing
+ * vacuously.
+ *
+ * Both Menus need this and neither is stable: each declares itself a person's
+ * judgement about one pinned Claude Code build, to be re-audited when the pin
+ * moves. This is the mechanism `effort-menu.ts` says "somebody remembers"
+ * stopped being.
+ */
+describe('a Menu name a Caller may press instead of type', () => {
+  it('round-trips through the Command reader, for every name on both Menus', () => {
+    const menus = [
+      { command: 'model' as const, names: MENU_NAMES },
+      { command: 'effort' as const, names: EFFORT_NAMES },
+    ]
+
+    for (const { command, names } of menus) {
+      for (const name of names) {
+        expect(readCommand(commandFor(command, name))).toEqual({ command, argument: name })
+      }
+    }
+  })
+
+  // One step further than the reader: a name that parses as an argument and then
+  // lands in `unknown` would refuse a Caller a model roma had just offered them,
+  // which reads as roma arguing with itself.
+  it('resolves back to the very choice the button claimed', () => {
+    for (const name of MENU_NAMES) {
+      const request = readModelRequest(readCommand(commandFor('model', name))?.argument ?? null)
+      expect(request.kind).not.toBe('unknown')
+      if (request.kind === 'chosen') expect(request.name).toBe(name)
+    }
+    for (const name of EFFORT_NAMES) {
+      const request = readEffortRequest(readCommand(commandFor('effort', name))?.argument ?? null)
+      expect(request.kind).not.toBe('unknown')
+      if (request.kind === 'chosen') expect(request.level).toBe(name)
+    }
+  })
+
+  // The checks above pass vacuously against an empty Menu, and a re-audit that
+  // dropped a name is exactly how that happens. Named here so losing one is a
+  // failure rather than a silently shorter card.
+  it('has both Menus say what they hold, so neither can empty unnoticed', () => {
+    expect(MENU_NAMES).toEqual(['opus', 'sonnet', 'haiku', 'default'])
+    expect(EFFORT_NAMES).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'default'])
+  })
+
+  // The two shapes that would break the round trip, spelled out so somebody
+  // adding a name knows what the checks above are watching for. Neither looks
+  // hypothetical once you know a button is a message: a level with a space in it
+  // and a display name that kept its capital are both plausible additions.
+  it('would fail on a name with whitespace or the wrong case', () => {
+    expect(readCommand(commandFor('model', 'claude opus'))).toBeNull()
+    expect(readModelRequest('Opus').kind).toBe('unknown')
   })
 })

@@ -11,18 +11,19 @@
  * Shaped like roma's use of Chat rather than like Chat — the same judgement
  * `ChatApi` below is built on. Whatever speaks HTTP turns this into the
  * `cardsV2` payload Chat wants; what matters at this boundary is which action a
- * click means and which Task it is about, because those are what come back.
+ * click means and what it is about, because those are what come back.
  *
- * One action per message, because roma has exactly one thing anybody can press:
- * taking Overflow on a blocked Task. A second would be a reason to revisit this,
- * not a reason to generalise it now.
+ * There were two kinds of these for a while and the second is what ended the
+ * one-per-message rule this used to state: taking Overflow on a blocked Task,
+ * and picking a name off a Menu (ADR-0023). A Menu is several at once, so a
+ * message carries a list.
  */
 export interface ChatAction {
   /** What the button says. */
   readonly label: string
   /** Chat's `action.function` — the name a click comes back carrying. */
   readonly action: string
-  /** Chat's `action.parameters`, which is how a click says which Task it is about. */
+  /** Chat's `action.parameters`, which is how a click says what it is about. */
   readonly parameters: Readonly<Record<string, string>>
 }
 
@@ -49,14 +50,15 @@ export interface ChatMessage {
    */
   readonly replyOption?: 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD'
   /**
-   * A button on this message, where there is something to press.
+   * The buttons on this message, where there is something to press.
    *
-   * Only on the message that says the Shared Window is spent, and only when
-   * Overflow is on offer — ADR-0002 puts the valve at the moment of blocking
-   * rather than in a setting, and a button on the message that reports the block
-   * is that moment.
+   * Two messages carry any: the one saying the Shared Window is spent, when
+   * Overflow is on offer (ADR-0002 puts the valve at the moment of blocking
+   * rather than in a setting), and the one offering a Menu to choose a model or
+   * an effort from (ADR-0023). Absent everywhere else, and never empty where
+   * present — a card holding no buttons is a card with nothing in it.
    */
-  readonly action?: ChatAction
+  readonly actions?: readonly ChatAction[]
 }
 
 /**

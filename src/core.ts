@@ -743,13 +743,14 @@ export class Core {
     switch (request.kind) {
       case 'unknown':
         // Nothing is written, so a typo cannot move a Session somebody shares
-        // with other people.
-        return { kind: 'failure', ...address, reason: unknownModelReason(request.name) }
+        // with other people. The Menu rides along, because this is the message
+        // where somebody has just shown they do not know it (ADR-0023).
+        return modelChoice(address, unknownModelReason(request.name), request.name)
       case 'report':
         // No process, no Turn, no money, and no interruption of whatever this
         // Conversation is waiting on: roma owns the answer, so asking is never
         // the slow thing.
-        return { kind: 'result', ...address, text: this.#modelReport(sessionId) }
+        return modelChoice(address, this.#modelReport(sessionId), null)
       case 'default':
         this.#models.usePinned(sessionId)
         // Named as `default` rather than by whatever the deployment pinned it
@@ -814,12 +815,26 @@ export class Core {
     const sessionId = this.#sessions.sessionFor(conversationKey)
 
     switch (request.kind) {
-      case 'unknown':
+      // Both of these carry the Menu only where it would mean something. Never
+      // unconditionally: on a model the Effort Matrix says takes none, the reply
+      // already says so, and buttons beside that sentence would undo it — an
+      // invitation to do the thing roma has just called inert. The typed Command
+      // is untouched either way, which is why this is not the refusal ADR-0016
+      // forbids (ADR-0023).
+      case 'unknown': {
         // Nothing is written, so a typo — or `ultracode`, which is the
         // operator's — cannot move a Session somebody shares with other people.
-        return { kind: 'failure', ...address, reason: unknownEffortReason(request.name) }
-      case 'report':
-        return { kind: 'result', ...address, text: this.#effortReport(sessionId) }
+        const reason = unknownEffortReason(request.name)
+        return this.#effortApplies(sessionId)
+          ? effortChoice(address, reason, request.name)
+          : { kind: 'failure', ...address, reason }
+      }
+      case 'report': {
+        const text = this.#effortReport(sessionId)
+        return this.#effortApplies(sessionId)
+          ? effortChoice(address, text, null)
+          : { kind: 'result', ...address, text }
+      }
       case 'default':
         this.#efforts.usePinned(sessionId)
         return {
@@ -882,8 +897,22 @@ export class Core {
    * sentence whether or not a record already existed.
    */
   #modelTakesNone(sessionId: string): string {
-    const model = this.#models.inForce(sessionId)
-    return takesEffort(model) === false ? ` ${takesNoEffort(model)}` : ''
+    if (this.#effortApplies(sessionId)) return ''
+    return ` ${takesNoEffort(this.#models.inForce(sessionId))}`
+  }
+
+  /**
+   * Never a falsy check: the Effort Matrix answers null for a model it has never
+   * been read about, and a null must keep both the sentence's silence and the
+   * Menu's buttons — roma may not withhold an offer on the strength of a reading
+   * it never made (ADR-0023).
+   *
+   * The sentence and the buttons ask through here rather than each reading the
+   * Matrix, so a model the Matrix has never seen cannot get one and not the
+   * other.
+   */
+  #effortApplies(sessionId: string): boolean {
+    return takesEffort(this.#models.inForce(sessionId)) !== false
   }
 
   /**
@@ -1627,6 +1656,24 @@ const MENU_LIST = MENU_NAMES.join(', ')
 
 /** The Effort Menu as a sentence names it, held once for `MENU_LIST`'s reason. */
 const EFFORT_LIST = EFFORT_NAMES.join(', ')
+
+/** A `/model` answer that carries the Model Menu to be chosen from. */
+function modelChoice(
+  address: TaskAddress,
+  text: string,
+  refused: string | null,
+): OutboundInstruction {
+  return { kind: 'choice', ...address, text, chooses: 'model', options: MENU_NAMES, refused }
+}
+
+/** An `/effort` answer that carries the Effort Menu to be chosen from. */
+function effortChoice(
+  address: TaskAddress,
+  text: string,
+  refused: string | null,
+): OutboundInstruction {
+  return { kind: 'choice', ...address, text, chooses: 'effort', options: EFFORT_NAMES, refused }
+}
 
 /**
  * What roma says when a Conversation has been put on a model.

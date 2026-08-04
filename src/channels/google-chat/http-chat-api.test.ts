@@ -109,11 +109,13 @@ describe('the button that takes Overflow', () => {
       space: SPACE,
       thread: null,
       text: 'The shared Claude quota is spent.',
-      action: {
-        label: 'Run it on metered billing',
-        action: 'takeOverflow',
-        parameters: { taskId: 'task-7' },
-      },
+      actions: [
+        {
+          label: 'Run it on metered billing',
+          action: 'takeOverflow',
+          parameters: { taskId: 'task-7' },
+        },
+      ],
     })
 
     expect(last()?.body).toMatchObject({
@@ -156,10 +158,49 @@ describe('the button that takes Overflow', () => {
       space: SPACE,
       thread: null,
       text: 'The shared Claude quota is spent.',
-      action: { label: 'Run it', action: 'takeOverflow', parameters: { taskId: 'task-7' } },
+      actions: [{ label: 'Run it', action: 'takeOverflow', parameters: { taskId: 'task-7' } }],
     })
 
     expect(last()?.body).toMatchObject({ text: 'The shared Claude quota is spent.' })
+  })
+})
+
+describe('the buttons that choose off a Menu', () => {
+  // A Menu is several buttons at once, which is what ended the one-action-per-
+  // message rule this file used to rest on (ADR-0023). One `buttonList` holding
+  // all of them rather than a widget each, because that is Chat's own grouping:
+  // it wraps a row across lines, which is what a six-level Effort Menu needs on
+  // a phone.
+  it('puts every button of a Menu in one list', async () => {
+    const { api, last } = recording()
+
+    await api.post({
+      space: SPACE,
+      thread: null,
+      text: 'This conversation is on sonnet (claude-sonnet-5).',
+      actions: ['opus', 'sonnet', 'haiku', 'default'].map((option) => ({
+        label: option,
+        action: 'choose',
+        parameters: { chooses: 'model', option },
+      })),
+    })
+
+    const [widget] = buttonWidgetsOf(last()?.body)
+    expect(widget?.buttonList.buttons.map((button) => button.text)).toEqual([
+      'opus',
+      'sonnet',
+      'haiku',
+      'default',
+    ])
+    // Both facts make the round trip on every button, because a press has to say
+    // which Command it means as well as which name off its Menu.
+    expect(widget?.buttonList.buttons[0]?.onClick.action).toEqual({
+      function: 'choose',
+      parameters: [
+        { key: 'chooses', value: 'model' },
+        { key: 'option', value: 'opus' },
+      ],
+    })
   })
 
   it('sends no card where there is nothing to press', async () => {
@@ -196,3 +237,21 @@ describe('editing a message', () => {
     await expect(api.edit(POSTED, 'Working…')).rejects.toThrow(/404/)
   })
 })
+
+/** Just enough of Chat's card payload to read a button list back out of it. */
+interface ButtonWidget {
+  readonly buttonList: {
+    readonly buttons: readonly {
+      readonly text: string
+      readonly onClick: { readonly action: unknown }
+    }[]
+  }
+}
+
+/** The widgets of the one card a message carries, or nothing if it carries none. */
+function buttonWidgetsOf(body: Readonly<Record<string, unknown>> | undefined): ButtonWidget[] {
+  const cards = body?.['cardsV2'] as
+    | readonly { card: { sections: readonly { widgets: ButtonWidget[] }[] } }[]
+    | undefined
+  return cards?.[0]?.card.sections[0]?.widgets ?? []
+}

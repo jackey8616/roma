@@ -109,6 +109,15 @@ to that: the Chosen or Pinned Model, and the Chosen or Pinned Effort. It answers
 from its own records, so the answer arrives with no process, no queueing behind a
 running Task, and no money.
 
+**Amended 2026-08-04 — the borrowed premise is narrower than it was, and this
+conclusion no longer rests on it** (ADR-0023). "A picker has no form in a chat
+message" turned out to be false of a *Menu*: four names is four buttons, and
+`/model` and `/effort` now answer with them. What has no form in a chat message is
+this one — a panel over 35 keys — and the reason `/config` still only reports is
+the one below rather than the one above: roma refuses all 35, so there is nothing
+on that panel a Caller could be offered. Whether `/config` should carry the two
+Menus it points at is a question ADR-0023 leaves open and does not answer.
+
 The alternative surfaced during measurement and was rejected: relay the bare
 `/config` as a Readout so a Caller sees the build's real list of 35 keys. It is
 read-only, non-interactive and free, so it would pass the Readout membership rule.

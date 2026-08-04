@@ -435,9 +435,12 @@ without anybody agreeing to it. Roma's own rather than everything Claude Code
 would take — it accepts arbitrary model ids, so no list roma held could ever be a
 complete check, which makes this an offer rather than a filter. Named for the
 reason an Installation is: a term that is the whole of a security property should
-be a term.
+be a term. A Caller may press it as well as type it, where the Channel can draw
+it — and pressing means exactly what typing means, so this is one offer with two
+ways to reach it rather than two offers (ADR-0023).
 _Avoid_: whitelist, allowlist (that is its shape, and the word is the Relays'),
-supported models (roma is not saying the rest do not work), model list
+supported models (roma is not saying the rest do not work), model list, and
+naming the pressable form separately — it is this Menu, drawn
 
 **Pinned Effort**:
 How hard roma asks the model to think, on every Session that has not been moved.
@@ -478,7 +481,11 @@ The levels a Caller may pick a Chosen Effort from — every level the pinned bui
 has, which is what makes it unlike the Model Menu. It is still a spending boundary
 and not a typo filter: what it holds back is not a level but `ultracode`, which is
 not a level at all but a licence for one Task to become a fleet, and which
-therefore reaches roma only through the operator (ADR-0016).
+therefore reaches roma only through the operator (ADR-0016). Pressable as well as
+typable on the Model Menu's terms, with one difference: it is not drawn at all
+where the Effort Matrix says this Session's model takes no effort, since roma
+declines to invite an action it has, in the same message, just called inert
+(ADR-0023).
 _Avoid_: effort levels (that is the provider's list; this is roma's offer),
 whitelist, allowlist
 

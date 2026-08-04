@@ -88,6 +88,11 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
       // does. Posted whole, Chat would refuse it and the Conversation would be
       // told nothing at all about a Task that is already dead.
       return split(to, instruction.reason)
+    case 'choice':
+      // Only the text. The buttons are the Adapter's, because they are a Chat
+      // card rather than words — and the text already names the Menu, so a
+      // message that lost them would still be the whole answer (ADR-0023).
+      return split(to, instruction.text)
     case 'stopped':
       return [`${to}Stopped.`]
     case 'command-outcome':

@@ -92,6 +92,7 @@ function newCore({
   workRoot: existingWorkRoot,
   overflow = { monthlyCapUsd: 100 },
   capabilities,
+  pinnedModel = PINNED_MODEL,
   ...options
 }: {
   /** An existing work root, for the one test that stands a second Core up over one. */
@@ -100,6 +101,12 @@ function newCore({
   overflow?: { monthlyCapUsd: number } | null
   retryBudget?: RetryBudget
   capabilities?: Partial<ChannelCapabilities>
+  /**
+   * For the deployment that pinned a model off the Model Menu, which is the only
+   * way to reach the Effort Matrix's third answer — neither yes nor no, but never
+   * read about.
+   */
+  pinnedModel?: string
 } = {}) {
   const fixture = romaFixture(
     'core',
@@ -113,7 +120,7 @@ function newCore({
   const work = new WorkRoot(workRoot)
   // Shared by the pool and the Core, which is what makes `/model` observable: the
   // Core writes what somebody chose and the pool reads it at the next spawn.
-  const models = chosenModels({ workRoot: work, pinnedModel: PINNED_MODEL })
+  const models = chosenModels({ workRoot: work, pinnedModel })
   // The same instance to both, for the same reason: the Core writes what somebody
   // chose and the pool reads it at the next spawn.
   const efforts = chosenEfforts({ workRoot: work, pinnedEffort: PINNED_EFFORT })
@@ -1305,10 +1312,15 @@ describe('the model a Conversation runs on', () => {
     await core.handle(ingress('/model gpt-5'))
     await say('hello')
 
+    // A refusal rather than a failure, and it carries the Menu: this is the
+    // message where somebody has just shown they do not know it (ADR-0023).
     expect(posted(adapter.instructions)[0]).toEqual({
-      kind: 'failure',
+      kind: 'choice',
       conversationKey: KEY,
-      reason: expect.stringContaining('gpt-5'),
+      text: expect.stringContaining('gpt-5'),
+      chooses: 'model',
+      options: ['opus', 'sonnet', 'haiku', 'default'],
+      refused: 'gpt-5',
     })
     expect(claude.lastSpawn.args).toContain(PINNED_MODEL)
     // Refused as a Command rather than falling through to a Task: the only Turn
@@ -1316,11 +1328,11 @@ describe('the model a Conversation runs on', () => {
     expect(claude.process.sent.filter((frame) => frame['type'] === 'user')).toHaveLength(1)
   })
 
-  // Claude Code's own no-argument `/model` is a picker, which a Channel cannot
-  // render. Reporting is what the gesture can honestly mean in a text channel,
-  // and roma can answer it with no process, no Turn and no money — so asking is
-  // never the slow thing, and never interrupts what the Conversation is waiting
-  // on.
+  // Claude Code's own no-argument `/model` is a picker, and roma answers it with
+  // one: the words a Channel can always post, plus the Menu as something it may
+  // render as pressable (ADR-0023). Either way roma owns the answer, so there is
+  // no process, no Turn and no money, and asking never interrupts what the
+  // Conversation is waiting on.
   it('reports the current model and the Menu, without a process or a Turn', async () => {
     const { adapter, claude, core } = newCore()
 
@@ -1329,9 +1341,14 @@ describe('the model a Conversation runs on', () => {
     expect(claude.processes).toHaveLength(0)
     expect(posted(adapter.instructions)).toEqual([
       {
-        kind: 'result',
+        kind: 'choice',
         conversationKey: KEY,
         text: expect.stringContaining(PINNED_MODEL),
+        chooses: 'model',
+        options: ['opus', 'sonnet', 'haiku', 'default'],
+        // Nothing was refused: this one answers "what is on offer", and that is
+        // the only thing telling the two cards apart.
+        refused: null,
       },
     ])
     const [reported] = posted(adapter.instructions)
@@ -1352,6 +1369,22 @@ describe('the model a Conversation runs on', () => {
     expect(posted(adapter.instructions).at(-1)).toMatchObject({
       text: expect.stringContaining(`opus (${OPUS})`),
     })
+  })
+
+  // Two of the four things `/model` can mean carry a Menu and two do not
+  // (ADR-0023). Somebody who has just chosen is not being asked to choose again,
+  // and a card under every confirmation is how a thread fills with pickers.
+  it('carries no Menu on a choice that succeeded, or on a return to the default', async () => {
+    const { adapter, core } = newCore()
+
+    await core.handle(ingress('/model opus'))
+    await core.handle(ingress('/model default'))
+    await core.handle(ingress('/effort max'))
+    await core.handle(ingress('/effort default'))
+
+    for (const instruction of posted(adapter.instructions)) {
+      expect(instruction).toMatchObject({ kind: 'result' })
+    }
   })
 
   // Choosing the model the deployment already pins is not the same as never
@@ -1608,9 +1641,12 @@ describe('the effort a Conversation runs at', () => {
     await say('hello')
 
     expect(posted(adapter.instructions)[0]).toEqual({
-      kind: 'failure',
+      kind: 'choice',
       conversationKey: KEY,
-      reason: expect.stringContaining('ludicrous'),
+      text: expect.stringContaining('ludicrous'),
+      chooses: 'effort',
+      options: ['low', 'medium', 'high', 'xhigh', 'max', 'default'],
+      refused: 'ludicrous',
     })
     expect(effortOf(claude.lastSpawn)).toBe(PINNED_EFFORT)
     // Refused as a Command rather than falling through to a Task: the only Turn
@@ -1627,7 +1663,16 @@ describe('the effort a Conversation runs at', () => {
 
     await core.handle(ingress('/effort ultracode'))
 
-    expect(posted(adapter.instructions)[0]).toMatchObject({ kind: 'failure' })
+    // Answered exactly as a typo is, which is the point: explaining that it
+    // exists and is the operator's would be roma advertising something no Caller
+    // can have — and it is not among the names on the card either.
+    expect(posted(adapter.instructions)[0]).toMatchObject({
+      kind: 'choice',
+      refused: 'ultracode',
+    })
+    expect(posted(adapter.instructions)[0]).not.toMatchObject({
+      options: expect.arrayContaining(['ultracode']),
+    })
     expect(claude.processes).toHaveLength(0)
   })
 
@@ -1638,7 +1683,14 @@ describe('the effort a Conversation runs at', () => {
 
     expect(claude.processes).toHaveLength(0)
     const [reported] = posted(adapter.instructions)
-    expect(reported).toMatchObject({ kind: 'result' })
+    expect(reported).toMatchObject({
+      kind: 'choice',
+      chooses: 'effort',
+      options: ['low', 'medium', 'high', 'xhigh', 'max', 'default'],
+      refused: null,
+    })
+    // The words say it too, and that is what makes the buttons additive: a
+    // Channel that renders none of them still posts the whole answer.
     for (const name of ['low', 'medium', 'high', 'xhigh', 'max', 'default']) {
       expect(reported).toMatchObject({ text: expect.stringContaining(name) })
     }
@@ -1770,6 +1822,58 @@ describe('an effort the model will not use', () => {
 
     expect(posted(adapter.instructions).at(-1)).not.toMatchObject({
       text: expect.stringContaining('does not apply'),
+    })
+  })
+
+  // The Matrix's third use, added by ADR-0023: it shows so. The reply already
+  // says choosing does nothing here, and buttons beside that sentence would undo
+  // it — a button is a stronger invitation than a sentence is a warning.
+  //
+  // Still not the refusal ADR-0016 forbids. `/effort max` above is accepted,
+  // recorded and answered exactly as before; what roma declines is to *invite* an
+  // action it has just called inert, and the typed Command is untouched.
+  it('offers no Menu to choose from, on a model that will not use one', async () => {
+    const { adapter, core } = newCore()
+    await core.handle(ingress('/model haiku'))
+
+    await core.handle(ingress('/effort'))
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'result' })
+    expect(posted(adapter.instructions).at(-1)).not.toMatchObject({ kind: 'choice' })
+  })
+
+  it('offers none on a refusal either, and still says what it refused', async () => {
+    const { adapter, core } = newCore()
+    await core.handle(ingress('/model haiku'))
+
+    await core.handle(ingress('/effort ludicrous'))
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      kind: 'failure',
+      reason: expect.stringContaining('ludicrous'),
+    })
+  })
+
+  // The case a falsy check would break and an equality check does not, which is
+  // why it is worth its own test. A model the Matrix has never been read about
+  // answers neither yes nor no, and roma may not withhold an offer on the
+  // strength of a reading it never made — the Matrix's own rows for opus and
+  // sonnet are a person's inference rather than the extractor's, and the
+  // extractor has been wrong once.
+  it('offers the Menu on a model the Matrix has never been read about', async () => {
+    const { adapter, core } = newCore({ pinnedModel: 'claude-something-nobody-measured' })
+
+    await core.handle(ingress('/effort'))
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      kind: 'choice',
+      chooses: 'effort',
+      refused: null,
+    })
+    // And says nothing about applying, for the same reason it offers the Menu:
+    // roma has established nothing either way.
+    expect(posted(adapter.instructions).at(-1)).not.toMatchObject({
+      text: expect.stringContaining('takes none'),
     })
   })
 
