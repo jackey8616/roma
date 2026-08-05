@@ -49,7 +49,7 @@ ARG GH_SHA256=83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60
 # ---------------------------------------------------------------------------
 # Builder: everything installed, `dist/` out.
 # ---------------------------------------------------------------------------
-FROM node:22-slim AS builder
+FROM node:25-slim AS builder
 
 WORKDIR /app
 
@@ -65,7 +65,7 @@ RUN npm run build
 # ---------------------------------------------------------------------------
 # Runtime: `dist/`, the two dependencies it imports, and an agent's userland.
 # ---------------------------------------------------------------------------
-FROM node:22-slim AS runtime
+FROM node:25-slim AS runtime
 
 # Deliberately small. roma's agent runs arbitrary shell commands, so this image
 # is a workspace and not only a runtime — but guessing at which tools it will
