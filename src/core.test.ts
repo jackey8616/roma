@@ -3,7 +3,7 @@ import { join, sep } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuditLog, monthOf } from './audit-log.js'
-import { Core, type CoreLogRecord } from './core.js'
+import { Core, type CoreLogRecord, type CoreOptions } from './core.js'
 import type {
   ChannelAdapter,
   ChannelCapabilities,
@@ -88,6 +88,33 @@ const MONTH = monthOf(new Date(NOW))
 let pools: SessionPool[] = []
 let fixtures: RomaFixture[] = []
 
+/**
+ * Every option the Core takes, listed so a new one cannot arrive without somebody
+ * deciding what this fixture does with it.
+ *
+ * A TS2741 the moment `CoreOptions` grows a field, and it lands here rather than
+ * at a call site — `newCore` is one of three places that wire a Core, and the
+ * other two are `startRoma` and `coreOver` below. What it cannot catch is a field
+ * this fixture declines to *pass*: `usedDocumentReach` sat unwired here while
+ * `core.ts` defaulted it to `() => false`, so the one assertion about it could
+ * not fail. A test that reads a field is the only thing that catches that.
+ */
+const EVERY_CORE_OPTION: Record<keyof CoreOptions, true> = {
+  channel: true,
+  pool: true,
+  workRoot: true,
+  queue: true,
+  sessions: true,
+  models: true,
+  efforts: true,
+  audit: true,
+  credential: true,
+  overflow: true,
+  usedCloudReach: true,
+  usedDocumentReach: true,
+  log: true,
+}
+
 function newCore({
   workRoot: existingWorkRoot,
   overflow = { monthlyCapUsd: 100 },
@@ -109,6 +136,8 @@ function newCore({
   pinnedModel?: string
   /** Omitted for the deployment with no Cloud Reach, which is every other test here. */
   usedCloudReach?: (taskId: string) => boolean
+  /** And for the one with no Document Reach, which is also every other test here. */
+  usedDocumentReach?: (taskId: string) => boolean
 } = {}) {
   const fixture = romaFixture(
     'core',
@@ -171,6 +200,9 @@ function newCore({
     log: (record) => log.push(record),
     ...(overflow === null ? {} : { overflow }),
     ...(options.usedCloudReach === undefined ? {} : { usedCloudReach: options.usedCloudReach }),
+    ...(options.usedDocumentReach === undefined
+      ? {}
+      : { usedDocumentReach: options.usedDocumentReach }),
   })
 
   /**
@@ -261,9 +293,14 @@ function recordsIn(audit: AuditLog) {
  *
  * One Core per Channel, over one pool, one queue, one generation record and one
  * audit log — the Core's own contract says every one of those is roma-wide. So a
- * test that wants a Channel of its own wants this rather than a second roma, and
- * gathering it here is also what keeps the next option the Core gains from being
- * pasted into six places.
+ * test that wants a Channel of its own wants this rather than a second roma.
+ *
+ * **Deliberately the minimum, and four options behind `newCore`.** Every caller
+ * is a test about a Channel that fails — one that never carries an instruction
+ * out, one that never finishes taking an update, one with no stable Conversation
+ * Key — and none of them reads Overflow, the Core log, or a Reach. A new option
+ * belongs here when a Channel-failure test reads it, and not because `newCore`
+ * has it: what the second Core leaves out is the isolation those tests are for.
  */
 function coreOver(shared: ReturnType<typeof newCore>, channel: ChannelAdapter): Core {
   return new Core({
@@ -2943,10 +2980,16 @@ describe('what Overflow is taken for', () => {
   // deletes. Asked inside the loop instead, the second record reports no for a
   // token the first one already accounted for, and a Task that spent somebody's
   // Google Cloud bill is filed half saying so with nothing anywhere disagreeing.
+  //
+  // Both Reaches, which is what makes every `cloudReach: false` and
+  // `documentReach: false` elsewhere in this file an answer rather than a
+  // vacancy: a fixture that cannot say yes cannot be caught saying no wrongly.
   it('asks each Reach once, so both of a Task’s records carry the same answer', async () => {
-    let asked = 0
+    let cloud = 0
+    let documents = 0
     const { adapter, audit, core, start, procFor } = newCore({
-      usedCloudReach: () => asked++ === 0,
+      usedCloudReach: () => cloud++ === 0,
+      usedDocumentReach: () => documents++ === 0,
     })
 
     const { task, proc } = await start('hello')
@@ -2957,8 +3000,11 @@ describe('what Overflow is taken for', () => {
     feed(procFor(KEY), OK)
     await task
 
-    expect(asked).toBe(1)
-    expect(recordsIn(audit)).toMatchObject([{ cloudReach: true }, { cloudReach: true }])
+    expect([cloud, documents]).toEqual([1, 1])
+    expect(recordsIn(audit)).toMatchObject([
+      { cloudReach: true, documentReach: true },
+      { cloudReach: true, documentReach: true },
+    ])
   })
 
   // The money the window refused is the subscription's, and it is charged to the
