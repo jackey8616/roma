@@ -61,9 +61,12 @@ and the Session survives it by construction.
 
 ## The home
 
-One new required, durable, **writable** mount is the entire Codex state:
-`CODEX_HOME` — `auth.json` beside `sessions/`. It is required the way
-`ROMA_CLAUDE_CONFIG_DIR` is, and for the same two reasons at once:
+One new durable, **writable** mount is the entire Codex state: `CODEX_HOME` —
+`auth.json` beside `sessions/`. It is what configuring Codex *means*: a
+deployment that wants the second Runtime must have it, and a deployment that
+does not needs nothing new and is not asked for anything (ADR-0024). Where
+Codex is configured it is required exactly the way `ROMA_CLAUDE_CONFIG_DIR`
+is, and for the same two reasons at once:
 
 - `sessions/` holds the rollout files, which are **the Transcript of a Codex
   Session** — the only account there is of what the agent did. Everything
@@ -82,8 +85,10 @@ trusted machine, place the file in the mount, and let the CLI keep it fresh
 from then on. roma builds no OAuth flow of its own — the convention is
 `CLAUDE_CODE_OAUTH_TOKEN`'s: the operator obtains the Runtime's own
 credential, and roma carries it without ever interpreting it. The Minter is
-unchanged and still holds exactly two keys, GitHub's and the cloud's; a
-Runtime's subscription credential is not roma's to mint from, on either side.
+unchanged: it holds the three keys it already held — the App's private key and
+the two service account keys, the Cloud Reach's and the Document Reach's — and
+gains none here. A Runtime's subscription credential is not roma's to mint
+from, on either side.
 
 What roma does adopt from hermes is the **refresh-death classification**: a
 refresh that fails terminally — a 4xx, an `invalid_grant`, a revoked grant —
@@ -116,10 +121,14 @@ argument transfers:
   able to say what happens. The default is the pinned build's own default,
   measured at pin time; the env override is validated at startup as
   `ROMA_EFFORT` is.
-- **The Startup Self-Check.** Both Runtimes, both blocking: a real handshake
-  and a probe Turn proving the credential resolves and the pinned model is
-  what answers, before anything that could accept an Ingress Message is
-  built. Required means required, and it is now true twice.
+- **The Startup Self-Check.** Blocking on every Runtime the deployment
+  configured: a real handshake and a probe Turn proving the credential
+  resolves and the pinned model is what answers, before anything that could
+  accept an Ingress Message is built. Claude Code's runs unconditionally, as
+  it does today. Codex's runs where Codex is configured and is exactly as
+  blocking there, because a Runtime roma is willing to offer is a Runtime roma
+  has proved — an offer that can be clicked onto a broken credential is worse
+  than no offer. A deployment without Codex boots precisely as it boots now.
 
 ## The money, version one
 
@@ -187,3 +196,8 @@ one is a claim this repository currently holds on somebody else's word:
    Codex Session would be a silent reinterpretation rather than a level. Rank
    this below item 3: a negative answer narrows what the pin may be set to and
    falsifies nothing else.
+9. What a Conversation actually sees when a standing offer outlives the
+   request behind it — the dead-letter or retention bound reached with the
+   card still posted (ADR-0024). The numbers are `infra/`'s and already
+   written down; what is unproven is the sentence at the end of them, and it
+   is the one a person reads at the moment roma has lost their message.

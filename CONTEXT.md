@@ -199,9 +199,13 @@ exactly one, chosen by a person when the Session starts and fixed for its life:
 changing it is `/clear`, because that is a new Session, and the choice is asked
 there again. A property of a Session and never of a Conversation or a Caller —
 the same thread runs on Codex today and Claude Code after a `/clear`, and
-nobody's identity decides which (ADR-0024). Each Runtime brings its own pinned
-model and its own subscription credential, so a sentence about "the" model or
-"the" window now has to say which Runtime it is about.
+nobody's identity decides which (ADR-0024). Chosen by a person only where there
+is something to choose: Claude Code is required and Codex is not, so a
+deployment that configured one Runtime gives every Session that Runtime without
+asking, and asking is what the other kind of deployment took on along with the
+second subscription. Each Runtime brings its own pinned model and its own
+subscription credential, so a sentence about "the" model or "the" window now has
+to say which Runtime it is about.
 _Avoid_: engine, backend (both already refused for the Core), provider (that is
 a Reach's word for the company on the other end), agent (that is what does the
 work inside a Turn, whichever Runtime runs it), CLI (its shape, not its role),
@@ -339,7 +343,7 @@ make room. Distinct from Eviction only in what prompted it.
 _Avoid_: timing out, garbage collection, idling out
 
 **Command**:
-One of the five messages roma answers itself instead of handing to Claude Code:
+One of the five messages roma answers itself instead of handing to the Runtime:
 `/stop` ends the work this Conversation has in flight — running, queued, or
 still starting — `/clear` gives the Conversation a fresh Session, `/model` sets
 its Chosen Model, `/effort` sets its Chosen Effort, and `/config` says what this
@@ -354,7 +358,14 @@ from widening into the prefix match ADR-0003 refused. That list is now three
 entries rather than one, so "a named list does not grow on its own" has become a
 thing somebody has to keep true rather than an observation. A Command is not a
 Task: it drives no Turn, is not queued, and is not counted against the
-concurrency cap.
+concurrency cap. Which of them **set** anything depends on the Runtime: on a
+Codex Session `/model` and `/effort` set nothing — with an argument they refuse
+and name the Runtime and its pin, bare they still report, because "there is
+none" is a sentence roma says out loud — and `/config` answers Runtime-aware. On
+a Session still awaiting its Runtime all three refuse an argument and point at
+the standing offer, since what they set belongs to a Session and which Session
+this is has not been decided. `/stop` and `/clear` touch only what roma itself
+holds and read the same on either Runtime (ADR-0024).
 _Avoid_: slash command (those are Claude Code's, and a Relay is the only way
 any of them reaches it), instruction (that is an Outbound Instruction)
 
@@ -379,7 +390,12 @@ may be relayed and `/clear`, `/model`, `/effort`, `/config` and `/autocompact` m
 not. Where the Caller Marker sits turns on whether the Caller supplied text: a
 Relay that is the whole message carries it after the command, and one carrying an
 argument carries none at all — the only message roma writes without one, and the
-Caller Marker's entry is where that is argued.
+Caller Marker's entry is where that is argued. Claude Code's list is the whole
+list: all five are refused on a Codex Session, structurally rather than by
+policy, because a Relay needs a process with something to hand a command *to*
+and the Codex wire has none — its slash commands are its interactive TUI's, and
+the free-text entry its protocol does have is prose, which is what a Task
+already is (ADR-0024).
 _Avoid_: Readout (the retired name, and wrong for a member that writes rather than
 reads), passthrough, slash command (that is Claude Code's name for what a Relay
 carries, not for the carrying), and using this for `/stop`, `/clear`, `/model`,
@@ -421,8 +437,14 @@ One try at serving a Task, paid for by one credential. The layer between a Task
 and a Turn, and it exists because a Task is not one try: the Shared Window can
 block it, Overflow can be taken on it, and the window can come back — so a Task
 makes between one and three, each with its own credential, its own reading of the
-window, and its own share of the bill. Which credential answered is which one the
-last Attempt was on, and that is what the Task's Audit Record is filed under.
+window, and its own share of the bill. Between one and three on Claude Code; on
+Codex always exactly one, because both of the things that would make a second
+are that Runtime's to lack — no park on its window and no Overflow behind it, so
+a blocked Task has nowhere to go but a readable failure (ADR-0025). A fixed
+count does not retire the layer: an Attempt is still what a credential pays for,
+and on Codex a Task simply never makes a second one. Which credential answered
+is which one the last Attempt was on, and that is what the Task's Audit Record
+is filed under.
 _Avoid_: retry (that is the Retry Storm's unit, and Claude Code's rather than
 roma's), pass, go
 
@@ -569,7 +591,7 @@ Conversation reaches all of it, and so does everyone who can message roma
 (ADR-0008). Named here for that reason and not for GitHub's sake: a term that is
 the whole of a security property should be a term. roma's Reach on the forge, and
 the one Reach no deployment can boot without — required means required, which is
-the whole of what makes it unlike the other one.
+the whole of what makes it unlike the others.
 _Avoid_: the App (that is the thing installed, not what it reaches), repo access,
 scope, permissions (those are what an Installation may *do*, which is a second
 question)

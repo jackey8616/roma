@@ -20,22 +20,50 @@ removes the crossing altogether, and with it all five consequences the review
 enumerated. The review's remaining findings are answered below and in
 ADR-0025, each where it belongs.
 
+A second review, of *this* design, followed. Three of its findings changed a
+decision and are visible below: Codex is optional rather than a deployment
+requirement, `/clear`'s changed contract is named where it happens instead of
+being absorbed, and the offer's outer bound is the Transport's own number
+rather than a promise roma is not in a position to make. The other two were
+repairs to what this file and `CONTEXT.md` said, and are made where they were
+wrong.
+
 ## The decision
 
 roma gains a second Runtime: **Codex**, beside Claude Code. A Runtime is the
 agent CLI serving one Session's Turns, and it is a property of the Session —
 chosen by a person when the Session starts, fixed for the Session's life, and
 asked again only where a new Session begins, which is what `/clear` makes.
-Both Runtimes are deployment requirements: there is no roma with only one, so
-the choice is always real.
+
+**Codex is optional, and a deployment that has not configured it is not
+changed by this ADR at all.** An earlier draft of this file made both Runtimes
+deployment requirements, and the review of it is why that is withdrawn:
+`CONTEXT.md` gives *required* to the Installation alone — "the one Reach no
+deployment can boot without — required means required, which is the whole of
+what makes it unlike the others" — and a second subscription, a seeded
+`auth.json` and a new writable mount are not something one clause may quietly
+make the price of booting a version somebody already runs. Claude Code stays
+required. Codex is configured or it is not.
+
+So the offer below is drawn **only where a deployment has both Runtimes**.
+Where it has one, that Runtime is every Session's without anybody being asked,
+nothing parks, and no card is posted. This is the grandfathering rule one
+level up — the same refusal to make somebody answer a question that has only
+one answer, applied to deployments rather than to Sessions — and it is what
+keeps the `CARD_CLICKED` risk this ADR owns from becoming universal before it
+has been proven: an unproven event path is crossed only by deployments that
+opted into the second Runtime.
 
 The shape repeats ADR-0014 and ADR-0016 for a third per-Session setting, and
 the repetition is the point — the record is a file beside `.generation`,
 `.model` and `.effort`, reclaim steps over it, and a missing one has a defined
 meaning (see grandfathering below). What is **not** repeated is the default:
 a Session with no Chosen Model runs on the Pinned Model, but there is no
-"pinned Runtime" a Session falls back to. A Session's Runtime does not exist
-until somebody picks it, and nothing runs until somebody does.
+"pinned Runtime" a Session falls back to. Where a deployment has both, a
+Session's Runtime does not exist until somebody picks it and nothing runs
+until somebody does; where it has one, there is nothing to fall back *from* —
+every Session is on the only Runtime there is, and that is not a default
+standing in for an answer nobody gave.
 
 ## What a new Session does not carry
 
@@ -75,6 +103,9 @@ availability:
 
 ## The offer
 
+Everything in this section describes a deployment that has both Runtimes. One
+that has a single Runtime draws no card and reads none of it.
+
 The first message of a Conversation — and the first after every `/clear` — is
 a real request, typed by somebody who wants it answered. So the choice is not
 allowed to cost them the message:
@@ -101,20 +132,44 @@ allowed to cost them the message:
   money because nobody said anything; the first defeats the reason the Task
   parks at all, and the second is a decision roma does not make on anybody's
   behalf — the same argument that keeps Overflow opt-in per Task.
-- `/clear` posts the offer immediately, without waiting for the next message.
-  That is a card with no held request behind it — a state the design carries
-  anyway, because `/stop` can end a parked Task while its card stands. A
-  click on such a card writes the record, says so, and waits for work.
+- **The request behind it does expire, and that is the Transport's to say.**
+  The offer is roma's own state and outlasts anything; the held request is a
+  Delivery, and a Delivery is Pub/Sub's. The lease lapses at
+  `ROMA_PUBSUB_MAX_LEASE_MINUTES` — an hour by default — and the event comes
+  back, which is the redelivery the bullet above edits the card for and the
+  same path a Task Parked on a spent Shared Window already takes. Two outer
+  bounds end that cycle: `dead_letter_max_delivery_attempts`, set to Pub/Sub's
+  ceiling of 100 at roughly one attempt an hour, and
+  `message_retention_duration` at seven days. Whichever arrives first, the
+  request is dead-lettered or dropped while the card is still standing. roma
+  does not pretend otherwise: a click on a card whose request is gone writes
+  the record, says the Session has started and which Runtime it is on, and
+  says plainly that the message it was holding is no longer held and wants
+  sending again. Bounding the card to the Delivery instead was refused: it
+  throws away the person's decision along with their message, and the decision
+  is the half worth keeping.
+- `/clear` posts the offer immediately, without waiting for the next message,
+  and that **changes what `/clear` promises**: ADR-0013 gives the Conversation
+  a fresh Session, and a fresh Session now serves nothing until somebody
+  clicks. It is named here rather than absorbed, because `/clear` is the
+  highest-traffic Command there is. What bounds the change is the rule above —
+  a deployment that has not configured Codex sees `/clear` behave exactly as
+  it does today — so the new contract is something a deployment took on with
+  the second Runtime, not something this ADR does to everybody. The card it
+  posts has no held request behind it, which is a state the design carries
+  anyway because `/stop` can end a parked Task while its card stands: a click
+  on such a card writes the record, says so, and waits for work.
 - Messages arriving while the Session waits queue behind the choice: the Task
   Queue already serialises a Session's Tasks, and the first click releases
   them in order.
 
 **Selection is button-only.** A typed selection (`cc` / `cx` as a whole
 message, or a Command) was considered and declined. The consequence is
-recorded rather than hidden: the one path into a running Session now crosses
-`CARD_CLICKED`, which is the one event shape in this repository that has
-never been proven against a real Workspace — `chat-events.ts` says so of the
-Overflow button it was written for. ADR-0025's verification agenda therefore
+recorded rather than hidden: on a deployment with both Runtimes the one path
+into a running Session now crosses `CARD_CLICKED`, which is the one event
+shape in this repository that has never been proven against a real Workspace
+— `chat-events.ts` says so of the Overflow button it was written for.
+ADR-0025's verification agenda therefore
 front-loads a real-Workspace capture of a card click before this ships, and
 a card that has stood unanswered past a threshold is written to the Operator
 Log, so a broken button reads as a broken button and not as silence. If that
@@ -168,6 +223,13 @@ and the same argument puts it in the same place.
   Pinned Model and Pinned Effort all stop being sentences that could only
   ever mean one provider. Overflow does not generalise — it is Claude Code's
   for now, and its entry says so.
+- Three further entries change **behaviour** rather than wording, and are
+  amended with the rest rather than left to read as they did: **Command**,
+  which says `/model` sets a Chosen Model and does not say that on a Codex
+  Session it sets nothing; **Relay**, which names no Runtime at all where all
+  five are now refused on one; and **Attempt**, whose "between one and three"
+  counts a park and an Overflow that a Codex Task has neither of, so on that
+  Runtime it is always exactly one.
 - "A named list does not grow on its own" gains another instance: the pair of
   Runtimes is a closed list, and adding a third is a deliberate act somebody
   writes down.
