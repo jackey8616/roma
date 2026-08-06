@@ -34,6 +34,14 @@ The five canonical triage roles, using their default label strings. See `docs/ag
 the imperative, with a body explaining *why*. PRs land by **squash merge**, and only when the
 user asks for the merge. See `docs/agents/commit-convention.md`.
 
+### Release notes
+
+**Short is the standard here, and only here.** A tag says what somebody upgrading needs to
+know: an upgrade block with a verb when a deployment must act, then one derived line per
+user-facing change. The reasoning stays in `docs/adr/` and the configuration in
+`README.md` — cite them, never restate them. The same text is the tag message and the
+GitHub Release body. See `docs/agents/release-notes.md`.
+
 ### Domain docs
 
 Single-context — one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
