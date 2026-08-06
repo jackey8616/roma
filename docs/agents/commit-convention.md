@@ -87,7 +87,20 @@ table in docs/agents/issue-tracker.md.
 ```
 
 For this repo, "breaking" means a skill or workflow that followed the old instructions
-stops working — not just that a file changed.
+stops working — not just that a file changed. A deployment that must do something before
+upgrading counts, and so does one that will lose state by doing nothing.
+
+**The footer is what a release note is built from**, which is the reason to be strict
+about it rather than a style point. `docs/agents/release-notes.md` reads this range for
+`!` and `BREAKING CHANGE:` to decide whether a version needs an upgrade block.
+
+This has been missed once, and it was the only chance to get it right. 0.5.0 moved
+`infra/variables.tf`'s `service_account_id` default from `roma-agent` to `roma-runtime`
+— a Google Cloud account id is immutable, so a plain `terraform apply` destroys and
+recreates the service account, its key, and every grant bound to it. It landed as
+`feat: roma mints the agent's Cloud Token (#99)`: no `!`, no footer, and one bullet 41
+lines into the body. The tag body caught it because a person wrote 1958 words by hand.
+Nothing else would have.
 
 ## Footers
 
