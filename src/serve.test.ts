@@ -264,7 +264,11 @@ describe('the same message delivered twice', () => {
     await first
 
     expect(roma.transport.acked).toEqual(['m-1'])
-    expect(roma.channel.instructions.filter(({ kind }) => kind === 'result')).toHaveLength(1)
+    // Two results, and only one of them is an answer: the Session's Opening goes
+    // out ahead of the work, and the redelivery produced neither.
+    const results = roma.channel.instructions.filter((instruction) => instruction.kind === 'result')
+    expect(results).toHaveLength(2)
+    expect(results.filter((instruction) => instruction.text === 'ok')).toHaveLength(1)
   })
 
   // Only while it is in flight. Once a Task is answered the id is forgotten, so

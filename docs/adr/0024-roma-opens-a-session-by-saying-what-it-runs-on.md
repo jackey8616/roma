@@ -4,8 +4,17 @@ Date: 2026-08-06
 
 ## Status
 
-Accepted. **Not implemented** — this record is the decision and nothing in `src/`
-has moved.
+Accepted and implemented. `Core.handle` starts the Opening, `Core.#deliverAfter`
+is what keeps it first, `WorkRoot` gains a fourth record kind, and `/config`'s
+sentence moves into a method the Opening shares.
+
+**Amended by its own implementation, in one place and it is §"It is a message,
+before the Acknowledgement".** That section said the Opening is awaited before the
+message is dispatched, and named the cost as latency. Both were wrong, and the
+correction is marked inline below: awaiting it there moves *everything that makes
+a message stoppable and ordered* later, because all of it happens downstream of
+that line. Two behaviours this Core is measured on broke, and neither was the one
+predicted.
 
 Builds on ADR-0014 and ADR-0016, which made the Chosen Model and the Chosen
 Effort roma's own and made asking about them free, and on ADR-0017, which claimed
@@ -77,6 +86,29 @@ into two things at once, which is the boundary ADR-0010 drew.
 
 Prefixing it to the first Result was rejected outright: it would arrive after the
 Turn it describes has been paid for, which is a receipt rather than an Opening.
+
+**Amended by the implementation.** This section originally said the Opening is
+awaited before the message is dispatched, and that the cost of doing so is a
+Channel slow to take it delaying the Task. The cost is not latency. Everything
+that makes a message stoppable and ordered happens *after* the point where a
+Command is told apart from work — registering the Task so `/stop` can reach it,
+and entering the Task Queue — so a message that pauses to open reaches both later
+than one that does not. Measured: a `/stop` sent straight after a Conversation's
+first message was answered "nothing to stop" while the Task ran on, and two
+messages sent together came back in the wrong order.
+
+So the Opening is **started** when the message is dispatched and **waited for at
+the Channel**: every instruction a Task or a Relay produces goes out behind it,
+through one method they all share. The ordering property is unchanged — the
+Opening is still the first thing posted — and it is now a property of the delivery
+path rather than of how long a caller was made to wait. The rule this buys is
+worth stating on its own: *nothing about an Opening may change when a message
+becomes stoppable.*
+
+One consequence is that a message arriving while an Opening is still going out has
+to wait for it too, or its acknowledgement is posted above the Opening. That is
+why roma holds a promise per Session rather than a flag — the flag would tell the
+second message there was nothing to do and let it straight past.
 
 ### A Command starts no Session, so a Command prompts no Opening
 
@@ -180,6 +212,14 @@ A Task whose Session roma cannot work out gets no Opening and is not made to wai
 for one. `sessionFor` can throw — an unreadable generation record — and that
 failure already has an owner inside `#runTask`, which answers the Caller with a
 `failure`. The Opening declines to duplicate it.
+
+**An Opening may never fail outwards, and since the amendment above that is a rule
+rather than a tidiness.** Everything the message goes on to produce waits on the
+Opening's promise, so a rejection would reject the Task's own delivery, hand the
+Delivery back to the Transport, and redeliver a Turn that has already been paid
+for. The write is therefore absorbed like the delivery — and unlike the delivery it
+stays claimed, because by then the Opening has been said and only the note of it
+was lost.
 
 ## Consequences
 

@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { join, sep } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -312,6 +312,66 @@ function posted(instructions: readonly OutboundInstruction[]) {
   return instructions.map(({ taskId, caller, callerName, ...rest }) => rest)
 }
 
+/**
+ * The Opening a Conversation's first message earns, as `posted` renders it.
+ *
+ * Matched on the model rather than on the whole sentence, because the sentence
+ * has one owner and it is not this: "the Opening says what `/config` says" is
+ * asserted once, against `/config` itself, in "the first thing roma says in a
+ * Session". Written out here as well, every sequence below would have to be
+ * edited to reword either of them.
+ */
+function opening(key = KEY) {
+  return { kind: 'result', conversationKey: key, text: expect.stringContaining(PINNED_MODEL) }
+}
+
+/** How an Opening begins, and how a `/config` answer begins — they are one sentence. */
+const OPENS_WITH = 'This conversation is on'
+
+/**
+ * The Openings among what the Channel was given.
+ *
+ * Told apart by the sentence, which a `/config` answer shares word for word — so
+ * this can only be used where no `/config` was sent, and none of its callers
+ * sends one. Deliberately not given a way to tell the two apart: the day roma
+ * needs one is the day the two sentences have drifted.
+ */
+function openingsIn(instructions: readonly OutboundInstruction[]) {
+  return instructions.filter(
+    (instruction) => instruction.kind === 'result' && instruction.text.startsWith(OPENS_WITH),
+  )
+}
+
+/**
+ * A roma whose Channel drops the first thing it is asked to post and takes
+ * everything after it.
+ *
+ * By position rather than by kind, because an Opening and an answer are both
+ * `result` and `RecordingAdapter.refuse` works on kinds — which is not a gap in
+ * it, but the consequence of an Opening deliberately having no kind of its own.
+ */
+function refusingTheOpening(shared: ReturnType<typeof newCore>) {
+  const delivered: OutboundInstruction[] = []
+  let refused = false
+  const core = coreOver(
+    shared,
+    channelThat((instruction) => {
+      if (!refused && instruction.kind === 'result') {
+        refused = true
+        return Promise.reject(new Error('the Channel is down'))
+      }
+      delivered.push(instruction)
+    }),
+  )
+  const say = async (text: string, { events = OK }: { events?: readonly ClaudeEvent[] } = {}) => {
+    const task = core.handle(ingress(text))
+    await flush()
+    feed(shared.procFor(KEY), events)
+    await task
+  }
+  return { core: { say }, delivered }
+}
+
 /** Every progress instruction the Channel was given, in order. */
 function progressOf(adapter: RecordingAdapter) {
   return adapter.instructions.filter((instruction) => instruction.kind === 'progress')
@@ -396,11 +456,14 @@ describe('what the Channel is asked to post', () => {
     await say('hello')
 
     expect(posted(adapter.instructions)).toEqual([
+      opening(),
       { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
       { kind: 'result', conversationKey: KEY, text: 'ok' },
     ])
   })
 
+  // Two per Conversation now: its Opening and its answer, in that order and
+  // never crossed over into the other thread.
   it("posts each Conversation's result back to its own Conversation", async () => {
     const { adapter, say } = newCore()
 
@@ -411,7 +474,7 @@ describe('what the Channel is asked to post', () => {
       adapter.instructions
         .filter((instruction) => instruction.kind === 'result')
         .map((instruction) => instruction.conversationKey),
-    ).toEqual([KEY, OTHER_KEY])
+    ).toEqual([KEY, KEY, OTHER_KEY, OTHER_KEY])
   })
 
   // A Task that fails and says nothing leaves someone waiting on work that is
@@ -423,6 +486,7 @@ describe('what the Channel is asked to post', () => {
     await say('hello', { events: FAILED })
 
     expect(posted(adapter.instructions)).toEqual([
+      opening(),
       { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
       { kind: 'failure', conversationKey: KEY, reason: expect.stringContaining('401') },
     ])
@@ -441,6 +505,7 @@ describe('what the Channel is asked to post', () => {
     await task
 
     expect(posted(adapter.instructions)).toEqual([
+      opening(),
       { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
       { kind: 'failure', conversationKey: KEY, reason: 'roma could not run this Task.' },
     ])
@@ -550,6 +615,11 @@ describe('handling one Conversation one Task at a time', () => {
     expect(
       posted(adapter.instructions.filter((instruction) => instruction.kind === 'result')),
     ).toEqual([
+      // One Opening for the Session, ahead of both answers, and then the answers
+      // in the order the messages arrived. The second half is what this is about
+      // and the first half is what could break it: the message doing the opening
+      // is the earlier one, so it is the one with something to wait for.
+      opening(),
       { kind: 'result', conversationKey: KEY, text: 'ok' },
       { kind: 'result', conversationKey: KEY, text: '47' },
     ])
@@ -564,8 +634,9 @@ describe('handling one Conversation one Task at a time', () => {
 
     // Two Tasks in one Conversation, each acknowledged on its own message —
     // which is why an acknowledgement is named by a Task id and not by the
-    // Conversation it is in.
+    // Conversation it is in. One Opening between them, not two.
     expect(posted(adapter.instructions)).toEqual([
+      opening(),
       { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
       { kind: 'progress', conversationKey: KEY, progress: { phase: 'queued', position: 1 } },
     ])
@@ -695,6 +766,7 @@ describe('giving up on a Task that is only retrying', () => {
     await task
 
     expect(posted(adapter.instructions)).toEqual([
+      opening(),
       { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
       {
         kind: 'failure',
@@ -757,6 +829,7 @@ describe('telling a Conversation its Task is alive', () => {
     const { task, proc } = await start('hello')
 
     expect(posted(adapter.instructions)).toEqual([
+      opening(),
       { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
     ])
 
@@ -825,8 +898,10 @@ describe('telling a Conversation its Task is alive', () => {
     release()
     await flush()
 
+    // `lastIndexOf`, because the Opening is a `result` too and it is the first
+    // thing in here. What this is about is the answer being the last word.
     const kinds = adapter.instructions.map((instruction) => instruction.kind)
-    expect(kinds.slice(kinds.indexOf('result'))).toEqual(['result'])
+    expect(kinds.slice(kinds.lastIndexOf('result'))).toEqual(['result'])
   })
 
   // The stream marks a tool starting and then says nothing until it finishes.
@@ -861,6 +936,7 @@ describe('telling a Conversation its Task is alive', () => {
     await task
 
     expect(posted(adapter.instructions)).toEqual([
+      opening(),
       { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
       { kind: 'result', conversationKey: KEY, text: expect.any(String) },
     ])
@@ -887,7 +963,10 @@ describe('telling a Conversation its Task is alive', () => {
     feed(procFor(KEY), OK)
     await task
 
-    expect(posted(delivered)).toEqual([{ kind: 'result', conversationKey: KEY, text: 'ok' }])
+    expect(posted(delivered)).toEqual([
+      opening(),
+      { kind: 'result', conversationKey: KEY, text: 'ok' },
+    ])
   })
 
   // Generation is no longer silent, so an extended silence now means a tool is
@@ -957,13 +1036,14 @@ describe('the Commands roma answers itself', () => {
     await task
 
     expect(posted(adapter.instructions)).toEqual([
+      opening(),
       { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
       { kind: 'command-outcome', conversationKey: KEY, command: 'stop', carriedOut: true },
       { kind: 'stopped', conversationKey: KEY },
     ])
     // The outcome belongs to the Task that was stopped, not to the Command that
     // stopped it: it is that Task's acknowledgement the Conversation is watching.
-    const [acknowledgement, command, stopped] = adapter.instructions
+    const [, acknowledgement, command, stopped] = adapter.instructions
     expect(stopped?.taskId).toBe(acknowledgement?.taskId)
     expect(command?.taskId).not.toBe(acknowledgement?.taskId)
   })
@@ -1056,6 +1136,7 @@ describe('the Commands roma answers itself', () => {
     expect(
       posted(adapter.instructions).filter(({ conversationKey }) => conversationKey === 'four'),
     ).toEqual([
+      opening('four'),
       { kind: 'progress', conversationKey: 'four', progress: { phase: 'queued', position: 1 } },
       { kind: 'command-outcome', conversationKey: 'four', command: 'stop', carriedOut: true },
       { kind: 'stopped', conversationKey: 'four' },
@@ -1992,6 +2073,170 @@ describe('what this Conversation is set to', () => {
   })
 })
 
+describe('the first thing roma says in a Session', () => {
+  // The sentence has one owner and it is `/config` (ADR-0024). Asserted as
+  // equality rather than as a string of its own, so that rewording one without
+  // the other fails here — which is the whole of what keeps four spellings of two
+  // facts from becoming four answers to them.
+  it('says exactly what /config says, out of the same reading', async () => {
+    const { adapter, core, say } = newCore()
+
+    await say('hello')
+    await core.handle(ingress('/config'))
+
+    const said = posted(adapter.instructions)
+    expect(said.at(0)).toEqual(said.at(-1))
+    expect(said.at(0)).toMatchObject({
+      kind: 'result',
+      conversationKey: KEY,
+      text: expect.stringContaining(PINNED_MODEL),
+    })
+    expect(said.at(0)).toMatchObject({ text: expect.stringContaining(PINNED_EFFORT) })
+  })
+
+  // What "first" means, and it is not a figure of speech: the acknowledgement is
+  // what roma said first for every message before this existed, and an Opening
+  // that arrived after it would be a receipt.
+  it('goes out ahead of the acknowledgement', async () => {
+    const { adapter, start } = newCore()
+
+    const { task, proc } = await start('hello')
+
+    expect(adapter.instructions.map(({ kind }) => kind)).toEqual(['result', 'progress'])
+
+    feed(proc, OK)
+    await task
+  })
+
+  it('says it once, however long the Conversation goes on', async () => {
+    const { adapter, say } = newCore()
+
+    await say('hello')
+    await say('and another')
+    await say('and another')
+
+    expect(openingsIn(adapter.instructions)).toHaveLength(1)
+  })
+
+  // Where an Opening is worth most. `/clear` puts the Conversation back on the
+  // Pinned Model without deleting anything, and the outcome it answers with names
+  // neither the model it left nor the one it landed on.
+  it('opens the Session a /clear gave the Conversation, on the pinned values', async () => {
+    const { adapter, core, models, say } = newCore()
+    models.choose(sessionIdFor(KEY), 'claude-opus-5')
+    await say('hello')
+
+    await core.handle(ingress('/clear'))
+    await say('and now', { session: sessionIdFor(KEY, 1) })
+
+    const [chosen, cleared] = openingsIn(adapter.instructions)
+    expect(chosen).toMatchObject({ text: expect.stringContaining('claude-opus-5') })
+    expect(cleared).toMatchObject({ text: expect.stringContaining(PINNED_MODEL) })
+  })
+
+  // A Command starts no Session — it drives no Turn, needs no process, and never
+  // reaches the pool — which is also the whole of why roma cannot answer one
+  // question twice here. One message in, one message out, and no list of
+  // exemptions to keep true.
+  it('opens nothing for a Command', async () => {
+    for (const spelling of ['/stop', '/clear', '/config', '/model opus', '/effort max']) {
+      const { adapter, core } = newCore()
+
+      await core.handle(ingress(spelling))
+
+      expect(adapter.instructions, spelling).toHaveLength(1)
+    }
+  })
+
+  // Neither in memory nor derived from the Working Directory: the record is a
+  // file in the Work Root, so a Conversation does not get a second Opening
+  // because roma was deployed.
+  it('does not open a Session another roma already opened', async () => {
+    const first = newCore()
+    await first.say('hello')
+    const second = newCore({ workRoot: first.workRoot })
+
+    await second.say('and now')
+
+    expect(openingsIn(second.adapter.instructions)).toEqual([])
+  })
+
+  // A file rather than a directory, which is the whole of why it survives: the
+  // sweep deletes Working Directories and steps over records. The Session Pool's
+  // own spawn file is *inside* that directory on purpose and goes with it, which
+  // is why this could not have been read off the pool.
+  it('does not open a Session whose Working Directory was reclaimed', async () => {
+    const { adapter, pool, say, workRoot } = newCore()
+    await say('hello')
+    await pool.evict(sessionIdFor(KEY))
+    const cwd = join(workRoot, sessionIdFor(KEY))
+    const aged = (Date.now() - 8 * 24 * 60 * 60_000) / 1000
+    utimesSync(cwd, aged, aged)
+    expect(pool.reclaimIdleWorkDirs()).toEqual([sessionIdFor(KEY)])
+
+    await say('and now')
+
+    expect(openingsIn(adapter.instructions)).toHaveLength(1)
+  })
+
+  // One Session, one Opening, even where the two messages that could each earn
+  // one arrive together. Reading the record would not be enough on its own —
+  // neither message has written it yet at the moment the other one looks.
+  it('opens once when two messages arrive together', async () => {
+    const { adapter, core, procFor } = newCore()
+
+    const first = core.handle(ingress('first'))
+    const second = core.handle(ingress('second'))
+    await flush()
+    const proc = procFor(KEY)
+    feed(proc, OK)
+    await first
+    await flush()
+    feed(proc, THREE_TURNS.turn(3))
+    await second
+
+    expect(openingsIn(adapter.instructions)).toHaveLength(1)
+  })
+
+  // A Channel that refused the Opening refused a notice, and the work it was in
+  // front of is still owed to whoever asked. Refused by position rather than by
+  // kind, because the Opening and the answer are both `result` — which is the
+  // point of it having no kind of its own.
+  it('runs the Task anyway when the Channel refuses the Opening', async () => {
+    const { core, delivered } = refusingTheOpening(newCore())
+
+    await core.say('hello')
+
+    expect(posted(delivered)).toEqual([
+      { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
+      { kind: 'result', conversationKey: KEY, text: 'ok' },
+    ])
+  })
+
+  // Delayed rather than lost. The record is written once the Channel has taken
+  // the message, so a refusal leaves the Session unopened and the next message
+  // opens it — where writing it first would have cost this Conversation its
+  // Opening permanently, and silently.
+  it('opens on the next message when the Channel refused the last one', async () => {
+    const { core, delivered } = refusingTheOpening(newCore())
+
+    await core.say('hello')
+    await core.say('and now', { events: THREE_TURNS.turn(3) })
+
+    expect(openingsIn(delivered)).toHaveLength(1)
+  })
+
+  // Nothing is spent, so nothing is filed. One Task, one record, and the account
+  // of the money goes on naming only the things that cost some.
+  it('leaves no Audit Record of its own', async () => {
+    const { audit, say } = newCore()
+
+    await say('hello')
+
+    expect(recordsIn(audit)).toHaveLength(1)
+  })
+})
+
 describe('a Chosen Model roma no longer offers', () => {
   /** On the Menu once, by construction — nothing else could have written it. */
   const WITHDRAWN = 'claude-opus-4-5'
@@ -2180,8 +2425,16 @@ describe('who asked', () => {
     feed(proc, THREE_TURNS.turn(3))
     await second
 
+    // Three results: the Session's Opening, then an answer each. The Opening is
+    // addressed to whoever sent the message that prompted it, on the same rule —
+    // a Caller belongs to a message, and this Conversation's two belong to two
+    // people.
     const results = adapter.instructions.filter((instruction) => instruction.kind === 'result')
-    expect(results.map((instruction) => instruction.caller)).toEqual(['users/17', 'users/99'])
+    expect(results.map((instruction) => instruction.caller)).toEqual([
+      'users/17',
+      'users/17',
+      'users/99',
+    ])
   })
 })
 
@@ -2462,7 +2715,11 @@ describe('a Compaction inside a Task', () => {
     await say('OK', { events: COMPACTED })
 
     expect(log).toEqual([])
-    expect(posted(adapter.instructions).map(({ kind }) => kind)).toEqual(['progress', 'result'])
+    expect(posted(adapter.instructions).map(({ kind }) => kind)).toEqual([
+      'result',
+      'progress',
+      'result',
+    ])
   })
 })
 
@@ -2478,7 +2735,11 @@ describe('a Compaction that failed', () => {
     await say('OK', { events: COMPACTION_FAILED })
 
     expect(log).toEqual([])
-    expect(posted(adapter.instructions).map(({ kind }) => kind)).toEqual(['progress', 'result'])
+    expect(posted(adapter.instructions).map(({ kind }) => kind)).toEqual([
+      'result',
+      'progress',
+      'result',
+    ])
   })
 
   // The failure #98 is actually about: a Session whose context cannot be reduced
@@ -2575,7 +2836,11 @@ describe('a Compaction that failed', () => {
     await say('OK', { events: withCompactionError(COMPACTION_FAILED, 'something_new') })
 
     expect(log).toMatchObject([{ code: 'something_new', severity: 'unexplained' }])
-    expect(posted(adapter.instructions).map(({ kind }) => kind)).toEqual(['progress', 'result'])
+    expect(posted(adapter.instructions).map(({ kind }) => kind)).toEqual([
+      'result',
+      'progress',
+      'result',
+    ])
   })
 })
 
@@ -3237,6 +3502,18 @@ describe('relaying a free Relay', () => {
     const last = posted(adapter.instructions).at(-1)
     expect(last).toMatchObject({ kind: 'result', conversationKey: KEY })
     expect((last as { text: string }).text).toContain('Context Usage')
+  })
+
+  // The Session has begun, whatever the message was for: a free Relay needs the
+  // Session's process, so one is spawned. That is the line an Opening is on —
+  // what starts the Session rather than what costs money (ADR-0024).
+  it('opens the Session, because a Relay is a message that starts one', async () => {
+    const { adapter, say } = newCore()
+
+    await say('/context', { events: FREE_RELAY })
+
+    expect(openingsIn(adapter.instructions)).toHaveLength(1)
+    expect(adapter.instructions.at(0)).toMatchObject({ kind: 'result' })
   })
 
   // Recorded because the list it came from is a person's judgement and can be
