@@ -194,10 +194,16 @@ describe('a Chat message, all the way through and back', () => {
     feed(roma.procFor(), OK)
     await until(() => message.settlements.length > 0)
 
+    // Three messages now, and the first is the Session's Opening: this is the one
+    // place the whole of ADR-0024 is proved against a real Chat request rather
+    // than against a recording Adapter, and it is proved by the Opening needing
+    // no rendering of its own — it is a `result`, so `render.ts` was already
+    // finished before this feature existed.
     const texts = roma.texts()
-    expect(texts).toHaveLength(2)
+    expect(texts).toHaveLength(3)
+    expect(texts.at(0)).toMatch(/This conversation is on /)
     expect(texts.at(-1)).toBe(`${TO}ok`)
-    expect(texts.at(0)).not.toBe(`${TO}ok`)
+    expect(texts.at(1)).not.toBe(`${TO}ok`)
   })
 
   it('never answers another app', async () => {

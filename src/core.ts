@@ -429,6 +429,29 @@ export class Core {
    * over a handful of entries, and there is no map of empty sets to prune.
    */
   readonly #running = new Set<RunningTask>()
+  /**
+   * Each Session's Opening, as something to wait for: in flight, or long since
+   * finished.
+   *
+   * Entered *before* the message is handed over rather than after, which is half
+   * of what it is for: the record on disk is written once the Channel has taken
+   * the Opening, and two messages arriving together in a brand-new Conversation
+   * would both read that record as absent and both open. An entry is withdrawn
+   * if the delivery failed, so this and the record agree about what "not yet
+   * opened" means.
+   *
+   * The other half is why it holds a promise rather than a flag: a **second**
+   * message arriving while the Opening is in flight has to wait for it too, or
+   * its acknowledgement is posted above the Opening and the Opening is no longer
+   * the first thing said in the Session. A flag would tell that message there was
+   * nothing to do and let it straight past.
+   *
+   * Kept after it settles rather than cleared, so that every later message of the
+   * Session has the same thing to wait on and gets it for free. A map that grew
+   * per Session was going to exist either way; this one holds a settled promise
+   * where it would have held a boolean.
+   */
+  readonly #openings = new Map<string, Promise<void>>()
 
   constructor({
     channel,
@@ -494,6 +517,25 @@ export class Core {
    * audited by the machinery that already does all five — nothing is invented for
    * it, which is what makes it not a fourth kind of message.
    *
+   * **The Opening sits on the seam the Command branch already cuts** (ADR-0024).
+   * Everything past that line needs the Session's process — a Task, a paid Relay,
+   * a free Relay — so one place covers all three, and a Command is excluded by
+   * having returned rather than by being named again. That is the whole of why
+   * roma never answers one question twice here: `/config` reports exactly the two
+   * facts an Opening carries, and it cannot reach this line.
+   *
+   * **Started here and waited for downstream, never waited for here.** The
+   * Opening has to reach the Channel before the acknowledgement, and the obvious
+   * way to arrange that — awaiting it on this line — breaks two behaviours this
+   * Core is measured on, because everything that makes a message stoppable and
+   * ordered happens *after* this point. Awaited here, a message that opens
+   * reaches `#running` and the Task Queue later than one that does not: a `/stop`
+   * sent straight after a Conversation's first message answers "nothing to stop"
+   * and the Task runs anyway, and two messages sent together come back in the
+   * wrong order. Both were measured on the first version of this, and both are in
+   * `core.test.ts`. So the Opening travels *with* the message and is waited for
+   * where it actually matters — at the first thing the Channel is told.
+   *
    * Resolves when the Conversation has been told how it went. It rejects only
    * if the Channel could not be told at all — a failed Task is an outcome, not
    * an error, and reporting it is how this method succeeds.
@@ -501,9 +543,126 @@ export class Core {
   async handle(message: IngressMessage): Promise<void> {
     const command = readCommand(message.text)
     if (command !== null) return await this.#runCommand(command, message)
+    const opened = this.#open(message)
     const relay = readRelay(message.text)
-    if (relay !== null && relay.cost === 'free') return await this.#runFreeRelay(relay, message)
-    return await this.#runTask(message, relay)
+    if (relay !== null && relay.cost === 'free') {
+      return await this.#runFreeRelay(relay, message, opened)
+    }
+    return await this.#runTask(message, relay, opened)
+  }
+
+  /**
+   * Hand something over, once this message's Opening has gone out ahead of it.
+   *
+   * The whole of how an Opening stays first. Every instruction a Task or a Relay
+   * produces goes through here, so ordering is a property of the one path they
+   * share rather than a rule each delivery site has to remember — and the Opening
+   * itself never comes this way, which is what keeps it from waiting on itself.
+   *
+   * `opened` cannot reject: `#open` absorbs every way an Opening can fail, since
+   * none of them is a reason to withhold somebody's work.
+   */
+  async #deliverAfter(
+    opened: Promise<void> | undefined,
+    instruction: OutboundInstruction,
+  ): Promise<void> {
+    await opened
+    await this.#channel.deliver(instruction)
+  }
+
+  /**
+   * Say what this Session runs on, once, before it runs anything.
+   *
+   * roma's first reply in a Session and its own message, so that somebody whose
+   * `/clear` has just put them back on the Pinned Model finds out from roma
+   * rather than from an answer that reads oddly (ADR-0024). It drives no Turn and
+   * spends nothing: both facts are records roma already holds.
+   *
+   * **Nothing here may cost the message that prompted it.** Three things can go
+   * wrong and all three end the same way — no Opening, and the message carries on
+   * exactly as it would have:
+   *
+   * - The Session cannot be worked out, or the record cannot be read. The first
+   *   is a failure `#runTask` already owns and answers; duplicating it here would
+   *   put two accounts of one fault in front of the Caller. The second leaves
+   *   roma unable to say whether this Session is new, and an Opening it could not
+   *   then record would arrive again on every message after it.
+   * - The Channel refused it. Absorbed like progress, and the claim is withdrawn
+   *   so the next message opens instead — a hiccup delays an Opening rather than
+   *   losing it.
+   *
+   * The record is written **after** the Channel has taken the message. Written
+   * first, one refusal would cost a Conversation its Opening permanently and
+   * silently, and there is no third position: something has to be true before the
+   * other.
+   */
+  async #open(message: IngressMessage): Promise<void> {
+    let record: string
+    let sessionId: string
+    try {
+      sessionId = this.#sessions.sessionFor(message.conversationKey)
+      const already = this.#openings.get(sessionId)
+      // Awaited rather than returned past, and that matters only for the message
+      // that arrives while an Opening is still going out: waiting is what keeps
+      // its acknowledgement from being posted above the Opening. For every
+      // message after that this is a settled promise and one microtask.
+      if (already !== undefined) return await already
+      record = this.#workRoot.openedRecord(sessionId)
+      if (this.#workRoot.readRecord(record) !== null) {
+        this.#openings.set(sessionId, Promise.resolve())
+        return
+      }
+    } catch {
+      return
+    }
+
+    const opening = this.#deliverOpening(sessionId, record, message)
+    // Registered before it is waited on, so that a message arriving while this
+    // one is in flight finds something to wait for rather than opening again.
+    this.#openings.set(sessionId, opening)
+    await opening
+  }
+
+  /**
+   * Hand one Opening over, and write the record if the Channel took it.
+   *
+   * Split from `#open` so that what is registered in `#openings` is the whole of
+   * the delivery — registering a promise that stopped short of the record would
+   * let a second message proceed believing an Opening had been recorded that had
+   * not.
+   */
+  async #deliverOpening(sessionId: string, record: string, message: IngressMessage): Promise<void> {
+    try {
+      await this.#channel.deliver({
+        kind: 'result',
+        // Its own id, like a Command's answer: an Opening is not the Task that
+        // prompted it, and an Adapter given one id for both would be editing one
+        // message with the other. Addressed to whoever sent that message, because
+        // a Caller belongs to a message and a Conversation has none of its own.
+        ...addressOf({ ...message, taskId: randomUUID() }),
+        text: this.#settingsReport(sessionId),
+      })
+    } catch {
+      // Withdrawn rather than left behind, so the next message opens instead. A
+      // message already waiting on this one rides the failed attempt and gets no
+      // Opening at all — it arrived before roma knew there had been a refusal,
+      // and re-deciding for it would mean a second Opening for whoever gets one.
+      this.#openings.delete(sessionId)
+      return
+    }
+    try {
+      this.#workRoot.writeRecord(record, '')
+    } catch {
+      // The Opening was said and only the note of it was lost. Kept claimed
+      // rather than withdrawn, so this Core does not say it twice; a restart
+      // will, once, which is the cheaper of the two ways to be wrong about a
+      // Work Root that cannot be written to.
+      //
+      // Never propagated, and that is the whole reason this is caught at all:
+      // this promise is awaited by everything the message goes on to produce, so
+      // a throw here would reject the Task's own delivery, hand the Delivery
+      // back, and redeliver a Turn that has already been paid for.
+    }
   }
 
   /**
@@ -540,7 +699,11 @@ export class Core {
    * — Attempts it has none of, a park it can never take. ADR-0018 closed the same
    * gap for the paid half by putting it on the path that already has both.
    */
-  async #runFreeRelay(relay: RelayRequest, message: IngressMessage): Promise<void> {
+  async #runFreeRelay(
+    relay: RelayRequest,
+    message: IngressMessage,
+    opened: Promise<void>,
+  ): Promise<void> {
     const { command } = relay
     const { conversationKey } = message
     const address = addressOf({ ...message, taskId: randomUUID() })
@@ -549,7 +712,7 @@ export class Core {
 
     const reporter = new ProgressReporter({
       updates: this.#channel.capabilities.messageMutation,
-      deliver: (progress) => this.#channel.deliver({ kind: 'progress', ...address, progress }),
+      deliver: (progress) => this.#deliverAfter(opened, { kind: 'progress', ...address, progress }),
     })
 
     let instruction: OutboundInstruction
@@ -662,7 +825,7 @@ export class Core {
     })
 
     reporter.stop()
-    await this.#channel.deliver(instruction)
+    await this.#deliverAfter(opened, instruction)
   }
 
   /**
@@ -934,20 +1097,33 @@ export class Core {
     if (argument !== null) {
       return { kind: 'failure', ...address, reason: CONFIG_SETS_NOTHING }
     }
-    const sessionId = this.#sessions.sessionFor(conversationKey)
-    // Built from the same two methods `/model` and `/effort` report with, rather
-    // than from the records again. Three spellings over two roma-owned facts, not
-    // three sources of truth — and a second reading here is exactly how three
-    // spellings would come to answer differently.
     return {
       kind: 'result',
       ...address,
-      text:
-        `This conversation is on ${this.#modelNamed(sessionId)}, ` +
-        `at ${this.#effortNamed(sessionId)}. ` +
-        `Change either with “/model” or “/effort”.` +
-        this.#modelTakesNone(sessionId),
+      text: this.#settingsReport(this.#sessions.sessionFor(conversationKey)),
     }
+  }
+
+  /**
+   * Both of what this Session is set to, in one sentence.
+   *
+   * Built from the same two methods `/model` and `/effort` report with, rather
+   * than from the records again. Four spellings over two roma-owned facts, not
+   * four sources of truth — and a second reading here is exactly how four
+   * spellings would come to answer differently.
+   *
+   * Its own method because an Opening says it too, and says it *unprompted*
+   * (ADR-0024) — which is what makes a second copy of this sentence worse than a
+   * second copy of the others. Nobody compares the top of a thread against
+   * `/config` a week later, so two versions would drift with nothing to notice.
+   */
+  #settingsReport(sessionId: string): string {
+    return (
+      `This conversation is on ${this.#modelNamed(sessionId)}, ` +
+      `at ${this.#effortNamed(sessionId)}. ` +
+      `Change either with “/model” or “/effort”.` +
+      this.#modelTakesNone(sessionId)
+    )
   }
 
   /**
@@ -1042,7 +1218,11 @@ export class Core {
    * redeemed an Enclosure on a relayed command, and roma has never classified a
    * failure somebody asked for.
    */
-  async #runTask(message: IngressMessage, relay: RelayRequest | null): Promise<void> {
+  async #runTask(
+    message: IngressMessage,
+    relay: RelayRequest | null,
+    opened: Promise<void>,
+  ): Promise<void> {
     const { conversationKey } = message
     // Minted here rather than derived, because it names this Task and not the
     // Conversation: two messages in one Conversation can be in flight at once,
@@ -1061,7 +1241,7 @@ export class Core {
       // answer. Where it cannot, the acknowledgement is sent once and nothing
       // follows it.
       updates: this.#channel.capabilities.messageMutation,
-      deliver: (progress) => this.#channel.deliver({ kind: 'progress', ...address, progress }),
+      deliver: (progress) => this.#deliverAfter(opened, { kind: 'progress', ...address, progress }),
     })
 
     let instruction: OutboundInstruction
@@ -1232,7 +1412,7 @@ export class Core {
     // the Channel has not finished taking is not a reason to hold back the one
     // message roma owes unconditionally.
     reporter.stop()
-    await this.#channel.deliver(instruction)
+    await this.#deliverAfter(opened, instruction)
   }
 
   /**
@@ -1359,7 +1539,7 @@ export class Core {
     // then fails, at the moment they are already waiting. Whether roma has an
     // Overflow credential at all is the Core's half of it.
     const offered = this.#overflow !== null && park.overageAllowed
-    await this.#tell({
+    await this.#tell(task, {
       kind: 'blocked',
       ...addressOf(task),
       resetsAt: park.resetsAt,
@@ -1425,7 +1605,7 @@ export class Core {
       })
       // The Task stays parked. Refused is not abandoned — the window still comes
       // back, and this is still the Task that was blocked.
-      await this.#tell({
+      await this.#tell(task, {
         kind: 'overflow-refused',
         ...addressOf(task),
         capUsd: overflow.monthlyCapUsd,
@@ -1496,7 +1676,7 @@ export class Core {
     })
     if (severity !== 'unreducible' || task.toldContextFull) return
     task.toldContextFull = true
-    void this.#tell({ kind: 'context-full', ...addressOf(task) })
+    void this.#tell(task, { kind: 'context-full', ...addressOf(task) })
   }
 
   /**
@@ -1507,9 +1687,13 @@ export class Core {
    * a reason to throw away work that will still produce an answer. The result
    * and the failure are the two that are never absorbed.
    */
-  async #tell(instruction: OutboundInstruction): Promise<void> {
+  async #tell(task: RunningTask, instruction: OutboundInstruction): Promise<void> {
     try {
-      await this.#channel.deliver(instruction)
+      // Behind the Opening like everything else a Task produces. Looked up
+      // rather than carried, because a Task already knows its Session and
+      // threading the promise down to three notices would be three more
+      // parameters for one ordering rule.
+      await this.#deliverAfter(this.#openings.get(task.sessionId), instruction)
     } catch {
       // Nothing to do with it. The Task carries on, and its ending is delivered
       // on its own terms.

@@ -164,6 +164,22 @@ showing the answer — it says that an answer is being written, not what it says
 and describing it as showing the command, which is a beginning long enough to
 tell two tool calls apart and no more
 
+**Opening**:
+The first thing roma says in a Session: which model it runs on and at what
+effort. One per Session, so a Conversation gets one and gets another after every
+`/clear` — which is where it is worth most, because `/clear` returns a Session to
+the Pinned Model and the Pinned Effort without anything being deleted and the
+answer it gives names neither (ADR-0024). Deliberately **not** roma speaking
+first: roma has nobody it can speak to first, so an Opening is a reply, sent
+before the Acknowledgement of the message that prompted it. `/config`'s sentence
+rather than a second one — four spellings over two roma-owned facts, not four
+sources of truth. A Command prompts none, and that is what keeps the count at
+four rather than making it a repetition: a Command starts no Session, and the
+three that report anything have just answered the question an Opening asks.
+_Avoid_: greeting and welcome (roma is not saying hello — it is saying what this
+Conversation is about to be run on), banner, and using this for the
+Acknowledgement, which is the next message and says something else entirely
+
 ### Running work
 
 **Core**:
@@ -216,10 +232,14 @@ difference is the whole of why the seven-day reclaim is safe to run: **a
 directory is a Session's Working Directory, and a file is a record.** The sweep
 deletes the first and steps over the second, so a Conversation can go quiet for a
 fortnight, lose the directory it was working in, and still come back on the model
-and the effort somebody chose for it. Four kinds of file rely on that and were
+and the effort somebody chose for it. Five kinds of file rely on that and were
 each added by somebody who had to work it out again — a Session Generation, a
-Chosen Model, a Chosen Effort, and the half-written record a machine that lost
-power leaves behind. Named here because until it was named the rule had nowhere
+Chosen Model, a Chosen Effort, the record that a Session has had its Opening, and
+the half-written record a machine that lost power leaves behind. The fourth is
+the one that shows what the rule buys: the same Session's spawn file lives
+*inside* the Working Directory and is reclaimed with it on purpose, so a Session
+gone quiet for a fortnight is spawned as new and is **not** opened again
+(ADR-0024). Named here because until it was named the rule had nowhere
 to live: it was one line in the Session Pool and three comments in another module
 that does not import it, and what actually held it was two tests.
 Deliberately **not** the directory a deployment has to mount, and that asymmetry

@@ -183,6 +183,7 @@ describe('where a record goes', () => {
     expect(work.generationRecord(A)).toBe(join(root, `${A}.generation`))
     expect(work.modelRecord(A)).toBe(join(root, `${A}.model`))
     expect(work.effortRecord(A)).toBe(join(root, `${A}.effort`))
+    expect(work.openedRecord(A)).toBe(join(root, `${A}.opened`))
   })
 
   // The rule the sweep enforces, read from the other end: a record is a sibling
@@ -191,7 +192,12 @@ describe('where a record goes', () => {
   it('puts no record inside the Session directory it describes', () => {
     const { work } = newRoot()
 
-    for (const path of [work.generationRecord(A), work.modelRecord(A), work.effortRecord(A)]) {
+    for (const path of [
+      work.generationRecord(A),
+      work.modelRecord(A),
+      work.effortRecord(A),
+      work.openedRecord(A),
+    ]) {
       expect(path.startsWith(`${work.sessionDir(A)}/`)).toBe(false)
     }
   })
