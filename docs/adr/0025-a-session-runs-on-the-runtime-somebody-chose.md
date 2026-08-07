@@ -1,4 +1,4 @@
-# 24. A Session runs on the Runtime somebody chose
+# 25. A Session runs on the Runtime somebody chose
 
 Date: 2026-08-04
 
@@ -6,7 +6,7 @@ Date: 2026-08-04
 
 Proposed — the decisions below came out of a design interview, not a build.
 Nothing here has been measured in this repository yet; the verification agenda
-is in ADR-0025, and every claim below about Codex's own behaviour is sourced
+is in ADR-0026, and every claim below about Codex's own behaviour is sourced
 from its documentation and from a reference implementation rather than from a
 capture roma holds. Where this ADR and a measurement later disagree, the
 measurement wins and this file gets amended.
@@ -18,7 +18,7 @@ crossing mechanism be replaced rather than softened, with the rule that a
 Runtime is chosen when a Session is born; choosing it at birth by asking
 removes the crossing altogether, and with it all five consequences the review
 enumerated. The review's remaining findings are answered below and in
-ADR-0025, each where it belongs.
+ADR-0026, each where it belongs.
 
 A second review, of *this* design, followed. Three of its findings changed a
 decision and are visible below: Codex is optional rather than a deployment
@@ -27,6 +27,17 @@ being absorbed, and the offer's outer bound is the Transport's own number
 rather than a promise roma is not in a position to make. The other two were
 repairs to what this file and `CONTEXT.md` said, and are made where they were
 wrong.
+
+A third review found the one under all of those: *Grandfathering* turned on a
+marker the seven-day reclaim deletes, so the rule stopped holding after seven
+idle days — exactly where it was carrying the most. `main` then moved, the
+same night, and moved the answer into reach: ADR-0024 gives every Session an
+**Opening**, and records it in the Work Root, which the sweep steps over. That
+record is what the rule asks now. The two designs meet in more than one place
+and *The Opening comes after the choice* is where they are reconciled. This
+file and ADR-0026 were 0024 and 0025 until that merge took 0024;
+`check:adr-collision` is what said so, and renumbering both is the whole of
+what that cost.
 
 ## The decision
 
@@ -56,10 +67,10 @@ opted into the second Runtime.
 
 The shape repeats ADR-0014 and ADR-0016 for a third per-Session setting, and
 the repetition is the point — the record is a file beside `.generation`,
-`.model` and `.effort`, reclaim steps over it, and a missing one has a defined
-meaning (see grandfathering below). What is **not** repeated is the default:
-a Session with no Chosen Model runs on the Pinned Model, but there is no
-"pinned Runtime" a Session falls back to. Where a deployment has both, a
+`.model`, `.effort` and `.opened`, reclaim steps over it, and a missing one
+has a defined meaning (see grandfathering below). What is **not** repeated is
+the default: a Session with no Chosen Model runs on the Pinned Model, but there
+is no "pinned Runtime" a Session falls back to. Where a deployment has both, a
 Session's Runtime does not exist until somebody picks it and nothing runs
 until somebody does; where it has one, there is nothing to fall back *from* —
 every Session is on the only Runtime there is, and that is not a default
@@ -169,7 +180,7 @@ recorded rather than hidden: on a deployment with both Runtimes the one path
 into a running Session now crosses `CARD_CLICKED`, which is the one event
 shape in this repository that has never been proven against a real Workspace
 — `chat-events.ts` says so of the Overflow button it was written for.
-ADR-0025's verification agenda therefore
+ADR-0026's verification agenda therefore
 front-loads a real-Workspace capture of a card click before this ships, and
 a card that has stood unanswered past a threshold is written to the Operator
 Log, so a broken button reads as a broken button and not as silence. If that
@@ -185,7 +196,7 @@ Session Generation — and behave identically on both Runtimes.
 with an argument they refuse, naming the Runtime and its pinned model, and
 bare they still report — the report is never Runtime-gated, on the principle
 that "there is none" is a sentence roma says out loud (ADR-0015 §9). Codex
-has no Model Menu and no Effort Menu yet; ADR-0025 records that the protocol
+has no Model Menu and no Effort Menu yet; ADR-0026 records that the protocol
 takes both per call, so this is scope deferred, not capability denied.
 
 `/config` reports Runtime-aware: the Runtime, its model, and — where the
@@ -201,14 +212,118 @@ While a Session awaits its Runtime, `/model`, `/effort` and `/config` with
 arguments refuse and point at the standing offer: those settings belong to a
 Session, and which Session this is has not been decided yet.
 
+## The Opening comes after the choice
+
+ADR-0024 gives every Session an Opening — roma's first message in it, saying
+which model it runs on and at what effort, sent before the Acknowledgement of
+the message that prompted it. A Runtime is the third thing a Session runs on
+and the only one somebody has to be asked for, so the two designs meet twice.
+
+**The Opening's sentence gains the Runtime.** It is `/config`'s sentence, and
+`/config` answers Runtime-aware above, so this is one composition gaining a
+fact rather than a second one growing beside it — ADR-0024's own argument, and
+it holds harder here than it did there. On a deployment with a single Runtime
+the sentence names the only one there is, which is worth the words: "the
+model" and "the window" stop being unambiguous the moment a second Runtime
+exists anywhere.
+
+**A Session awaiting its Runtime has nothing to open with.** The Pinned Model
+and the Pinned Effort are per-Runtime, so until somebody clicks, the question
+an Opening exists to answer has no answer — roma would have to guess a Runtime
+or say something empty. So where the offer is made, the Opening waits for it:
+the card goes out, and **the click's feedback is the Opening** — which
+Runtime, at what model and effort, that the Session has started, and who
+chose. One message rather than two, and it lands where ADR-0024 wants an
+Opening to land: first, ahead of the Acknowledgement of the request the click
+released. Posting a separate Opening after the feedback was the alternative
+and is refused: it says the Runtime twice in a row, to somebody who has just
+that moment chosen it.
+
+That fixes the order in which the two records are written, and the order is
+load-bearing: **the offer is decided before the Opening, never after.** The
+other way round, `Core.#open` writes the Opened record on the very message the
+offer was about to park, every new Session then looks like a grandfathered
+one, and the rule below quietly stops firing at all.
+
 ## Grandfathering
 
-A Session spawned before this feature has no record, and no record on a
-Session that has already been spawned means **Claude Code** — today's
-behaviour, uninterrupted. No card ever appears mid-conversation; the choice
-reaches existing Conversations at their next `/clear`, where a new Session
-begins and the ordinary rule applies. Only a Session that has never been
-spawned parks its first Task on the offer.
+A Session that predates this feature has no Runtime record, and no Runtime
+record on a Session roma has **already opened** means **Claude Code** —
+today's behaviour, uninterrupted. No card ever appears mid-conversation; the
+choice reaches existing Conversations at their next `/clear`, where a new
+Session begins and the ordinary rule applies. Only a Session roma has never
+opened parks its first Task on the offer.
+
+### Why not spawned-ness
+
+The draft this replaces asked a different question — *has this Session been
+spawned* — and roma cannot answer that one after seven idle days. What says a
+Session has been spawned is `.roma-session`, and the Session Pool writes it
+*inside* the Working Directory, which ADR-0003's sweep deletes; the Runtime
+record is a file in the Work Root, which the sweep steps over. The two
+therefore disagreed precisely where grandfathering needed them to agree.
+
+A grandfathered Conversation that went quiet for a week came back with both
+gone — no Runtime record, correctly, because nobody had ever chosen, and no
+spawned-ness either — so its next message read as a Session that had never
+been spawned and posted a card mid-conversation, the one thing the paragraph
+above promises never happens. A CX click then made it worse quietly: the
+record is written as Codex against a Session id that has not moved, because no
+`/clear` happened, so roma opens a Codex thread on a Session whose Transcript
+is Claude Code's and the Conversation's context is dropped with nothing said —
+the outcome *What a new Session does not carry* exists to make impossible
+without a `/clear`. `transcript-survived` cannot catch it: that correction is
+keyed on Claude Code's own refusal and is the other Runtime's path by
+construction.
+
+Writing a Runtime record on first contact narrows that and does not close it,
+because a Conversation untouched between the deploy and its reclaim never gets
+a first contact to write on. What closes it is a record that outlives the
+reclaim, and **this ADR adds none** — ADR-0024 landed one on `main` the same
+night this design was reviewed, for a reason that has nothing to do with
+Codex. An Opening is roma's first message in a Session saying what it runs on,
+and `<session>.opened` is the note that it has been said: a file in the Work
+Root beside `.generation`, `.model` and `.effort`, which in that tree means
+the sweep steps over it.
+
+It is also the better question. A Session roma has opened is one that has been
+told what it is running on and is now mid-exchange, and a card is wrong for it
+whatever the reclaim did to its Working Directory. A Session roma has never
+opened has been told nothing, and is the only kind the offer is for.
+
+### What the Opened record does not say
+
+It is not spawned-ness under another name, and the difference has to be said
+out loud because the rule now rests on it. An Opening is recorded **after the
+Channel has taken it**, and every way it can fail is absorbed: the Session
+cannot be worked out, the record cannot be read, the Channel refused it — all
+three end with no Opening, the message carrying on untouched, and the claim
+withdrawn so that the next message opens instead (`Core.#open`). So an absent
+record does not prove a Session has never been talked to. It proves it for
+every Session whose Opening has ever been delivered, which is every Session
+that has exchanged a message since ADR-0024 shipped into a Channel that took
+it — and where it is wrong it is wrong the same way it was already wrong for
+ADR-0024's own purpose, which is one Conversation opened twice rather than a
+new failure this ADR introduces.
+
+### What this still cannot close
+
+A Conversation that has exchanged no message since ADR-0024 shipped, or whose
+every attempt at an Opening was refused, and whose Working Directory the
+reclaim has since taken, has no record anywhere in the Work Root. Nothing
+tells it apart from a Conversation nobody has ever messaged, and nothing can:
+the only remaining account of it is the Transcript, and ADR-0006 keeps roma
+out of that — the same refusal made in *What a new Session does not carry*,
+and it costs something here too. Such a Conversation is offered the card on
+its next message.
+
+The residue is bounded and it shrinks. It can only be a Conversation silent
+across the whole span between ADR-0024 and the day its deployment configured a
+second Runtime, and it happens to each one at most once. It is left visible
+rather than papered over: the card says what a click *starts* — a Session with
+nothing in it — which on the path this is written for is trivially true and
+reads as decoration, and in the case above is the whole difference between a
+context drop and a context drop with nothing said.
 
 ## The Audit Record
 
@@ -230,8 +345,21 @@ and the same argument puts it in the same place.
   five are now refused on one; and **Attempt**, whose "between one and three"
   counts a park and an Overflow that a Codex Task has neither of, so on that
   Runtime it is always exactly one.
+- **Opening** changes too, and it is the entry a reader is most likely to
+  finish still believing the old thing: its sentence gains the Runtime, and
+  "one per Session" gains the case where the Session has not been given one
+  yet — a Session awaiting its Runtime prompts no Opening, and the click's
+  feedback is the Opening it was waiting for. **Work Root**'s count of the
+  kinds of file the sweep steps over goes from five to six, the Runtime being
+  the sixth.
+- The Opened record acquires a second reader, and that is worth knowing when
+  it is next changed: ADR-0024 writes it so that one Conversation is not told
+  the same thing twice, and this ADR reads it to decide whether a Conversation
+  is asked anything at all. It is best-effort for the first purpose and the
+  second inherits that, which *What the Opened record does not say* is where
+  the cost of sharing it is priced.
 - "A named list does not grow on its own" gains another instance: the pair of
   Runtimes is a closed list, and adding a third is a deliberate act somebody
   writes down.
 - The mechanics of the Codex Runtime itself — process model, credential,
-  pins, and the money asymmetries — are ADR-0025's.
+  pins, and the money asymmetries — are ADR-0026's.

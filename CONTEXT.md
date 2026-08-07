@@ -165,17 +165,22 @@ and describing it as showing the command, which is a beginning long enough to
 tell two tool calls apart and no more
 
 **Opening**:
-The first thing roma says in a Session: which model it runs on and at what
-effort. One per Session, so a Conversation gets one and gets another after every
-`/clear` — which is where it is worth most, because `/clear` returns a Session to
-the Pinned Model and the Pinned Effort without anything being deleted and the
-answer it gives names neither (ADR-0024). Deliberately **not** roma speaking
-first: roma has nobody it can speak to first, so an Opening is a reply, sent
-before the Acknowledgement of the message that prompted it. `/config`'s sentence
-rather than a second one — four spellings over two roma-owned facts, not four
-sources of truth. A Command prompts none, and that is what keeps the count at
-four rather than making it a repetition: a Command starts no Session, and the
-three that report anything have just answered the question an Opening asks.
+The first thing roma says in a Session: which Runtime it runs on, on which model
+and at what effort. One per Session, so a Conversation gets one and gets another
+after every `/clear` — which is where it is worth most, because `/clear` returns
+a Session to the Pinned Model and the Pinned Effort without anything being
+deleted and the answer it gives names neither (ADR-0024). Deliberately **not**
+roma speaking first: roma has nobody it can speak to first, so an Opening is a
+reply, sent before the Acknowledgement of the message that prompted it.
+`/config`'s sentence rather than a second one — four spellings over three
+roma-owned facts, not four sources of truth. A Command prompts none, and that is
+what keeps the count at four rather than making it a repetition: a Command
+starts no Session, and the three that report anything have just answered the
+question an Opening asks. A Session still awaiting its Runtime prompts none
+either, for the opposite reason: the question cannot be answered yet, because
+the model and the effort both follow the Runtime. There the click that chooses
+one is what opens the Session, and the feedback on the card is the Opening
+(ADR-0025).
 _Avoid_: greeting and welcome (roma is not saying hello — it is saying what this
 Conversation is about to be run on), banner, and using this for the
 Acknowledgement, which is the next message and says something else entirely
@@ -190,7 +195,7 @@ _Avoid_: backend, server, bridge, engine
 **Session**:
 One Runtime's state backing one Conversation: a Transcript, a session id, and a
 working directory. Which Runtime is the Session's own property, chosen at its
-start (ADR-0024).
+start (ADR-0025).
 _Avoid_: context, history, conversation
 
 **Runtime**:
@@ -199,7 +204,7 @@ exactly one, chosen by a person when the Session starts and fixed for its life:
 changing it is `/clear`, because that is a new Session, and the choice is asked
 there again. A property of a Session and never of a Conversation or a Caller —
 the same thread runs on Codex today and Claude Code after a `/clear`, and
-nobody's identity decides which (ADR-0024). Chosen by a person only where there
+nobody's identity decides which (ADR-0025). Chosen by a person only where there
 is something to choose: Claude Code is required and Codex is not, so a
 deployment that configured one Runtime gives every Session that Runtime without
 asking, and asking is what the other kind of deployment took on along with the
@@ -253,16 +258,19 @@ difference is the whole of why the seven-day reclaim is safe to run: **a
 directory is a Session's Working Directory, and a file is a record.** The sweep
 deletes the first and steps over the second, so a Conversation can go quiet for a
 fortnight, lose the directory it was working in, and still come back on the model
-and the effort somebody chose for it. Five kinds of file rely on that and were
+and the effort somebody chose for it. Six kinds of file rely on that and were
 each added by somebody who had to work it out again — a Session Generation, a
-Chosen Model, a Chosen Effort, the record that a Session has had its Opening, and
-the half-written record a machine that lost power leaves behind. The fourth is
-the one that shows what the rule buys: the same Session's spawn file lives
-*inside* the Working Directory and is reclaimed with it on purpose, so a Session
-gone quiet for a fortnight is spawned as new and is **not** opened again
-(ADR-0024). Named here because until it was named the rule had nowhere
-to live: it was one line in the Session Pool and three comments in another module
-that does not import it, and what actually held it was two tests.
+Chosen Model, a Chosen Effort, the Runtime a Session runs on, the record that a
+Session has had its Opening, and the half-written record a machine that lost
+power leaves behind. The Opening record is the one that shows what the rule
+buys: the same Session's spawn file lives *inside* the Working Directory and is
+reclaimed with it on purpose, so a Session gone quiet for a fortnight is spawned
+as new and is **not** opened again (ADR-0024) — and that asymmetry is why it,
+rather than the spawn file, is what says a Session is old enough to be
+grandfathered onto Claude Code (ADR-0025). Named here because until it was named
+the rule had nowhere to live: it was one line in the Session Pool and three
+comments in another module that does not import it, and what actually held it
+was two tests.
 Deliberately **not** the directory a deployment has to mount, and that asymmetry
 is argued rather than inherited: the image defaults this one because losing it is
 by design — ADR-0003 reclaims whatever has gone a week untouched anyway — while
@@ -365,7 +373,7 @@ none" is a sentence roma says out loud — and `/config` answers Runtime-aware. 
 a Session still awaiting its Runtime all three refuse an argument and point at
 the standing offer, since what they set belongs to a Session and which Session
 this is has not been decided. `/stop` and `/clear` touch only what roma itself
-holds and read the same on either Runtime (ADR-0024).
+holds and read the same on either Runtime (ADR-0025).
 _Avoid_: slash command (those are Claude Code's, and a Relay is the only way
 any of them reaches it), instruction (that is an Outbound Instruction)
 
@@ -395,7 +403,7 @@ list: all five are refused on a Codex Session, structurally rather than by
 policy, because a Relay needs a process with something to hand a command *to*
 and the Codex wire has none — its slash commands are its interactive TUI's, and
 the free-text entry its protocol does have is prose, which is what a Task
-already is (ADR-0024).
+already is (ADR-0025).
 _Avoid_: Readout (the retired name, and wrong for a member that writes rather than
 reads), passthrough, slash command (that is Claude Code's name for what a Relay
 carries, not for the carrying), and using this for `/stop`, `/clear`, `/model`,
@@ -440,7 +448,7 @@ makes between one and three, each with its own credential, its own reading of th
 window, and its own share of the bill. Between one and three on Claude Code; on
 Codex always exactly one, because both of the things that would make a second
 are that Runtime's to lack — no park on its window and no Overflow behind it, so
-a blocked Task has nowhere to go but a readable failure (ADR-0025). A fixed
+a blocked Task has nowhere to go but a readable failure (ADR-0026). A fixed
 count does not retire the layer: an Attempt is still what a credential pays for,
 and on Codex a Task simply never makes a second one. Which credential answered
 is which one the last Attempt was on, and that is what the Task's Audit Record
@@ -474,7 +482,7 @@ per Runtime per deployment, fixed before boot, and proved at startup against wha
 the Runtime says it resolved to — because the model follows the credential and
 moves without saying so (ADR-0003). Not a fallback and not the Runtime's own
 default, which never runs: this is what roma insists on, on both Runtimes
-(ADR-0025).
+(ADR-0026).
 _Avoid_: default model (that is the argument `/model default` takes, not the name
 of the thing it returns to), the model, configured model
 
@@ -508,7 +516,7 @@ The Pinned Model's opposite number and argued the same way: it is a thing that w
 always being set — by a settings file roma neither writes nor reads — and pinning
 it does not change what happens, it makes roma able to say what happens
 (ADR-0016). One per Runtime per deployment, fixed before boot, and carried on
-every spawn so that no Session runs on an effort nobody chose (ADR-0025).
+every spawn so that no Session runs on an effort nobody chose (ADR-0026).
 _Avoid_: default effort (that is the argument `/effort default` takes, not the
 name of the thing it returns to), effort setting, reasoning level
 
@@ -759,7 +767,7 @@ everyone shares that Runtime's one credential. When it is spent, everyone on
 that Runtime is blocked at once — including the credential's owner. One per
 Runtime, so a sentence about the window has to say whose: Claude Code's and
 Codex's are separate quotas on separate credentials, and spending one leaves
-the other's Sessions untouched (ADR-0024).
+the other's Sessions untouched (ADR-0025).
 _Avoid_: rate limit, quota, budget
 
 **Overflow**:
@@ -767,7 +775,7 @@ Running one blocked Task on metered API billing instead of the Shared Window.
 Off by default and offered per-Task at the moment of blocking. Mechanically it is
 not a mode: it is the other environment map, chosen per Turn, and it moves back
 on its own for the Conversation's next message. Claude Code's alone: a Codex
-Task that hits its window fails with the reason instead, and ADR-0025 is where
+Task that hits its window fails with the reason instead, and ADR-0026 is where
 that asymmetry is argued rather than an oversight.
 _Avoid_: fallback, API mode, paid mode, spillover
 
@@ -776,7 +784,7 @@ What a Task is while it waits on something that is neither roma nor the queue:
 kept, said out loud, holding no concurrency slot and no process, and stoppable
 throughout. Two things park one today — the Shared Window being spent, where the
 wait is on the provider, and a Session awaiting its Runtime, where the wait is
-on a person (ADR-0024). Distinct from queued — the Task Queue decides what may
+on a person (ADR-0025). Distinct from queued — the Task Queue decides what may
 run now, and a parked Task is not asking it yet.
 _Avoid_: paused, retrying, backing off, queued (that word is the Task Queue's)
 

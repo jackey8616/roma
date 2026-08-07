@@ -1,10 +1,10 @@
-# 25. Codex is driven over app-server, and roma keeps its home
+# 26. Codex is driven over app-server, and roma keeps its home
 
 Date: 2026-08-04
 
 ## Status
 
-Proposed — ADR-0024 decides that a second Runtime exists and how it is chosen;
+Proposed — ADR-0025 decides that a second Runtime exists and how it is chosen;
 this one decides how roma drives it. Nothing below has been measured in this
 repository yet. The facts about Codex come from its protocol documentation and
 from hermes-agent, a working integration whose scars are documented in its
@@ -18,7 +18,7 @@ construction on survives here as that agenda, extended by one item the review
 of that draft asked for: the pinned build's own reasoning-effort levels, which
 nothing in it read. The review's requirement of a Pinned Effort per Runtime is
 answered under The pins, and its recording requirement — that an Audit Record
-say whose `high` it names, without a lookup table — is ADR-0024's Runtime
+say whose `high` it names, without a lookup table — is ADR-0025's Runtime
 field carrying exactly that.
 
 ## The process model: app-server, resident
@@ -64,7 +64,7 @@ and the Session survives it by construction.
 One new durable, **writable** mount is the entire Codex state: `CODEX_HOME` —
 `auth.json` beside `sessions/`. It is what configuring Codex *means*: a
 deployment that wants the second Runtime must have it, and a deployment that
-does not needs nothing new and is not asked for anything (ADR-0024). Where
+does not needs nothing new and is not asked for anything (ADR-0025). Where
 Codex is configured it is required exactly the way `ROMA_CLAUDE_CONFIG_DIR`
 is, and for the same two reasons at once:
 
@@ -174,7 +174,7 @@ Every item below is a seam-2-shaped live test or a recorded verification
 one is a claim this repository currently holds on somebody else's word:
 
 1. A real-Workspace capture of `CARD_CLICKED` arriving over Pub/Sub — the
-   selection's only path (ADR-0024), and the Overflow button's overdue proof.
+   selection's only path (ADR-0025), and the Overflow button's overdue proof.
 2. `thread/resume` continues a thread across a process end, and across a roma
    restart.
 3. `thread/start` accepts `model` and `effort` on the pinned build, and what
@@ -198,6 +198,6 @@ one is a claim this repository currently holds on somebody else's word:
    falsifies nothing else.
 9. What a Conversation actually sees when a standing offer outlives the
    request behind it — the dead-letter or retention bound reached with the
-   card still posted (ADR-0024). The numbers are `infra/`'s and already
+   card still posted (ADR-0025). The numbers are `infra/`'s and already
    written down; what is unproven is the sentence at the end of them, and it
    is the one a person reads at the moment roma has lost their message.
