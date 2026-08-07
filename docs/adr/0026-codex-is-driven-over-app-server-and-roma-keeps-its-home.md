@@ -21,6 +21,13 @@ answered under The pins, and its recording requirement — that an Audit Record
 say whose `high` it names, without a lookup table — is ADR-0025's Runtime
 field carrying exactly that.
 
+What the agenda lost in growing from three items to nine was the withdrawn
+draft's other property: its questions were ordered by how much falls if the
+answer is no, and it named the first as the load-bearing wall. Seven of the
+nine then said nothing about a negative answer at all. That is restored below,
+after the merge rather than in it, because it is what the sprint's tickets take
+their order and their blocking edges from.
+
 ## The process model: app-server, resident
 
 roma drives Codex over `codex app-server` — JSON-RPC 2.0 on stdio, an
@@ -171,22 +178,75 @@ true of.
 
 Every item below is a seam-2-shaped live test or a recorded verification
 (`docs/*-verification.md`) that must exist before this ships, because every
-one is a claim this repository currently holds on somebody else's word:
+one is a claim this repository currently holds on somebody else's word.
+
+**Each item says what a negative answer costs**, because that is the half of a
+verification agenda that decides anything: it fixes the order the sprint runs
+in, and it says in advance whether a "no" is a repair these two ADRs have
+already authorised or a decision somebody has to make again. The numbering is
+the order the items were written in and is left alone — item 8 cites item 3 by
+number and so does the review that asked for it. The order by how much falls is
+**2, 3, 7, 1, 5, 6, 4, 8, 9**, and item 2 is the load-bearing wall: every one of
+items 4 to 7 describes a resident process and none of them survives its answer
+being no. Item 1 is the one place that order should not be read as a schedule —
+it touches no Codex at all and can be captured against the Workspace roma
+already has, so it runs first in wall-clock whatever its rank.
 
 1. A real-Workspace capture of `CARD_CLICKED` arriving over Pub/Sub — the
    selection's only path (ADR-0025), and the Overflow button's overdue proof.
+   A negative answer is the one this pair of ADRs has already answered:
+   selection becomes typed, ADR-0025's *Selection is button-only* is amended
+   into its own last sentence, and nothing else in either file moves. It also
+   convicts a button that shipped — the Overflow offer has been crossing this
+   event since ADR-0018 on nobody's proof — so a "no" here is a bug report
+   against `main` before it is a design change.
 2. `thread/resume` continues a thread across a process end, and across a roma
-   restart.
+   restart. A negative answer takes *The process model* with it: the case for
+   a resident app-server under the Session Pool **is** that resume exists, and
+   without it the only remaining shape is exec-per-Turn, which this ADR rejects
+   above for introducing a Session that is never Resident. So a "no" is not an
+   amendment to this file but a decision made again from the top, and Eviction,
+   Reaping and restart lose the account of themselves given here.
 3. `thread/start` accepts `model` and `effort` on the pinned build, and what
-   answers is the pinned model — the self-check's foundation.
+   answers is the pinned model — the self-check's foundation. A negative answer
+   splits. If the per-call parameters fail but the `config.toml` backstop holds,
+   the pin survives and loses its second belt. If neither can make the pinned
+   model the one that answers, *The pins* has no mechanism and the Startup
+   Self-Check has nothing to probe for — and what goes with it is ADR-0003's
+   sentence, that roma runs the model it insists on rather than the vendor's
+   default, which this Runtime may not ship without. ADR-0025's Opening would
+   be naming a model on somebody's word.
 4. Thread id key tolerance (`id` vs `sessionId`), `<turn_aborted>` as a
-   terminal marker, and the wedge watchdog's thresholds.
+   terminal marker, and the wedge watchdog's thresholds. A negative answer is
+   a port that needs its own handling rather than a decision that needs
+   remaking — the quirks are hermes's scars and roma's pin may not carry the
+   same ones. The watchdog is the exception: if no threshold tells a wedged
+   process from a slow Turn, **Retirement** has no trigger, and "the Session
+   survives it by construction" is a claim with nothing behind it.
 5. Token usage and the compaction flag on `turn/completed`, differenced the
-   way Claude Code's cumulative totals are.
+   way Claude Code's cumulative totals are. A negative answer costs the Audit
+   Record. Dollars are already conceded as unpriced; tokens are what is left,
+   and a Codex Task that reports neither is unaccounted — which ADR-0014 and
+   ADR-0018 both forbid, resting as they do on a Record that says what a Task
+   spent. The compaction flag is ADR-0019's, and a Turn that compacts without
+   saying so is that ADR's cost fact going missing.
 6. The refresh race: concurrent resident processes against one `auth.json`,
-   including one process refreshing while another starts.
+   including one process refreshing while another starts. A negative answer
+   falsifies nothing above; it adds mechanism this ADR does not design. *The
+   home* leaves concurrency at "the reference implementation survives it", and
+   a lost race on a single-use refresh token does not degrade — it invalidates
+   the credential and takes the deployment's second Runtime down until an
+   operator re-seeds the file by hand. The cost of a "no" is a serialisation
+   roma has to build; the cost of not asking is an outage with no visible
+   cause.
 7. The permission profile lands from `config.toml` and the agent can write
-   in its Working Directory and nowhere it should not.
+   in its Working Directory and nowhere it should not. A negative answer is the
+   only one on this list with no repair named anywhere: the per-thread
+   `permissions` parameter is already rejected above on the reference
+   implementation's live test, so if `config.toml` does not land either, roma
+   has no way to set the posture and Codex runs at whatever its own default is
+   — a security decision nobody made, arrived at by omission. This item blocks
+   shipping rather than reshaping a section.
 8. The pinned build's own reasoning-effort levels, read the way Claude Code's
    were: `scripts/claude-code-effort-matrix.ts` extracted them and a person
    reviewed the table before it became a constant. This Runtime's pinnable set
@@ -200,4 +260,10 @@ one is a claim this repository currently holds on somebody else's word:
    request behind it — the dead-letter or retention bound reached with the
    card still posted (ADR-0025). The numbers are `infra/`'s and already
    written down; what is unproven is the sentence at the end of them, and it
-   is the one a person reads at the moment roma has lost their message.
+   is the one a person reads at the moment roma has lost their message. A
+   negative answer falsifies that sentence rather than a decision: ADR-0025
+   promises a click on a card whose request is gone says so plainly and asks
+   for the message again, and this is where that promise is kept or found to
+   be describing something else. It ranks last because least falls, not
+   because least is read — the repair is wording, plus whatever handling the
+   dead-letter path turns out to need.
