@@ -186,9 +186,12 @@ in, and it says in advance whether a "no" is a repair these two ADRs have
 already authorised or a decision somebody has to make again. The numbering is
 the order the items were written in and is left alone — item 8 cites item 3 by
 number and so does the review that asked for it. The order by how much falls is
-**2, 3, 7, 1, 5, 6, 4, 8, 9**, and item 2 is the load-bearing wall: every one of
-items 4 to 7 describes a resident process and none of them survives its answer
-being no. Item 1 is the one place that order should not be read as a schedule —
+**2, 3, 7, 1, 5, 6, 4, 8, 9**, and item 2 is the load-bearing wall: items 4, 5
+and 7 describe a resident process and none of them reads the same way once that
+answer is no. Item 6 is the one that survives it, in changed form — concurrent
+processes sharing one credential is a live question under either process model,
+and a worse one under exec-per-Turn, which has more of them. Item 1 is the one
+place the order should not be read as a schedule —
 it touches no Codex at all and can be captured against the Workspace roma
 already has, so it runs first in wall-clock whatever its rank.
 
