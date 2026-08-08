@@ -39,6 +39,12 @@ file and ADR-0026 were 0024 and 0025 until that merge took 0024;
 `check:adr-collision` is what said so, and renumbering both is the whole of
 what that cost.
 
+A fourth finding was raised in the approving review and merged unrepaired. It
+is repaired now: *What this still cannot close* qualified the residue on
+something the rule cannot read, so the one section written to say how wide the
+gap is understated it. The correction is there, with the single witness that
+would narrow it priced rather than taken.
+
 ## The decision
 
 roma gains a second Runtime: **Codex**, beside Claude Code. A Runtime is the
@@ -309,21 +315,45 @@ new failure this ADR introduces.
 ### What this still cannot close
 
 A Conversation that has exchanged no message since ADR-0024 shipped, or whose
-every attempt at an Opening was refused, and whose Working Directory the
-reclaim has since taken, has no record anywhere in the Work Root. Nothing
-tells it apart from a Conversation nobody has ever messaged, and nothing can:
-the only remaining account of it is the Transcript, and ADR-0006 keeps roma
-out of that — the same refusal made in *What a new Session does not carry*,
-and it costs something here too. Such a Conversation is offered the card on
-its next message.
+every attempt at an Opening was refused, has no record anywhere in the Work
+Root. Nothing tells it apart from a Conversation nobody has ever messaged, and
+nothing can: the only remaining account of it is the Transcript, and ADR-0006
+keeps roma out of that — the same refusal made in *What a new Session does not
+carry*, and it costs something here too. Such a Conversation is offered the
+card on its next message.
 
-The residue is bounded and it shrinks. It can only be a Conversation silent
-across the whole span between ADR-0024 and the day its deployment configured a
-second Runtime, and it happens to each one at most once. It is left visible
-rather than papered over: the card says what a click *starts* — a Session with
-nothing in it — which on the path this is written for is trivially true and
-reads as decoration, and in the case above is the whole difference between a
-context drop and a context drop with nothing said.
+An earlier draft of that sentence carried a third condition — *and whose
+Working Directory the reclaim has since taken* — and it is struck rather than
+kept, because it never bound anything and made the gap read narrower than it
+is. The rule consults `.opened`, which lives in the Work Root's own directory
+where the sweep does not go; what a reclaim did to a Working Directory is not a
+fact the rule can see. In the one section whose job is to say how wide the gap
+is, a condition that cannot fire is worse than no condition at all.
+
+There is a second witness roma could consult and does not. `.roma-session`
+survives inside a Working Directory the reclaim has not yet taken, and reading
+it only where `.opened` is absent would be one-way — able to suppress a card,
+never to post one — so it would not make spawned-ness the question again after
+*Why not spawned-ness* refused it. What keeps it out is what it would buy. For
+the silent kind it buys nothing: silence past seven days is the reclaim's own
+trigger, so by the day any deployment configures a second Runtime that file has
+gone with the directory. It buys only the refused kind — an active Conversation
+whose every Opening the Channel turned down, which has `.roma-session` and no
+`.opened`, and which is the one case here where a card really would land
+mid-conversation. If that case is ever observed, this is the repair and this
+paragraph is where it was priced: one more check, and a new ordering rule, the
+offer then having to be decided before the spawn as well as before the Opening.
+
+The residue is bounded and it shrinks, along two edges rather than one. The
+silent kind can only be a Conversation quiet across the whole span between
+ADR-0024 and the day its deployment configured a second Runtime, and it happens
+to each one at most once. The refused kind is bounded by nothing written here —
+it lasts as long as the Channel goes on refusing — and it is why the sentence
+above says *or* and not *and*. Both are left visible rather than papered over:
+the card says what a click *starts* — a Session with nothing in it — which on
+the path this is written for is trivially true and reads as decoration, and in
+the cases above is the whole difference between a context drop and a context
+drop with nothing said.
 
 ## The Audit Record
 
