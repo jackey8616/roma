@@ -342,7 +342,10 @@ _Avoid_: process pool, session manager, cache
 **Eviction**:
 Ending a Resident Session's process to make room for another one. The Session
 survives it — the next message resumes from the transcript on disk — so nothing
-the person using it can observe changes.
+the person using it can observe changes. That last clause is load-bearing
+elsewhere: the Relay membership rule's second clause is it, read as a constraint
+on what may be relayed, and `/usage` was taken off that list for being a way to
+observe one (ADR-0027).
 _Avoid_: killing a Session, closing a Session, expiring
 
 **Reaping**:
@@ -351,29 +354,42 @@ make room. Distinct from Eviction only in what prompted it.
 _Avoid_: timing out, garbage collection, idling out
 
 **Command**:
-One of the five messages roma answers itself instead of handing to the Runtime:
+One of the six messages roma answers itself instead of handing to the Runtime:
 `/stop` ends the work this Conversation has in flight — running, queued, or
 still starting — `/clear` gives the Conversation a fresh Session, `/model` sets
-its Chosen Model, `/effort` sets its Chosen Effort, and `/config` says what this
-Session is set to and refuses to set anything else. Recognised in the Core, never
-in a Channel Adapter, and only when the whole message is one of them — everything
+its Chosen Model, `/effort` sets its Chosen Effort, `/config` says what this
+Session is set to and refuses to set anything else, and `/usage` says what the
+deployment has spent this calendar month. Recognised in the Core, never in a
+Channel Adapter, and only when the whole message is one of them — everything
 else is work, apart from the few Claude Code commands a Relay carries. `/clear`
-answers to `/reset` and `/new`, and `/config` to `/settings`, because those are
-Claude Code's own spellings and a spelling roma leaves unclaimed is one somebody
-is billed for (ADR-0013, ADR-0017). Three of the five take an argument, and only
+answers to `/reset` and `/new`, `/config` to `/settings`, and `/usage` to
+`/cost` and `/stats`, because those are Claude Code's own spellings and a
+spelling roma leaves unclaimed is one somebody is billed for (ADR-0013,
+ADR-0017). The last one is claimed under that rule for a different fault, and is
+the sharper case for it: relayed, it was free and answered by the real command
+rather than by a guess, and it reported the *process's* counters — which are
+zeroed at every spawn — so what leaving it unclaimed cost was not money but a
+wrong number, and a wrong number nobody is billed for announces itself to
+nobody (ADR-0027). Three of the six take an argument, and only
 a listed head may: nothing else does, which is what keeps the whole-message rule
 from widening into the prefix match ADR-0003 refused. That list is now three
 entries rather than one, so "a named list does not grow on its own" has become a
 thing somebody has to keep true rather than an observation. A Command is not a
 Task: it drives no Turn, is not queued, and is not counted against the
-concurrency cap. Which of them **set** anything depends on the Runtime: on a
+concurrency cap. Five of the six answer about the Conversation that sent them and
+`/usage` does not: it answers about the deployment, so the same message returns
+the same figures wherever it is sent. Named because six Commands of which one
+ignores the Conversation Key is the kind of asymmetry somebody tidies away
+(ADR-0027). Which of them **set** anything depends on the Runtime: on a
 Codex Session `/model` and `/effort` set nothing — with an argument they refuse
 and name the Runtime and its pin, bare they still report, because "there is
 none" is a sentence roma says out loud — and `/config` answers Runtime-aware. On
 a Session still awaiting its Runtime all three refuse an argument and point at
 the standing offer, since what they set belongs to a Session and which Session
-this is has not been decided. `/stop` and `/clear` touch only what roma itself
-holds and read the same on either Runtime (ADR-0025).
+this is has not been decided. `/stop`, `/clear` and `/usage` touch only what roma
+itself holds and read the same on either Runtime (ADR-0025) — the last one
+reports a line *per* Runtime, which is a different thing from depending on the
+one this Session runs on.
 _Avoid_: slash command (those are Claude Code's, and a Relay is the only way
 any of them reaches it), instruction (that is an Outbound Instruction)
 
@@ -390,16 +406,25 @@ look like a fourth kind of message — a Relay names the **shape a message takes
 the wire**, a Task names **what governs it**, and those are different axes. A
 Relay that drives a Turn is governed exactly as a Task is: queued, counted against
 the cap, stoppable, Parkable, audited. One that drives none is free of all of it.
-The membership rule is that **a Relay changes nothing roma holds a belief about** —
+The membership rule has two clauses. The first is that **a Relay changes nothing
+roma holds a belief about** —
 which session id a Conversation resumes to, which model and effort it runs on,
 what the settings file every Session shares says, that auto-compaction is on. roma
 holds no belief about what is in a context, which is the whole of why `/compact`
 may be relayed and `/clear`, `/model`, `/effort`, `/config` and `/autocompact` may
-not. Where the Caller Marker sits turns on whether the Caller supplied text: a
+not. The second is that **a Relay's answer must be true of the Session, not merely
+of the process serving it** — which is Eviction's promise read as a constraint on
+what may be relayed rather than a new rule, the first clause being about changes
+and this one about answers. `/usage` is why it had to be said: it changed nothing,
+passed the first clause exactly as written, and reported counters that were zeroed
+at every spawn, so it was a way to observe an Eviction (ADR-0027). Unlike the
+first, it is a property a machine can be asked — send it, evict, resume, send it
+again, and the answer should not have moved. Where the Caller Marker sits turns on whether the Caller supplied text: a
 Relay that is the whole message carries it after the command, and one carrying an
 argument carries none at all — the only message roma writes without one, and the
 Caller Marker's entry is where that is argued. Claude Code's list is the whole
-list: all five are refused on a Codex Session, structurally rather than by
+list — two entries since ADR-0027, `/context` and `/compact`, one free and one
+paid — and both are refused on a Codex Session, structurally rather than by
 policy, because a Relay needs a process with something to hand a command *to*
 and the Codex wire has none — its slash commands are its interactive TUI's, and
 the free-text entry its protocol does have is prose, which is what a Task
@@ -407,11 +432,14 @@ already is (ADR-0025).
 _Avoid_: Readout (the retired name, and wrong for a member that writes rather than
 reads), passthrough, slash command (that is Claude Code's name for what a Relay
 carries, not for the carrying), and using this for `/stop`, `/clear`, `/model`,
-`/effort` or `/config` — those are roma's own and are Commands. The last two are
-the sharpest case for the membership rule, because both are free and
-non-interactive on the pinned build and neither may be relayed: `/effort` sets a
-value that lives in the process and dies with it, and `/config` writes a settings
-file every Session in the deployment shares (ADR-0016, ADR-0017)
+`/effort`, `/config` or `/usage` — those are roma's own and are Commands, and the
+last one was on this list until ADR-0027 took it off. The clauses have a sharpest
+case each, and all three are free and non-interactive on the pinned build.
+`/effort` and `/config` are the first's: `/effort` sets a value that lives in the
+process and dies with it, and `/config` writes a settings file every Session in
+the deployment shares (ADR-0016, ADR-0017). `/usage` is the second's, and the
+harder one to see, because it sets nothing and changes nothing at all — what
+disqualifies it is only what its answer is about (ADR-0027)
 
 **Task**:
 One message from one person, from arrival to final result, given to the model to
@@ -767,8 +795,14 @@ everyone shares that Runtime's one credential. When it is spent, everyone on
 that Runtime is blocked at once — including the credential's owner. One per
 Runtime, so a sentence about the window has to say whose: Claude Code's and
 Codex's are separate quotas on separate credentials, and spending one leaves
-the other's Sessions untouched (ADR-0025).
-_Avoid_: rate limit, quota, budget
+the other's Sessions untouched (ADR-0025). Something roma reads as three states
+and a reset moment, and never as a quantity: the wire carries no figure for how
+much is left, so "nearly spent" is the most roma can ever say and "43% left" is
+not a sentence it is in a position to form. Enough to decide whether to Park a
+Task, which is all it is asked for, and the reason `/usage` says nothing about
+it (ADR-0027).
+_Avoid_: rate limit, quota, budget, and using this for what is left in it — that
+is a number nobody has
 
 **Overflow**:
 Running one blocked Task on metered API billing instead of the Shared Window.
@@ -790,10 +824,18 @@ _Avoid_: paused, retrying, backing off, queued (that word is the Task Queue's)
 
 **Audit Record**:
 The line roma writes when a Task ends: the Caller, which Session ran it, how long
-they waited, what it cost, which credential paid, which model ran it, what effort
+they waited, what it cost, which credential paid, which Runtime and which model
+ran it, what effort
 it ran at, whether a Compaction happened inside it and who asked for that, which
 repositories it minted an Installation Token for, and whether it used the Cloud
-Reach or the Document Reach. The model is here because a
+Reach or the Document Reach. The Runtime is here because the credential beside it
+says only which of the two bills a Task landed on and never whose subscription:
+a Shared Window is one per Runtime, so a month's records added up without it
+would sum two separate quotas into one figure and say the sentence this glossary
+forbids. Written down while there is one Runtime and the answer is uninteresting,
+because a record is append-only and a field added later leaves every line before
+it ambiguous between "Claude Code" and "written before anybody asked" — which is
+the one distinction it exists to make (ADR-0027). The model is here because a
 Chosen Model is a Caller moving the shared bill and nothing else would remember
 which Task did (ADR-0014). The effort is here for the same reason and is weaker
 evidence, and says so: it is what roma sent and what the Effort Matrix says the
@@ -821,7 +863,12 @@ Session's running total. It can also be nothing at all: a Turn that began and
 never reached a terminal event spent real tokens nothing will ever name, and that
 is written down as unpriced rather than as free. Everybody shares one token, so the provider knows only
 that somebody spent it; this is the only place the question of who is answerable,
-and the only place a calendar month can be added up.
+and the only place a calendar month can be added up. `/usage` is that month said
+out loud, and says it as two figures rather than one: a Shared Window Task
+carries a cost because the Runtime prices every Turn, and nobody is billed it —
+so what the subscription drew and what metered billing charged are reported in
+two registers and never summed, which is the arithmetic the Overflow cap is
+already built to avoid (ADR-0027).
 _Avoid_: the bare word "log" for one of these — the Operator Log is the
 operational one and the two are not the same thing, so the qualified "audit log"
 is the collection and an Audit Record is a line of it. Also: metric, usage
