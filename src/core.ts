@@ -36,6 +36,7 @@ import {
 } from './model-menu.js'
 import { readRelay, type RelayRequest } from './relays.js'
 import { ProgressReporter } from './progress-reporter.js'
+import { RUNTIME_NAMES, type Runtime } from './runtime.js'
 import {
   ChosenEffortNotOffered,
   ChosenModelNotOffered,
@@ -820,6 +821,7 @@ export class Core {
       durationMs: Date.now() - startedAt,
       turnMs: turn?.durationMs ?? null,
       credential: this.#credential,
+      runtime: EVERY_SESSION_RUNS_ON,
       model: model ?? this.#models.pinned,
       effort: effortOn(model ?? this.#models.pinned, effort ?? this.#efforts.pinned),
       // Asked rather than assumed false. A free Relay drives no Turn so nothing
@@ -1415,6 +1417,10 @@ export class Core {
         durationMs,
         turnMs: paid.turnMs,
         credential,
+        // Which of the two bills, then whose. Outside the loop's business: the
+        // credential moved between Attempts and a Session's Runtime is fixed for
+        // its life (ADR-0025), so both records of one Task name the same one.
+        runtime: EVERY_SESSION_RUNS_ON,
         // What this Task ran on. The Pinned Model only where roma never got as
         // far as a Session to ask about — the same failure that leaves
         // `sessionId` null — because a row that says nothing is a row the month's
@@ -1807,6 +1813,17 @@ export class Core {
 }
 
 /**
+ * The Runtime every Session runs on, while a deployment has one to give
+ * (ADR-0025).
+ *
+ * **Never go on writing this once a Session has a Runtime of its own** — the
+ * point at which ADR-0027 has the record read it from there instead. A Codex
+ * Task recorded as Claude Code's is filed against the wrong Shared Window, and
+ * telling two windows apart is the only thing the field is for.
+ */
+const EVERY_SESSION_RUNS_ON: Runtime = 'claude-code'
+
+/**
  * What roma says about a Task that failed on roma's side rather than in the Turn.
  *
  * Fixed, never the error's own message: those are written for whoever reads the
@@ -1963,8 +1980,9 @@ const CONFIG_SETS_NOTHING =
  * What the deployment drew and what it was billed, for one calendar month.
  *
  * **Never one figure.** What the subscription drew is priced work nobody is
- * billed for, so a sum would print it as money — the arithmetic roma's own
- * Overflow cap is built to avoid (ADR-0027).
+ * billed for, so a sum across the two registers prints it as money, and a sum
+ * across Runtimes adds two separate subscriptions' quotas — the arithmetic
+ * roma's own Overflow cap is built to avoid (ADR-0027).
  */
 function monthReport({ month, spend, unreadable }: AuditBreakdown): string {
   const named = monthNamed(month)
@@ -1983,17 +2001,22 @@ function monthReport({ month, spend, unreadable }: AuditBreakdown): string {
   return [`${named}.`, ...spend.map(spendLine)].join('\n')
 }
 
-/** One credential's line, in the register that credential is read in. */
-function spendLine({ credential, costUsd, unpriced }: CredentialSpend): string {
+/** One credential's line on one Runtime, in the register that credential is read in. */
+function spendLine({ runtime, credential, costUsd, unpriced }: CredentialSpend): string {
   // A floor where the month holds a Turn that began and was never priced. The
   // count itself stays off the line: a column that reads zero for ever is a
   // column nobody reads (ADR-0027).
   const figure = `${unpriced === 0 ? '' : 'at least '}$${money(costUsd)}`
+  // Never leave the Runtime off because there is only one: a sentence about a
+  // Shared Window has to say whose (`CONTEXT.md`), and a line worded for the
+  // deployment goes on reading right at the moment a second Runtime makes it
+  // wrong.
+  const named = RUNTIME_NAMES[runtime]
   switch (credential) {
     case 'shared-window':
-      return `The subscription drew ${figure} worth of work. Nobody is billed for that.`
+      return `${named}’s subscription drew ${figure} worth of work. Nobody is billed for that.`
     case 'overflow':
-      return `Metered billing charged ${figure}.`
+      return `Metered billing charged ${figure} for Tasks on ${named}.`
   }
 }
 

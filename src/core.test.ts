@@ -16,6 +16,7 @@ import { apiKeySourceFor, type CredentialKind } from './build-env.js'
 import { PINNED_EFFORT, PINNED_MODEL } from './claude-session.js'
 import { EFFORT_NOT_APPLIED } from './effort-menu.js'
 import type { RetryBudget } from './config.js'
+import { RUNTIME_NAMES, RUNTIMES, type Runtime } from './runtime.js'
 import { chosenEfforts, chosenModels, SessionGenerations } from './session-generation.js'
 import { sessionIdFor } from './session-id.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
@@ -2133,7 +2134,14 @@ describe('what the deployment has spent this month', () => {
       costUsd,
       credential = 'shared-window',
       apiKeySource = apiKeySourceFor(credential),
-    }: { costUsd: number | null; credential?: CredentialKind; apiKeySource?: string },
+      runtime,
+    }: {
+      costUsd: number | null
+      credential?: CredentialKind
+      apiKeySource?: string
+      /** Left off by default, which is what every record written before the field is. */
+      runtime?: Runtime
+    },
   ) {
     audit.record({
       taskId: 'earlier',
@@ -2144,6 +2152,7 @@ describe('what the deployment has spent this month', () => {
       durationMs: 1_000,
       turnMs: 1_000,
       credential,
+      ...(runtime === undefined ? {} : { runtime }),
       apiKeySource,
     })
   }
@@ -2157,7 +2166,8 @@ describe('what the deployment has spent this month', () => {
 
   // The whole answer, asserted as the string it is: the month named rather than
   // called "this month", the subscription's draw worded as work drawn, metered
-  // billing worded as money, and nothing anywhere that adds the two together.
+  // billing worded as money, every figure saying which Runtime it is about, and
+  // nothing anywhere that adds any two of them together.
   it('names the month and reports both figures, without a process or a Turn', async () => {
     const { adapter, audit, claude, core } = newCore()
     spent(audit, { costUsd: 0.21 })
@@ -2172,10 +2182,30 @@ describe('what the deployment has spent this month', () => {
         conversationKey: KEY,
         text:
           'July 2026 (UTC).\n' +
-          'The subscription drew $0.21 worth of work. Nobody is billed for that.\n' +
-          'Metered billing charged $1.34.',
+          'Claude Code’s subscription drew $0.21 worth of work. Nobody is billed for that.\n' +
+          'Metered billing charged $1.34 for Tasks on Claude Code.',
       },
     ])
+  })
+
+  // **One Runtime, one Runtime's worth of lines.** A Shared Window is one per
+  // Runtime, so a sentence about one has to say whose (`CONTEXT.md`) — and the
+  // figures are read off the real list rather than counted, so the day a second
+  // Runtime is named this asserts the report grew with it instead of needing to
+  // be told.
+  it('reports the two figures once per Runtime, which is one line each today', async () => {
+    const { adapter, audit, core } = newCore()
+    spent(audit, { costUsd: 0.21 })
+    spent(audit, { costUsd: 1.34, credential: 'overflow' })
+
+    await core.handle(ingress('/usage'))
+
+    const [named, ...figures] = textIn(adapter).split('\n')
+    expect(named).toBe('July 2026 (UTC).')
+    expect(figures).toHaveLength(RUNTIMES.length * 2)
+    for (const runtime of RUNTIMES) {
+      expect(figures.filter((line) => line.includes(RUNTIME_NAMES[runtime]))).toHaveLength(2)
+    }
   })
 
   // Three spellings, one Command. A `/cost` answering differently from the
@@ -2231,8 +2261,8 @@ describe('what the deployment has spent this month', () => {
 
     expect(textIn(adapter)).toBe(
       'July 2026 (UTC).\n' +
-        'The subscription drew at least $0.21 worth of work. Nobody is billed for that.\n' +
-        'Metered billing charged $0.00.',
+        'Claude Code’s subscription drew at least $0.21 worth of work. Nobody is billed for that.\n' +
+        'Metered billing charged $0.00 for Tasks on Claude Code.',
     )
     expect(textIn(adapter)).not.toContain('3')
   })
@@ -2243,8 +2273,21 @@ describe('what the deployment has spent this month', () => {
 
     await core.handle(ingress('/usage'))
 
-    expect(textIn(adapter)).toContain('The subscription drew $0.21 worth of work.')
+    expect(textIn(adapter)).toContain('Claude Code’s subscription drew $0.21 worth of work.')
     expect(textIn(adapter)).not.toContain('at least')
+  })
+
+  // The deploy that adds the field falls in the middle of a month, and the
+  // records either side of it are one Runtime's: absent means Claude Code, so
+  // the month is one figure rather than a figure and a hole (ADR-0027).
+  it('counts a record written before the field beside one written after it', async () => {
+    const { adapter, audit, core } = newCore()
+    spent(audit, { costUsd: 0.21 })
+    spent(audit, { costUsd: 0.09, runtime: 'claude-code' })
+
+    await core.handle(ingress('/usage'))
+
+    expect(textIn(adapter)).toContain('Claude Code’s subscription drew $0.30 worth of work.')
   })
 
   // A line roma wrote and cannot read back. The month is short by whatever that
@@ -2260,6 +2303,38 @@ describe('what the deployment has spent this month', () => {
 
     expect(textIn(adapter)).toContain('roma cannot vouch for July 2026 (UTC)')
     expect(textIn(adapter)).not.toContain('$')
+  })
+
+  // **The line the field exists for, arriving from a build that has a Runtime
+  // this one has not.** Everything about it reads back except the one thing that
+  // says whose window it drew on — so it joins the count roma cannot attribute,
+  // rather than putting another subscription's draw into Claude Code's figure
+  // where nothing would ever say it had.
+  it('vouches for nothing where a record names a Runtime it cannot name', async () => {
+    const { adapter, audit, auditRoot, core } = newCore()
+    spent(audit, { costUsd: 0.21 })
+    appendFileSync(
+      join(auditRoot, `${MONTH}.jsonl`),
+      `${JSON.stringify({
+        at: new Date(NOW).toISOString(),
+        taskId: 'elsewhere',
+        caller: 'users/99',
+        callerName: null,
+        sessionId: sessionIdFor('another'),
+        outcome: 'result',
+        costUsd: 9.99,
+        durationMs: 1_000,
+        turnMs: 1_000,
+        credential: 'shared-window',
+        runtime: 'codex',
+        apiKeySource: 'none',
+      })}\n`,
+    )
+
+    await core.handle(ingress('/usage'))
+
+    expect(textIn(adapter)).toContain('roma cannot vouch for July 2026 (UTC)')
+    expect(textIn(adapter)).not.toContain('9.99')
   })
 
   // ADR-0002's silent-degradation mode, which is the failure it is most afraid
@@ -2742,6 +2817,12 @@ describe('the record every Task leaves behind', () => {
         durationMs: 0,
         turnMs: 0,
         credential: 'shared-window',
+        // Which of the two bills, then whose: the credential says nothing about
+        // whose subscription, and a Shared Window is one per Runtime — so a
+        // month added up without this sums two of them the day there are two
+        // (ADR-0027). One value today, written all the same, because a field
+        // added later leaves every line before it ambiguous.
+        runtime: 'claude-code',
         // What it ran on, which for a Conversation that has chosen nothing is
         // the Pinned Model. Written rather than left out, so that the month's
         // spending can be read against what it was spent on with no blank rows
@@ -3828,6 +3909,10 @@ describe('relaying a free Relay', () => {
       credential: 'shared-window',
     })
     expect(audit.totalFor(MONTH)).toMatchObject({ tasks: 1, relays: 1 })
+    // **Both records roma writes, read back through the real reader.** "Every
+    // Audit Record names the Runtime" is a claim about two call sites, and the
+    // Relay's is the one nothing else here would notice going missing.
+    expect(records.map((record) => record.runtime)).toEqual(['claude-code', 'claude-code'])
   })
 
   // ADR-0010's rule, applied to something that answers in milliseconds: an
