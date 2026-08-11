@@ -852,9 +852,12 @@ export class Core {
     let instruction: OutboundInstruction
     try {
       // The three that answer with prose and the two that answer with an
-      // outcome, told apart here rather than inside `#carryOut` — "it was carried
-      // out" is not what any of the first three say, and `#carryOut`'s type is
-      // what stops a sixth Command being added without this deciding which it is.
+      // outcome, told apart here rather than inside `#carryOut` — "it was
+      // carried out" is not what any of the first three say. Never define
+      // `#carryOut`'s parameter by subtracting these three: naming the two it
+      // handles is what makes a sixth Command a compile error here until this
+      // says which of the two it is. Subtracted, it would land inside that type
+      // and be answered as a second `/stop`.
       instruction =
         request.command === 'model'
           ? this.#answerModel(readModelRequest(request.argument), conversationKey, address)
@@ -1150,21 +1153,23 @@ export class Core {
   }
 
   /** Do what the Command asks, and say whether there was anything to do. */
-  #carryOut(
-    command: Exclude<Command, 'model' | 'effort' | 'config'>,
-    conversationKey: string,
-  ): boolean {
-    if (command === 'clear') {
-      // Nothing is torn down. `/clear` is aimed at what the *next* message
-      // reaches: a Task already running in the old Session finishes and still
-      // answers the person who asked, and the process behind it is left to the
-      // pool, which reaps or evicts it like any other Session nobody is talking
-      // to any more. Always true — a Conversation can always be given a Session
-      // with nothing in it, including one that has never had a Session at all.
-      this.#sessions.freshSession(conversationKey)
-      return true
+  #carryOut(command: Extract<Command, 'stop' | 'clear'>, conversationKey: string): boolean {
+    // Not an `if` whose else is `/stop`: a third Command added to the parameter
+    // above stops this compiling instead of being answered as `/stop`.
+    switch (command) {
+      case 'clear':
+        // Nothing is torn down. `/clear` is aimed at what the *next* message
+        // reaches: a Task already running in the old Session finishes and still
+        // answers the person who asked, and the process behind it is left to
+        // the pool, which reaps or evicts it like any other Session nobody is
+        // talking to any more. Always true — a Conversation can always be given
+        // a Session with nothing in it, including one that has never had a
+        // Session at all.
+        this.#sessions.freshSession(conversationKey)
+        return true
+      case 'stop':
+        return this.#stop(conversationKey)
     }
-    return this.#stop(conversationKey)
   }
 
   /**
