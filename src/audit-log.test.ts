@@ -163,6 +163,135 @@ describe('adding a calendar month up', () => {
   })
 })
 
+/**
+ * ADR-0027: `/usage` needs both credentials' figures out of one month, and the
+ * two must never be added together — a Shared Window Task carries a cost because
+ * Claude Code prices every Turn, and nobody is billed it.
+ */
+describe('a calendar month split by credential', () => {
+  it('keeps the two apart, in the order a report reads them', () => {
+    const log = new AuditLog({ auditRoot: newDir() })
+    log.record(entry({ costUsd: 0.01 }))
+    log.record(entry({ kind: 'relay', taskId: 'relay-one', costUsd: 0 }))
+    log.record(entry({ credential: 'overflow', apiKeySource: 'ANTHROPIC_API_KEY', costUsd: 0.9 }))
+
+    expect(log.breakdownFor(MONTH)).toEqual({
+      month: MONTH,
+      unreadable: 0,
+      spend: [
+        {
+          runtime: 'claude-code',
+          credential: 'shared-window',
+          tasks: 1,
+          relays: 1,
+          costUsd: 0.01,
+          unpriced: 0,
+          mismatched: 0,
+        },
+        {
+          runtime: 'claude-code',
+          credential: 'overflow',
+          tasks: 1,
+          relays: 0,
+          costUsd: 0.9,
+          unpriced: 0,
+          mismatched: 0,
+        },
+      ],
+    })
+  })
+
+  // **Why the walk exists.** A line that cannot be read belongs to no credential,
+  // so it is counted once for the month — where the two filtered totals it
+  // replaces count it in each of them, and a report built from those would say
+  // one torn record twice. `totalFor` goes on doing that on purpose, because a
+  // cap that assumed the line it could not read was not spending is the wrong way
+  // to be wrong.
+  it('counts a line it cannot read once, for the month rather than for a credential', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ costUsd: 0.01 }))
+    appendFileSync(join(dir, `${MONTH}.jsonl`), '{"at":"2026-07-29T10:00:00.000Z","cos')
+
+    const { spend, unreadable } = log.breakdownFor(MONTH)
+    expect(unreadable).toBe(1)
+    expect(spend.map(({ credential, tasks }) => [credential, tasks])).toEqual([
+      ['shared-window', 1],
+      ['overflow', 0],
+    ])
+    expect(
+      log.totalFor(MONTH, 'shared-window').unreadable + log.totalFor(MONTH, 'overflow').unreadable,
+    ).toBe(2)
+  })
+
+  // Both are facts about a record that read back perfectly well and named its
+  // credential, so both land on it. What a report may not do is print the
+  // mismatch beside that credential's figure — the count says the credential on
+  // the record is not to be believed.
+  it('files an unpriced Turn and a credential that disagreed under their own', () => {
+    const log = new AuditLog({ auditRoot: newDir() })
+    log.record(entry({ apiKeySource: 'ANTHROPIC_API_KEY', costUsd: 0.02 }))
+    log.record(entry({ credential: 'overflow', apiKeySource: 'ANTHROPIC_API_KEY', costUsd: null }))
+
+    expect(log.breakdownFor(MONTH).spend).toMatchObject([
+      { credential: 'shared-window', mismatched: 1, unpriced: 0 },
+      { credential: 'overflow', mismatched: 0, unpriced: 1 },
+    ])
+  })
+
+  it('reads a month nothing ran in as a month with nothing in it', () => {
+    const log = new AuditLog({ auditRoot: newDir() })
+
+    expect(log.breakdownFor('2019-04')).toEqual({
+      month: '2019-04',
+      unreadable: 0,
+      spend: [
+        {
+          runtime: 'claude-code',
+          credential: 'shared-window',
+          tasks: 0,
+          relays: 0,
+          costUsd: 0,
+          unpriced: 0,
+          mismatched: 0,
+        },
+        {
+          runtime: 'claude-code',
+          credential: 'overflow',
+          tasks: 0,
+          relays: 0,
+          costUsd: 0,
+          unpriced: 0,
+          mismatched: 0,
+        },
+      ],
+    })
+  })
+
+  // The fold, from the other side: what the Overflow cap reads is this walk
+  // added up, filtered where it asked for one credential. Its `mismatched` stays
+  // filtered with it — that number is about the credential the cap is enforcing
+  // on, and it is the one caller entitled to read it that way.
+  it('adds up to what the month’s total says, filtered and whole', () => {
+    const log = new AuditLog({ auditRoot: newDir() })
+    log.record(entry({ apiKeySource: 'ANTHROPIC_API_KEY', costUsd: 0.02 }))
+    log.record(entry({ credential: 'overflow', apiKeySource: 'ANTHROPIC_API_KEY', costUsd: null }))
+
+    expect(log.totalFor(MONTH)).toMatchObject({
+      tasks: 2,
+      costUsd: 0.02,
+      unpriced: 1,
+      mismatched: 1,
+    })
+    expect(log.totalFor(MONTH, 'overflow')).toMatchObject({
+      tasks: 1,
+      costUsd: 0,
+      unpriced: 1,
+      mismatched: 0,
+    })
+  })
+})
+
 describe('reading records that a machine got half way through writing', () => {
   // A power loss mid-append leaves exactly this. Losing the month's total to it
   // would leave the cap unenforceable over one truncated line, and skipping it
@@ -378,6 +507,114 @@ describe('telling a Relay from a Task', () => {
       tasks: 1,
       relays: 1,
       costUsd: 0.060000000000000005,
+    })
+  })
+})
+
+/**
+ * ADR-0027: the credential on a record says which of the two *bills* a Task
+ * landed on and nothing about whose subscription. A Shared Window is one per
+ * Runtime, so a month added up without this sums two separate quotas into one
+ * figure the day there are two.
+ */
+describe('which Runtime served a Task', () => {
+  it('keeps the Runtime across a restart', () => {
+    const dir = newDir()
+    new AuditLog({ auditRoot: dir }).record(entry({ runtime: 'claude-code' }))
+
+    const [record] = new AuditLog({ auditRoot: dir }).readMonth(MONTH)
+    expect(record?.runtime).toBe('claude-code')
+  })
+
+  // Absent is Claude Code, the way an absent `kind` is a Task: it is what every
+  // record written while there was one Runtime ran on, since nothing else was
+  // reachable. Requiring it would make all of them unreadable at once — a
+  // dropped line leaves the month's total, and the month's total is what the
+  // Overflow cap is enforced against.
+  it('reads a record with no Runtime on it as Claude Code’s', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ costUsd: 0.01 }))
+
+    const [record] = log.readMonth(MONTH)
+    // Absent, and left absent. Nothing here fills the field in on the way back.
+    expect(record?.runtime).toBeUndefined()
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 0, costUsd: 0.01 })
+    expect(log.breakdownFor(MONTH).spend).toMatchObject([
+      { runtime: 'claude-code', credential: 'shared-window', tasks: 1, costUsd: 0.01 },
+      { runtime: 'claude-code', credential: 'overflow', tasks: 0 },
+    ])
+  })
+
+  // **`codex` is not a Runtime this version can name, and that is the whole
+  // point of writing the field now.** Read as Claude Code it would put another
+  // subscription's draw into Claude Code's figure, which is the one confusion
+  // the field exists to remove — so the line is unreadable, and an unreadable
+  // line is reported where a wrong one is not.
+  it('refuses a Runtime it does not know', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ costUsd: 0.01 }))
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), runtime: 'codex', costUsd: 0.05, at: new Date().toISOString() })}\n`,
+    )
+
+    // The five cents are out of the month rather than filed under Claude Code.
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1, costUsd: 0.01 })
+  })
+
+  // A line that cannot be read names no Runtime either, so it stays the month's.
+  // Counted onto the buckets it would be counted once per figure the report
+  // prints — one torn record read as two the day there are two Runtimes, which
+  // is the double count `breakdownFor` was built to stop one dimension down.
+  it('keeps an unreadable line the month’s, whatever the month is split by', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ costUsd: 0.01 }))
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), runtime: 'codex', at: new Date().toISOString() })}\n`,
+    )
+
+    const { spend, unreadable } = log.breakdownFor(MONTH)
+    expect(unreadable).toBe(1)
+    expect(spend.some((bucket) => 'unreadable' in bucket)).toBe(false)
+    expect(spend.map(({ runtime, tasks }) => [runtime, tasks])).toEqual([
+      ['claude-code', 1],
+      ['claude-code', 0],
+    ])
+  })
+
+  // **The Overflow cap's only caller, and a second dimension may not move it.**
+  // A month with both credentials, a Turn nothing priced, a credential Claude
+  // Code contradicted, a torn line, and records with and without the field: the
+  // figures are what the same month gave before it existed, because `totalFor`
+  // filters by credential and never by Runtime.
+  it('leaves what the Overflow cap reads exactly where it was', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ costUsd: 0.01 }))
+    log.record(entry({ credential: 'overflow', apiKeySource: 'ANTHROPIC_API_KEY', costUsd: 0.9 }))
+    log.record(entry({ credential: 'overflow', apiKeySource: 'ANTHROPIC_API_KEY', costUsd: null }))
+    log.record(
+      entry({
+        credential: 'overflow',
+        apiKeySource: 'none',
+        costUsd: 0.05,
+        runtime: 'claude-code',
+      }),
+    )
+    appendFileSync(join(dir, `${MONTH}.jsonl`), '{"at":"2026-07-29T10:00:00.000Z","cos')
+
+    expect(log.totalFor(MONTH, 'overflow')).toEqual({
+      month: MONTH,
+      tasks: 3,
+      relays: 0,
+      costUsd: 0.9500000000000001,
+      unpriced: 1,
+      unreadable: 1,
+      mismatched: 1,
     })
   })
 })

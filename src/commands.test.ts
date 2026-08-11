@@ -9,12 +9,13 @@ function commandIn(text: string): string | null {
 }
 
 describe('reading a message as a Command', () => {
-  it('recognises the five Commands roma has', () => {
+  it('recognises the six Commands roma has', () => {
     expect(commandIn('/stop')).toBe('stop')
     expect(commandIn('/clear')).toBe('clear')
     expect(commandIn('/model')).toBe('model')
     expect(commandIn('/effort')).toBe('effort')
     expect(commandIn('/config')).toBe('config')
+    expect(commandIn('/usage')).toBe('usage')
   })
 
   // ADR-0013. `clear` is Claude Code's name for this and `new` is one of its two
@@ -49,6 +50,18 @@ describe('reading a message as a Command', () => {
   it('answers to both of Claude Code’s spellings for its settings', () => {
     expect(commandIn('/config')).toBe('config')
     expect(commandIn('/settings')).toBe('config')
+  })
+
+  // The same rule for a fault it was not written for. These three were free
+  // Relays and answered by the real command, so leaving one behind would cost
+  // nobody a Turn — it would leave a spelling answering about the process that
+  // happens to be serving this Session next to one answering about the
+  // deployment, which is ADR-0013's fault with the money swapped for a number
+  // (ADR-0027). Three spellings, one Command; six is still the Commands.
+  it('answers to all three of Claude Code’s spellings for its usage', () => {
+    expect(commandIn('/usage')).toBe('usage')
+    expect(commandIn('/cost')).toBe('usage')
+    expect(commandIn('/stats')).toBe('usage')
   })
 
   // ADR-0014's rule, now carrying three heads: a listed head may take an
@@ -118,6 +131,17 @@ describe('reading a message as a Command', () => {
     it('grants the argument to no other Command', () => {
       expect(readCommand('/stop the deploy')).toBeNull()
       expect(readCommand('/clear foo')).toBeNull()
+    })
+
+    // On all three spellings, and the gap is the one `/clear foo` has had since
+    // ADR-0013: roma's `/usage` has nothing to name — not a month, not a person,
+    // not a Session — so each falls through and is billed as prose. Recorded by
+    // ADR-0027 rather than closed, because closing it means deciding what a
+    // shared thread may ask about other people.
+    it('does not grant it to the usage Command, which is a gap ADR-0027 left open', () => {
+      expect(readCommand('/usage july')).toBeNull()
+      expect(readCommand('/cost ada')).toBeNull()
+      expect(readCommand('/stats today')).toBeNull()
     })
 
     // `/settings` is on the whole-message list and deliberately not on this one,

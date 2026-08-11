@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { Attempts, waitMsUntil } from './attempts.js'
-import { monthOf, type AuditLog, type TaskOutcome } from './audit-log.js'
+import {
+  monthOf,
+  type AuditBreakdown,
+  type AuditLog,
+  type CredentialSpend,
+  type TaskOutcome,
+} from './audit-log.js'
 import type { CredentialKind } from './build-env.js'
 import { attributed, relayed } from './attribution.js'
 import type {
@@ -30,6 +36,7 @@ import {
 } from './model-menu.js'
 import { readRelay, type RelayRequest } from './relays.js'
 import { ProgressReporter } from './progress-reporter.js'
+import { RUNTIME_NAMES, type Runtime } from './runtime.js'
 import {
   ChosenEffortNotOffered,
   ChosenModelNotOffered,
@@ -502,7 +509,7 @@ export class Core {
    * kind of message. Everything that is none of them is work.
    *
    * Order matters, and only in one direction: a Command is checked first so
-   * that roma's own five can never be shadowed by something added to the Relay
+   * that roma's own six can never be shadowed by something added to the Relay
    * list. Nothing is on both lists and `relays.test.ts` is what keeps that true —
    * Claude Code has a `/stop` of its own, and roma's is the one that must win.
    * Since ADR-0013 the same is true of `/clear`, where it is a safety property
@@ -814,6 +821,7 @@ export class Core {
       durationMs: Date.now() - startedAt,
       turnMs: turn?.durationMs ?? null,
       credential: this.#credential,
+      runtime: EVERY_SESSION_RUNS_ON,
       model: model ?? this.#models.pinned,
       effort: effortOn(model ?? this.#models.pinned, effort ?? this.#efforts.pinned),
       // Asked rather than assumed false. A free Relay drives no Turn so nothing
@@ -851,10 +859,13 @@ export class Core {
 
     let instruction: OutboundInstruction
     try {
-      // The three that answer with prose and the two that answer with an
-      // outcome, told apart here rather than inside `#carryOut` — "it was carried
-      // out" is not what any of the first three say, and `#carryOut`'s type is
-      // what stops a sixth Command being added without this deciding which it is.
+      // The four that answer with prose and the two that answer with an
+      // outcome, told apart here rather than inside `#carryOut` — "it was
+      // carried out" is not what any of the first four say. Never define
+      // `#carryOut`'s parameter by subtracting these four: naming the two it
+      // handles is what made the sixth Command a compile error here until this
+      // said which of the two it is. Subtracted, it would have landed inside
+      // that type and been answered as a second `/stop`.
       instruction =
         request.command === 'model'
           ? this.#answerModel(readModelRequest(request.argument), conversationKey, address)
@@ -862,12 +873,14 @@ export class Core {
             ? this.#answerEffort(readEffortRequest(request.argument), conversationKey, address)
             : request.command === 'config'
               ? this.#answerConfig(request.argument, conversationKey, address)
-              : {
-                  kind: 'command-outcome',
-                  ...address,
-                  command: request.command,
-                  carriedOut: this.#carryOut(request.command, conversationKey),
-                }
+              : request.command === 'usage'
+                ? this.#answerUsage(address)
+                : {
+                    kind: 'command-outcome',
+                    ...address,
+                    command: request.command,
+                    carriedOut: this.#carryOut(request.command, conversationKey),
+                  }
     } catch (error) {
       // Silence is not an outcome here either. Nothing routine reaches this —
       // it takes a generation record roma cannot read, or a Conversation Key an
@@ -1105,6 +1118,23 @@ export class Core {
   }
 
   /**
+   * Say what the deployment has spent this calendar month.
+   *
+   * **Never narrow it to the Conversation that asked.** It is the one Command
+   * that ignores the Conversation Key, and six Commands tidied into a single
+   * shape is how that would go: the figures are the deployment's, so a `/usage`
+   * that answered differently by thread would be answering a different question
+   * rather than a narrower one (ADR-0027).
+   */
+  #answerUsage(address: TaskAddress): OutboundInstruction {
+    return {
+      kind: 'result',
+      ...address,
+      text: monthReport(this.#audit.breakdownFor(monthOf(new Date()))),
+    }
+  }
+
+  /**
    * Both of what this Session is set to, in one sentence.
    *
    * Built from the same two methods `/model` and `/effort` report with, rather
@@ -1150,21 +1180,23 @@ export class Core {
   }
 
   /** Do what the Command asks, and say whether there was anything to do. */
-  #carryOut(
-    command: Exclude<Command, 'model' | 'effort' | 'config'>,
-    conversationKey: string,
-  ): boolean {
-    if (command === 'clear') {
-      // Nothing is torn down. `/clear` is aimed at what the *next* message
-      // reaches: a Task already running in the old Session finishes and still
-      // answers the person who asked, and the process behind it is left to the
-      // pool, which reaps or evicts it like any other Session nobody is talking
-      // to any more. Always true — a Conversation can always be given a Session
-      // with nothing in it, including one that has never had a Session at all.
-      this.#sessions.freshSession(conversationKey)
-      return true
+  #carryOut(command: Extract<Command, 'stop' | 'clear'>, conversationKey: string): boolean {
+    // Not an `if` whose else is `/stop`: a third Command added to the parameter
+    // above stops this compiling instead of being answered as `/stop`.
+    switch (command) {
+      case 'clear':
+        // Nothing is torn down. `/clear` is aimed at what the *next* message
+        // reaches: a Task already running in the old Session finishes and still
+        // answers the person who asked, and the process behind it is left to
+        // the pool, which reaps or evicts it like any other Session nobody is
+        // talking to any more. Always true — a Conversation can always be given
+        // a Session with nothing in it, including one that has never had a
+        // Session at all.
+        this.#sessions.freshSession(conversationKey)
+        return true
+      case 'stop':
+        return this.#stop(conversationKey)
     }
-    return this.#stop(conversationKey)
   }
 
   /**
@@ -1385,6 +1417,10 @@ export class Core {
         durationMs,
         turnMs: paid.turnMs,
         credential,
+        // Which of the two bills, then whose. Outside the loop's business: the
+        // credential moved between Attempts and a Session's Runtime is fixed for
+        // its life (ADR-0025), so both records of one Task name the same one.
+        runtime: EVERY_SESSION_RUNS_ON,
         // What this Task ran on. The Pinned Model only where roma never got as
         // far as a Session to ask about — the same failure that leaves
         // `sessionId` null — because a row that says nothing is a row the month's
@@ -1777,6 +1813,17 @@ export class Core {
 }
 
 /**
+ * The Runtime every Session runs on, while a deployment has one to give
+ * (ADR-0025).
+ *
+ * **Never go on writing this once a Session has a Runtime of its own** — the
+ * point at which ADR-0027 has the record read it from there instead. A Codex
+ * Task recorded as Claude Code's is filed against the wrong Shared Window, and
+ * telling two windows apart is the only thing the field is for.
+ */
+const EVERY_SESSION_RUNS_ON: Runtime = 'claude-code'
+
+/**
  * What roma says about a Task that failed on roma's side rather than in the Turn.
  *
  * Fixed, never the error's own message: those are written for whoever reads the
@@ -1928,6 +1975,82 @@ const CONFIG_SETS_NOTHING =
   'roma does not set Claude Code settings — every Session in this deployment shares one ' +
   'configuration, so a change here would be a change for everybody, permanently. ' +
   'What you can set for this conversation is “/model” and “/effort”. Nothing has changed.'
+
+/**
+ * What the deployment drew and what it was billed, for one calendar month.
+ *
+ * **Never one figure.** What the subscription drew is priced work nobody is
+ * billed for, so a sum across the two registers prints it as money, and a sum
+ * across Runtimes adds two separate subscriptions' quotas — the arithmetic
+ * roma's own Overflow cap is built to avoid (ADR-0027).
+ */
+function monthReport({ month, spend, unreadable }: AuditBreakdown): string {
+  const named = monthNamed(month)
+  // A refusal rather than a figure with a footnote under it. Either count above
+  // zero says the records are not describing what they claim to, and a footnote
+  // is not read as a reason to disbelieve the number above it.
+  if (unreadable > 0 || spend.some(({ mismatched }) => mismatched > 0)) {
+    return (
+      `roma cannot vouch for ${named} and is printing no figure for it. ` +
+      'Some of the month’s audit records cannot be read back, or name a credential ' +
+      'Claude Code contradicted — either way a total here would be describing ' +
+      'something other than what it says.'
+    )
+  }
+  if (spend.every(({ tasks, relays }) => tasks + relays === 0)) return `${named}: nothing has run.`
+  return [`${named}.`, ...spend.map(spendLine)].join('\n')
+}
+
+/** One credential's line on one Runtime, in the register that credential is read in. */
+function spendLine({ runtime, credential, costUsd, unpriced }: CredentialSpend): string {
+  // A floor where the month holds a Turn that began and was never priced. The
+  // count itself stays off the line: a column that reads zero for ever is a
+  // column nobody reads (ADR-0027).
+  const figure = `${unpriced === 0 ? '' : 'at least '}$${money(costUsd)}`
+  // Never leave the Runtime off because there is only one: a sentence about a
+  // Shared Window has to say whose (`CONTEXT.md`), and a line worded for the
+  // deployment goes on reading right at the moment a second Runtime makes it
+  // wrong.
+  const named = RUNTIME_NAMES[runtime]
+  switch (credential) {
+    case 'shared-window':
+      return `${named}’s subscription drew ${figure} worth of work. Nobody is billed for that.`
+    case 'overflow':
+      return `Metered billing charged ${figure} for Tasks on ${named}.`
+  }
+}
+
+/** Money as people read it, which is two decimal places and no more. */
+function money(usd: number): string {
+  return usd.toFixed(2)
+}
+
+/** The months in English, because a figure's month is read rather than filed. */
+const MONTH_NAMES: readonly string[] = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
+
+/**
+ * Which month a report covers, and that it is a UTC one — `monthOf` slices an
+ * ISO string, so it is deliberately not the reader's month (ADR-0027).
+ */
+function monthNamed(month: string): string {
+  const [year, ordinal] = month.split('-')
+  const name = MONTH_NAMES[Number(ordinal) - 1]
+  if (name === undefined || year === undefined) return month
+  return `${name} ${year} (UTC)`
+}
 
 /**
  * One model, in both spellings a person needs: the name is what they may type

@@ -4,10 +4,17 @@ Date: 2026-08-11
 
 ## Status
 
-Proposed — the decisions below came out of a grilling session rather than a
-build, and this pull request is documentation only. `src/relays.ts`,
-`src/commands.ts`, `src/audit-log.ts` and `src/core.ts` are all unchanged by it,
-so until they move, `/usage` goes on doing what *Context* describes.
+Accepted, and **implemented** (#165, #166). `/usage`, `/cost` and `/stats` are
+Commands answered from the Audit Records by a single walk of the month —
+`AuditLog.breakdownFor`, which `totalFor` is now folded from — and the Relay list
+is the two entries this ADR leaves it at. Every record roma writes now names the
+Runtime that served it: absent reads as Claude Code, a value roma cannot name
+makes the line unreadable, and the month is split by Runtime as well as by
+credential, so the report gives both registers per Runtime — two lines today. The
+`Runtime` type *The Runtime goes on the Audit Record now* found nowhere in `src/`
+is `src/runtime.ts`, beside the closed list of them. Nobody has yet asked whether
+`/context` is Eviction-invariant, which is where the *Verification agenda* below
+still stands.
 
 Third in the family ADR-0013 and ADR-0017 began, and the one that changes what
 the family is about. Both of those claimed a spelling because leaving it

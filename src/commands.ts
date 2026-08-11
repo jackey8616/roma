@@ -1,19 +1,21 @@
 /**
- * The five things a person can say that roma answers itself.
+ * The six things a person can say that roma answers itself.
  *
  * `stop` ends the Task running now and leaves the Session intact, so the next
  * message can redirect it rather than start over. `clear` gives the
  * Conversation a Session with nothing in it, for when the context has gone
  * stale or wrong. `model` says which model that Session runs on, `effort` says
- * how hard it is asked to think, and `config` says both at once and refuses to
- * set anything else.
+ * how hard it is asked to think, `config` says both at once and refuses to set
+ * anything else, and `usage` says what the deployment has spent this calendar
+ * month.
  *
- * There are five here, and the number has moved twice: ADR-0014 took ADR-0003's
- * two to three, and ADR-0016 and ADR-0017 take it to five. Everything else a
- * person types is work for Claude Code — apart from the few of Claude Code's own
- * commands ADR-0012 relays as a Relay. Five is a count of Commands and not of
- * spellings: ADR-0013 gives the reset three and ADR-0017 gives `/config` two,
- * and neither moved the number here.
+ * There are six here, and the number has moved three times: ADR-0014 took
+ * ADR-0003's two to three, ADR-0016 and ADR-0017 take it to five, and ADR-0027
+ * takes it to six. Everything else a person types is work for Claude Code —
+ * apart from the few of Claude Code's own commands ADR-0012 relays as a Relay.
+ * Six is a count of Commands and not of spellings: ADR-0013 gives the reset
+ * three, ADR-0017 gives `/config` two and ADR-0027 gives `usage` three, and none
+ * of them moved the number here.
  *
  * This comment used to say that every Claude Code slash command was passed
  * through as work, and it was never true. What is passed through is the *text*
@@ -28,13 +30,20 @@
  * because a relayed `/effort` sets something the build itself calls `this
  * session only`, and the second because a relayed `/config key=value` writes a
  * settings file every Session in the deployment shares.
+ *
+ * `usage` is claimed for a different fault and is the one place the reasoning
+ * above does not reach. Relayed, it was free, non-interactive, and answered by
+ * the real command rather than by a guess about it — so what it cost was not
+ * money but a wrong number, read off counters that belong to a process roma
+ * replaces at every Eviction. A wrong number nobody is billed for announces
+ * itself to nobody, which is why it outranks the ones that do (ADR-0027).
  */
-export type Command = 'stop' | 'clear' | 'model' | 'effort' | 'config'
+export type Command = 'stop' | 'clear' | 'model' | 'effort' | 'config' | 'usage'
 
 /**
  * One Command as it was typed: which one, and what followed it.
  *
- * The argument is null for the two Commands that take none, and for the three
+ * The argument is null for the three Commands that take none, and for the three
  * that do when nothing followed them — which is a request in its own right
  * rather than a malformed one.
  */
@@ -68,6 +77,9 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   '/effort': 'effort',
   '/config': 'config',
   '/settings': 'config',
+  '/usage': 'usage',
+  '/cost': 'usage',
+  '/stats': 'usage',
 }
 
 /**

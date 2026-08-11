@@ -5,9 +5,6 @@ import { readRelay, relaySpellings } from './relays.js'
 describe('reading a Relay', () => {
   it('recognises every entry on the list', () => {
     expect(readRelay('/context')).toEqual({ command: '/context', argument: null, cost: 'free' })
-    expect(readRelay('/usage')).toEqual({ command: '/usage', argument: null, cost: 'free' })
-    expect(readRelay('/cost')).toEqual({ command: '/cost', argument: null, cost: 'free' })
-    expect(readRelay('/stats')).toEqual({ command: '/stats', argument: null, cost: 'free' })
     expect(readRelay('/compact')).toEqual({ command: '/compact', argument: null, cost: 'paid' })
   })
 
@@ -31,9 +28,21 @@ describe('reading a Relay', () => {
     expect(readRelay('/autocompact off')).toBeNull()
   })
 
+  // The membership rule's second clause, which has exactly one case and this is
+  // it. All three changed nothing roma holds a belief about and passed the table
+  // above exactly as written; what took them off the list is only ever what
+  // their answer was about — the process's counters, zeroed at every spawn
+  // (ADR-0027). Named here rather than left to the no-overlap check below, which
+  // catches one of them coming back and says nothing about why it may not.
+  it('leaves the spellings whose answer was the process’s alone', () => {
+    expect(readRelay('/usage')).toBeNull()
+    expect(readRelay('/cost')).toBeNull()
+    expect(readRelay('/stats')).toBeNull()
+  })
+
   it('wants the whole message where the entry takes no argument', () => {
     // The property the marker-last placement rests on, and it is unchanged for
-    // the four free entries. A message that is one of those plus anything else is
+    // the one free entry. A message that is `/context` plus anything else is
     // work, so what reaches `relayed` is only ever a string from roma's own
     // table — and there is no Caller text for a forged marker to hide in.
     expect(readRelay('/context please')).toBeNull()
@@ -66,7 +75,7 @@ describe('reading a Relay', () => {
     // A phone keyboard capitalises the first letter on its own. What goes on the
     // wire is the table's spelling either way, never the typed one.
     expect(readRelay('/Context')?.command).toBe('/context')
-    expect(readRelay('  /USAGE  ')?.command).toBe('/usage')
+    expect(readRelay('  /COMPACT  ')?.command).toBe('/compact')
     expect(readRelay('/Compact keep the ADRs')).toEqual({
       command: '/compact',
       argument: 'keep the ADRs',
@@ -125,7 +134,10 @@ describe('reading a Relay', () => {
       '/effort',
       '/config',
       '/settings',
+      '/usage',
+      '/cost',
+      '/stats',
     ])
-    expect(relaySpellings()).toEqual(['/context', '/usage', '/cost', '/stats', '/compact'])
+    expect(relaySpellings()).toEqual(['/context', '/compact'])
   })
 })
