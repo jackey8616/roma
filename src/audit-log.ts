@@ -388,6 +388,74 @@ export interface AuditTotal {
   readonly mismatched: number
 }
 
+/** Both credentials, for reading a record back and for the order a month reports them in. */
+const CREDENTIALS: readonly CredentialKind[] = ['shared-window', 'overflow']
+
+/**
+ * What one credential drew in a calendar month.
+ *
+ * The four figures are `AuditTotal`'s, counted over this credential's records
+ * alone. What is not here is `unreadable`: a line that cannot be read cannot be
+ * said to belong to one credential rather than the other, so it belongs to the
+ * month.
+ *
+ * Kept apart from the other credential and **never added to it**. A Shared
+ * Window Task carries a `costUsd` because Claude Code prices every Turn and
+ * nobody is billed it, so one sum reports subscription draw as money — the
+ * arithmetic the Overflow cap already refuses (ADR-0027).
+ */
+export interface CredentialSpend {
+  readonly credential: CredentialKind
+  readonly tasks: number
+  readonly relays: number
+  readonly costUsd: number
+  readonly unpriced: number
+  /**
+   * Records roma filed under this credential that Claude Code contradicted.
+   *
+   * Per credential because `totalFor` has always counted it for the credential
+   * it was asked about. What may not be done with it is print it beside that
+   * credential's figure: the count says the record's own `credential` is not to
+   * be believed, so attributing it to one is asserting the thing in doubt. A
+   * report reads it for the month and prints no number (ADR-0027).
+   */
+  readonly mismatched: number
+}
+
+/**
+ * One calendar month, split by credential, plus the one count that has no
+ * credential to belong to.
+ *
+ * **The only walk of a month's file there is.** `totalFor` folds this down, so a
+ * caller that wants both figures asks once — where two filtered totals would
+ * read the month from disk twice and count every unreadable line in each of
+ * them, reporting one torn record as two.
+ */
+export interface AuditBreakdown {
+  readonly month: string
+  /** One entry per credential, both always present, in the order above. */
+  readonly spend: readonly CredentialSpend[]
+  /** The month's, and what `AuditTotal.unreadable` carries whole. */
+  readonly unreadable: number
+}
+
+/** One column of a month's credentials, added up. */
+function sumOf(
+  spend: readonly CredentialSpend[],
+  field: keyof Omit<CredentialSpend, 'credential'>,
+) {
+  return spend.reduce((total, entry) => total + entry[field], 0)
+}
+
+/** What one credential has drawn so far, while the walk is still going. */
+interface Tally {
+  tasks: number
+  relays: number
+  costUsd: number
+  unpriced: number
+  mismatched: number
+}
+
 /**
  * Whether the credential roma ran a Task on is the one that paid for it.
  *
@@ -516,18 +584,18 @@ export class AuditLog {
   }
 
   /**
-   * What one calendar month came to, which is what the Overflow cap needs.
+   * What one calendar month came to, per credential and unsummed.
    *
-   * Filtered by credential where the caller has one in mind: the cap is on
-   * metered spend, and Shared Window Tasks are not spend in the sense it means.
+   * Every rule for reading this file lives here, because every other reading is
+   * folded from it. A second walk written beside this one is a second answer to
+   * "what is in the month" that nothing keeps in step.
    */
-  totalFor(month: string, credential?: CredentialKind): AuditTotal {
-    let tasks = 0
-    let relays = 0
-    let costUsd = 0
-    let unpriced = 0
+  breakdownFor(month: string): AuditBreakdown {
+    const drawn: Record<CredentialKind, Tally> = {
+      'shared-window': { tasks: 0, relays: 0, costUsd: 0, unpriced: 0, mismatched: 0 },
+      overflow: { tasks: 0, relays: 0, costUsd: 0, unpriced: 0, mismatched: 0 },
+    }
     let unreadable = 0
-    let mismatched = 0
 
     for (const line of this.#linesOf(month)) {
       const record = readRecord(line)
@@ -535,21 +603,48 @@ export class AuditLog {
         unreadable += 1
         continue
       }
-      if (credential !== undefined && record.credential !== credential) continue
+      const tally = drawn[record.credential]
       // A record written before Relays existed carries no kind and is a Task,
       // which is the only thing it can have been. A record written before the
       // ADR-0018 rename carries `readout` and never reaches here at all —
       // `readRecord` drops it, and it is counted in `unreadable` above.
-      if (record.kind === 'relay') relays += 1
-      else tasks += 1
+      if (record.kind === 'relay') tally.relays += 1
+      else tally.tasks += 1
       // Counted as having happened and left out of the money, which is the only
       // honest pair of answers: it happened, and what it cost is not knowable.
-      if (record.costUsd === null) unpriced += 1
-      else costUsd += record.costUsd
-      if (!paidAsIntended(record)) mismatched += 1
+      if (record.costUsd === null) tally.unpriced += 1
+      else tally.costUsd += record.costUsd
+      if (!paidAsIntended(record)) tally.mismatched += 1
     }
 
-    return { month, tasks, relays, costUsd, unpriced, unreadable, mismatched }
+    return {
+      month,
+      spend: CREDENTIALS.map((credential) => ({ credential, ...drawn[credential] })),
+      unreadable,
+    }
+  }
+
+  /**
+   * What one calendar month came to, which is what the Overflow cap needs.
+   *
+   * Filtered by credential where the caller has one in mind: the cap is on
+   * metered spend, and Shared Window Tasks are not spend in the sense it means.
+   * `unreadable` is carried whole either way — see the field.
+   */
+  totalFor(month: string, credential?: CredentialKind): AuditTotal {
+    const { spend, unreadable } = this.breakdownFor(month)
+    const counted =
+      credential === undefined ? spend : spend.filter((entry) => entry.credential === credential)
+
+    return {
+      month,
+      tasks: sumOf(counted, 'tasks'),
+      relays: sumOf(counted, 'relays'),
+      costUsd: sumOf(counted, 'costUsd'),
+      unpriced: sumOf(counted, 'unpriced'),
+      unreadable,
+      mismatched: sumOf(counted, 'mismatched'),
+    }
   }
 
   /** A month nothing was written in reads as a month with nothing in it. */
@@ -648,6 +743,6 @@ function readRecord(line: string): AuditRecord | null {
   // whole account of why a Task cost several times what its neighbours did, and a
   // line that answers that with a string answers it wrongly.
   if (record['compaction'] !== undefined && !isCompaction(record['compaction'])) return null
-  if (record['credential'] !== 'shared-window' && record['credential'] !== 'overflow') return null
+  if (!CREDENTIALS.includes(record['credential'] as CredentialKind)) return null
   return record as unknown as AuditRecord
 }

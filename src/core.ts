@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { Attempts, waitMsUntil } from './attempts.js'
-import { monthOf, type AuditLog, type TaskOutcome } from './audit-log.js'
+import {
+  monthOf,
+  type AuditBreakdown,
+  type AuditLog,
+  type CredentialSpend,
+  type TaskOutcome,
+} from './audit-log.js'
 import type { CredentialKind } from './build-env.js'
 import { attributed, relayed } from './attribution.js'
 import type {
@@ -502,7 +508,7 @@ export class Core {
    * kind of message. Everything that is none of them is work.
    *
    * Order matters, and only in one direction: a Command is checked first so
-   * that roma's own five can never be shadowed by something added to the Relay
+   * that roma's own six can never be shadowed by something added to the Relay
    * list. Nothing is on both lists and `relays.test.ts` is what keeps that true —
    * Claude Code has a `/stop` of its own, and roma's is the one that must win.
    * Since ADR-0013 the same is true of `/clear`, where it is a safety property
@@ -851,13 +857,13 @@ export class Core {
 
     let instruction: OutboundInstruction
     try {
-      // The three that answer with prose and the two that answer with an
+      // The four that answer with prose and the two that answer with an
       // outcome, told apart here rather than inside `#carryOut` — "it was
-      // carried out" is not what any of the first three say. Never define
-      // `#carryOut`'s parameter by subtracting these three: naming the two it
-      // handles is what makes a sixth Command a compile error here until this
-      // says which of the two it is. Subtracted, it would land inside that type
-      // and be answered as a second `/stop`.
+      // carried out" is not what any of the first four say. Never define
+      // `#carryOut`'s parameter by subtracting these four: naming the two it
+      // handles is what made the sixth Command a compile error here until this
+      // said which of the two it is. Subtracted, it would have landed inside
+      // that type and been answered as a second `/stop`.
       instruction =
         request.command === 'model'
           ? this.#answerModel(readModelRequest(request.argument), conversationKey, address)
@@ -865,12 +871,14 @@ export class Core {
             ? this.#answerEffort(readEffortRequest(request.argument), conversationKey, address)
             : request.command === 'config'
               ? this.#answerConfig(request.argument, conversationKey, address)
-              : {
-                  kind: 'command-outcome',
-                  ...address,
-                  command: request.command,
-                  carriedOut: this.#carryOut(request.command, conversationKey),
-                }
+              : request.command === 'usage'
+                ? this.#answerUsage(address)
+                : {
+                    kind: 'command-outcome',
+                    ...address,
+                    command: request.command,
+                    carriedOut: this.#carryOut(request.command, conversationKey),
+                  }
     } catch (error) {
       // Silence is not an outcome here either. Nothing routine reaches this —
       // it takes a generation record roma cannot read, or a Conversation Key an
@@ -1104,6 +1112,23 @@ export class Core {
       kind: 'result',
       ...address,
       text: this.#settingsReport(this.#sessions.sessionFor(conversationKey)),
+    }
+  }
+
+  /**
+   * Say what the deployment has spent this calendar month.
+   *
+   * **Never narrow it to the Conversation that asked.** It is the one Command
+   * that ignores the Conversation Key, and six Commands tidied into a single
+   * shape is how that would go: the figures are the deployment's, so a `/usage`
+   * that answered differently by thread would be answering a different question
+   * rather than a narrower one (ADR-0027).
+   */
+  #answerUsage(address: TaskAddress): OutboundInstruction {
+    return {
+      kind: 'result',
+      ...address,
+      text: monthReport(this.#audit.breakdownFor(monthOf(new Date()))),
     }
   }
 
@@ -1933,6 +1958,76 @@ const CONFIG_SETS_NOTHING =
   'roma does not set Claude Code settings — every Session in this deployment shares one ' +
   'configuration, so a change here would be a change for everybody, permanently. ' +
   'What you can set for this conversation is “/model” and “/effort”. Nothing has changed.'
+
+/**
+ * What the deployment drew and what it was billed, for one calendar month.
+ *
+ * **Never one figure.** What the subscription drew is priced work nobody is
+ * billed for, so a sum would print it as money — the arithmetic roma's own
+ * Overflow cap is built to avoid (ADR-0027).
+ */
+function monthReport({ month, spend, unreadable }: AuditBreakdown): string {
+  const named = monthNamed(month)
+  // A refusal rather than a figure with a footnote under it. Either count above
+  // zero says the records are not describing what they claim to, and a footnote
+  // is not read as a reason to disbelieve the number above it.
+  if (unreadable > 0 || spend.some(({ mismatched }) => mismatched > 0)) {
+    return (
+      `roma cannot vouch for ${named} and is printing no figure for it. ` +
+      'Some of the month’s audit records cannot be read back, or name a credential ' +
+      'Claude Code contradicted — either way a total here would be describing ' +
+      'something other than what it says.'
+    )
+  }
+  if (spend.every(({ tasks, relays }) => tasks + relays === 0)) return `${named}: nothing has run.`
+  return [`${named}.`, ...spend.map(spendLine)].join('\n')
+}
+
+/** One credential's line, in the register that credential is read in. */
+function spendLine({ credential, costUsd, unpriced }: CredentialSpend): string {
+  // A floor where the month holds a Turn that began and was never priced. The
+  // count itself stays off the line: a column that reads zero for ever is a
+  // column nobody reads (ADR-0027).
+  const figure = `${unpriced === 0 ? '' : 'at least '}$${money(costUsd)}`
+  switch (credential) {
+    case 'shared-window':
+      return `The subscription drew ${figure} worth of work. Nobody is billed for that.`
+    case 'overflow':
+      return `Metered billing charged ${figure}.`
+  }
+}
+
+/** Money as people read it, which is two decimal places and no more. */
+function money(usd: number): string {
+  return usd.toFixed(2)
+}
+
+/** The months in English, because a figure's month is read rather than filed. */
+const MONTH_NAMES: readonly string[] = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
+
+/**
+ * Which month a report covers, and that it is a UTC one — `monthOf` slices an
+ * ISO string, so it is deliberately not the reader's month (ADR-0027).
+ */
+function monthNamed(month: string): string {
+  const [year, ordinal] = month.split('-')
+  const name = MONTH_NAMES[Number(ordinal) - 1]
+  if (name === undefined || year === undefined) return month
+  return `${name} ${year} (UTC)`
+}
 
 /**
  * One model, in both spellings a person needs: the name is what they may type

@@ -4,10 +4,14 @@ Date: 2026-08-11
 
 ## Status
 
-Proposed — the decisions below came out of a grilling session rather than a
-build, and this pull request is documentation only. `src/relays.ts`,
-`src/commands.ts`, `src/audit-log.ts` and `src/core.ts` are all unchanged by it,
-so until they move, `/usage` goes on doing what *Context* describes.
+Accepted, and **implemented but for one field** (#165). `/usage`, `/cost` and
+`/stats` are Commands answered from the Audit Records by a single walk of the
+month — `AuditLog.breakdownFor`, which `totalFor` is now folded from — and the
+Relay list is the two entries this ADR leaves it at. What has not landed is the
+Runtime on the record: that is #166, and until it does the report is the
+deployment's two figures rather than a line per Runtime. Nobody has yet asked
+whether `/context` is Eviction-invariant, which is where the *Verification
+agenda* below still stands.
 
 Third in the family ADR-0013 and ADR-0017 began, and the one that changes what
 the family is about. Both of those claimed a spelling because leaving it

@@ -46,11 +46,21 @@
  * rule rather than as an exception carved for it: `/compact` changes Claude
  * Code's state and changes nothing that is roma's.
  *
+ * **And a second clause: a Relay's answer must be true of the Session, not
+ * merely of the process serving it.** Eviction's promise read as a constraint on
+ * what may be relayed rather than a new rule — the first clause is about changes
+ * and this one is about answers, which is how `/usage` passed the table above
+ * exactly as written while reporting counters that were zeroed at every spawn
+ * (ADR-0027). Unlike the first it is a property a machine can be asked — send
+ * it, evict, resume, send it again, and the answer should not have moved — and
+ * nobody has yet asked it of `/context`, which is now the only free entry there
+ * is to ask it of.
+ *
  * Applied by a person, and re-applied whenever the pin moves — nothing in the
- * stream marks a command as safe, so this cannot be checked by machine. Exactly
- * one part of it can: that no string here is also a Command, which is what keeps
- * the dangerous spellings out of reach by construction rather than by name, and
- * `relays.test.ts` asserts it against the real table.
+ * stream marks a command as safe, so the first clause cannot be checked by
+ * machine. Exactly one part of it can: that no string here is also a Command,
+ * which is what keeps the dangerous spellings out of reach by construction
+ * rather than by name, and `relays.test.ts` asserts it against the real table.
  *
  * A whitelist rather than a denylist, and that is the decision rather than the
  * shortcut. Under a denylist a release that adds a destructive non-interactive
@@ -130,14 +140,6 @@ interface RelayEntry {
 const RELAYS: Readonly<Record<string, RelayEntry>> = {
   // Show current context usage: how full this Session's context window is.
   '/context': { cost: 'free', takesArgument: false },
-  // Show session cost, plan usage, and activity stats — with `/cost` and
-  // `/stats`, which Claude Code declares as aliases of it. The aliases are here
-  // because leaving them out reproduces exactly the fault ADR-0012 exists to
-  // fix, only for two more strings: somebody types `/cost` and is billed for a
-  // plausible sentence about what `/cost` would have said.
-  '/usage': { cost: 'free', takesArgument: false },
-  '/cost': { cost: 'free', takesArgument: false },
-  '/stats': { cost: 'free', takesArgument: false },
   // Replace this Session's conversation with a summary, keeping what the Caller
   // asked to keep. The first entry that costs money, and the whole of ADR-0018.
   //

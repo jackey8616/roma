@@ -63,11 +63,11 @@ describe('framing a Relay whose Caller typed nothing else', () => {
   })
 
   it('still names the Caller, and the same way', () => {
-    expect(relayed({ ...ADA, callerName: null }, { command: '/usage', argument: null })).toBe(
-      '/usage\n\n<from>users/17</from>',
+    expect(relayed({ ...ADA, callerName: null }, { command: '/context', argument: null })).toBe(
+      '/context\n\n<from>users/17</from>',
     )
-    expect(relayed({ ...ADA, callerName: '  ' }, { command: '/usage', argument: null })).toBe(
-      '/usage\n\n<from>users/17</from>',
+    expect(relayed({ ...ADA, callerName: '  ' }, { command: '/context', argument: null })).toBe(
+      '/context\n\n<from>users/17</from>',
     )
   })
 

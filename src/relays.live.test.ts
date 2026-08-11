@@ -25,14 +25,14 @@ import { liveSessionDirs, sharedWindowCredential } from '../test/support/live-cl
 // contract, and it is not.
 //
 // One case per entry, from the real table — a list this iterated by hand would
-// go on passing when somebody added a sixth string to `relays.ts` and forgot
+// go on passing when somebody added a third string to `relays.ts` and forgot
 // this file.
 //
-// **One Session for all of it**, and the order is deliberate. The free entries
-// go first on a process that has spent nothing, then a short conversation, then
-// the paid one — which needs conversation to summarise, and which would fail
-// with "Not enough messages to compact." on an empty Session and pass a check
-// that only looked at the cost.
+// **One Session for both entries, in that order.** `/context` goes first, on a
+// process that has spent nothing, so that its zero is a zero on the wire rather
+// than one the per-Turn differencing produced. Then a short conversation, then
+// `/compact`, which needs one: on an empty Session it fails with "Not enough
+// messages to compact." and would pass a check that only looked at the cost.
 
 const CALLER = { caller: 'users/17', callerName: 'Ada' }
 
@@ -66,7 +66,7 @@ describe('what each entry on the Relay list costs', () => {
     })
     session.start()
 
-    // Every free entry first, on a process with nothing behind it.
+    // The free entry first, on a process with nothing behind it.
     for (const spelling of relaySpellings()) {
       const relay = readRelay(spelling)
       if (relay === null || relay.cost !== 'free') continue
@@ -115,7 +115,7 @@ describe('what each entry on the Relay list costs', () => {
 
     // `num_turns` is asserted on neither branch, and its absence is the finding:
     // it is **0** for a paid `/compact` that spent five cents, exactly as it is
-    // for the four free entries. Reading it here would be re-making the mistake
+    // for the free entry. Reading it here would be re-making the mistake
     // ADR-0012's drift check made.
     if (cost === 'free') {
       // Free means no model work, which is the membership rule's own word, and

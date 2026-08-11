@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
+import { appendFileSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { join, sep } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,6 +12,7 @@ import type {
   PendingEnclosure,
   Quotation,
 } from './channel-adapter.js'
+import { apiKeySourceFor, type CredentialKind } from './build-env.js'
 import { PINNED_EFFORT, PINNED_MODEL } from './claude-session.js'
 import { EFFORT_NOT_APPLIED } from './effort-menu.js'
 import type { RetryBudget } from './config.js'
@@ -247,6 +248,7 @@ function newCore({
   return {
     adapter,
     audit,
+    auditRoot,
     claude,
     core,
     efforts,
@@ -2110,6 +2112,244 @@ describe('what this Conversation is set to', () => {
   })
 })
 
+/**
+ * `/usage`, the sixth Command and the only one that is not about the
+ * Conversation that sent it (ADR-0027).
+ *
+ * It was a free Relay, and every check roma had passed it: it drove no Turn, it
+ * changed nothing roma believed, and Claude Code answered it with the real
+ * command rather than a guess. What it reported were the counters of whichever
+ * process was serving this Session — zeroed at every spawn — so the answer was a
+ * way to observe an Eviction, which `CONTEXT.md` promises nobody can.
+ *
+ * Asserted at the Core, because the whole of it is what a Caller is told and what
+ * is *not* done to get there: no process, no Turn, no record, no queue.
+ */
+describe('what the deployment has spent this month', () => {
+  /** A Task some other Conversation already ran this month, and what it cost. */
+  function spent(
+    audit: AuditLog,
+    {
+      costUsd,
+      credential = 'shared-window',
+      apiKeySource = apiKeySourceFor(credential),
+    }: { costUsd: number | null; credential?: CredentialKind; apiKeySource?: string },
+  ) {
+    audit.record({
+      taskId: 'earlier',
+      caller: 'users/99',
+      sessionId: sessionIdFor('another'),
+      outcome: 'result',
+      costUsd,
+      durationMs: 1_000,
+      turnMs: 1_000,
+      credential,
+      apiKeySource,
+    })
+  }
+
+  /** What roma last answered with, which for this Command is always prose. */
+  function textIn(adapter: RecordingAdapter): string {
+    const instruction = adapter.instructions.at(-1)
+    if (instruction?.kind !== 'result') throw new Error('roma did not answer with a result')
+    return instruction.text
+  }
+
+  // The whole answer, asserted as the string it is: the month named rather than
+  // called "this month", the subscription's draw worded as work drawn, metered
+  // billing worded as money, and nothing anywhere that adds the two together.
+  it('names the month and reports both figures, without a process or a Turn', async () => {
+    const { adapter, audit, claude, core } = newCore()
+    spent(audit, { costUsd: 0.21 })
+    spent(audit, { costUsd: 1.34, credential: 'overflow' })
+
+    await core.handle(ingress('/usage'))
+
+    expect(claude.processes).toHaveLength(0)
+    expect(posted(adapter.instructions)).toEqual([
+      {
+        kind: 'result',
+        conversationKey: KEY,
+        text:
+          'July 2026 (UTC).\n' +
+          'The subscription drew $0.21 worth of work. Nobody is billed for that.\n' +
+          'Metered billing charged $1.34.',
+      },
+    ])
+  })
+
+  // Three spellings, one Command. A `/cost` answering differently from the
+  // `/usage` beside it is ADR-0013's fault with the money swapped for a number.
+  it('answers /cost and /stats with the very same thing', async () => {
+    const { adapter, audit, core } = newCore()
+    spent(audit, { costUsd: 0.21 })
+
+    const said: string[] = []
+    for (const spelling of ['/usage', '/cost', '/stats']) {
+      await core.handle(ingress(spelling))
+      said.push(textIn(adapter))
+    }
+
+    const [usage, cost, stats] = said
+    expect(cost).toBe(usage)
+    expect(stats).toBe(usage)
+    // So that three empty answers cannot agree with each other and pass.
+    expect(usage).toContain('$0.21')
+  })
+
+  // The asymmetry ADR-0027 writes down rather than smooths away: five Commands
+  // answer about the Conversation that sent them and this one answers about the
+  // deployment, so the same message in another thread is the same question.
+  it('answers the same wherever it was sent', async () => {
+    const { adapter, audit, core } = newCore()
+    spent(audit, { costUsd: 0.21 })
+
+    await core.handle(ingress('/usage', KEY))
+    const mine = textIn(adapter)
+    await core.handle(ingress('/usage', OTHER_KEY))
+
+    expect(textIn(adapter)).toBe(mine)
+    expect(posted(adapter.instructions).map(({ conversationKey }) => conversationKey)).toEqual([
+      KEY,
+      OTHER_KEY,
+    ])
+  })
+
+  // A Turn that began and was never priced spent tokens nothing will ever name,
+  // so the register that lost one reports a floor and the other does not. The
+  // count itself is not printed: a column that reads zero for ever is a column
+  // nobody reads.
+  it('gives the figure as a floor where the month holds a Turn nothing priced', async () => {
+    const { adapter, audit, core } = newCore()
+    spent(audit, { costUsd: 0.21 })
+    // Three of them, so that a count printed anywhere would show up as a “3”.
+    spent(audit, { costUsd: null })
+    spent(audit, { costUsd: null })
+    spent(audit, { costUsd: null })
+
+    await core.handle(ingress('/usage'))
+
+    expect(textIn(adapter)).toBe(
+      'July 2026 (UTC).\n' +
+        'The subscription drew at least $0.21 worth of work. Nobody is billed for that.\n' +
+        'Metered billing charged $0.00.',
+    )
+    expect(textIn(adapter)).not.toContain('3')
+  })
+
+  it('gives it as exact where nothing in the month went unpriced', async () => {
+    const { adapter, audit, core } = newCore()
+    spent(audit, { costUsd: 0.21 })
+
+    await core.handle(ingress('/usage'))
+
+    expect(textIn(adapter)).toContain('The subscription drew $0.21 worth of work.')
+    expect(textIn(adapter)).not.toContain('at least')
+  })
+
+  // A line roma wrote and cannot read back. The month is short by whatever that
+  // line cost and roma cannot say by how much, so it says so instead of printing
+  // a number with a footnote under it — which is not read as a reason to
+  // disbelieve the number above.
+  it('vouches for nothing in a month holding a record it cannot read back', async () => {
+    const { adapter, audit, auditRoot, core } = newCore()
+    spent(audit, { costUsd: 0.21 })
+    appendFileSync(join(auditRoot, `${MONTH}.jsonl`), '{"at":"2026-07-28T19:40:00.000Z","cos')
+
+    await core.handle(ingress('/usage'))
+
+    expect(textIn(adapter)).toContain('roma cannot vouch for July 2026 (UTC)')
+    expect(textIn(adapter)).not.toContain('$')
+  })
+
+  // ADR-0002's silent-degradation mode, which is the failure it is most afraid
+  // of: roma believed the subscription was paying and Claude Code said a key
+  // was. Every figure roma could print here would be describing money that came
+  // out of somewhere else.
+  it('vouches for nothing where the credential roma ran on is not the one that paid', async () => {
+    const { adapter, audit, core } = newCore()
+    spent(audit, { costUsd: 0.21, apiKeySource: 'ANTHROPIC_API_KEY' })
+
+    await core.handle(ingress('/usage'))
+
+    expect(textIn(adapter)).toContain('roma cannot vouch for July 2026 (UTC)')
+    expect(textIn(adapter)).not.toContain('$')
+  })
+
+  it('reads a month nothing has run in as a month with nothing in it', async () => {
+    const { adapter, core } = newCore()
+
+    await core.handle(ingress('/usage'))
+
+    expect(textIn(adapter)).toBe('July 2026 (UTC): nothing has run.')
+  })
+
+  // **The regression case for the trap #163 removed.** A sixth Command that fell
+  // through to the carry-out path would have been answered as a second `/stop`:
+  // the Task interrupted, and whoever asked what the month had cost told instead
+  // that their command was carried out.
+  it('leaves a Task this Conversation has in flight running', async () => {
+    const { adapter, core, start } = newCore()
+    const { task, proc } = await start('a long job')
+
+    await core.handle(ingress('/usage'))
+
+    expect(proc.sent.filter((frame) => frame['type'] === 'control_request')).toEqual([])
+    expect(proc.signals).toEqual([])
+
+    feed(proc, OK)
+    await task
+
+    expect(posted(adapter.instructions).at(-1)).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: 'ok',
+    })
+  })
+
+  // A free Relay wrote one; a Command writes nothing. Accepted rather than
+  // repaired (ADR-0027): the Audit Records are the account of the money and this
+  // spends none.
+  it('leaves no Audit Record of its own', async () => {
+    const { audit, core, say } = newCore()
+    await say('hello')
+
+    await core.handle(ingress('/usage'))
+    await core.handle(ingress('/cost'))
+    await core.handle(ingress('/stats'))
+
+    expect(recordsIn(audit)).toHaveLength(1)
+  })
+
+  // Not the command, and not the text of it either. What used to reach the
+  // Session's process on all three of these now reaches nothing.
+  it('sends the Session’s process nothing at all', async () => {
+    const { claude, core, say } = newCore()
+    await say('hello')
+
+    for (const spelling of ['/usage', '/cost', '/stats']) {
+      await core.handle(ingress(spelling))
+    }
+
+    expect(claude.process.sent.filter((frame) => frame['type'] === 'user')).toHaveLength(1)
+  })
+
+  // `readCommand` refuses an argument on a head that takes none, so this is
+  // prose and is billed as prose. The opening `/clear foo` has had since
+  // ADR-0013, which ADR-0027 records rather than closes — closing it means
+  // deciding what a shared thread may ask about other people.
+  it('leaves a /usage with an argument as work, which ADR-0027 records rather than fixes', async () => {
+    const { claude, say } = newCore()
+
+    await say('/usage july')
+
+    expect(claude.process.sent.at(-1)).toMatchObject({
+      type: 'user',
+      message: { content: [{ text: '<from>Ada (users/17)</from>\n\n/usage july' }] },
+    })
+  })
+})
+
 describe('the first thing roma says in a Session', () => {
   // The sentence has one owner and it is `/config` (ADR-0024). Asserted as
   // equality rather than as a string of its own, so that rewording one without
@@ -2176,7 +2416,7 @@ describe('the first thing roma says in a Session', () => {
   // question twice here. One message in, one message out, and no list of
   // exemptions to keep true.
   it('opens nothing for a Command', async () => {
-    for (const spelling of ['/stop', '/clear', '/config', '/model opus', '/effort max']) {
+    for (const spelling of ['/stop', '/clear', '/config', '/usage', '/model opus', '/effort max']) {
       const { adapter, core } = newCore()
 
       await core.handle(ingress(spelling))
