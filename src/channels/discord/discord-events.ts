@@ -1,4 +1,5 @@
 import type { IngressMessage, PendingEnclosure, Quotation } from '../../channel-adapter.js'
+import { commandFor, type Command } from '../../commands.js'
 import { reasonOf, type OperatorLog } from '../../operator-log.js'
 
 /**
@@ -42,6 +43,159 @@ export interface DiscordEvent {
   readonly guildChannel: boolean
   /** The passage this message quotes, already completed. See `completedQuotation`. */
   readonly quotation: Quotation | null
+  /**
+   * The press this event is, or null where it is somebody's own message.
+   *
+   * What tells the two readers below apart, and what a Chat event says with its
+   * `type`. An interaction carries roma's **own** card as its message, so there
+   * is no reading of that message that could answer who chose or which
+   * Conversation they chose in — the person is elsewhere on the event and the
+   * Conversation is on the button (ADR-0023).
+   */
+  readonly press: DiscordPress | null
+}
+
+/**
+ * A button roma posted, pressed.
+ *
+ * **A press is a message the Caller did not have to type** (ADR-0023), so what
+ * is carried here is what a message carries: who sent it, and what it says. The
+ * third thing an ingress message needs — which Conversation — is on the button
+ * rather than on the event, which is what makes a press self-describing.
+ */
+export interface DiscordPress {
+  /**
+   * Whoever pressed it, which is never the card's author.
+   *
+   * The card is roma's, so reading the person off `message.author` would credit
+   * every choice to roma. Discord puts them on `member` in a guild and on `user`
+   * in a direct message, and `readInteraction` reads both.
+   */
+  readonly caller: string
+  readonly callerName: string | null
+  /** The button's own `custom_id`, exactly as it went out. See `chooseId`. */
+  readonly customId: string
+}
+
+/**
+ * One press off the socket, before roma has answered it.
+ *
+ * Two fields here are not on a `DiscordEvent` and never become one, because they
+ * are the Transport's alone: the interaction's id and its token are what the
+ * acknowledgement is sent with, and it has three seconds to go (ADR-0029).
+ */
+export interface Interaction {
+  /**
+   * What names this Delivery — the interaction's own id, never the card's.
+   *
+   * **Never the message's.** Two presses on one card are two events, and a
+   * Delivery named by the card would make the second one look like the first
+   * arriving twice — which `Ingress.take` drops on the floor while the first is
+   * still running.
+   */
+  readonly id: string
+  /** What the acknowledgement is sent with, and it is good for three seconds. */
+  readonly token: string
+  /** The card the button is on, which is roma's own message. */
+  readonly message: DiscordMessage
+  readonly press: DiscordPress
+}
+
+/**
+ * Discord's kind for a press on something roma posted.
+ *
+ * The only interaction roma reads. An application command is the other kind that
+ * arrives over this socket, and roma registers none — ADR-0029 leaves slash
+ * commands open and explicitly not as something to add quietly.
+ */
+const MESSAGE_COMPONENT = 3
+
+/**
+ * How long a `custom_id` may be, which is *"1-100 characters"*.
+ *
+ * What roma spends is about forty — a tag, a Conversation Key, and a name off a
+ * Menu — and nothing here enforces the rest, because there is nothing good to do
+ * with one that would not fit: dropped, the button is gone, and truncated, it
+ * comes back meaning something else. So the budget is held by the assertion in
+ * `discord-channel.test.ts` instead, which fails where prose would go quietly
+ * stale. Being over it is a message Discord refuses whole: a Menu nobody is
+ * shown, and on the blocked path an Overflow offer that never reaches the person
+ * waiting on it.
+ */
+export const MAX_CUSTOM_ID = 100
+
+/**
+ * The two things a press can be, as the first field of a `custom_id`.
+ *
+ * **Never let these two collide.** `Ingress.#workFor` asks `toIngress` first and
+ * only calls `toOverflowTaken` where it answered null, so an encoding both
+ * readers accept would turn taking an Overflow offer into a paid Task
+ * (`src/serve.ts`).
+ */
+const CHOOSE = 'choose'
+const TAKE_OVERFLOW = 'overflow'
+
+/** Between the fields of a `custom_id`. See `chooseId` for why the option is last. */
+const FIELD = ':'
+
+/**
+ * What a Menu button carries, which is the Command and the Conversation both.
+ *
+ * The Conversation Key is on the button because reading it off `channel_id`
+ * would be wrong exactly where it matters: a card posted by the thread fallback
+ * sits in a parent channel whose id is not the key, and a press there would
+ * answer in a Conversation nobody was in (ADR-0029). It also costs nothing —
+ * ADR-0023's best property is that the Adapter remembers **nothing** between
+ * posting a card and its being pressed, and a self-describing button is what
+ * keeps that true.
+ *
+ * The option last and rejoined on the way back, because it is the only field
+ * whose spelling is not roma's own to bound: a Menu re-audited onto a name with
+ * a `:` in it would otherwise arrive cut in half.
+ */
+export function chooseId(
+  chooses: Extract<Command, 'model' | 'effort'>,
+  conversationKey: string,
+  option: string,
+): string {
+  return [CHOOSE, chooses, conversationKey, option].join(FIELD)
+}
+
+/**
+ * What the Overflow button carries, which is the Task and nothing else.
+ *
+ * A Task id roma minted and put on the offer, so a press can only ever answer an
+ * offer roma actually made — and never the Conversation, which can have a second
+ * Task blocked behind this one.
+ */
+export function overflowId(taskId: string): string {
+  return [TAKE_OVERFLOW, taskId].join(FIELD)
+}
+
+/**
+ * Read one `INTERACTION_CREATE` payload as a press, or null if it is not one
+ * roma answers.
+ *
+ * Everything Discord's shape is, read in the one file that reads Discord's
+ * shapes. What the Transport does with it — acknowledge it inside three seconds,
+ * then hand it on — is the Transport's.
+ */
+export function readInteraction(payload: Readonly<Record<string, unknown>>): Interaction | null {
+  if (asNumber(payload['type']) !== MESSAGE_COMPONENT) return null
+
+  const id = asString(payload['id'])
+  const token = asString(payload['token'])
+  const customId = asString(asRecord(payload['data'])?.['custom_id'])
+  const message = asRecord(payload['message'])
+  // `member` in a guild and `user` in a direct message, and neither is the card's
+  // author — see `DiscordPress.caller`.
+  const user = asRecord(asRecord(payload['member'])?.['user']) ?? asRecord(payload['user'])
+  const caller = asString(user?.['id'])
+  if (id === null || token === null || customId === null || message === null || caller === null) {
+    return null
+  }
+
+  return { id, token, message, press: { caller, callerName: displayName(user), customId } }
 }
 
 /** Fetch the bytes behind one attachment, by the URL Discord gave it. */
@@ -143,6 +297,62 @@ export function readIngressMessage(
     enclosures,
     quotation,
   }
+}
+
+/**
+ * Read a press on a Menu button as the message the Caller would have typed, or
+ * null if this event is not one.
+ *
+ * **Pressing is typing** (ADR-0023). What comes out is an ordinary Ingress
+ * Message carrying `/model opus`, so the press goes down the path every typed
+ * Command goes down and the Core learns nothing new — which is what makes a card
+ * from three weeks ago safe to press, and why nothing has to be remembered
+ * between posting one and its being pressed.
+ *
+ * **Never route this through `readIngressMessage`.** The message on a press
+ * event is roma's *own* card, whose author is an application: that reader's bot
+ * guard would swallow it, and relaxing the guard to let it through would both
+ * re-open the two-apps-answering-each-other fault and credit the choice to roma.
+ */
+export function readChosenOption(event: DiscordEvent): IngressMessage | null {
+  const { press } = event
+  if (press === null) return null
+
+  const [tag, chooses, conversationKey, ...rest] = press.customId.split(FIELD)
+  if (tag !== CHOOSE) return null
+  // Only the two Commands that have a Menu. A press naming anything else is one
+  // roma never put out, and synthesising `/stop` or `/clear` from it would reach
+  // a Command through a door meant for a Menu.
+  if (chooses !== 'model' && chooses !== 'effort') return null
+  if (conversationKey === undefined || conversationKey === '') return null
+  const option = rest.join(FIELD)
+  if (option === '') return null
+
+  return {
+    // The button's own, never the channel the card sits in — see `chooseId`.
+    conversationKey,
+    caller: press.caller,
+    callerName: press.callerName,
+    text: commandFor(chooses, option),
+    enclosures: [],
+    quotation: null,
+  }
+}
+
+/**
+ * Read a press on the Overflow button as the Task it was about, or null.
+ *
+ * The other half of `overflowId`: what goes out on the button comes back on the
+ * press, so the Task id makes the round trip and roma remembers nothing between
+ * the offer and its being taken.
+ */
+export function readOverflowTaken(event: DiscordEvent): string | null {
+  const { press } = event
+  if (press === null) return null
+  const [tag, ...rest] = press.customId.split(FIELD)
+  if (tag !== TAKE_OVERFLOW) return null
+  const taskId = rest.join(FIELD)
+  return taskId === '' ? null : taskId
 }
 
 /**

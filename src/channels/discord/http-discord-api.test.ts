@@ -98,7 +98,9 @@ describe('saying something in a channel', () => {
   it('posts the words to the channel it was given', async () => {
     const { api, requests } = answering(() => json({ id: 'm-9' }))
 
-    expect(await api.post({ channel: 'c-1', text: 'the answer', replyTo: null })).toBe('m-9')
+    expect(await api.post({ channel: 'c-1', text: 'the answer', replyTo: null, buttons: [] })).toBe(
+      'm-9',
+    )
     expect(requests[0]?.url).toBe(`${API}/channels/c-1/messages`)
     expect(requests[0]?.method).toBe('POST')
     expect(requests[0]?.body).toMatchObject({ content: 'the answer' })
@@ -110,7 +112,7 @@ describe('saying something in a channel', () => {
   it('answers the Caller’s message with a reply rather than a mention', async () => {
     const { api, requests } = answering(() => json({ id: 'm-9' }))
 
-    await api.post({ channel: 'c-1', text: 'the answer', replyTo: 'm-1' })
+    await api.post({ channel: 'c-1', text: 'the answer', replyTo: 'm-1', buttons: [] })
 
     expect(requests[0]?.body?.['message_reference']).toEqual({
       message_id: 'm-1',
@@ -128,9 +130,60 @@ describe('saying something in a channel', () => {
   it('lets nothing the text asks for be a mention, and keeps the reply’s', async () => {
     const { api, requests } = answering(() => json({ id: 'm-9' }))
 
-    await api.post({ channel: 'c-1', text: '@everyone the deploy is done', replyTo: 'm-1' })
+    await api.post({
+      channel: 'c-1',
+      text: '@everyone the deploy is done',
+      replyTo: 'm-1',
+      buttons: [],
+    })
 
     expect(requests[0]?.body?.['allowed_mentions']).toEqual({ parse: [], replied_user: true })
+  })
+
+  // A message with nothing to press carries no `components` at all, rather than
+  // an empty list: an empty action row is a card with nothing in it, and Discord
+  // is entitled to refuse one.
+  it('sends no components on a message with nothing to press', async () => {
+    const { api, requests } = answering(() => json({ id: 'm-9' }))
+
+    await api.post({ channel: 'c-1', text: 'the answer', replyTo: null, buttons: [] })
+
+    expect(requests[0]?.body).not.toHaveProperty('components')
+  })
+
+  // An action row holds five buttons and the Effort Menu is six, so the sixth is
+  // a row of its own — and the order across the rows is the Menu's, because that
+  // is what somebody reading the card is reading.
+  it('lays a Menu out in rows of five, in the order it was given', async () => {
+    const { api, requests } = answering(() => json({ id: 'm-9' }))
+
+    await api.post({
+      channel: 'c-1',
+      text: 'This conversation runs at high.',
+      replyTo: null,
+      buttons: ['low', 'medium', 'high', 'xhigh', 'max', 'default'].map((label) => ({
+        label,
+        customId: `choose:effort:c-1:${label}`,
+      })),
+    })
+
+    expect(requests[0]?.body?.['components']).toEqual([
+      {
+        type: 1,
+        components: ['low', 'medium', 'high', 'xhigh', 'max'].map((label) => ({
+          type: 2,
+          style: 2,
+          label,
+          custom_id: `choose:effort:c-1:${label}`,
+        })),
+      },
+      {
+        type: 1,
+        components: [
+          { type: 2, style: 2, label: 'default', custom_id: 'choose:effort:c-1:default' },
+        ],
+      },
+    ])
   })
 
   it('edits a message roma posted, in place', async () => {
@@ -190,12 +243,37 @@ describe('opening a thread from a message', () => {
   })
 })
 
+describe('answering a press inside its three seconds', () => {
+  // Type 6 and no other. *"ACK an interaction and edit the original message
+  // later; the user does not see a loading state"* — every other callback type
+  // either posts something or shows a spinner, and both would have roma
+  // answering one Command twice. Pressing is typing, and typing does not rewrite
+  // the message you typed into (ADR-0023, ADR-0029).
+  it('acknowledges without touching the card', async () => {
+    const { api, requests } = answering(() => new Response(null, { status: 204 }))
+
+    await api.acknowledgePress('i-1', 'interaction-token')
+
+    expect(requests[0]?.url).toBe(`${API}/interactions/i-1/interaction-token/callback`)
+    expect(requests[0]?.method).toBe('POST')
+    expect(requests[0]?.body).toEqual({ type: 6 })
+  })
+
+  // Rejects like any other call. What the one caller does with that is write it
+  // down and answer the press anyway — the person has already chosen.
+  it('rejects where Discord refused it, rather than reporting a press that failed', async () => {
+    const { api } = answering(() => new Response('', { status: 404 }))
+
+    await expect(api.acknowledgePress('i-1', 'gone')).rejects.toThrow(/404/)
+  })
+})
+
 describe('what a refusal carries back', () => {
   /** A refusal, so a test can read the two fields a retry acts on. */
   async function refusalFrom(response: Response): Promise<DiscordRefusal> {
     const { api } = answering(() => response)
     try {
-      await api.post({ channel: 'c-1', text: 'the answer', replyTo: null })
+      await api.post({ channel: 'c-1', text: 'the answer', replyTo: null, buttons: [] })
     } catch (error) {
       return error as DiscordRefusal
     }

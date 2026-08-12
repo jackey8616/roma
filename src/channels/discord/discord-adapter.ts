@@ -4,9 +4,18 @@ import type {
   IngressMessage,
   OutboundInstruction,
 } from '../../channel-adapter.js'
-import { DiscordRefusal, type DiscordApi } from './discord-api.js'
-import { asString, readIngressMessage, type DiscordEvent } from './discord-events.js'
-import { outcomeMessages, progressText, threadName } from './render.js'
+import type { Command } from '../../commands.js'
+import { DiscordRefusal, type DiscordApi, type DiscordButton } from './discord-api.js'
+import {
+  asString,
+  chooseId,
+  overflowId,
+  readChosenOption,
+  readIngressMessage,
+  readOverflowTaken,
+  type DiscordEvent,
+} from './discord-events.js'
+import { OVERFLOW_BUTTON, outcomeMessages, progressText, threadName } from './render.js'
 
 /**
  * How many times roma makes one Discord call before it gives up on it.
@@ -180,14 +189,38 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
    * thread and an @-mention have become a key, a Caller and some text.
    */
   toIngress(event: DiscordEvent): IngressMessage | null {
-    const message = readIngressMessage(event, {
-      // Bound rather than called: `toIngress` stays synchronous, and what an
-      // Enclosure costs is paid once the Core knows the Session and knows the
-      // bytes are wanted (ADR-0011).
-      download: (url) => this.#api.download(url),
-    })
+    const message =
+      // A press on a Menu button is a message the Caller did not have to type, so
+      // it arrives here rather than through a reader of its own on this
+      // interface — pressing is typing (ADR-0023). Asked first because it
+      // answers about a different kind of event entirely: the message on a press
+      // is roma's *own* card, and the reader below must go on refusing anything
+      // an app said rather than being taught an exception to it.
+      readChosenOption(event) ??
+      readIngressMessage(event, {
+        // Bound rather than called: `toIngress` stays synchronous, and what an
+        // Enclosure costs is paid once the Core knows the Session and knows the
+        // bytes are wanted (ADR-0011).
+        download: (url) => this.#api.download(url),
+      })
     if (message !== null) this.#remember(event, message)
     return message
+  }
+
+  /**
+   * A press on the Overflow button, as the Task it was about.
+   *
+   * The other half of `offerButton` below: what goes out on the button comes
+   * back on the press, so the Task id makes the round trip and roma needs to
+   * remember nothing between the offer and its being taken.
+   *
+   * Answers null for every press `toIngress` answered — `Ingress.#workFor` tries
+   * that one first and only reaches here where it returned null, so the two
+   * encodings are told apart by the first field of a `custom_id` and never by
+   * which reader was asked (`discord-events.ts`).
+   */
+  toOverflowTaken(event: DiscordEvent): string | null {
+    return readOverflowTaken(event)
   }
 
   /**
@@ -224,6 +257,19 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     // nothing behind.
     if (ENDS_THE_TASK.has(instruction.kind)) this.#acknowledgements.delete(taskId)
 
+    // Two messages can carry buttons and they are never the same message: the
+    // block that offers Overflow (ADR-0002 puts the valve at the moment of
+    // blocking rather than in a setting), and the Menu somebody may choose from
+    // (ADR-0023). Which Menus are drawn at all is the Core's — an `/effort` on a
+    // model the Effort Matrix says takes none arrives as a `result` rather than
+    // a `choice`, so there is nothing here to suppress.
+    const buttons =
+      instruction.kind === 'blocked' && instruction.overflowOffered
+        ? [offerButton(taskId)]
+        : instruction.kind === 'choice'
+          ? choiceButtons(instruction.chooses, conversationKey, instruction.options)
+          : []
+
     const messages = outcomeMessages(instruction)
     for (const [at, text] of messages.entries()) {
       // The reply on the first piece and nothing on the rest. It is what
@@ -231,7 +277,14 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
       // mention — and an answer long enough to split would otherwise notify
       // somebody once per 2000 characters of it (ADR-0029).
       const replyTo = at === 0 ? (answered?.message ?? null) : null
-      await this.#retrying(() => this.#api.post({ channel, text, replyTo }))
+      // On the last piece rather than on every one, for the same reason the
+      // reply is on the first: buttons belong under the text that explains them,
+      // and a split answer would otherwise repeat the whole Menu under each
+      // piece.
+      const last = at === messages.length - 1
+      await this.#retrying(() =>
+        this.#api.post({ channel, text, replyTo, buttons: last ? buttons : [] }),
+      )
     }
   }
 
@@ -242,6 +295,12 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
    * `toIngress` has returned, so nothing downstream links the event roma read to
    * the instruction it is handed (`TaskAddress`) — here is the only place the
    * two are the same thing.
+   *
+   * **Never skip a press.** The message on one is roma's own card, and answering
+   * a press by replying to it reads as it should — but what is really being kept
+   * is the *channel the card is in*, which is the only thing that repairs a
+   * Conversation whose thread was refused: without it, the answer to a press
+   * goes to the id of a thread that was never opened (ADR-0029).
    */
   #remember(event: DiscordEvent, message: IngressMessage): void {
     const channel = asString(event.message['channel_id'])
@@ -324,7 +383,7 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     // post and not on the edits, so this is one notification per Task rather
     // than one per update.
     const posting = this.#retrying(() =>
-      this.#api.post({ channel, text, replyTo: answered?.message ?? null }),
+      this.#api.post({ channel, text, replyTo: answered?.message ?? null, buttons: [] }),
     )
     this.#acknowledgements.set(taskId, posting)
     try {
@@ -360,6 +419,37 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
  */
 function addressOf(conversationKey: string, caller: string): string {
   return `${conversationKey} ${caller}`
+}
+
+/**
+ * The button that takes Overflow for one Task.
+ *
+ * **Never name it by the Conversation.** A Conversation can have a second Task
+ * blocked behind this one, so "the blocked Task here" would spend money on
+ * whichever roma looked at first. Anyone in the Conversation may press it, which
+ * is ADR-0002's decision rather than an oversight.
+ */
+function offerButton(taskId: string): DiscordButton {
+  return { label: OVERFLOW_BUTTON, customId: overflowId(taskId) }
+}
+
+/**
+ * One button per name on a Menu, in the order the Menu lists them.
+ *
+ * Labelled with the name itself and nothing around it, unlike the Overflow
+ * button, whose label has to carry what pressing it costs. These cost nothing,
+ * and the bare name is also the string a Caller would type — so the card teaches
+ * the typed form rather than replacing it.
+ */
+function choiceButtons(
+  chooses: Extract<Command, 'model' | 'effort'>,
+  conversationKey: string,
+  options: readonly string[],
+): readonly DiscordButton[] {
+  return options.map((option) => ({
+    label: option,
+    customId: chooseId(chooses, conversationKey, option),
+  }))
 }
 
 /** Whether Discord refused this on its own terms, rather than failing to serve it. */

@@ -1,6 +1,32 @@
 import type { DiscordMessage } from './discord-events.js'
 
 /**
+ * Something a person can do to a message roma posted, as a button on it.
+ *
+ * Shaped like roma's use of Discord rather than like Discord — the same
+ * judgement `DiscordApi` below is built on. Whatever speaks HTTP turns this into
+ * the `components` payload Discord wants; what matters at this boundary is what
+ * the button says and what comes back when it is pressed, because those are the
+ * two halves of the round trip.
+ *
+ * There are two kinds and they are the two things anybody can press: taking
+ * Overflow on a blocked Task (ADR-0002), and picking a name off a Menu
+ * (ADR-0023). A Menu is several at once, so a message carries a list.
+ */
+export interface DiscordButton {
+  /** What the button says. */
+  readonly label: string
+  /**
+   * Discord's `custom_id` — the whole of what a press carries back.
+   *
+   * *"1-100 characters"*, and roma spends about forty of them. What goes in one
+   * and why it holds the Conversation Key as well as the Command is
+   * `discord-events.ts`'s `chooseId`.
+   */
+  readonly customId: string
+}
+
+/**
  * One message roma is about to say, in roma's terms rather than Discord's.
  *
  * Everything the Adapter decided — which channel, what the words are, whether
@@ -28,6 +54,19 @@ export interface DiscordPost {
    * notifications of it (ADR-0029).
    */
   readonly replyTo: string | null
+  /**
+   * The buttons on this message, and empty where there is nothing to press.
+   *
+   * Required and empty rather than optional, for `IngressMessage.enclosures`'
+   * reason: a caller with something to draw that forgets to hand it over is
+   * indistinguishable from one that had nothing, and the failure is a Menu
+   * nobody can press with no error anywhere.
+   *
+   * Two messages ever carry any — the one saying the Shared Window is spent when
+   * Overflow is on offer, and the one offering a Menu — and they are never the
+   * same message.
+   */
+  readonly buttons: readonly DiscordButton[]
 }
 
 /**
@@ -65,9 +104,9 @@ export class DiscordRefusal extends Error {
 /**
  * As much of Discord's REST API as roma calls.
  *
- * Five calls: two that read, for the words behind a Quotation and the bytes
- * behind an Enclosure, and three that write, which are the whole of how roma
- * answers anybody here.
+ * Six calls: two that read, for the words behind a Quotation and the bytes
+ * behind an Enclosure, three that write, which are the whole of how roma answers
+ * anybody here, and one that answers a press inside three seconds.
  *
  * A port rather than a client, for `ChatApi`'s reason: what a test needs on the
  * far side of seam 3 is a recording of what roma asked for, and a port shaped
@@ -124,4 +163,27 @@ export interface DiscordApi {
    * channel the message arrived in instead.
    */
   startThread(channelId: string, messageId: string, name: string): Promise<string>
+  /**
+   * Say that a press arrived, inside the three seconds it is good for, and leave
+   * the card exactly as it was.
+   *
+   * **The deadline is the whole reason this exists.** *"You must send an initial
+   * response within 3 seconds of receiving the event. If the 3 second deadline
+   * is exceeded, the token will be invalidated"* — and roma's Core takes
+   * minutes. So this goes out before the press reaches anything that could
+   * answer it, which is why it is the Transport's rather than the Adapter's
+   * (ADR-0029).
+   *
+   * **The card must not change.** Pressing is typing, and typing does not
+   * rewrite the message you typed into — so what is sent is
+   * `DEFERRED_UPDATE_MESSAGE`, which is *"ACK an interaction and edit the
+   * original message later; the user does not see a loading state"*. roma never
+   * takes the second half of that offer.
+   *
+   * Rejects like any other call. The one caller writes it down and hands the
+   * press on anyway: a press roma failed to acknowledge is one Discord will mark
+   * as failed, and answering it late is better than a Task that stays blocked
+   * because nobody could take the offer.
+   */
+  acknowledgePress(interactionId: string, token: string): Promise<void>
 }

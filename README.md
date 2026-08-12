@@ -65,8 +65,17 @@ message on the first piece only, and a top-level @-mention is answered in a thre
 opens from it. A post Discord refuses is retried inside the Adapter, waiting exactly as
 long as Discord's own headers ask for — nothing about a rate limit is hard coded, because
 a retry that ignores a 429 spends its way toward a block on the whole API (ADR-0028).
-What is **not** drawn yet is buttons: a Menu arrives as the words it already is, and the
-Overflow offer cannot yet be taken here. #181 is where those land.
+
+Both Menus and the Overflow offer are **buttons** here as they are on Chat, and pressing
+one means exactly what typing it means: the button carries the Command and the
+Conversation, the Adapter reads a press into an ordinary message, and it travels the path
+a typed Command travels (ADR-0023). Presses arrive over the same socket messages do — an
+HTTP interactions endpoint is the other half of a mutually exclusive pair and roma
+registers none — so buttons cost no inbound port either. A press is acknowledged inside
+Discord's three seconds and the card is left exactly as it was, because roma's answer takes
+minutes and typing does not rewrite the message you typed into. Effort buttons are the one
+thing not always drawn: on a model the Effort Matrix says takes no effort, the reply
+already says so and roma declines to invite an action it has just called inert.
 
 What ships is compiled. `npm run build` emits `src` alone to `dist/` — the tests are not
 in it — and the image runs `node dist/channels/main.js` under `npm ci --omit=dev`, so
@@ -323,12 +332,16 @@ Session sit outside the checkout, so the Session inherits neither roma's `CLAUDE
 its project skills. It lives in the free run because seam 2 cannot catch that class of
 bug: the contamination it guards against made those tests pass, expensively (#101).
 
-`src/channels/google-chat/wiring.test.ts` is the one place the seams meet: roma assembled
-out of its real parts, with only Claude Code and the network replaced. A Pub/Sub message
-goes in and the request Google would have received comes out. It exists because every other
-test proves one component in isolation, and the failure they cannot see is the one at the
-joins — a Transport emitting events the Adapter cannot read gives you a roma that runs
-perfectly and answers nobody.
+There is a `wiring.test.ts` in each Channel's directory, and they are where the seams meet:
+roma assembled out of its real parts, with only Claude Code and the network replaced. A
+Pub/Sub message goes in and the request Google would have received comes out; a Gateway
+frame goes in and the request Discord would have received comes out. They exist because
+every other test proves one component in isolation, and the failure they cannot see is the
+one at the joins — a Transport emitting events the Adapter cannot read gives you a roma
+that runs perfectly and answers nobody. It is also the only place a button can be proved
+at all: one seam knows the Core answers `/model opus`, the other knows a press becomes
+that text, and neither can see whether the button roma actually posted carries what its
+own reader actually reads.
 
 Two things have no seam and cannot have one until roma runs against a real Workspace:
 Google's auth library resolving a credential, and the fields a real Chat interaction event

@@ -2,11 +2,13 @@ import { sep } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { IngressMessage, OutboundInstruction } from '../../channel-adapter.js'
 import { readCommand } from '../../commands.js'
+import { EFFORT_NAMES } from '../../effort-menu.js'
+import { MENU_NAMES } from '../../model-menu.js'
 import { sessionIdFor } from '../../session-id.js'
 import type { Delivery } from '../../transport.js'
 import { ATTEMPTS, DiscordAdapter, RETRY_CEILING_MS, RETRY_FLOOR_MS } from './discord-adapter.js'
-import { DiscordRefusal } from './discord-api.js'
-import type { DiscordEvent, DiscordMessage } from './discord-events.js'
+import { DiscordRefusal, type DiscordButton } from './discord-api.js'
+import { MAX_CUSTOM_ID, type DiscordEvent, type DiscordMessage } from './discord-events.js'
 import {
   GatewayTransport,
   INTENTS,
@@ -14,10 +16,13 @@ import {
   RECONNECT_FLOOR_MS,
   type DiscordLogRecord,
 } from './gateway-transport.js'
-import { MAX_TEXT } from './render.js'
+import { MAX_TEXT, OVERFLOW_BUTTON } from './render.js'
 import { FakeGatewayNetwork } from '../../../test/support/fake-gateway.js'
 import { recordedStream } from '../../../test/support/recorded-stream.js'
-import { RecordingDiscordApi } from '../../../test/support/recording-discord-api.js'
+import {
+  RecordingDiscordApi,
+  type DiscordCall,
+} from '../../../test/support/recording-discord-api.js'
 import { sources } from '../../../test/support/sources.js'
 
 // SEAM 3 — the Discord Channel: a raw Gateway frame goes in and an ingress
@@ -58,6 +63,11 @@ const FORUM = '400000000000000016'
 const DM = '600000000000000008'
 const MESSAGE = '700000000000000009'
 const QUOTED = '700000000000000010'
+/** A card roma posted, which is the message a press arrives carrying. */
+const CARD = '700000000000000017'
+/** One press, which is its own event and never the card's. */
+const INTERACTION = '900000000000000018'
+const INTERACTION_TOKEN = 'an-interaction-token'
 
 const OP_HEARTBEAT = 1
 const OP_IDENTIFY = 2
@@ -130,6 +140,44 @@ function inDm(overrides: Record<string, unknown> = {}): DiscordMessage {
   }
 }
 
+/**
+ * roma's own card, in the thread it opened.
+ *
+ * Authored by an application, which is what a press event always carries — and
+ * the reason the press gets a reader of its own rather than a branch inside the
+ * message reader (ADR-0023).
+ */
+function card(overrides: Record<string, unknown> = {}): DiscordMessage {
+  return {
+    id: CARD,
+    channel_id: MESSAGE,
+    guild_id: GUILD,
+    author: { id: ROMA, username: 'roma', bot: true },
+    content: 'You can choose: opus, sonnet, haiku, default.',
+    ...overrides,
+  }
+}
+
+/** A press on one button, as Discord delivers one over the same socket messages arrive on. */
+function press(customId: string, overrides: Record<string, unknown> = {}): unknown {
+  return dispatch('INTERACTION_CREATE', {
+    id: INTERACTION,
+    token: INTERACTION_TOKEN,
+    // `MESSAGE_COMPONENT`. The other kind is an application command, and roma
+    // registers none.
+    type: 3,
+    application_id: ROMA,
+    channel_id: MESSAGE,
+    guild_id: GUILD,
+    // Whoever pressed, where a guild puts them. Never the card's author, which
+    // is roma.
+    member: { user: { id: CALLER, username: 'ada', global_name: 'Ada' } },
+    data: { custom_id: customId, component_type: 2 },
+    message: card(),
+    ...overrides,
+  })
+}
+
 /** An attachment as Discord documents one: a name to print and a link that expires. */
 const ATTACHED = {
   id: '800000000000000011',
@@ -168,7 +216,13 @@ async function listening() {
 
   const deliveries: Delivery<DiscordEvent>[] = []
   const read: IngressMessage[] = []
+  // What roma had already said to Discord at the moment each Delivery arrived.
+  // The only way to assert that the acknowledgement went out *before* the event
+  // was handed on, which is the whole of the three-second deadline: read after
+  // the fact, both orders leave the same two calls in the same list.
+  const saidBefore: DiscordCall[][] = []
   await transport.receive(async (delivery) => {
+    saidBefore.push([...api.calls])
     deliveries.push(delivery)
     const message = adapter.toIngress(delivery.event)
     if (message !== null) read.push(message)
@@ -184,6 +238,11 @@ async function listening() {
     transport,
     deliveries,
     read,
+    saidBefore,
+    /** The buttons on the last message roma posted, in the order it posted them. */
+    get buttons(): readonly DiscordButton[] {
+      return api.messages.at(-1)?.posted.buttons ?? []
+    },
     /** What the Core was handed last, or null where it was handed nothing. */
     get last(): IngressMessage | null {
       return read.at(-1) ?? null
@@ -242,6 +301,34 @@ function to(
  */
 function refusal(status: number, retryAfterMs: number | null = null): DiscordRefusal {
   return new DiscordRefusal(`Discord answered ${status}`, status, retryAfterMs)
+}
+
+/**
+ * A Menu as the Core sends one, over the real Menu rather than a copy of it.
+ *
+ * The names are what a button is labelled with *and* what a press comes back
+ * saying, so a test spelling its own would be asserting that roma agrees with
+ * the test rather than that a Menu survives the round trip.
+ */
+function choice(
+  chooses: 'model' | 'effort',
+  options: readonly string[],
+  text = `You can choose: ${options.join(', ')}.`,
+): Outcome<OutboundInstruction> {
+  return { kind: 'choice', text, chooses, options, refused: null }
+}
+
+/**
+ * The `custom_id` off a button roma actually posted.
+ *
+ * Never a string a test wrote: a button carrying something roma's own reader
+ * cannot read back is the failure this whole area exists to catch, and it is
+ * invisible to a press built out of a literal.
+ */
+function customIdFor(buttons: readonly DiscordButton[], label: string): string {
+  const button = buttons.find((candidate) => candidate.label === label)
+  if (button === undefined) throw new Error(`no button labelled ${label}`)
+  return button.customId
 }
 
 /** The complete answer of the recorded 72-second generating Turn. */
@@ -818,6 +905,7 @@ describe('where an answer goes', () => {
       channel: MESSAGE,
       text: 'the answer',
       replyTo: MESSAGE,
+      buttons: [],
     })
   })
 
@@ -1160,7 +1248,8 @@ describe('what a Conversation is told', () => {
   // Plainly that quota is spent, with the reset time the event gave — and that
   // the Task is kept, because told only that quota is spent people send the
   // message again, which is the behaviour the acknowledgement exists to prevent.
-  // No button on it: the Overflow offer is #181's.
+  // Nothing in the words about the offer: that is the button below, and a
+  // sentence beside it would have to name a Command roma never had.
   it('says quota is spent, when it comes back, and that the Task is kept', async () => {
     const channel = await messaged(inDm())
 
@@ -1198,10 +1287,10 @@ describe('what a Conversation is told', () => {
     ])
   })
 
-  // ADR-0023 says a Channel that ignores `options` is *correct* rather than
-  // degraded, because the text names the Menu in words. So a Discord with no
-  // buttons on it yet posts the whole answer, and #181 adds the shortcut.
-  it('posts a Menu as the words it already is, and no buttons yet', async () => {
+  // The words are the whole answer whether or not anything draws them, which is
+  // what lets a Channel ignore `options` and be *correct* rather than degraded
+  // (ADR-0023). The buttons under them are the shortcut, asserted below.
+  it('posts a Menu as the words it already is', async () => {
     const channel = await messaged(inDm())
 
     await channel.adapter.deliver(
@@ -1264,6 +1353,336 @@ describe('what a Conversation is told', () => {
     expect(channel.api.texts).toEqual(['Running on claude-sonnet-5.', 'Working…'])
     expect(channel.api.messages.map(({ posted }) => posted.channel)).toEqual([MESSAGE, MESSAGE])
     expect(channel.api.threads).toHaveLength(1)
+  })
+})
+
+/**
+ * ADR-0023 applied to Discord, unchanged: **a press is a message the Caller did
+ * not have to type.** The button carries the Command, the Adapter reads it into
+ * an ordinary Ingress Message, and it travels the path a typed Command travels
+ * — no new Core entrance, no new `ChannelAdapter` method, no new authority to
+ * scope, and nothing remembered between posting a card and its being pressed.
+ */
+describe('a Menu, out as buttons and back as a press', () => {
+  it('draws one button per option, in the order the Menu lists them', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, choice('model', MENU_NAMES)))
+
+    expect(channel.buttons.map(({ label }) => label)).toEqual(MENU_NAMES)
+    expect(MENU_NAMES).toEqual(['opus', 'sonnet', 'haiku', 'default'])
+  })
+
+  // Six, which is one more than an action row holds — so this is the case that
+  // proves a Menu is not bounded by a row. Where the second row starts is
+  // `http-discord-api.test.ts`'s, because it is a fact about the payload.
+  it('draws the whole Effort Menu, past the width of one row', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, choice('effort', EFFORT_NAMES)))
+
+    expect(channel.buttons.map(({ label }) => label)).toEqual(EFFORT_NAMES)
+    expect(EFFORT_NAMES.length).toBeGreaterThan(5)
+  })
+
+  // *"1-100 characters"*, and being over it is a message Discord refuses whole —
+  // a Menu nobody is shown, with nothing in the log about it. Asserted rather
+  // than reasoned about, because what goes in one is a Conversation Key roma does
+  // not choose the length of.
+  it('spends a custom_id Discord will take', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, choice('effort', EFFORT_NAMES)))
+    await channel.adapter.deliver(
+      to(DM, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: true }),
+    )
+
+    for (const { customId } of channel.api.messages.flatMap(({ posted }) => posted.buttons)) {
+      expect(customId.length).toBeGreaterThanOrEqual(1)
+      expect(customId.length).toBeLessThanOrEqual(MAX_CUSTOM_ID)
+    }
+  })
+
+  // The whole of the design in one assertion: what comes back is the message the
+  // Caller would have typed, and `readCommand` reads it as the Command it is. A
+  // name that did not survive that round trip would be a button that produces a
+  // billable Task — which is why the invariant is driven over the real Menus in
+  // `commands.test.ts` rather than restated here.
+  it('reads a press as the message the Caller would have typed', async () => {
+    const channel = await messaged(inDm())
+    await channel.adapter.deliver(to(DM, choice('model', MENU_NAMES)))
+
+    await channel.take(press(customIdFor(channel.buttons, 'opus')))
+
+    expect(channel.last).toMatchObject({ text: '/model opus', caller: CALLER, callerName: 'Ada' })
+    expect(readCommand(channel.last?.text ?? '')).toEqual({ command: 'model', argument: 'opus' })
+  })
+
+  // The Conversation Key is on the button, so a press answers the Conversation
+  // the card was posted about rather than the one the card happens to sit in.
+  it('carries the Conversation Key the card was posted for', async () => {
+    const channel = await messaged(addressed())
+    await channel.adapter.deliver(to(MESSAGE, choice('effort', EFFORT_NAMES)))
+
+    await channel.take(press(customIdFor(channel.buttons, 'xhigh')))
+
+    expect(channel.last?.conversationKey).toBe(MESSAGE)
+  })
+
+  /**
+   * **The Discord-specific cousin of ADR-0023's stated failure mode.** roma may
+   * be refused the thread a top-level key names, and then the card sits in the
+   * parent channel — whose id is not the key. Reading the Conversation off
+   * `channel_id` there would answer in a Conversation nobody was ever in, and
+   * every press in a guild roma lacks `CREATE_PUBLIC_THREADS` in would be wrong
+   * (ADR-0029).
+   */
+  it('is right about the Conversation even where the card is not in it', async () => {
+    const posting = await messaged(addressed())
+    posting.api.failEvery('startThread', refusal(403))
+    await posting.adapter.deliver(to(MESSAGE, choice('model', MENU_NAMES)))
+    expect(posting.api.messages.at(-1)?.posted.channel).toBe(CHANNEL)
+
+    // Pressed at a roma that has never seen the card, because that is the state
+    // ADR-0023 claims: nothing is remembered between posting one and its being
+    // pressed, so the whole of what a press is answered from is the press.
+    const restarted = await connected()
+    restarted.api.failEvery('startThread', refusal(403))
+    await restarted.take(
+      press(customIdFor(posting.buttons, 'haiku'), { message: card({ channel_id: CHANNEL }) }),
+    )
+
+    expect(restarted.last?.conversationKey).toBe(MESSAGE)
+    expect(sessionIdFor(restarted.last?.conversationKey ?? '')).toBe(sessionIdFor(MESSAGE))
+    // And the answer still reaches somebody. The key names a thread that was
+    // never opened, so what carries the reply is the channel the *card* is in —
+    // which is the whole of why a press is remembered as a message is.
+    await restarted.adapter.deliver(to(MESSAGE, { kind: 'result', text: 'Now on haiku.' }))
+    expect(restarted.api.messages.at(-1)?.posted.channel).toBe(CHANNEL)
+  })
+
+  /**
+   * **There is nothing to expire and nothing to sweep** (ADR-0023). The card
+   * carries a *message* rather than a decision, so pressing a three-week-old one
+   * means send this Command now — which is what typing it now would mean.
+   *
+   * Driven over an Adapter and a Transport that have never seen the card, which
+   * is what a restart between the two leaves behind.
+   */
+  it('answers a press on a card posted before roma last started', async () => {
+    const posting = await messaged(addressed())
+    await posting.adapter.deliver(to(MESSAGE, choice('model', MENU_NAMES)))
+    const pressed = customIdFor(posting.buttons, 'sonnet')
+
+    const restarted = await connected()
+    await restarted.take(press(pressed))
+
+    expect(restarted.last).toMatchObject({ conversationKey: MESSAGE, text: '/model sonnet' })
+    // And the answer still reaches the Conversation: the key names the thread
+    // once it exists, so a message can only ever have the one and asking again
+    // is a success.
+    await restarted.adapter.deliver(to(MESSAGE, { kind: 'result', text: 'Now on sonnet.' }))
+    expect(restarted.api.messages.at(-1)?.posted.channel).toBe(MESSAGE)
+  })
+
+  // The Effort Matrix's third use is the Core's — an `/effort` on a model it says
+  // takes none arrives as a `result` rather than a `choice`, so there is no Menu
+  // here to suppress and no second reading of the Matrix to disagree with
+  // `Core.#effortStranded` (ADR-0023). What the Adapter owes is drawing exactly
+  // what it was sent, which is what this asserts from the other side.
+  it('draws nothing on the reply a suppressed Menu arrives as', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(
+      to(DM, {
+        kind: 'result',
+        text: 'This conversation runs at max. claude-haiku-4-5 takes none.',
+      }),
+    )
+
+    expect(channel.buttons).toEqual([])
+  })
+
+  // Only where there is something to explain. A Menu long enough to split would
+  // otherwise repeat itself under every piece, and the buttons belong under the
+  // words that name them.
+  it('puts the buttons under the last piece of a split answer and no other', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(
+      to(DM, choice('model', MENU_NAMES, `${'word '.repeat(2000)}You can choose:`)),
+    )
+
+    const drawn = channel.api.messages.map(({ posted }) => posted.buttons.length)
+    expect(drawn.length).toBeGreaterThan(1)
+    expect(drawn.slice(0, -1).every((count) => count === 0)).toBe(true)
+    expect(drawn.at(-1)).toBe(MENU_NAMES.length)
+  })
+})
+
+describe('the Overflow offer, out as a button and back as a press', () => {
+  // ADR-0002 puts the valve at the moment of blocking rather than in a setting,
+  // and the label says what pressing it costs — "Run anyway" would be that
+  // decision made by somebody who did not know they were making it.
+  it('offers Overflow on the message that reports the block', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(
+      to(DM, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: true }),
+    )
+
+    expect(channel.buttons.map(({ label }) => label)).toEqual([OVERFLOW_BUTTON])
+  })
+
+  // False where the provider says overage is unavailable or roma holds no
+  // metered credential. A button that cannot work spends somebody's attention on
+  // nothing, and on this Channel it is the only thing they could have pressed.
+  it('offers none where the Core says there is none to offer', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(
+      to(DM, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: false }),
+    )
+
+    expect(channel.buttons).toEqual([])
+  })
+
+  // Named by the Task and never by the Conversation, which can have a second
+  // Task blocked behind this one — "the blocked Task here" would spend money on
+  // whichever roma looked at first.
+  it('takes the offer for the Task it was made about', async () => {
+    const channel = await messaged(inDm())
+    await channel.adapter.deliver(
+      to(DM, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: true }, 'task-7'),
+    )
+
+    await channel.take(press(customIdFor(channel.buttons, OVERFLOW_BUTTON)))
+
+    const event = channel.deliveries.at(-1)?.event
+    expect(channel.adapter.toOverflowTaken(event as DiscordEvent)).toBe('task-7')
+  })
+
+  /**
+   * **`Ingress.#workFor` tries `toIngress` first and only calls
+   * `toOverflowTaken` where that answered null** (`src/serve.ts`). So the two
+   * encodings have to be unambiguous in that order: an Overflow press read as an
+   * ingress message would turn taking an offer into a paid Task, and a Menu press
+   * read as an Overflow one would spend money on a Task roma never named.
+   */
+  it('tells the two presses apart in the order the subscriber asks', async () => {
+    const channel = await messaged(inDm())
+    await channel.adapter.deliver(
+      to(DM, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: true }, 'task-7'),
+    )
+    const offer = customIdFor(channel.buttons, OVERFLOW_BUTTON)
+    await channel.adapter.deliver(to(DM, choice('model', MENU_NAMES)))
+    const menu = customIdFor(channel.buttons, 'opus')
+
+    await channel.take(press(offer))
+    const takingOverflow = channel.deliveries.at(-1)?.event as DiscordEvent
+    await channel.take(press(menu, { id: '900000000000000019' }))
+    const choosing = channel.deliveries.at(-1)?.event as DiscordEvent
+
+    expect(channel.adapter.toIngress(takingOverflow)).toBeNull()
+    expect(channel.adapter.toOverflowTaken(takingOverflow)).toBe('task-7')
+    expect(channel.adapter.toIngress(choosing)).toMatchObject({ text: '/model opus' })
+    expect(channel.adapter.toOverflowTaken(choosing)).toBeNull()
+  })
+})
+
+/**
+ * The deadline Chat does not have: *"you must send an initial response within 3
+ * seconds of receiving the event. If the 3 second deadline is exceeded, the
+ * token will be invalidated"* — and roma's Core takes minutes. This is why
+ * ADR-0029 made this Transport a thing that decides rather than a bare port.
+ */
+describe('a press is acknowledged before anything answers it', () => {
+  it('says the press arrived before the event is handed on', async () => {
+    const channel = await messaged(inDm())
+    await channel.adapter.deliver(to(DM, choice('model', MENU_NAMES)))
+
+    await channel.take(press(customIdFor(channel.buttons, 'opus')))
+
+    expect(channel.api.acknowledged).toEqual([
+      { interactionId: INTERACTION, token: INTERACTION_TOKEN },
+    ])
+    // Already said by the time the receiver was called. Read afterwards, both
+    // orders leave the same two calls in the same list.
+    expect(channel.saidBefore.at(-1)).toContain('acknowledgePress')
+  })
+
+  // `DEFERRED_UPDATE_MESSAGE` and nothing after it: pressing is typing, and
+  // typing does not rewrite the message you typed into. What roma sends to say
+  // that is `http-discord-api.test.ts`'s; that roma never edits the card is this.
+  it('leaves the card exactly as it was', async () => {
+    const channel = await messaged(inDm())
+    await channel.adapter.deliver(to(DM, choice('model', MENU_NAMES)))
+    const before = channel.api.messages.map(({ text, edits }) => ({ text, edits }))
+
+    await channel.take(press(customIdFor(channel.buttons, 'opus')))
+
+    expect(channel.api.calls).not.toContain('edit')
+    expect(channel.api.messages.map(({ text, edits }) => ({ text, edits }))).toEqual(before)
+  })
+
+  // A press roma could not acknowledge is one Discord marks as failed — and
+  // answering it late is better than a Task that stays blocked because nobody
+  // could take the offer. Nothing else would say so: the answer arrives, so from
+  // the Conversation there is no fault to see.
+  it('answers a press it could not acknowledge, and writes down that it could not', async () => {
+    const channel = await messaged(inDm())
+    channel.api.failEvery('acknowledgePress', refusal(404))
+    await channel.adapter.deliver(to(DM, choice('model', MENU_NAMES)))
+
+    await channel.take(press(customIdFor(channel.buttons, 'opus')))
+
+    expect(channel.last).toMatchObject({ text: '/model opus' })
+    expect(channel.log).toContainEqual({
+      event: 'press-unacknowledged',
+      reason: expect.any(String),
+    })
+  })
+
+  // Two presses on one card are two events, and a Delivery named by the card
+  // would make the second look like the first arriving twice — which
+  // `Ingress.take` drops while the first is still running.
+  it('names a Delivery by the press rather than by the card', async () => {
+    const channel = await messaged(inDm())
+    await channel.adapter.deliver(to(DM, choice('model', MENU_NAMES)))
+
+    await channel.take(press(customIdFor(channel.buttons, 'opus')))
+    await channel.take(press(customIdFor(channel.buttons, 'haiku'), { id: '900000000000000019' }))
+
+    expect(channel.deliveries.slice(-2).map(({ id }) => id)).toEqual([
+      INTERACTION,
+      '900000000000000019',
+    ])
+  })
+
+  // roma registers no application commands — ADR-0029 leaves slash commands open
+  // and explicitly not as something to add quietly — so an interaction that is
+  // not a press is one roma neither answers nor acknowledges.
+  it('acknowledges nothing that is not a press on something roma posted', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.take(press('choose:model:1:opus', { type: 2 }))
+
+    expect(channel.api.acknowledged).toEqual([])
+    expect(channel.deliveries).toHaveLength(1)
+  })
+
+  // A press whose `custom_id` roma cannot read is acknowledged all the same —
+  // the three seconds are spent whether or not roma understands it — and then
+  // answers nothing, which is what an event roma is not meant to answer does.
+  it('answers nothing for a custom_id roma never put out', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.take(press('something-roma-never-wrote'))
+
+    expect(channel.api.acknowledged).toHaveLength(1)
+    const event = channel.deliveries.at(-1)?.event as DiscordEvent
+    expect(channel.adapter.toIngress(event)).toBeNull()
+    expect(channel.adapter.toOverflowTaken(event)).toBeNull()
   })
 })
 

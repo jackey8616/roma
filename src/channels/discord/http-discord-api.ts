@@ -1,4 +1,9 @@
-import { DiscordRefusal, type DiscordApi, type DiscordPost } from './discord-api.js'
+import {
+  DiscordRefusal,
+  type DiscordApi,
+  type DiscordButton,
+  type DiscordPost,
+} from './discord-api.js'
 import { asNumber, asRecord, asString, type DiscordMessage } from './discord-events.js'
 
 export interface HttpDiscordApiOptions {
@@ -71,7 +76,7 @@ export class HttpDiscordApi implements DiscordApi {
     return new Uint8Array(await response.arrayBuffer())
   }
 
-  async post({ channel, text, replyTo }: DiscordPost): Promise<string> {
+  async post({ channel, text, replyTo, buttons }: DiscordPost): Promise<string> {
     const response = await this.#call(`/channels/${channel}/messages`, 'POST', {
       content: text,
       ...(replyTo === null
@@ -84,6 +89,7 @@ export class HttpDiscordApi implements DiscordApi {
             // for.
             message_reference: { message_id: replyTo, fail_if_not_exists: false },
           }),
+      ...(buttons.length === 0 ? {} : { components: componentRows(buttons) }),
       ...ALLOWED_MENTIONS,
     })
     refuseUnless(response, 'a message roma tried to post')
@@ -113,6 +119,13 @@ export class HttpDiscordApi implements DiscordApi {
     return messageId
   }
 
+  async acknowledgePress(interactionId: string, token: string): Promise<void> {
+    const response = await this.#call(`/interactions/${interactionId}/${token}/callback`, 'POST', {
+      type: DEFERRED_UPDATE_MESSAGE,
+    })
+    refuseUnless(response, 'a press roma had three seconds to answer')
+  }
+
   #call(path: string, method = 'GET', body?: unknown): Promise<Response> {
     return this.#fetch(`${this.#apiBase}${path}`, {
       method,
@@ -127,6 +140,61 @@ export class HttpDiscordApi implements DiscordApi {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
   }
+}
+
+/**
+ * Discord's answer to a press that changes nothing about the card.
+ *
+ * *"For components, ACK an interaction and edit the original message later; the
+ * user does not see a loading state"* — which is exactly right for a design
+ * where pressing is typing and the card should not move (ADR-0029). Every other
+ * callback type either posts something or shows a spinner, and both would have
+ * roma answering a Command twice.
+ */
+const DEFERRED_UPDATE_MESSAGE = 6
+
+/**
+ * Discord's numbers for the two things a card is made of.
+ *
+ * A row is a container and a button is what goes in one; the style is the plain
+ * grey. Nothing here is a decision — which buttons exist and what they say was
+ * settled before this file saw them.
+ */
+const ACTION_ROW = 1
+const BUTTON = 2
+const SECONDARY = 2
+
+/**
+ * How many buttons fit in one row, and how many rows in one message.
+ *
+ * **Never let a row go past five.** Discord refuses the whole message, so a Menu
+ * one button too wide is a Menu nobody is shown — and on the blocked path, an
+ * Overflow offer that never reaches the person waiting on it. The Model Menu is
+ * four and the Effort Menu six, so one row and two.
+ *
+ * Past five *rows* the tail is dropped rather than sent, which is the harmless
+ * direction and is why the two limits are not guarded the same way: the text
+ * still names every name, so a Menu that outgrew a card costs the shortcut and
+ * not the answer.
+ */
+const PER_ROW = 5
+const MAX_ROWS = 5
+
+/** Buttons as Discord takes them: rows of five, and never more rows than it allows. */
+function componentRows(buttons: readonly DiscordButton[]): unknown[] {
+  const rows: unknown[] = []
+  for (let at = 0; at < buttons.length && rows.length < MAX_ROWS; at += PER_ROW) {
+    rows.push({
+      type: ACTION_ROW,
+      components: buttons.slice(at, at + PER_ROW).map(({ label, customId }) => ({
+        type: BUTTON,
+        style: SECONDARY,
+        label,
+        custom_id: customId,
+      })),
+    })
+  }
+  return rows
 }
 
 /**

@@ -19,6 +19,20 @@ import type { Command } from '../../commands.js'
 export const MAX_TEXT = 2000
 
 /**
+ * What the button that takes Overflow says.
+ *
+ * It says that it costs money, because that is the whole of the decision being
+ * asked for: ADR-0002 has the valve off by default precisely so that spending is
+ * something somebody chooses, and a button labelled "Run anyway" would be that
+ * choice made by somebody who did not know they were making it.
+ *
+ * Chat's word for word, and that is the argument being shared rather than a
+ * constant: what the offer costs reads the same wherever it is drawn, and two
+ * Channels wording one decision differently would be two decisions.
+ */
+export const OVERFLOW_BUTTON = 'Run it on metered billing'
+
+/**
  * How long the name of a thread roma opens may be.
  *
  * **Never let a name past it.** Discord refuses the creation, and a refused
@@ -77,19 +91,21 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
       // the Conversation nothing at all about a Task that is already dead.
       return split(instruction.reason, MAX_TEXT)
     case 'choice':
-      // Only the text, and that is enough: it names the Menu in words, so a
-      // Channel with no buttons on it yet has posted the whole answer rather
-      // than a degraded one (ADR-0023). The buttons are #181's.
+      // Only the text, and the buttons are the Adapter's: the Menu is one offer
+      // with two ways to reach it, so the sentence names every name whether or
+      // not anything drew it (ADR-0023). What that keeps is a `choice` splitting
+      // like a result — the words are the answer, and the shortcut goes under
+      // the last piece of them.
       return split(instruction.text, MAX_TEXT)
     case 'stopped':
       return ['Stopped.']
     case 'command-outcome':
       return [commandText(instruction.command, instruction.carriedOut)]
     case 'blocked':
-      // `overflowOffered` renders nothing here yet, and saying so in words would
-      // be worse than silence: there is no way to take the offer until it is a
-      // button (#181), and a sentence offering one would name a Command roma has
-      // deliberately never had (ADR-0023).
+      // `overflowOffered` is the Adapter's and says nothing here, which is not
+      // an omission: the offer is a button, and a sentence beside it would have
+      // to name a Command roma has deliberately never had — taking Overflow is
+      // the one thing in roma nobody can do by typing (ADR-0002, ADR-0023).
       return [blockedText(instruction.resetsAt)]
     case 'context-full':
       // The consequence rather than the cause, and naming the remedy and what it

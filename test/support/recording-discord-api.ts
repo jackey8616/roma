@@ -1,8 +1,15 @@
 import type { DiscordApi, DiscordPost } from '../../src/channels/discord/discord-api.js'
 import type { DiscordMessage } from '../../src/channels/discord/discord-events.js'
 
-/** Which of the five calls a recording is of. */
-export type DiscordCall = 'message' | 'download' | 'post' | 'edit' | 'startThread'
+/** Which of the six calls a recording is of. */
+export type DiscordCall =
+  'message' | 'download' | 'post' | 'edit' | 'startThread' | 'acknowledgePress'
+
+/** One press roma said had arrived, by the interaction it answered. */
+export interface RecordedAcknowledgement {
+  readonly interactionId: string
+  readonly token: string
+}
 
 /** One message as Discord holds it: what it was posted with, and its text now. */
 export interface RecordedDiscordMessage {
@@ -45,6 +52,8 @@ export class RecordingDiscordApi implements DiscordApi {
   readonly messages: RecordedDiscordMessage[] = []
   /** Every thread roma asked for, including the ones that already existed. */
   readonly threads: RecordedThread[] = []
+  /** Every press roma acknowledged, in order. Three seconds is what it has. */
+  readonly acknowledged: RecordedAcknowledgement[] = []
 
   readonly #messages = new Map<string, DiscordMessage>()
   readonly #content = new Map<string, Uint8Array>()
@@ -134,6 +143,13 @@ export class RecordingDiscordApi implements DiscordApi {
     const refusal = this.#refusal('startThread')
     if (refusal !== null) return Promise.reject(refusal)
     return Promise.resolve(messageId)
+  }
+
+  acknowledgePress(interactionId: string, token: string): Promise<void> {
+    this.calls.push('acknowledgePress')
+    this.acknowledged.push({ interactionId, token })
+    const refusal = this.#refusal('acknowledgePress')
+    return refusal === null ? Promise.resolve() : Promise.reject(refusal)
   }
 
   /** The text of every message, in the order they were posted. */

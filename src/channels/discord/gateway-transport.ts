@@ -6,9 +6,12 @@ import {
   asRecord,
   asString,
   completedQuotation,
+  readInteraction,
   type DiscordEvent,
   type DiscordEventLogRecord,
   type DiscordMessage,
+  type DiscordPress,
+  type Interaction,
 } from './discord-events.js'
 
 /**
@@ -147,6 +150,20 @@ export type GatewayLogRecord =
       readonly messageId: string
       readonly reason: string
     }
+  | {
+      /**
+       * A press arrived and roma could not say so inside its three seconds.
+       *
+       * The token is invalidated, so Discord shows the person that their press
+       * failed — while roma goes on and answers it, which is the right way round
+       * and is also why nothing else would ever mention this. Worth an
+       * operator's attention because the ordinary cause is a REST API roma
+       * cannot reach at all, which every other symptom of arrives minutes later
+       * as an answer nobody was told (ADR-0029).
+       */
+      readonly event: 'press-unacknowledged'
+      readonly reason: string
+    }
 
 /** Everything the Discord Channel says to an operator: its Transport's and its own. */
 export type DiscordLogRecord = GatewayLogRecord | DiscordEventLogRecord
@@ -210,6 +227,13 @@ const REFUSED_FOR_GOOD = new Set([4004, 4010, 4011, 4012, 4013, 4014])
 /** The close codes that mean the session is gone, but the connection may return. */
 const SESSION_LOST = new Set([4007, 4009])
 
+/** One thing off the socket, on its way to the receiver: a message, or a press on one. */
+interface Pending {
+  readonly id: string
+  readonly message: DiscordMessage
+  readonly press: DiscordPress | null
+}
+
 /**
  * Discord's inbound path: one WebSocket, held open.
  *
@@ -224,11 +248,17 @@ const SESSION_LOST = new Set([4007, 4009])
  * named by the message's own snowflake and not by anything minted here
  * (ADR-0028).
  *
- * It decides two things Chat's Transport does not, and both for the same reason
- * — they need state that arrives over this socket. Which channels a guild has,
- * which is what tells a thread from a top-level message; and the words behind a
- * Quotation, which cost a REST call `toIngress` may not make. A message that
- * arrives before roma holds the first is **held**, never guessed at.
+ * It decides three things Chat's Transport does not, and the first two for the
+ * same reason — they need state that arrives over this socket. Which channels a
+ * guild has, which is what tells a thread from a top-level message; and the
+ * words behind a Quotation, which cost a REST call `toIngress` may not make. A
+ * message that arrives before roma holds the first is **held**, never guessed
+ * at.
+ *
+ * The third is a deadline: a press has to be acknowledged inside three seconds
+ * and roma's Core takes minutes, so the acknowledgement goes out from here
+ * before the press reaches anything that could answer it. This is why ADR-0029
+ * made this Transport a thing that decides rather than a bare port.
  */
 export class GatewayTransport implements Transport<DiscordEvent> {
   readonly #token: string
@@ -273,8 +303,8 @@ export class GatewayTransport implements Transport<DiscordEvent> {
    * split its Session (ADR-0029).
    */
   readonly #channels = new Map<string, Set<string>>()
-  /** Messages waiting for the state that makes them readable. See `gateway-held`. */
-  #held: DiscordMessage[] = []
+  /** What is waiting for the state that makes it readable. See `gateway-held`. */
+  #held: Pending[] = []
 
   constructor({ token, url, connect, api, log, jitter }: GatewayTransportOptions) {
     this.#token = token
@@ -441,8 +471,16 @@ export class GatewayTransport implements Transport<DiscordEvent> {
         this.#notChannels(asString(payload['guild_id']), idsIn(payload['threads']))
         return
       case 'MESSAGE_CREATE':
-        this.#take(payload)
+        this.#message(payload)
         return
+      case 'INTERACTION_CREATE': {
+        // Over this socket rather than an endpoint, because the two are
+        // *"mutually exclusive"* and roma registers none — so buttons cost no
+        // inbound port either (ADR-0029).
+        const interaction = readInteraction(payload)
+        if (interaction !== null) void this.#pressed(interaction)
+        return
+      }
       default:
         return
     }
@@ -470,39 +508,69 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     return guildId === null ? undefined : this.#channels.get(guildId)
   }
 
-  /** Take one message, or hold it until roma can read it. */
-  #take(message: DiscordMessage): void {
-    if (asString(message['id']) === null) {
+  /** One message, named by its own snowflake, or dropped where it has none. */
+  #message(message: DiscordMessage): void {
+    const id = asString(message['id'])
+    if (id === null) {
       this.#log({ event: 'gateway-undecodable', reason: 'a message arrived with no id' })
       return
     }
-    if (this.#readable(message)) {
-      void this.#deliver(message)
+    this.#take({ id, message, press: null })
+  }
+
+  /**
+   * One press: acknowledged first, then handed on like anything else.
+   *
+   * **Never hand it on first.** Discord invalidates the token after three
+   * seconds and roma's Core takes minutes, so the acknowledgement cannot wait on
+   * the work — it is what buys the time the work needs (ADR-0029). An
+   * acknowledgement that failed is written down and the press goes on anyway:
+   * the person has already chosen, and the only thing worse than a press Discord
+   * marks failed is one nothing answers.
+   */
+  async #pressed({ id, token, message, press }: Interaction): Promise<void> {
+    try {
+      await this.#api.acknowledgePress(id, token)
+    } catch (error) {
+      this.#log({ event: 'press-unacknowledged', reason: reasonOf(error) })
+    }
+    this.#take({ id, message, press })
+  }
+
+  /** Take one thing off the socket, or hold it until roma can read it. */
+  #take(pending: Pending): void {
+    if (this.#readable(pending)) {
+      void this.#deliver(pending)
       return
     }
-    this.#log({ event: 'gateway-held', guildId: asString(message['guild_id']) })
-    this.#held.push(message)
+    this.#log({ event: 'gateway-held', guildId: asString(pending.message['guild_id']) })
+    this.#held.push(pending)
   }
 
   /** Deliver whatever roma has learned enough to read, in the order it arrived. */
   #release(): void {
     const waiting = this.#held
     this.#held = []
-    for (const message of waiting) {
-      if (this.#readable(message)) void this.#deliver(message)
-      else this.#held.push(message)
+    for (const pending of waiting) {
+      if (this.#readable(pending)) void this.#deliver(pending)
+      else this.#held.push(pending)
     }
   }
 
-  /** Whether roma holds the state this message has to be read against. */
-  #readable(message: DiscordMessage): boolean {
+  /** Whether roma holds the state this has to be read against. */
+  #readable({ message, press }: Pending): boolean {
     if (this.#self === null) return false
+    // A press carries its own Conversation Key on the button, so the classifier
+    // — and the guild state behind it — is not a question it has to be read
+    // against. Held for one it does not ask, the person has already been told
+    // their press arrived and would then wait for an answer to it (ADR-0029).
+    if (press !== null) return true
     const guildId = asString(message['guild_id'])
     return guildId === null || this.#channels.has(guildId)
   }
 
   /**
-   * One message, completed and handed over.
+   * One message or one press, completed and handed over.
    *
    * **Never await this from the frame handler.** A Task takes minutes, and this
    * resolves when one is finished with — so awaiting it stops roma reading the
@@ -512,24 +580,29 @@ export class GatewayTransport implements Transport<DiscordEvent> {
    * about the guild as it stands a round trip later rather than as it stood when
    * the message arrived.
    */
-  async #deliver(message: DiscordMessage): Promise<void> {
+  async #deliver({ id, message, press }: Pending): Promise<void> {
     const receiver = this.#receiver
     const self = this.#self
-    const id = asString(message['id'])
-    if (receiver === null || self === null || id === null) return
+    if (receiver === null || self === null) return
 
     const guildChannel = this.#guildChannel(message)
-    const quotation = await completedQuotation(message, {
-      fetchMessage: (channelId, messageId) => this.#api.message(channelId, messageId),
-      log: this.#log,
-    })
+    // Never for a press. The card is roma's own message and roma replies to the
+    // Caller on it, so completing its `message_reference` would spend a round
+    // trip quoting the very question the press is answering.
+    const quotation =
+      press !== null
+        ? null
+        : await completedQuotation(message, {
+            fetchMessage: (channelId, messageId) => this.#api.message(channelId, messageId),
+            log: this.#log,
+          })
 
     const delivery: Delivery<DiscordEvent> = {
       // The event's own snowflake, never anything minted here: a resumed session
       // replays what roma missed, and this is what tells that replay from a
       // second message saying the same words (ADR-0028).
       id,
-      event: { message, self, guildChannel, quotation },
+      event: { message, self, guildChannel, quotation, press },
       // **Never make either of these do anything.** A socket has nowhere to hand
       // a Delivery back to, so a `nack` that pretended otherwise would promise a
       // redelivery that never comes — and an `ack` on a Gateway event is a
