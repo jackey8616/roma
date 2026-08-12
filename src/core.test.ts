@@ -13,11 +13,17 @@ import type {
   Quotation,
 } from './channel-adapter.js'
 import { apiKeySourceFor, type CredentialKind } from './build-env.js'
+import { CAVEMAN_NAMES, CAVEMAN_OFF, cavemanRuleset } from './caveman.js'
 import { PINNED_EFFORT, PINNED_MODEL } from './claude-session.js'
 import { EFFORT_NOT_APPLIED } from './effort-menu.js'
 import type { RetryBudget } from './config.js'
 import { RUNTIME_NAMES, RUNTIMES, type Runtime } from './runtime.js'
-import { chosenEfforts, chosenModels, SessionGenerations } from './session-generation.js'
+import {
+  chosenCavemen,
+  chosenEfforts,
+  chosenModels,
+  SessionGenerations,
+} from './session-generation.js'
 import { sessionIdFor } from './session-id.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
 import { WorkRoot } from './work-root.js'
@@ -109,6 +115,7 @@ const EVERY_CORE_OPTION: Record<keyof CoreOptions, true> = {
   sessions: true,
   models: true,
   efforts: true,
+  cavemen: true,
   audit: true,
   credential: true,
   overflow: true,
@@ -122,6 +129,7 @@ function newCore({
   overflow = { monthlyCapUsd: 100 },
   capabilities,
   pinnedModel = PINNED_MODEL,
+  pinnedCaveman = CAVEMAN_OFF,
   ...options
 }: {
   /** An existing work root, for the one test that stands a second Core up over one. */
@@ -136,6 +144,11 @@ function newCore({
    * read about.
    */
   pinnedModel?: string
+  /**
+   * Omitted for the deployment that named no Caveman, which is every test here
+   * but the ones about a Conversation being put back on what it pinned.
+   */
+  pinnedCaveman?: string
   /** Omitted for the deployment with no Cloud Reach, which is every other test here. */
   usedCloudReach?: (taskId: string) => boolean
   /** And for the one with no Document Reach, which is also every other test here. */
@@ -157,11 +170,15 @@ function newCore({
   // The same instance to both, for the same reason: the Core writes what somebody
   // chose and the pool reads it at the next spawn.
   const efforts = chosenEfforts({ workRoot: work, pinnedEffort: PINNED_EFFORT })
+  // And the third, to both again — a pool built without it answers `/caveman`
+  // and appends the Pinned Caveman to every Session regardless.
+  const cavemen = chosenCavemen({ workRoot: work, pinnedCaveman })
   const poolLog: PoolLogRecord[] = []
   const pool = new SessionPool({
     workRoot: work,
     models,
     efforts,
+    cavemen,
     envs: {
       // A function of the Session, because two of the variables a real one
       // carries are the Session's own. Nothing here needs them, so the Session
@@ -197,6 +214,7 @@ function newCore({
     sessions,
     models,
     efforts,
+    cavemen,
     audit,
     credential: 'shared-window',
     log: (record) => log.push(record),
@@ -250,6 +268,7 @@ function newCore({
     adapter,
     audit,
     auditRoot,
+    cavemen,
     claude,
     core,
     efforts,
@@ -314,6 +333,7 @@ function coreOver(shared: ReturnType<typeof newCore>, channel: ChannelAdapter): 
     sessions: shared.sessions,
     models: shared.models,
     efforts: shared.efforts,
+    cavemen: shared.cavemen,
     audit: shared.audit,
     credential: 'shared-window',
   })
@@ -2019,6 +2039,324 @@ describe('an effort the model will not use', () => {
 })
 
 /**
+ * `/caveman`, driven through the Core the way `/model` and `/effort` are, and
+ * asserted the same way: through the spawn arguments rather than through the
+ * record on disk.
+ *
+ * The seventh Command and the first claimed spelling that is nobody's build. It
+ * cannot be relayed — the pinned build has never heard of it — so unlike the
+ * other two there is no version of this feature where the Runtime answers, and
+ * roma's own reply is the only reply there is (ADR-0030).
+ *
+ * A `/caveman` that wrote a perfect file and changed nothing about the next Turn
+ * is the failure these are built to prevent, and it is the least visible of the
+ * three: `system/init` echoes the model, nothing echoes the effort, and here even
+ * the argv carries a ruleset rather than the word somebody typed.
+ */
+describe('the Caveman a Conversation runs at', () => {
+  /** What the spawn was actually told about how short to be. */
+  const appendedTo = (spawn: { args: readonly string[] }): string | undefined => {
+    const at = spawn.args.indexOf('--append-system-prompt')
+    return at === -1 ? undefined : spawn.args[at + 1]
+  }
+
+  it('runs the next Task at the Caveman somebody chose, and says so from that message on', async () => {
+    const { adapter, claude, core, say } = newCore()
+
+    await core.handle(ingress('/caveman ultra'))
+    await say('hello')
+
+    expect(appendedTo(claude.lastSpawn)).toBe(cavemanRuleset('ultra'))
+    expect(posted(adapter.instructions)[0]).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: expect.stringContaining('from your next message'),
+    })
+  })
+
+  // The deployment ADR-0030 is not allowed to change, read from the Caller's end
+  // rather than the operator's: nobody has pinned anything and nobody has chosen
+  // anything, so there is no flag at all.
+  it('appends nothing where the deployment pinned none and nobody has chosen', async () => {
+    const { claude, say } = newCore()
+
+    await say('hello')
+
+    expect(claude.lastSpawn.args).not.toContain('--append-system-prompt')
+  })
+
+  // Aimed at what the next message reaches, never backwards into work somebody
+  // is waiting on — `--append-system-prompt` is fixed at spawn, so the
+  // alternative is an answer written half one way and half the other.
+  it('leaves a Task that is already running at the Caveman it started at', async () => {
+    const { claude, core, say, start } = newCore()
+    const { task, proc } = await start('a long job')
+
+    await core.handle(ingress('/caveman full'))
+    feed(proc, OK)
+    await task
+
+    expect(appendedTo(claude.lastSpawn)).toBeUndefined()
+
+    await say('and now')
+    expect(appendedTo(claude.lastSpawn)).toBe(cavemanRuleset('full'))
+  })
+
+  it('refuses a level it does not offer, by name, and moves nothing', async () => {
+    const { adapter, claude, core, say } = newCore()
+
+    await core.handle(ingress('/caveman terse'))
+    await say('hello')
+
+    expect(posted(adapter.instructions)[0]).toEqual({
+      kind: 'failure',
+      conversationKey: KEY,
+      reason: expect.stringContaining('terse'),
+    })
+    expect(appendedTo(claude.lastSpawn)).toBeUndefined()
+    // Refused as a Command rather than falling through to a Task: the only Turn
+    // driven here is the "hello" that followed it.
+    expect(claude.process.sent.filter((frame) => frame['type'] === 'user')).toHaveLength(1)
+  })
+
+  // Off the Menu and reachable only through `ROMA_CAVEMAN`. Answered exactly as a
+  // typo is, because explaining that they exist and are the operator's would be
+  // roma advertising something no Caller can have — and wenyan's own row claims
+  // its saving in characters where a Shared Window is spent in tokens.
+  it('refuses the two wenyan levels an operator may pin, like any other name', async () => {
+    const { adapter, claude, core } = newCore()
+
+    for (const level of ['wenyan-lite', 'wenyan-ultra']) {
+      await core.handle(ingress(`/caveman ${level}`))
+
+      expect(posted(adapter.instructions).at(-1)).toMatchObject({
+        kind: 'failure',
+        reason: expect.stringContaining(level),
+      })
+    }
+    expect(claude.processes).toHaveLength(0)
+  })
+
+  it('reports the current Caveman and the Menu, without a process or a Turn', async () => {
+    const { adapter, claude, core } = newCore()
+
+    await core.handle(ingress('/caveman'))
+
+    expect(claude.processes).toHaveLength(0)
+    const [reported] = posted(adapter.instructions)
+    expect(reported).toMatchObject({ kind: 'result' })
+    // Six names in the words, which is the whole answer on any Channel — #190
+    // is what makes them pressable as well, and pressing means what typing means.
+    for (const name of CAVEMAN_NAMES) {
+      expect(reported).toMatchObject({ text: expect.stringContaining(name) })
+    }
+  })
+
+  // Choosing the level the deployment already pins is not the same as never
+  // having chosen, and this is the only place the difference is visible before
+  // it matters — the day an operator moves `ROMA_CAVEMAN`.
+  it('reports a Session moved to the Pinned Caveman by the name that was typed', async () => {
+    const { adapter, core } = newCore({ pinnedCaveman: 'full' })
+
+    await core.handle(ingress('/caveman full'))
+    await core.handle(ingress('/caveman'))
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      text: expect.stringContaining('runs at caveman full.'),
+    })
+  })
+
+  it('reports a Session nobody moved as following the Pinned Caveman', async () => {
+    const { adapter, core } = newCore({ pinnedCaveman: 'lite' })
+
+    await core.handle(ingress('/caveman'))
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      text: expect.stringContaining('default (lite)'),
+    })
+  })
+
+  // The two words a Caller might reach for to mean "leave me alone", kept apart:
+  // `off` is a level and is written down, `default` is the absence of a record
+  // and follows whatever the deployment moves to.
+  it('tells off, which is a level, apart from default, which is the pin', async () => {
+    const { claude, core, say } = newCore({ pinnedCaveman: 'full' })
+
+    await core.handle(ingress('/caveman off'))
+    await say('hello')
+    expect(appendedTo(claude.lastSpawn)).toBeUndefined()
+
+    await core.handle(ingress('/caveman default'))
+    await say('and now')
+    expect(appendedTo(claude.lastSpawn)).toBe(cavemanRuleset('full'))
+  })
+
+  it('goes back to the Pinned Caveman on /caveman default, keeping the context', async () => {
+    const { claude, core, say } = newCore({ pinnedCaveman: 'lite' })
+    await core.handle(ingress('/caveman ultra'))
+    await say('hello')
+
+    await core.handle(ingress('/caveman default'))
+    await say('and now')
+
+    expect(appendedTo(claude.lastSpawn)).toBe(cavemanRuleset('lite'))
+    // The same Session throughout: `/caveman default` moves the Caveman and
+    // nothing else.
+    expect(claude.lastSpawn.args).toContain(sessionIdFor(KEY))
+  })
+
+  // Reverting is arithmetic rather than an action somebody has to remember: a
+  // Chosen Caveman is keyed by the Session id, the reset moves the generation,
+  // and the new Session has no record. Nothing is deleted.
+  it('goes back to the Pinned Caveman when the Conversation is cleared, deleting nothing', async () => {
+    const { cavemen, claude, core, say, workRoot } = newCore({ pinnedCaveman: 'full' })
+    await core.handle(ingress('/caveman off'))
+    await say('hello')
+
+    await core.handle(ingress('/clear'))
+    await say('and now', { session: sessionIdFor(KEY, 1) })
+
+    expect(appendedTo(claude.lastSpawn)).toBe(cavemanRuleset('full'))
+    expect(readdirSync(workRoot)).toContain(`${sessionIdFor(KEY)}.caveman`)
+    expect(cavemen.inForce(sessionIdFor(KEY))).toBe('off')
+  })
+
+  // The fourth reason a process ends for money, and the one an operator has no
+  // other account of: the level is nowhere in the stream and the argv carries the
+  // ruleset rather than the word.
+  it('writes the process change down as a swap, and not as an Eviction', async () => {
+    const { core, poolLog, say } = newCore()
+    await say('hello')
+
+    await core.handle(ingress('/caveman lite'))
+    await say('and now')
+
+    expect(poolLog.filter(({ event }) => event === 'swap')).toEqual([
+      { event: 'swap', sessionId: sessionIdFor(KEY), reason: 'caveman', from: 'off', to: 'lite' },
+    ])
+    expect(poolLog.filter(({ event }) => event === 'evict' || event === 'reap')).toEqual([])
+  })
+
+  // Asking is never the slow thing. roma owns the answer, so it takes no
+  // concurrency slot and does not queue behind the Conversation's own work — the
+  // property `/model`, `/effort` and `/usage` already have.
+  it('answers while roma is running as much as it runs at once', async () => {
+    const { adapter, core, start } = newCore()
+    const running = [
+      await start('one', KEY),
+      await start('two', OTHER_KEY),
+      await start('three', 'c'),
+    ]
+
+    await core.handle(ingress('/caveman'))
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'result' })
+    for (const { proc, task } of running) {
+      feed(proc, OK)
+      await task
+    }
+  })
+
+  // Nothing is spent, so nothing is filed — and the Task the Command did not
+  // wait behind still finishes and still answers whoever asked.
+  it('leaves a Task this Conversation has in flight running, and no record of its own', async () => {
+    const { adapter, audit, core, start } = newCore()
+    const { task, proc } = await start('a long job')
+
+    await core.handle(ingress('/caveman ultra'))
+    feed(proc, OK)
+    await task
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'result', text: 'ok' })
+    expect(recordsIn(audit)).toHaveLength(1)
+  })
+
+  it('treats a message that merely begins with /caveman as work', async () => {
+    const { claude, say } = newCore()
+
+    await say('/caveman mode for the deploy notes')
+
+    expect(claude.process.sent.filter((frame) => frame['type'] === 'user')).toHaveLength(1)
+  })
+})
+
+/**
+ * What a Conversation is told when its Chosen Caveman is one roma has stopped
+ * offering.
+ *
+ * `a Chosen Model roma no longer offers`, a third time, and driven the same way:
+ * by writing the record directly, because the Menu is a constant and this state
+ * is what a *later* roma finds after somebody removed an entry from it.
+ *
+ * A wider hole than the other two. Removing a Menu entry reaches all three, and
+ * this one is reachable a second way — `ROMA_CAVEMAN` accepts two levels the Menu
+ * does not, so a record naming one is refused while a deployment pinning it goes
+ * on running.
+ */
+describe('a Chosen Caveman roma no longer offers', () => {
+  /**
+   * The operator's, never a Caller's — which is the second way into this state
+   * and the one the other two records have no equivalent of.
+   */
+  const WITHHELD = 'wenyan-lite'
+
+  function withWithheldCaveman() {
+    const core = newCore()
+    writeFileSync(join(core.workRoot, `${sessionIdFor(KEY)}.caveman`), WITHHELD)
+    return core
+  }
+
+  // The Conversation still gets its Opening, where one whose Chosen Model has
+  // gone does not — the Opening reads the model and the effort and not this
+  // (ADR-0024, and #189 is where that stops being true). So the refusal is the
+  // last thing said rather than the only thing.
+  it('tells the Conversation what happened and how to undo it', async () => {
+    const { adapter, core } = withWithheldCaveman()
+
+    await core.handle(ingress('hello'))
+
+    expect(posted(adapter.instructions).at(-1)).toEqual({
+      kind: 'failure',
+      conversationKey: KEY,
+      reason: expect.stringContaining('/caveman default'),
+    })
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      reason: expect.stringContaining(WITHHELD),
+    })
+  })
+
+  // The Command path has its own catch and its own generic sentence, so it would
+  // otherwise answer "roma could not carry out that command" to the person
+  // asking the one question this state makes urgent.
+  it('says the same when asked which Caveman it is at', async () => {
+    const { adapter, core } = withWithheldCaveman()
+
+    await core.handle(ingress('/caveman'))
+
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      reason: expect.stringContaining('/caveman default'),
+    })
+  })
+
+  // The promise that sentence makes, kept. `/caveman default` forgets the record
+  // without reading it, which is what lets it work here at all — and the
+  // Conversation keeps everything it has said.
+  it('is cleared by the /caveman default it recommends', async () => {
+    const { adapter, claude, core, say } = withWithheldCaveman()
+
+    await core.handle(ingress('/caveman default'))
+    await say('hello')
+
+    expect(claude.lastSpawn.args).not.toContain('--append-system-prompt')
+    expect(posted(adapter.instructions).at(-1)).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: 'ok',
+    })
+  })
+})
+
+/**
  * `/config`, which is two more spellings that used to cost a Turn to answer
  * nothing (ADR-0017).
  *
@@ -2086,6 +2424,12 @@ describe('what this Conversation is set to', () => {
     })
     expect(posted(adapter.instructions)[0]).toMatchObject({
       reason: expect.stringContaining('/effort'),
+    })
+    // All three, on every deployment. This sentence says what a Caller may type
+    // rather than what this Session is, so unlike the report beside it there is
+    // no deployment where the third one is left out.
+    expect(posted(adapter.instructions)[0]).toMatchObject({
+      reason: expect.stringContaining('/caveman'),
     })
   })
 

@@ -3,17 +3,100 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   CAVEMAN_MENU,
+  CAVEMAN_NAMES,
   CAVEMAN_OFF,
   cavemanRuleset,
   isPinnableCaveman,
   OFF_MENU_WENYAN,
+  PINNED_CAVEMAN_NAME,
+  readCavemanRequest,
+  type CavemanRequest,
 } from './caveman.js'
+import { readCommand } from './commands.js'
 
 /** Every level an operator may pin, which is the Menu plus the two off it. */
 const EVERY_LEVEL = [...CAVEMAN_MENU, ...OFF_MENU_WENYAN]
 
 /** Every level that has a ruleset, which is every level except `off`. */
 const LEVELS_WITH_RULES = EVERY_LEVEL.filter((level) => level !== CAVEMAN_OFF)
+
+/**
+ * What a message asks roma to do about the Caveman, or null if it is not asking.
+ *
+ * `effort-menu.test.ts`'s helper, for its reason: `readCommand` decides which
+ * messages are `/caveman` at all and `readCavemanRequest` decides what the
+ * argument means, and nobody typing one knows which side of that their message
+ * falls on.
+ */
+function read(text: string): CavemanRequest | null {
+  const command = readCommand(text)
+  return command?.command === 'caveman' ? readCavemanRequest(command.argument) : null
+}
+
+describe('reading a /caveman message', () => {
+  it('recognises every level on the Menu, off among them', () => {
+    for (const level of CAVEMAN_MENU) {
+      expect(read(`/caveman ${level}`)).toEqual({ kind: 'chosen', level })
+    }
+  })
+
+  // `default` names the Pinned Caveman rather than a level of its own, which is
+  // why nothing here resolves it: a deployment that moved `ROMA_CAVEMAN` would
+  // otherwise strand every Session that asked for "default" at the old one.
+  it('reads default as a name of its own rather than as a level', () => {
+    expect(read('/caveman default')).toEqual({ kind: 'default' })
+  })
+
+  // Off the Menu and reachable only through `ROMA_CAVEMAN`, on the rule
+  // `ultracode` already reaches `ROMA_EFFORT` by. Refused here exactly as a typo
+  // is, so that roma does not advertise something no Caller can have.
+  it('refuses the two wenyan levels an operator may pin', () => {
+    for (const level of OFF_MENU_WENYAN) {
+      expect(read(`/caveman ${level}`)).toEqual({ kind: 'unknown', name: level })
+    }
+  })
+
+  // caveman's own hook folds this into `wenyan-full`. roma relays nothing to that
+  // hook, so accepting it would be a spelling roma had chosen to claim rather
+  // than one it inherited (ADR-0030).
+  it('does not take wenyan, which is an alias rather than a level', () => {
+    expect(read('/caveman wenyan')).toEqual({ kind: 'unknown', name: 'wenyan' })
+  })
+
+  it('refuses a level roma does not offer, and says which', () => {
+    expect(read('/caveman terse')).toEqual({ kind: 'unknown', name: 'terse' })
+  })
+
+  it('reads no argument as a request to report', () => {
+    expect(read('/caveman')).toEqual({ kind: 'report' })
+  })
+
+  it('ignores the whitespace and the casing a Channel or a keyboard added', () => {
+    expect(read('  /caveman ULTRA\n')).toEqual({ kind: 'chosen', level: 'ultra' })
+    expect(read('/Caveman')).toEqual({ kind: 'report' })
+  })
+
+  // One argument is an argument; several words are a sentence. This is what
+  // keeps something meant for the agent from being swallowed by a Command that
+  // would answer it with a refusal.
+  it('leaves a message that merely begins with /caveman as work', () => {
+    expect(read('/caveman mode please')).toBeNull()
+    expect(read('/cavemen')).toBeNull()
+    expect(read('what is caveman mode?')).toBeNull()
+  })
+
+  it('lists every name a Caller may type, the one for the Pinned Caveman included', () => {
+    expect(CAVEMAN_NAMES).toEqual([...CAVEMAN_MENU, PINNED_CAVEMAN_NAME])
+  })
+
+  // Six, and the two an operator may pin are not among them. Named as a literal
+  // rather than derived, so that a level added or dropped is a decision somebody
+  // took rather than a card that quietly changed width (ADR-0030).
+  it('offers six names, and neither of the operator’s two', () => {
+    expect(CAVEMAN_NAMES).toEqual(['off', 'lite', 'full', 'ultra', 'wenyan-full', 'default'])
+    for (const level of OFF_MENU_WENYAN) expect(CAVEMAN_NAMES).not.toContain(level)
+  })
+})
 
 describe('what an operator may pin', () => {
   it('takes every level a Caller will be able to choose', () => {
@@ -162,9 +245,10 @@ describe('the three lines that describe a machine roma does not install', () => 
     }
   })
 
-  // Upstream advertises seven values on a line a Caller could act on. roma draws
-  // no Menu and answers no `/caveman` yet, so any mention of one would bill
-  // somebody for a Turn explaining that it does nothing.
+  // Upstream advertises seven values on a line a Caller could act on, against a
+  // Menu of six — so the line roma left out is one that would have had roma
+  // refuse two names its own system prompt offered. ADR-0023's consequence list
+  // names that failure exactly, by a different route.
   it('advertises no Command, and so cannot advertise a value roma does not offer', () => {
     for (const level of LEVELS_WITH_RULES) expect(cavemanRuleset(level)).not.toContain('/caveman')
   })

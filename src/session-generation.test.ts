@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { WorkRoot } from './work-root.js'
 import { sessionIdFor } from './session-id.js'
 import {
+  chosenCavemen,
   chosenEfforts,
   chosenModels,
   SessionGenerations,
@@ -50,6 +51,19 @@ const PINNED_AT = 'high'
 
 function efforts(pinnedEffort = PINNED_AT): ChosenRecord<'effort'> {
   return chosenEfforts({ workRoot: work, pinnedEffort })
+}
+
+/**
+ * The Caveman roma runs at where nobody has chosen anything.
+ *
+ * A level rather than `off`, so that the two words a Caller may type for "leave
+ * me alone" stay apart in every case below: `off` is a level this record may
+ * name, and `default` is the absence of a record.
+ */
+const PINNED_SHORT = 'full'
+
+function cavemen(pinnedCaveman = PINNED_SHORT): ChosenRecord<'caveman'> {
+  return chosenCavemen({ workRoot: work, pinnedCaveman })
 }
 
 describe('the Session a Conversation is on', () => {
@@ -358,6 +372,66 @@ describe('the effort a Session runs at', () => {
 
     const written = readdirSync(workRoot, { withFileTypes: true })
     expect(written.map((entry) => entry.name).sort()).toEqual([
+      `${SESSION}.effort`,
+      `${SESSION}.model`,
+    ])
+    expect(written.every((entry) => entry.isFile())).toBe(true)
+  })
+})
+
+/**
+ * The same rules a third time, for the Caveman — written once and run three
+ * times, which is the whole argument ADR-0030 makes for a third adapter over a
+ * third class. The first two had already drifted in what each was tested for
+ * while they were separate; this is the ticket that stops that happening again.
+ *
+ * The stakes are a third kind. A Chosen Model that went missing would eventually
+ * contradict `system/init`, and a Chosen Effort would contradict nothing at all
+ * — but this one has a witness nobody can read: the Session goes on answering,
+ * in prose that is the wrong length, and the only evidence is that roma sounds
+ * different from the message before.
+ */
+describe('the Caveman a Session runs at', () => {
+  behavesLikeAChosenRecord({
+    make: cavemen,
+    suffix: '.caveman',
+    pinned: PINNED_SHORT,
+    otherPinned: 'lite',
+    chosen: 'ultra',
+    offMenu: 'wenyan',
+    refusal: /chosen caveman/i,
+  })
+
+  // The two levels an operator may pin and no Caller may choose. They reach roma
+  // through `ROMA_CAVEMAN` and never through a record, so a record naming one is
+  // one nothing in roma wrote — `ultracode`'s case exactly, and there are two of
+  // them here.
+  it('refuses a record naming a wenyan level no Caller can have written', () => {
+    for (const level of ['wenyan-lite', 'wenyan-ultra']) {
+      writeFileSync(join(workRoot, `${SESSION}.caveman`), level)
+
+      expect(() => cavemen().inForce(SESSION)).toThrow(/offers/i)
+    }
+  })
+
+  // `off` is a level a Caller may choose and so a value a record may name, which
+  // is what tells it apart from `default` — the name that means "follow the
+  // deployment" and is written down as no record at all.
+  it('keeps off, which is a level, apart from having chosen nothing', () => {
+    cavemen().choose(SESSION, 'off')
+
+    expect(cavemen().chosenFor(SESSION)).toBe('off')
+    expect(cavemen('ultra').inForce(SESSION)).toBe('off')
+  })
+
+  it('is a file beside the other two, so the reclaim steps over all three', () => {
+    models().choose(SESSION, 'claude-opus-5')
+    efforts().choose(SESSION, 'max')
+    cavemen().choose(SESSION, 'ultra')
+
+    const written = readdirSync(workRoot, { withFileTypes: true })
+    expect(written.map((entry) => entry.name).sort()).toEqual([
+      `${SESSION}.caveman`,
       `${SESSION}.effort`,
       `${SESSION}.model`,
     ])

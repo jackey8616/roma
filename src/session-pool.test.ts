@@ -9,6 +9,7 @@ import {
   type SessionPoolOptions,
 } from './session-pool.js'
 import type { CredentialKind } from './build-env.js'
+import { cavemanRuleset } from './caveman.js'
 import type { Turn } from './claude-session.js'
 import { FakeClaude, flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
 import {
@@ -1249,6 +1250,80 @@ describe('running a Turn on the other credential', () => {
     expect(log.filter(({ event }) => event === 'swap')).toEqual([])
   })
 
+  /**
+   * The fourth reason a process ends for money, and the one that moves a
+   * different quantity from the other three.
+   *
+   * A credential change moves which bill a Turn lands on, a model change moves
+   * what a token costs, an effort change moves how many the model spends
+   * thinking — and this moves how many it spends *answering*. The ruleset rides
+   * in `--append-system-prompt`, which is fixed at spawn like the other three,
+   * so a Session whose Chosen Caveman has moved needs a different process.
+   *
+   * Named by the level rather than by the text: `from` and `to` are what an
+   * operator can read, and the text is several thousand characters of somebody
+   * else's prose (ADR-0030).
+   */
+  it('starts a new process when the Session has been moved to another Caveman', async () => {
+    const chosen = new Map<string, string>()
+    const { log, send, claude } = newPool({
+      cavemen: { kind: 'caveman', inForce: (sessionId) => chosen.get(sessionId) ?? 'off' },
+    })
+    await send(A, 'first', OK)
+
+    chosen.set(A, 'ultra')
+    await send(A, 'and again', OK)
+
+    const args = claude.lastSpawn.args
+    expect(args[args.indexOf('--append-system-prompt') + 1]).toBe(cavemanRuleset('ultra'))
+    expect(log).toContainEqual({
+      event: 'swap',
+      sessionId: A,
+      reason: 'caveman',
+      from: 'off',
+      to: 'ultra',
+    })
+  })
+
+  // Asked because the comparison is made at every acquisition, and one that read
+  // the record wrongly would present as a cold start on every message. Sharper
+  // than the model's and the effort's: what is compared is a rendered paragraph
+  // rather than a word, so a template that interpolated anything varying would
+  // fail here rather than in production.
+  it('keeps the process when the Caveman has not moved', async () => {
+    const { log, send } = newPool({
+      cavemen: { kind: 'caveman', inForce: () => 'full' },
+      announcements: ['reaches a-team/roma'],
+    })
+
+    await send(A, 'first', OK)
+    await send(A, 'and again', OK)
+
+    expect(log.filter(({ event }) => event === 'swap')).toEqual([])
+  })
+
+  // The model still wins, and the Caveman is named ahead of the credential
+  // because the credential is on the `spawn` record that follows and this is on
+  // nothing else at all.
+  it('names the Caveman when the credential moved too, and leaves the credential to the spawn', async () => {
+    const chosen = new Map<string, string>()
+    const { log, send } = newPool({
+      cavemen: { kind: 'caveman', inForce: (sessionId) => chosen.get(sessionId) ?? 'off' },
+    })
+    await send(A, 'first', OK)
+
+    chosen.set(A, 'lite')
+    await send(A, 'and again', OK, 'overflow')
+
+    expect(log.filter(({ event }) => event === 'swap')).toEqual([
+      { event: 'swap', sessionId: A, reason: 'caveman', from: 'off', to: 'lite' },
+    ])
+    expect(log.filter(({ event }) => event === 'spawn').at(-1)).toMatchObject({
+      credential: 'overflow',
+      caveman: 'lite',
+    })
+  })
+
   // Both at once, which is what an Overflow retry on a Session somebody moved in
   // between looks like. One record rather than two, because it is one event —
   // the next Turn's terms are not the ones this process was started for — and
@@ -1278,5 +1353,92 @@ describe('running a Turn on the other credential', () => {
       credential: 'overflow',
       model: 'claude-opus-5',
     })
+  })
+})
+
+/**
+ * The system-prompt append, assembled here because half of it is per Session.
+ *
+ * It was one text the composition root joined once and the pool read again at
+ * every spawn, which made "per spawn" true and meaningless (#185). ADR-0030's
+ * Chosen Caveman is what makes it mean something: the Reach announcements are
+ * the deployment's and settled at boot, the ruleset is this Session's, and the
+ * pool is the only thing that knows which Session is about to start.
+ *
+ * Asserted off the spawned process's own arguments, because everything between
+ * the record and the argv is what could go wrong.
+ */
+describe('what a Session is told about itself', () => {
+  /** What one Session was appended, or nothing where the flag was left off. */
+  const appendedTo = (spawn: { args: readonly string[] }): string | undefined => {
+    const at = spawn.args.indexOf('--append-system-prompt')
+    return at === -1 ? undefined : spawn.args[at + 1]
+  }
+
+  it('joins the Reach announcements ahead of the ruleset, on a blank line', async () => {
+    const { claude, send } = newPool({
+      announcements: ['reaches a-team/roma', 'acts as agent@a-project'],
+      cavemen: { kind: 'caveman', inForce: () => 'lite' },
+    })
+
+    await send(A, 'hello', OK)
+
+    expect(appendedTo(claude.lastSpawn)).toBe(
+      `reaches a-team/roma\n\nacts as agent@a-project\n\n${cavemanRuleset('lite')}`,
+    )
+  })
+
+  // A Reach with nothing to say and an `off` Caveman are the same case, and both
+  // are dropped before the join rather than trimmed after it — the flag is gated
+  // on the value being absent and never on its being empty, so a trailing blank
+  // line would reach the argv.
+  it('drops an empty part rather than joining it and tidying up after', async () => {
+    const { claude, send } = newPool({
+      announcements: ['reaches a-team/roma', ''],
+      cavemen: { kind: 'caveman', inForce: () => 'off' },
+    })
+
+    await send(A, 'hello', OK)
+
+    expect(appendedTo(claude.lastSpawn)).toBe('reaches a-team/roma')
+  })
+
+  // Two Sessions of one deployment, told two different things — which is the
+  // whole of what a Chosen Caveman is and the thing a deployment-wide append
+  // could not do.
+  it('tells two Sessions of one deployment two different things', async () => {
+    const chosen = new Map([[B, 'ultra']])
+    const { claude, send } = newPool({
+      announcements: ['reaches a-team/roma'],
+      cavemen: { kind: 'caveman', inForce: (sessionId) => chosen.get(sessionId) ?? 'off' },
+    })
+
+    await send(A, 'hello', OK)
+    const first = appendedTo(claude.lastSpawn)
+    await send(B, 'hello', OK)
+
+    expect(first).toBe('reaches a-team/roma')
+    expect(appendedTo(claude.lastSpawn)).toBe(`reaches a-team/roma\n\n${cavemanRuleset('ultra')}`)
+  })
+
+  // Read at the spawn rather than handed over, which is what makes a Chosen
+  // Caveman written while roma was somewhere else in force without anybody
+  // telling the pool.
+  it('passes the flag at all only where there is something to say', async () => {
+    const { claude, send } = newPool()
+
+    await send(A, 'hello', OK)
+
+    expect(claude.lastSpawn.args).not.toContain('--append-system-prompt')
+  })
+
+  // The Pinned Caveman, for a pool built without a per-Session answer — `model`
+  // and `effort` have the same pair, and this is the third.
+  it('falls back to one Caveman for the whole pool where nothing answers per Session', async () => {
+    const { claude, send } = newPool({ caveman: 'full' })
+
+    await send(A, 'hello', OK)
+
+    expect(appendedTo(claude.lastSpawn)).toBe(cavemanRuleset('full'))
   })
 })

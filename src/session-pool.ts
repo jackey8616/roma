@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { CAVEMAN_OFF, cavemanRuleset } from './caveman.js'
 import { spawnClaudeProcess, type SpawnClaudeProcess } from './claude-process.js'
 import {
   ClaudeExitedError,
@@ -83,6 +84,17 @@ export type PoolLogRecord =
        * spawn arguments, and it is the only such statement per process.
        */
       readonly effort: string
+      /**
+       * How short its Turns were asked to be: this Session's Chosen Caveman, or
+       * the Pinned Caveman.
+       *
+       * Here for the effort's reason, and it is what keeps the swap below
+       * readable when two terms move at once — a swap names one of them, and the
+       * spawn that follows is where the others are recovered from. The *level*
+       * rather than the text it renders to: what reaches the argv is several
+       * thousand characters of a ruleset, and an Operator Log line is read.
+       */
+      readonly caveman: string
       readonly residents: number
     }
   | {
@@ -95,14 +107,16 @@ export type PoolLogRecord =
        * appears as something that happened to a process; what it cost appears
        * on the Task's Audit Record.
        *
-       * Three reasons, one shape — the way `evict` and `reap` already differ only
+       * Four reasons, one shape — the way `evict` and `reap` already differ only
        * in what prompted them. A credential change is money moving between
-       * bills, a model change is money moving between models, and an effort
-       * change is money moving between depths of thinking; an operator looking at
-       * an unexplained respawn is asking which. Where more than one differs at
-       * once the model is named first and the effort second, because the
-       * credential is the one of the three that is not on the `spawn` record's
-       * critical line — and because a model change is the larger fact.
+       * bills, a model change is money moving between models, an effort change is
+       * money moving between depths of thinking, and a Caveman change is money
+       * moving between lengths of answer; an operator looking at an unexplained
+       * respawn is asking which. Where more than one differs at once the model is
+       * named first, the effort second and the Caveman third, because a model
+       * change is the larger fact and because every one of the four is on the
+       * `spawn` record that follows — so what a swap chooses between is which
+       * *`from`* is worth keeping, and the model's is.
        *
        * `from` and `to` say what changed rather than being two fields per
        * reason, and they are typed by the reason so that a model can never land
@@ -116,17 +130,17 @@ export type PoolLogRecord =
     }
   | {
       /**
-       * The same event, moving between models or between efforts rather than
+       * The same event, moving between models, efforts or Cavemen rather than
        * between bills.
        *
-       * One arm for both because they carry the same two strings; the `reason`
-       * is what an operator reads them as. Deliberately not folded in with the
-       * credential above, which is typed to `CredentialKind` so that a model can
-       * never be logged where a bill is expected.
+       * One arm for all three because they carry the same two strings; the
+       * `reason` is what an operator reads them as. Deliberately not folded in
+       * with the credential above, which is typed to `CredentialKind` so that a
+       * model can never be logged where a bill is expected.
        */
       readonly event: 'swap'
       readonly sessionId: string
-      readonly reason: 'model' | 'effort'
+      readonly reason: 'model' | 'effort' | 'caveman'
       readonly from: string
       readonly to: string
     }
@@ -298,15 +312,30 @@ export interface SessionEfforts {
 }
 
 /**
+ * How short a Session is asked to be, asked afresh at every spawn.
+ *
+ * The third of these, and a port for the same reason as the first two. What it
+ * answers is a *level* and never the text — the ruleset is roma's own rendering
+ * of it (`cavemanRuleset`), and a port that handed over finished prose would put
+ * the question "what is this Session set to" in two places, one of which cannot
+ * be asked (ADR-0030).
+ */
+export interface SessionCavemen {
+  /** Carried for `SessionModels.kind`'s reason. */
+  readonly kind: 'caveman'
+  inForce(sessionId: string): string
+}
+
+/**
  * What a process is started for, and therefore what its Turns run on.
  *
- * The four things that are fixed at spawn and cannot be changed under a running
+ * The things that are fixed at spawn and cannot be changed under a running
  * process: which bill its Turns land on, which model answers them, how hard that
- * model is asked to think, and what it is told about itself on top of Claude
- * Code's own prompt. Named as one thing because they are already one thing
- * everywhere they are talked about — `#acquire` takes a Session "for a Turn on
- * these terms", and `#swap` ends a process because "the next Turn's terms are not
- * the ones it was started for".
+ * model is asked to think, how short it is asked to be, and what it is told about
+ * itself on top of Claude Code's own prompt. Named as one thing because they are
+ * already one thing everywhere they are talked about — `#acquire` takes a Session
+ * "for a Turn on these terms", and `#swap` ends a process because "the next
+ * Turn's terms are not the ones it was started for".
  *
  * They travel together through acquisition, spawning and the swap between them,
  * and each one that arrives becomes a member here rather than another loose
@@ -314,23 +343,27 @@ export interface SessionEfforts {
  * eventually passes the model where the effort goes and nothing says so; this
  * cannot be got wrong silently.
  *
- * The append is the newest, and the only one that does not yet differ between two
- * Sessions of one deployment — which is what makes its membership worth arguing
- * rather than assuming. It is here because it is fixed at spawn in exactly the
- * sense the other three are, an argument on the process's own command line, and
- * because being here is what makes `#turn`'s retry respawn re-start on the append
- * its Turn began under instead of on whatever the pool holds by then. ADR-0030 is
- * what turns that last difference from theoretical into real.
+ * The last two are one fact in two currencies, which is the only place this type
+ * repeats itself and is worth the repetition: `caveman` is the word an operator
+ * reads and `appendSystemPrompt` is what the argv carries. Both are here because
+ * both are needed at a different moment — the append at the spawn, the level at
+ * the swap, where a record naming several thousand characters of ruleset would be
+ * unreadable. They are resolved together in `#acquire` and never separately, so
+ * that the text a process is started with and the level a swap names it by can
+ * never be two readings of one record.
  */
 export interface SpawnTerms {
   readonly credential: CredentialKind
   readonly model: string
   readonly effort: string
+  /** The Caveman level `appendSystemPrompt` below was rendered from. */
+  readonly caveman: string
   /**
    * Absent where there is nothing to append, and never empty for it: the flag is
    * gated on this being `undefined` and never on it being `''` (`ClaudeSession`'s
    * argv). What that costs whoever assembles the text — an empty part dropped
-   * before the join rather than trimmed after it — is argued in `startup.ts`.
+   * before the join rather than trimmed after it — is argued at
+   * `#appendSystemPromptFor`, which is the one place that assembles it.
    */
   readonly appendSystemPrompt: string | undefined
 }
@@ -379,17 +412,34 @@ export interface SessionPoolOptions {
    */
   readonly efforts?: SessionEfforts
   /**
-   * What every Session is told about itself on top of Claude Code's own prompt.
+   * How short every Session is asked to be, for a pool built without `cavemen`.
    *
-   * The pool's rather than the Core's because the pool is what spawns. Still one
-   * text for the whole deployment — what it says is what roma can reach, which is
-   * a property of the deployment and not of any Conversation — but no longer held
-   * here *because* it is one text. `#appendSystemPromptFor` reads it at every
-   * spawn the way `#modelFor` and `#effortFor` read theirs, so the per-Session
-   * part ADR-0030 adds joins it at one resolution point instead of finding its
-   * own way into `#spawnNow`.
+   * `model`'s counterpart again, kept for the tests that are about something else
+   * and want one Caveman for the whole pool. `startRoma` always supplies
+   * `cavemen`.
    */
-  readonly appendSystemPrompt?: string
+  readonly caveman?: string
+  /**
+   * How short each Session is asked to be, where somebody has chosen.
+   *
+   * Omitted, every Session is asked for `caveman` — which is what roma did
+   * between ADR-0030 landing and a Conversation being able to say otherwise.
+   */
+  readonly cavemen?: SessionCavemen
+  /**
+   * What every Session is told about what roma can reach, one part per Reach.
+   *
+   * The pool's rather than the Core's because the pool is what spawns, and a list
+   * rather than the finished text because the finished text is no longer one
+   * thing: half of it is the deployment's and settled at boot, and half of it is
+   * this Session's. Joining them is `#appendSystemPromptFor`'s, so that the rule
+   * about empty parts is applied once rather than at both ends of a seam.
+   *
+   * Each part is exactly what one Reach announces, including the empty string an
+   * unavailable one announces — dropped at the join rather than filtered by the
+   * caller, for the same reason.
+   */
+  readonly announcements?: readonly string[]
   readonly maxResident?: number
   readonly reclaimIntervalMs?: number
   /** How much retrying a Turn may do before it is abandoned. */
@@ -455,13 +505,24 @@ interface Resident {
    */
   readonly effort: string
   /**
+   * How short this process was asked to be, and therefore how short its Turns
+   * answer.
+   *
+   * Kept for the effort's reason and with the same edge: nothing in the stream
+   * echoes it, and here not even the argv names it — what the argv carries is the
+   * ruleset this word renders to. It is also the `from` half of the swap that
+   * ends this process, which is the only place the move is written as a word.
+   */
+  readonly caveman: string
+  /**
    * What this process was told about itself on top of Claude Code's own prompt.
    *
-   * Not kept for the model's reason: nothing spawns a different process over
-   * this one, and `sameTerms` is where that is argued. It is kept because
-   * `#turn`'s retry respawn hands a Resident straight back as its own
-   * `SpawnTerms`, so one that had not written this down would re-start a Turn on
-   * whatever the pool holds by then rather than on what the Turn began under.
+   * Kept, and since ADR-0030 for two reasons rather than one. `#turn`'s retry
+   * respawn hands a Resident straight back as its own `SpawnTerms`, so one that
+   * had not written this down would re-start a Turn on whatever the pool holds by
+   * then rather than on what the Turn began under — and `sameTerms` compares it,
+   * because a Chosen Caveman is what makes two spawns of one deployment able to
+   * disagree about it.
    */
   readonly appendSystemPrompt: string | undefined
   readonly session: ClaudeSession
@@ -508,7 +569,9 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   readonly #models: SessionModels | undefined
   readonly #effort: string | undefined
   readonly #efforts: SessionEfforts | undefined
-  readonly #appendSystemPrompt: string | undefined
+  readonly #caveman: string | undefined
+  readonly #cavemen: SessionCavemen | undefined
+  readonly #announcements: readonly string[]
   readonly #maxResident: number
   readonly #retryBudget: RetryBudget
   readonly #spawnProcess: SpawnClaudeProcess
@@ -535,7 +598,9 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     this.#models = options.models
     this.#effort = options.effort
     this.#efforts = options.efforts
-    this.#appendSystemPrompt = options.appendSystemPrompt
+    this.#caveman = options.caveman
+    this.#cavemen = options.cavemen
+    this.#announcements = options.announcements ?? []
     this.#maxResident = options.maxResident ?? MAX_RESIDENT
     this.#retryBudget = options.retryBudget ?? defaultConfig.retryBudget
     this.#spawnProcess = options.spawn ?? spawnClaudeProcess
@@ -710,11 +775,16 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * `/model` writes a record and tears nothing down.
    */
   async #acquire(sessionId: string, credential: CredentialKind): Promise<Resident> {
+    // Resolved once and used twice, never read twice: the append below is
+    // rendered from this very string, so the text a process is started with and
+    // the level a swap names it by cannot describe different records.
+    const caveman = this.#cavemanFor(sessionId)
     const terms: SpawnTerms = {
       credential,
       model: this.#modelFor(sessionId),
       effort: this.#effortFor(sessionId),
-      appendSystemPrompt: this.#appendSystemPromptFor(sessionId),
+      caveman,
+      appendSystemPrompt: this.#appendSystemPromptFor(caveman),
     }
     const resident = this.#residents.get(sessionId)
     if (resident !== undefined && resident.session.alive) {
@@ -752,18 +822,41 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     return this.#efforts?.inForce(sessionId) ?? this.#effort ?? PINNED_EFFORT
   }
 
+  /** How short this Session's next process is asked to be, read for `#modelFor`'s reason. */
+  #cavemanFor(sessionId: string): string {
+    return this.#cavemen?.inForce(sessionId) ?? this.#caveman ?? CAVEMAN_OFF
+  }
+
   /**
-   * What this Session's next process is told about itself, read for `#modelFor`'s
-   * reason.
+   * What this Session's next process is told about itself: what roma can reach,
+   * and how short to be.
    *
-   * **Do not fold this back into `#spawnNow` because the `sessionId` goes
-   * unread.** One text for the whole deployment is the whole answer today, so
-   * this looks like a field read wearing a function. Inlining it takes the append
-   * back out of `SpawnTerms`, and `#turn`'s retry respawn then re-starts on
-   * whatever the pool holds by then rather than on what its Turn began under.
+   * Assembled here rather than by the composition root, which is the whole of
+   * ADR-0030's first Consequence read forwards. Both halves were settled at boot
+   * until a Caveman could be chosen per Session; the announcements still are, and
+   * the ruleset is not, and the pool is the only thing that knows which Session
+   * is about to start.
+   *
+   * A blank line between the parts rather than a joined paragraph, because they
+   * are separate subjects — an agent skimming a system prompt reads a break as a
+   * change of one, which it is. The Caveman goes *after* every Reach on that same
+   * join: what roma can reach is what this Session may do, and how short to be is
+   * how it should answer, and the second is only useful once the first is read.
+   *
+   * **Never trim the join instead of dropping the empty parts before it.** An
+   * unavailable Reach announces nothing and an `off` Caveman renders nothing, and
+   * `--append-system-prompt` is gated on the value being absent rather than on
+   * its being empty — so a part joined and then tidied leaves a blank line on the
+   * argv of every Session in the deployment.
+   *
+   * Takes the level rather than the Session so that `#acquire` resolves the
+   * record once; `SpawnTerms` is where what that buys is argued.
    */
-  #appendSystemPromptFor(sessionId: string): string | undefined {
-    return this.#appendSystemPrompt
+  #appendSystemPromptFor(caveman: string): string | undefined {
+    const said = [...this.#announcements, cavemanRuleset(caveman)]
+      .filter((part) => part !== '')
+      .join('\n\n')
+    return said === '' ? undefined : said
   }
 
   async #spawn(sessionId: string, terms: SpawnTerms, resume?: boolean): Promise<Resident> {
@@ -776,7 +869,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
 
   async #spawnNow(
     sessionId: string,
-    { credential, model, effort, appendSystemPrompt }: SpawnTerms,
+    { credential, model, effort, caveman, appendSystemPrompt }: SpawnTerms,
     resume?: boolean,
   ): Promise<Resident> {
     const buildEnvFor = this.#envs[credential]
@@ -819,6 +912,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       credential,
       model,
       effort,
+      caveman,
       appendSystemPrompt,
       session,
       resumed: resuming,
@@ -861,6 +955,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       credential,
       model,
       effort,
+      caveman,
       residents: this.#residents.size,
     })
     this.#scheduleReap(resident)
@@ -902,28 +997,33 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * started for.
    *
    * Its own path rather than a third kind of eviction: an eviction is roma
-   * managing processes and this is money moving — between two bills, or between
-   * two models — and the two are read by different people looking for different
-   * things.
+   * managing processes and this is money moving — between two bills, between two
+   * models, or between two lengths of answer — and the two are read by different
+   * people looking for different things.
    */
-  async #swap(resident: Resident, { credential, model, effort }: SpawnTerms): Promise<void> {
+  async #swap(
+    resident: Resident,
+    { credential, model, effort, caveman }: SpawnTerms,
+  ): Promise<void> {
     this.#leave(resident)
     const sessionId = resident.sessionId
     // One record per swap however many terms moved, and the model wins where two
-    // did: it is the larger fact, and the credential is on the `spawn` record
+    // did: it is the larger fact, and every other term is on the `spawn` record
     // that follows this one either way.
     this.#log(
       resident.model !== model
         ? { event: 'swap', sessionId, reason: 'model', from: resident.model, to: model }
         : resident.effort !== effort
           ? { event: 'swap', sessionId, reason: 'effort', from: resident.effort, to: effort }
-          : {
-              event: 'swap',
-              sessionId,
-              reason: 'credential',
-              from: resident.credential,
-              to: credential,
-            },
+          : resident.caveman !== caveman
+            ? { event: 'swap', sessionId, reason: 'caveman', from: resident.caveman, to: caveman }
+            : {
+                event: 'swap',
+                sessionId,
+                reason: 'credential',
+                from: resident.credential,
+                to: credential,
+              },
     )
     await this.#terminate(resident)
   }
@@ -1114,19 +1214,30 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
  * cannot be checked at the spawn and forgotten here — the failure with no
  * symptom, a Session served by a process started for something else.
  *
- * **The append is deliberately not compared — the first member of `SpawnTerms`
- * that is not.** It is one text for the whole deployment, so two spawns of one
- * roma cannot disagree about it and the comparison would never once be false;
- * that is the weaker half of the reason. The stronger half is that adding it
- * early would be worse than leaving it out: `#swap` knows three reasons and falls
- * through to `credential`, so an append that did differ would end a process and
- * tell an operator the bill had moved when it had not. ADR-0030 is what makes it
- * able to differ, and it adds the fourth reason in the same breath; the
- * comparison belongs with that and not ahead of it.
+ * **The append is compared and `caveman` is deliberately not, which is the one
+ * asymmetry here worth knowing before editing it.** The two are one fact in two
+ * currencies and comparing either would answer the same today; the append is the
+ * one compared because it is what the process's argv actually carries, so a
+ * second per-Session part joined into it later is caught here for free rather
+ * than needing to be remembered. `caveman` earns its place on `SpawnTerms` at
+ * `#swap`, which needs a word an operator can read, and it cannot drift from the
+ * append because `#acquire` renders one from the other.
+ *
+ * This comparison did not exist until ADR-0030, and leaving it out until then was
+ * the right way round: `#swap` knew three reasons and fell through to
+ * `credential`, so an append that differed would have ended a process and told an
+ * operator the bill had moved when it had not. The fourth reason and this line
+ * arrive together.
  */
-function sameTerms(resident: Resident, { credential, model, effort }: SpawnTerms): boolean {
+function sameTerms(
+  resident: Resident,
+  { credential, model, effort, appendSystemPrompt }: SpawnTerms,
+): boolean {
   return (
-    resident.credential === credential && resident.model === model && resident.effort === effort
+    resident.credential === credential &&
+    resident.model === model &&
+    resident.effort === effort &&
+    resident.appendSystemPrompt === appendSystemPrompt
   )
 }
 

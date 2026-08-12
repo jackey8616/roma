@@ -40,6 +40,16 @@ describe('reading a Relay', () => {
     expect(readRelay('/stats')).toBeNull()
   })
 
+  // The one Command on the no-overlap list below that could never have been a
+  // Relay in the first place, and it is worth saying separately: a Relay carries
+  // one of *Claude Code's* own commands, and the pinned build has never heard of
+  // this one. Relayed, it would come back as `Unknown command` having spent a
+  // process on the question (ADR-0030).
+  it('leaves the one spelling that is nobody’s build alone', () => {
+    expect(readRelay('/caveman')).toBeNull()
+    expect(readRelay('/caveman ultra')).toBeNull()
+  })
+
   it('wants the whole message where the entry takes no argument', () => {
     // The property the marker-last placement rests on, and it is unchanged for
     // the one free entry. A message that is `/context` plus anything else is
@@ -132,6 +142,7 @@ describe('reading a Relay', () => {
       '/new',
       '/model',
       '/effort',
+      '/caveman',
       '/config',
       '/settings',
       '/usage',

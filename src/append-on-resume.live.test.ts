@@ -156,7 +156,7 @@ describe('whether an appended system prompt survives a --resume', () => {
     // One Work Root and one config dir for both pools — the throwaway pair is
     // handed out once, because `liveWorkRoot` empties what it hands out and a
     // second call would delete the Session this run is about to resume.
-    const poolFor = (appendSystemPrompt: string): SessionPool => {
+    const poolFor = (briefed: string): SessionPool => {
       const pool = new SessionPool({
         workRoot: new WorkRoot(dirs.workRoot),
         envs: {
@@ -167,7 +167,12 @@ describe('whether an appended system prompt survives a --resume', () => {
               inherit: process.env,
             }),
         },
-        appendSystemPrompt,
+        // As one announcement rather than as a finished append: the pool joins
+        // the announcements to this Session's Caveman since ADR-0030, and a
+        // briefing handed in any other way would not be on the argv. One part and
+        // no Caveman, so what reaches `--append-system-prompt` is this string
+        // exactly — which is what the whole instrument rests on.
+        announcements: [briefed],
         log: (record) => log.push(record),
       })
       pool.on('event', (_sessionId, event) => noteBuild(event))

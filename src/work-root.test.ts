@@ -122,10 +122,11 @@ describe('reclaiming what nothing has used', () => {
    * The rule this module exists to hold.
    *
    * Every record roma keeps about a Conversation sits beside these directories
-   * as a file — a generation, a Chosen Model, a Chosen Effort, and the
-   * `.pending` a half-written record leaves behind. A sweep that took them would
-   * drop a Session's Chosen Model on the floor while the Session was still being
-   * talked to, and put a Conversation back on the Pinned Model with nobody told.
+   * as a file — a generation, a Chosen Model, a Chosen Effort, a Chosen Caveman,
+   * and the `.pending` a half-written record leaves behind. A sweep that took
+   * them would drop a Session's Chosen Model on the floor while the Session was
+   * still being talked to, and put a Conversation back on the Pinned Model with
+   * nobody told.
    *
    * It used to be one line in the Session Pool and three comments in
    * `session-generation.ts`, in modules that do not import each other. This is
@@ -133,7 +134,13 @@ describe('reclaiming what nothing has used', () => {
    */
   it('steps over every file, however old', () => {
     const { root, work } = newRoot()
-    const records = [`${A}.generation`, `${A}.model`, `${A}.effort`, `${A}.model.pending`]
+    const records = [
+      `${A}.generation`,
+      `${A}.model`,
+      `${A}.effort`,
+      `${A}.caveman`,
+      `${A}.model.pending`,
+    ]
     for (const name of records) {
       const path = join(root, name)
       writeFileSync(path, '1')
@@ -183,6 +190,7 @@ describe('where a record goes', () => {
     expect(work.generationRecord(A)).toBe(join(root, `${A}.generation`))
     expect(work.modelRecord(A)).toBe(join(root, `${A}.model`))
     expect(work.effortRecord(A)).toBe(join(root, `${A}.effort`))
+    expect(work.cavemanRecord(A)).toBe(join(root, `${A}.caveman`))
     expect(work.openedRecord(A)).toBe(join(root, `${A}.opened`))
   })
 
@@ -196,6 +204,7 @@ describe('where a record goes', () => {
       work.generationRecord(A),
       work.modelRecord(A),
       work.effortRecord(A),
+      work.cavemanRecord(A),
       work.openedRecord(A),
     ]) {
       expect(path.startsWith(`${work.sessionDir(A)}/`)).toBe(false)

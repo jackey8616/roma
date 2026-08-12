@@ -44,7 +44,19 @@ const MODEL_SUFFIX = '.model'
 const EFFORT_SUFFIX = '.effort'
 
 /**
- * What the record that a Session has had its Opening is called, beside the efforts.
+ * What a record of a Session's Chosen Caveman is called, beside the efforts.
+ *
+ * A file for the same reason, at stakes of a third kind: reclaimed, a
+ * Conversation that went quiet comes back on the Pinned Caveman having asked for
+ * something else — and unlike the model and the effort, what that changes is how
+ * roma *writes*. Somebody who turned it `off` to get a careful explanation would
+ * get a terse one, and the evidence would be the prose itself rather than
+ * anything anybody could point at (ADR-0030).
+ */
+const CAVEMAN_SUFFIX = '.caveman'
+
+/**
+ * What the record that a Session has had its Opening is called, beside the Cavemen.
  *
  * A file for the reason the other three are, and it is the one where the
  * contrast is the whole point: the Session Pool's spawn file says the same
@@ -99,11 +111,11 @@ export interface Reclaimed {
  * continue`) and three comments in `session-generation.ts` arguing that a record
  * had better be a file. The two modules did not import each other and the rule
  * was in neither type, so what held it was two tests in two files. It is here
- * now because a rule with five dependants deserves an owner, and because the
- * five kinds of file that rely on it — a generation, a Chosen Model, a Chosen
- * Effort, the record that a Session has had its Opening, and the `.pending` a
- * half-written record leaves behind — were each added by somebody who had to
- * rediscover it.
+ * now because a rule with six dependants deserves an owner, and because the
+ * six kinds of file that rely on it — a generation, a Chosen Model, a Chosen
+ * Effort, a Chosen Caveman, the record that a Session has had its Opening, and
+ * the `.pending` a half-written record leaves behind — were each added by
+ * somebody who had to rediscover it.
  *
  * **Not a Working Directory.** That word is one Session's own directory, which
  * ADR-0008 gives to the agent and into which roma puts exactly two things. This
@@ -242,7 +254,12 @@ export class WorkRoot {
     return join(this.#root, `${sessionId}${EFFORT_SUFFIX}`)
   }
 
-  /** Where the record that a Session has been opened is written, beside its effort. */
+  /** Where a Session's Chosen Caveman is written, beside its effort. */
+  cavemanRecord(sessionId: string): string {
+    return join(this.#root, `${sessionId}${CAVEMAN_SUFFIX}`)
+  }
+
+  /** Where the record that a Session has been opened is written, beside its Caveman. */
   openedRecord(sessionId: string): string {
     return join(this.#root, `${sessionId}${OPENED_SUFFIX}`)
   }

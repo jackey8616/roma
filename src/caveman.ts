@@ -32,11 +32,34 @@ export const CAVEMAN_OFF = 'off'
  * one it inherited. `EFFORT_MENU`'s argument against `med`, at higher stakes —
  * the Audit Record would carry two spellings for one level.
  *
- * The Menu itself — drawn, pressed and typed — is not built yet. This is the list
- * it will be drawn from, named here because pinnability is a question about it
- * and asking that question does not need a Menu to exist (#187).
+ * This is the Menu a Caller types, and ADR-0023 makes a Menu something a Channel
+ * may draw as well — pressing means what typing means, so a name added here
+ * eventually becomes a button, and a button is a message roma sends itself.
+ * `commands.test.ts` is what stands between this list and a name that does not
+ * round-trip through `readCommand`; the hyphen in `wenyan-full` is why that check
+ * is not theoretical.
  */
 export const CAVEMAN_MENU: readonly string[] = ['off', 'lite', 'full', 'ultra', 'wenyan-full']
+
+/**
+ * The name that means the Pinned Caveman.
+ *
+ * Not a level of its own, for `PINNED_EFFORT_NAME`'s reason: it names whatever
+ * `ROMA_CAVEMAN` resolved to for this deployment, so a Conversation can be put
+ * back without clearing what it has said, and a deployment that moves its Pinned
+ * Caveman does not strand a Session that asked for "default" at the old one.
+ *
+ * **Not the same word as `off`, and the difference is the whole of why both
+ * exist.** `off` is a level: it says this Session gets no ruleset whatever the
+ * deployment pinned. `default` says this Session follows the deployment. They
+ * coincide on a roma that pinned nothing and part company the moment an operator
+ * sets `ROMA_CAVEMAN`, which is exactly when somebody needs to be able to say
+ * which of the two they meant.
+ */
+export const PINNED_CAVEMAN_NAME = 'default'
+
+/** Every name a Caller may type, in the order `/caveman` lists them. */
+export const CAVEMAN_NAMES: readonly string[] = [...CAVEMAN_MENU, PINNED_CAVEMAN_NAME]
 
 /**
  * The two wenyan levels an operator may pin and no Caller may ask for.
@@ -63,6 +86,60 @@ export const OFF_MENU_WENYAN: readonly string[] = ['wenyan-lite', 'wenyan-ultra'
  */
 export function isPinnableCaveman(value: string): boolean {
   return CAVEMAN_MENU.includes(value) || OFF_MENU_WENYAN.includes(value)
+}
+
+/** What a `/caveman` message is asking for. */
+export type CavemanRequest =
+  | {
+      /**
+       * What Caveman this Session runs at, and what else it may run at.
+       *
+       * `/caveman` with no argument. There is no Runtime command of this name to
+       * relay it to — the pinned build has never heard of it — so unlike
+       * `/effort`'s report this is not roma declining to hand something over. It
+       * is the only answer there is, and roma owns it outright: no process, no
+       * Turn, no money.
+       */
+      readonly kind: 'report'
+    }
+  | {
+      /** A level on the Menu. The name and the level are one string here. */
+      readonly kind: 'chosen'
+      readonly level: string
+    }
+  | {
+      /** Back to the Pinned Caveman, whatever this deployment resolved it to. */
+      readonly kind: 'default'
+    }
+  | {
+      /**
+       * A level roma does not offer — a typo, `wenyan`, or one of the two wenyan
+       * levels that are the operator's and not a Caller's.
+       *
+       * Refused rather than passed on as work, for `EffortRequest`'s reason: the
+       * Caller Marker goes above the message, so Claude Code never sees a command
+       * at all and somebody is billed for a Turn that answers a plausible
+       * sentence about their typo. Sharper here than there, because the sentence
+       * a mistyped Caveman would buy is one about a third-party skill this
+       * deployment does not have installed.
+       */
+      readonly kind: 'unknown'
+      readonly name: string
+    }
+
+/**
+ * Read what a `/caveman` Command was asking for.
+ *
+ * Total, and it takes the argument the Command reader already separated rather
+ * than the message — `readEffortRequest`'s rule, for its reason: which messages
+ * are `/caveman` at all is `readCommand`'s single answer, and a second parser
+ * here would be a second answer to it.
+ */
+export function readCavemanRequest(argument: string | null): CavemanRequest {
+  if (argument === null) return { kind: 'report' }
+  if (argument === PINNED_CAVEMAN_NAME) return { kind: 'default' }
+  if (!CAVEMAN_MENU.includes(argument)) return { kind: 'unknown', name: argument }
+  return { kind: 'chosen', level: argument }
 }
 
 /**
