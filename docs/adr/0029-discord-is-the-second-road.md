@@ -13,6 +13,13 @@ and nothing above them changed. They are here rather than in a comment because
 each is a product decision somebody could reverse, and a decision argued only
 beside the line that implements it is one nobody meets before they change it.
 
+**And with one figure this file got wrong.** The split below is measured at
+twelve messages rather than nine, marked inline. It is the first thing here to be
+corrected by running rather than by reading, which is the whole point of the tiers
+in *Verification status* — and worth noting that it was not one of the readings
+those tiers doubted. It was arithmetic nobody checked against the rule it was
+describing.
+
 ADR-0003 defines the channel-agnostic Core and the Adapter contract every Channel
 binds to. ADR-0004 is Google Chat's binding. This is Discord's. ADR-0028 carries
 the two Core changes that adding it forces; everything below is a fact about
@@ -217,6 +224,21 @@ Results are plain text, split at 2000 characters on a paragraph boundary where
 there is one — the rule ADR-0004 sets, at a smaller number. The recorded 17,706-
 character generating turn in `test/fixtures/claude-stream/` is five messages on
 Chat and nine here.
+
+**Amended — it is twelve here, and nine was never what this rule produces.** Nine
+is 17,706 divided by 2000, which is what a splitter that cut mid-word would give;
+the rule cuts at the last paragraph boundary in the window, and a window whose
+last blank line falls just past halfway spends the rest of itself on nothing.
+Twelve is that cost, measured. Chat re-measured is still five, so the comparison
+this sentence was drawn for survives — the gap between the Channels is wider than
+stated, not narrower.
+
+The figure is now asserted in `src/channels/discord/discord-channel.test.ts`
+rather than restated anywhere, because that is the only place it can be wrong and
+say so. The rule is the decision; the count is its consequence, and a consequence
+written into prose is one that goes on being claimed after the rule changes. The
+nine in *"nine mentions are not"* below is the same arithmetic and the argument it
+carries is untouched: twelve @-mentions would be worse than nine, not better.
 
 **Embeds are rejected on ADR-0004's own argument**, which is stronger on Discord:
 *"a long answer inside a card is worse than a plain one at the two things the
