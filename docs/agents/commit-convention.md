@@ -55,6 +55,7 @@ Optional, but use one when the change sits in a recognisable area:
 | `claude`  | `CLAUDE.md`                                      |
 | `core`    | `src/` — the Channel-independent part of roma    |
 | `chat`    | `src/channels/google-chat/` — the Chat Adapter    |
+| `discord` | `src/channels/discord/` — the Discord Adapter and its Gateway |
 | `infra`   | `infra/` — the Terraform somebody runs by hand    |
 | `image`   | `Dockerfile`, `.github/` and `scripts/` — how roma is built, checked and shipped |
 
