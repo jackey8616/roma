@@ -34,8 +34,9 @@ import { PubSubTransport, type PubSubLogRecord } from './pubsub-transport.js'
  * the top of `src/` for the reason everything else here does — assembling roma
  * means naming which Channel it is on and which queue that Channel publishes to,
  * and `src/` proper is not allowed to know either. Today there is one deployment
- * and this is it. A second Channel gets a second one of these, over the same
- * Core.
+ * and this is it. A second Channel gets a **second Core** over this same pool —
+ * `CoreOptions.channel` is where that is argued — assembled by a root naming both,
+ * which is why that root cannot live in this directory (ADR-0028).
  *
  * Nothing is decided here. Every number is `env-config.ts`'s, every rule about
  * what happens to a message is `serve.ts`'s, and every Chat fact is the

@@ -108,6 +108,19 @@ Google Chat delivers to Pub/Sub natively, so its inbound adapter is nearly empty
 native delivery needs an HTTPS receiver inside its own adapter that publishes
 onward. That receiver, not the core, holds the open port.
 
+**Amended 2026-08-12 by ADR-0028 — the two properties carry, the mechanism does
+not.** This section reads as though a queue were the only thing that satisfies
+them, and Discord's Gateway is a counter-example: it is a WebSocket the adapter
+opens *outward*, so no port is exposed, and it imposes no deadline on answering a
+message. Both bullets hold; it is not a queue, and it cannot redeliver. So what a
+Transport owes the core is the pair of promises `src/transport.ts` already names
+— here are the events, here is how to stop — and **durability is not among
+them**. `Delivery.nack` is a no-op where there is nothing to hand back, and the
+remedy for a post that failed moves to `ChannelAdapter.deliver`, which is where
+the failure actually is. The heading stays as written because it is still true of
+this channel and of the ingress ADR-0004 describes; read *"a queue"* as one
+answer rather than the requirement.
+
 ### Runtime
 
 A **long-running GCE VM running Docker**, not Cloud Run.

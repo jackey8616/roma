@@ -24,6 +24,18 @@ to keep it true once the prefix had content in it.
 still redeemed late. A Quotation is deliberately not one, and §5 is the one place
 the two meet.
 
+**Amended 2026-08-12 by ADR-0029**, in one place, and the decision is unchanged.
+§1's *"The snapshot cannot drift"* turns out to be a fact about Google Chat
+rather than about Quotations: Discord hands over no snapshot at all — its reply
+resolves the quoted message at delivery, so the drift described there as a
+misattribution risk is simply what arrives. That does not reopen anything,
+because taking the snapshot was never a choice roma makes against an
+alternative it prefers: where a Channel offers a snapshot beside a link, roma
+takes the snapshot; where it offers only the current text, that is the whole of
+what there is to take. What the amendment costs is the generality of the
+sentence, and `CONTEXT.md` now says instead that a Quotation's freshness belongs
+to the Channel. Marked inline at the bullet.
+
 ## Context
 
 Google Chat lets somebody quote an earlier message and reply to it. roma reads
@@ -70,6 +82,13 @@ Three things follow, and only the first is the obvious one:
   see. If the original is edited afterwards, a fetch returns what Bob says *now*
   under a tag that says Bob said it — which is the misattribution this ADR is
   otherwise spent preventing. The snapshot cannot drift.
+  - **Amended — that last sentence is about Chat, not about Quotations.** A
+    Channel that keeps no snapshot hands over the current text and there is
+    nothing else to read: Discord's reply carries the quoted message as it
+    stands at delivery, so a Quotation there drifts by construction and roma
+    cannot prevent it (ADR-0029). The preference above is unaffected — it ranks
+    a snapshot above a fetch where both are on offer, and says nothing about a
+    Channel where neither is.
 
 The third is why this is not a compromise forced by the second.
 

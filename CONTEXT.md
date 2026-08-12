@@ -10,26 +10,32 @@ road, not the destination.
 
 **Channel**:
 A messaging product a team member talks to roma through. Google Chat is the
-first.
+first, Discord the second.
 _Avoid_: platform, integration, client, transport
 
 **Transport**:
-The wire the ingress queue runs on. Distinct from a Channel: Pub/Sub is the
-transport, Google Chat is the Channel, and more than one Channel can share a
-transport.
-_Avoid_: using this word for a Channel
+How one Channel's events reach roma, and the means to say roma is finished with
+each one. Distinct from a Channel: Pub/Sub is a Transport and Google Chat is a
+Channel that publishes to it, and more than one Channel can share one.
+**Not necessarily a queue** — Discord's Gateway is a socket roma holds open, and
+what a Transport owes is the events and a way to stop, never durability
+(ADR-0028).
+_Avoid_: using this word for a Channel, and calling this a queue
 
 **Delivery**:
 One event handed over by the Transport, together with the means to say roma is
-finished with it. It carries the Transport's own id for that event — the same on
-every redelivery, because a queue that promises to lose nothing delivers some
-things twice.
+finished with it. It carries the Transport's own id for that event, which is what
+tells a repeat apart from a second message saying the same words — a queue that
+promises to lose nothing delivers some things twice, and a socket that resumes
+replays what it missed while it was gone.
 _Avoid_: message (that is the Channel's word and an Ingress Message's),
 event (that is what a Delivery carries, not what it is)
 
 **Settling**:
-Saying roma is finished with a Delivery, one of two ways: it is done with, or it
-is handed back to be delivered again. Deliberately **not** called acknowledging,
+Saying roma is finished with a Delivery: it is done with, or — on a Transport
+that has somewhere to give it back to — it is handed back to be delivered again.
+A Transport with no redelivery has only the first, and says so by doing nothing
+(ADR-0028). Deliberately **not** called acknowledging,
 though one of the two is a Pub/Sub `ack` — an Acknowledgement is the message roma
 posts into a Conversation, and the two words in one paragraph would be
 indistinguishable. What is settled is the Delivery; what is acknowledged is the
@@ -43,9 +49,10 @@ Channel-specific knowledge lives.
 _Avoid_: connector, integration, plugin, bridge
 
 **Conversation**:
-The user-visible exchange on a Channel — a Chat thread, a DM. One Conversation
-maps to one Session.
-_Avoid_: chat, thread (thread is a Google Chat term, not a roma one)
+The user-visible exchange on a Channel — a Chat thread, a Discord thread, a DM.
+One Conversation maps to one Session.
+_Avoid_: chat, thread (both Channels have one and roma has neither — a
+Conversation is what they are called here)
 
 **Conversation Key**:
 The stable string an Adapter supplies to name one Conversation. The Session id
@@ -118,18 +125,24 @@ One may name **who it came from**, and nearly none of them do: the Caller Marker
 above the message already says who sent it, so that is written only where the
 answer is somebody else — a Quotation of a forwarded message brings its own, and
 "the screenshot Ada sent" and "the screenshot Ada forwarded from Bob" are
-otherwise one sentence (ADR-0021).
+otherwise one sentence (ADR-0021). A Channel that cannot say who forwarded it
+collapses those two back into one, and Discord is such a Channel (ADR-0029).
 _Avoid_: attachment (that is the Channel's word for the thing upstream, and the
 two are not the same object — an Enclosure is named by roma and the Channel's is
 not), file (so is everything else in a Working Directory), upload, payload
 
 **Quotation**:
 Somebody else's words, carried into a message by whoever sent it rather than
-typed by them — the passage as it stood when it was quoted, and who the Channel
-says wrote it. Chat hands over a link to the quoted message beside the words and
-roma does not take it: what roma reads is the **snapshot**, which costs no round
-trip, needs no scope beyond the one roma already has, and goes on saying what was
-quoted after somebody edits the original (ADR-0021). Not an Enclosure — that is
+typed by them — the passage the Channel hands over, and who the Channel says
+wrote it, where it can say. **How fresh the passage is belongs to the Channel**:
+Chat snapshots it at the moment of quoting and Discord resolves it at delivery,
+so only one of the two still says what was quoted after somebody edits the
+original (ADR-0029). Chat hands over a link to the quoted message beside the
+words and roma does not take it: what roma reads is the **snapshot**, which costs
+no round trip and needs no scope beyond the one roma already has (ADR-0021).
+A Channel may be unable to name the author at all — Discord strips it from a
+forwarded passage — and an unattributed Quotation is still a Quotation, because
+inventing an author is the one thing worse than naming none. Not an Enclosure — that is
 bytes, sized by whoever sent them, named by roma and written to the Working
 Directory; this is a passage, and it has an author. A message carrying one is a
 request whether or not anybody typed anything, on the same argument an Enclosure
