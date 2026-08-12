@@ -135,8 +135,8 @@ export interface StartRomaOptions {
    * over.
    *
    * **One Core per Channel, over one of everything else here.** The queue, the
-   * pool, the Work Root, the Audit Log and the two Chosen Records are built once
-   * below and handed to every Core; what that buys the Core is
+   * pool, the Work Root, the Audit Log and the three Chosen Records are built
+   * once below and handed to every Core; what that buys the Core is
    * `CoreOptions.channel`, which has said it since there was one Channel.
    *
    * **One process, and that is the half this adds.** Every cap roma has is a

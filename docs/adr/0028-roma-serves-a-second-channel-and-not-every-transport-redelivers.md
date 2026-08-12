@@ -56,9 +56,9 @@ This is not a new decision. It is written twice in the source already:
 
 What this ADR adds is that it stops being a comment, and that **one process** is
 the load-bearing half of it. `startRoma` already builds every shared thing once
-and injects it — the queue, the pool, the Work Root, the Audit Log, the two
-Chosen Records — so a second Core inherits all of them by construction. Each of
-those is singular for a reason that a second Channel does not touch:
+and injects it — the queue, the pool, the Work Root, the Audit Log, the Chosen
+Records — so a second Core inherits all of them by construction. Each of those
+is singular for a reason that a second Channel does not touch:
 
 - **The queue** caps concurrency at 3 against the Shared Window, and a Shared
   Window does not get larger because a second chat product points at it.
