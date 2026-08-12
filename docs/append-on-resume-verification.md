@@ -1,15 +1,17 @@
 # Verification: whether an appended system prompt survives a `--resume`
 
 Date: 2026-08-12
-Status: **not run.** The instrument is committed and the reading is outstanding.
-ADR-0030's fifth verification agenda item points here; its Verification status
-carries the same fact in the `**Not measured — …**` idiom it uses for everything
-else nobody has looked at yet.
+Status: **run, on 2026-08-12, against Claude Code 2.1.220.** The verdict is
+`append-applies` — see *Result*. ADR-0030's fifth verification agenda item points
+here, and its Verification status carries the same reading in the
+`**Measured — …**` idiom it uses for everything else somebody has looked at.
 
-This document exists ahead of the run on purpose. A measurement that spends the
-Shared Window everybody shares is asked once and written down, so the method has
-to be settled — and reviewable — before the money moves. What is missing below is
-one table and one sentence, and both are filled in by running one command.
+This document existed ahead of the run on purpose. A measurement that spends the
+Shared Window everybody shares is asked once and written down, so the method had
+to be settled — and reviewable — before the money moved. Everything above
+*Result* is as it was written before the answer was known, which is the point:
+the three outcomes and what each would cost were priced with nothing riding on
+which one came back.
 
 Instrument: `src/append-on-resume.live.test.ts`, a seam 2 test. Two Turns, both
 one word long, so what this costs is cents rather than a context window.
@@ -98,32 +100,63 @@ receiving one.
 
 ## Result
 
-**Not taken.** No run of `src/append-on-resume.live.test.ts` has happened.
+**`append-applies`.** The append is in force on a resumed process.
 
-Filling this in means one command and pasting what it printed:
+Run on **2026-08-12**, from a clean checkout at `ab48d09`:
 
 ```
 npx vitest run --config vitest.seam2.config.ts src/append-on-resume.live.test.ts
 ```
 
-It needs `CLAUDE_CODE_OAUTH_TOKEN` in a `.env` at the repo root, and it draws on
-the Shared Window everybody shares. The output is one block:
-
 ```
-append-on-resume seam 2 (#183) — Claude Code <version>, $<spend> over 2 Turns
-  verdict  <one of the four> — <what it means>
-  first    briefed ZARQUON-7413, said "…"
-  resumed  briefed VELMOTH-2856, said "…"
+append-on-resume seam 2 (#183) — Claude Code 2.1.220, $0.118313 over 2 Turns
+  verdict  append-applies — the append applies on resume — agenda item 5 answered yes
+  first    briefed ZARQUON-7413, said "BRIEFING-IN-FORCE"
+  resumed  briefed VELMOTH-2856, said "VELMOTH-2856"
   spawns   resume=false resume=true
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
 ```
 
-**The version in that first line is part of the reading.** Every measurement in
-this repository is evidence about one build and no other, so the run asserts that
-both processes reported the same `claude_code_version` and goes red rather than
-let a reading span two. If what it prints is not **2.1.220** — the build
-`Dockerfile` pins, ADR-0007 argues for and `src/packaging.test.ts` guards — then
-the reading is about a neighbouring build and this document must say so in as
-many words, the way ADR-0030's own bundle readings say they were taken on 2.1.227.
+Read line by line, because every line is doing something:
+
+- `spawns resume=false resume=true` — the second process reached the Session by
+  `--resume`, after an `evict`. Without this the run would be two new Sessions and
+  the verdict would be worthless.
+- `first … said "BRIEFING-IN-FORCE"` — the control. The append applied to the
+  first process, so a missing codeword downstream would have meant *resume drops
+  it* rather than *the instrument never worked*.
+- `resumed … said "VELMOTH-2856"` — the reading. The resumed process answered
+  with the codeword of the briefing **it was resumed under**, not the one the
+  Session was created under. That token appears nowhere in the conversation it
+  inherited — the first Turn was asked whether a briefing was in force, precisely
+  so that it would not say a codeword — so it can only have come from the system
+  prompt the resumed process was started with.
+
+**The version is part of the reading.** Every measurement in this repository is
+evidence about one build and no other. Both processes reported
+`claude_code_version` **2.1.220** — the build `Dockerfile` pins, ADR-0007 argues
+for and `src/packaging.test.ts` guards — and the run asserts they agree rather
+than letting a reading span two builds. Moving the pin re-opens this question,
+and this file is what re-runs.
+
+### What it costs, which is nothing
+
+`append-applies` is the outcome ADR-0030 assumed and the only one that required
+no change to it. A Caveman applies for as long as a Session lives, across every
+Eviction, Reaping, restart and swap, so `/caveman` reports a level the model is
+actually on. ADR-0030's fourth acceptance criterion — a section saying what a
+`no` costs and what the design does instead — is therefore not owed, and is
+deliberately absent rather than forgotten.
+
+**The reading is wider than the Caveman.** The briefing was handed to the pool as
+an *announcement*, which is the same argument a Reach announcement rides
+(`startup.ts`'s `eachReach`), and it reached the model on the resumed process
+exactly as it would on a new one. So `nothing-persists` — the outcome this
+document named loudest, in which a resumed Session is told nothing about itself
+at all — is ruled out for announcements too, and not only for the ruleset this
+ADR is about.
 
 ## What this will not settle
 

@@ -22,8 +22,11 @@ deliberately **not made**. What landed beside the mechanism is the instruments
 for making it: the Audit Record now carries the level and the Turn's output
 tokens, which is what lets a deployment answer agenda item 1 from its own months
 rather than from a synthetic prompt, and `src/append-on-resume.live.test.ts` is
-item 5's, built and unspent. The agenda at the end is shorter by one item and
-longer by another, both from the same re-reading — see *Verification status*.
+item 5's. That one has since been spent, and it is the only claim in this file
+that has moved from assumed to measured: **the append survives a `--resume` on
+2.1.220**, so a Caveman applies for as long as a Session lives. The agenda at the
+end is shorter by one item and longer by another, both from the same re-reading —
+see *Verification status*.
 
 Follows ADR-0016 in shape and ADR-0014 in shape: a thing every Session runs
 with, pinned by the operator and moved by a person, kept in a Chosen Record and
@@ -44,12 +47,15 @@ ADR-0029 are about Channels and touch nothing here.
 
 ### Verification status
 
-Read rather than run. The readings about Claude Code — the two immediately
+Read rather than run, with one exception, and the exception is the load-bearing
+one. The readings about Claude Code taken off the binary — the two immediately
 below, on where a skill is found and what an uninvoked one costs — are off the
 pinned build, **2.1.220**, the version `Dockerfile` and `src/packaging.test.ts`
 both carry. The **Measured** ones after them are off `jackey8616/caveman` at its
 pinned commit — readings about a third-party repository, which no Claude Code
-version dates.
+version dates. The last **Measured** block is neither: it is a run, two real
+Turns against the Shared Window, and it names 2.1.220 for itself rather than
+inheriting it from this paragraph.
 
 The two were first taken on 2.1.227 and have been re-taken here, because a
 reading inherited from the build next door is not evidence about the build roma
@@ -177,6 +183,39 @@ wenyan-lite, wenyan, wenyan-full, wenyan-ultra, commit, review, compress`.
 `compress` are `INDEPENDENT_MODES`, for which the hook emits one line deferring
 to a separate skill — skills this decision does not install.
 
+**Measured — the append survives a `--resume`.** Agenda item 5, the one question
+here no bundle could answer, and the assumption the whole decision rests on.
+`#spawnNow` hands `appendSystemPrompt` to `ClaudeSession` without looking at
+`resuming`, so the flag is on a resumed process's argv — which says nothing about
+whether the Runtime applies it to a conversation that already has a system
+prompt. `src/append-on-resume.live.test.ts` briefs a Session under one nonsense
+codeword, ends it with `evict`, resumes it under a **different** one, and asks
+for a codeword the inherited conversation never contained, so one run tells apart
+the append applying, the original one persisting, and nothing persisting. It was
+run on 2026-08-12 at `ab48d09`, two Turns for $0.118313, and both processes
+reported **Claude Code 2.1.220** — which the run asserts rather than assumes,
+going red rather than letting a reading span two builds:
+
+```
+verdict  append-applies — the append applies on resume — agenda item 5 answered yes
+first    briefed ZARQUON-7413, said "BRIEFING-IN-FORCE"
+resumed  briefed VELMOTH-2856, said "VELMOTH-2856"
+spawns   resume=false resume=true
+```
+
+The resumed process answered with the codeword of the briefing **it was resumed
+under**. So a Caveman applies for as long as a Session lives — across every
+Eviction, Reaping, restart and swap — and `/caveman` reports a level the model is
+on rather than one it abandoned at the first Eviction. This decision needs no
+change, which is why nothing below was rewritten around it.
+
+The reading is wider than the Caveman, and the failure it rules out was wider
+still. The briefing was handed to the pool as an **announcement** — the same
+argument a Reach announcement rides (`startup.ts`'s `eachReach`) — so what
+survived the Eviction here is the channel itself, and ADR-0020's capabilities
+survive it with the ruleset. `docs/append-on-resume-verification.md` is the
+method and the reading in full.
+
 **Not measured — that any of this saves a token.** The 65% is caveman's own
 number, measured by a third party on prompts nobody here has seen, and it is
 cited in this file as caveman's claim and never as roma's. What roma will be able
@@ -196,18 +235,6 @@ Menu.
 **Not measured — Codex.** Everything below is Claude Code's. ADR-0026's rule
 that everything roma pins for Claude Code it pins for Codex applies, and the
 agenda item is at the end.
-
-**Not measured — whether the append survives a `--resume`.** Agenda item 5, and
-the one question here no bundle can answer. `#spawnNow` hands
-`appendSystemPrompt` to `ClaudeSession` without looking at `resuming`, so the
-flag is on a resumed process's argv — which says nothing about whether the
-Runtime applies it to a conversation that already has a system prompt. The
-**instrument exists**: `src/append-on-resume.live.test.ts` briefs a Session under
-one nonsense codeword, evicts it, resumes it under a **different** one, and asks
-for a codeword the conversation itself never contained, so one run tells apart
-the append applying, the original one persisting, and nothing persisting. It
-drives a real Turn against the Shared Window and **nobody has spent it yet**;
-`docs/append-on-resume-verification.md` is the method and the empty result.
 
 ## Context
 
@@ -508,11 +535,14 @@ Ordered by how much falls if the answer is no.
 4. **Does `wenyan-full` cost fewer tokens than `full` on Chinese prompts?**
    Decides whether it earns a button. `npm run test:seam2` is the instrument, and
    it spends Shared Window money, so it is asked once and written down.
-5. **Does `--append-system-prompt` survive a `--resume`?** roma's Sessions are
-   resumed constantly, and a ruleset that applies only to a Session's first
-   process is a diet with a hole in it. `src/append-on-resume.live.test.ts` is
-   the instrument and `docs/append-on-resume-verification.md` the method; it
-   distinguishes three outcomes rather than two, and the reading is outstanding.
+5. **Does `--append-system-prompt` survive a `--resume`? — asked and answered:
+   yes, on 2.1.220.** It stays on the agenda with its answer rather than being
+   deleted, because it is the item the rest of this file leaned on and a reader
+   who wonders whether anybody checked deserves to find that they did.
+   `src/append-on-resume.live.test.ts` is the instrument and
+   `docs/append-on-resume-verification.md` the reading. Moving the pin re-opens
+   it — that is what ADR-0007 means by a re-verification event — and re-running
+   that one file is the whole of what re-opening costs.
 6. **Does the app-server take a system-prompt append, and is any of this
    measurable on Codex?** ADR-0026's agenda gains this item; nothing here is
    blocked on it.
