@@ -7,7 +7,7 @@ import { MENU_NAMES } from '../../model-menu.js'
 import { sessionIdFor } from '../../session-id.js'
 import type { Delivery } from '../../transport.js'
 import { ATTEMPTS, DiscordAdapter, RETRY_CEILING_MS, RETRY_FLOOR_MS } from './discord-adapter.js'
-import { DiscordRefusal, type DiscordButton } from './discord-api.js'
+import { DiscordRefusal, MAX_BUTTONS, type DiscordButton } from './discord-api.js'
 import { MAX_CUSTOM_ID, type DiscordEvent, type DiscordMessage } from './discord-events.js'
 import {
   GatewayTransport,
@@ -1383,6 +1383,21 @@ describe('a Menu, out as buttons and back as a press', () => {
 
     expect(channel.buttons.map(({ label }) => label)).toEqual(EFFORT_NAMES)
     expect(EFFORT_NAMES.length).toBeGreaterThan(5)
+  })
+
+  // The one Menu shape Discord will not take: it refuses a message carrying more
+  // than 25 buttons whole. Drawn in part it would be a card saying those are all
+  // the names there are, with the rest unreachable by pressing anything — so
+  // roma draws none, which ADR-0023 calls correct, and the sentence still names
+  // every one of them.
+  it('draws no buttons at all for a Menu wider than one message holds', async () => {
+    const channel = await messaged(inDm())
+    const wide = Array.from({ length: MAX_BUTTONS + 1 }, (_, at) => `option-${at}`)
+
+    await channel.adapter.deliver(to(DM, choice('model', wide)))
+
+    expect(channel.buttons).toEqual([])
+    expect(channel.api.messages.at(-1)?.text).toContain(`option-${MAX_BUTTONS}`)
   })
 
   // *"1-100 characters"*, and being over it is a message Discord refuses whole —

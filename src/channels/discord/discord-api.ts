@@ -65,9 +65,34 @@ export interface DiscordPost {
    * Two messages ever carry any — the one saying the Shared Window is spent when
    * Overflow is on offer, and the one offering a Menu — and they are never the
    * same message.
+   *
+   * **At most `MAX_BUTTONS`, and whoever fills this decides what a wider Menu
+   * does.** Nothing below here trims the list: a card quietly missing its tail
+   * says those are all the names there are, and it is the caller that knows the
+   * answer is complete without them (ADR-0023).
    */
   readonly buttons: readonly DiscordButton[]
 }
+
+/**
+ * How many buttons one message may carry, which is five rows of five.
+ *
+ * Discord refuses the **whole message** past it, so a Menu one button too wide
+ * is not a shorter Menu but no message at all — and on the blocked path, an
+ * Overflow offer that never reaches the person waiting on it.
+ *
+ * Here rather than beside the payload it is laid out in, because it bounds what
+ * a caller may ask for rather than how a request is built. roma's own Menus are
+ * four and six, so nothing reaches it today; what it stops is a Menu that grows.
+ *
+ * **Twenty-five rather than the forty #181 names**, which is the count a message
+ * carries under Discord's newer component set — a set roma neither asks for nor
+ * sends. What bounds the action rows roma does post is five of five. Neither
+ * number is verified here and they fail in opposite directions, so this is the
+ * low one: too low costs a Menu its buttons and leaves the answer standing,
+ * where too high costs the whole message. `MAX_TEXT` is read the same way.
+ */
+export const MAX_BUTTONS = 25
 
 /**
  * What Discord said no with, in the only terms a retry can act on.

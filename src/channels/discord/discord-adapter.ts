@@ -5,7 +5,7 @@ import type {
   OutboundInstruction,
 } from '../../channel-adapter.js'
 import type { Command } from '../../commands.js'
-import { DiscordRefusal, type DiscordApi, type DiscordButton } from './discord-api.js'
+import { DiscordRefusal, MAX_BUTTONS, type DiscordApi, type DiscordButton } from './discord-api.js'
 import {
   asString,
   chooseId,
@@ -434,18 +434,20 @@ function offerButton(taskId: string): DiscordButton {
 }
 
 /**
- * One button per name on a Menu, in the order the Menu lists them.
+ * One button per name on a Menu, or none at all where the Menu is wider than one
+ * message will hold.
  *
- * Labelled with the name itself and nothing around it, unlike the Overflow
- * button, whose label has to carry what pressing it costs. These cost nothing,
- * and the bare name is also the string a Caller would type — so the card teaches
- * the typed form rather than replacing it.
+ * **Never draw a Menu in part.** A card carrying the first `MAX_BUTTONS` of a
+ * longer one says those are the names there are, and the rest cannot be reached
+ * by pressing anything; drawn as nothing it is *correct* rather than degraded,
+ * because the text names every name whether or not anything drew it (ADR-0023).
  */
 function choiceButtons(
   chooses: Extract<Command, 'model' | 'effort'>,
   conversationKey: string,
   options: readonly string[],
 ): readonly DiscordButton[] {
+  if (options.length > MAX_BUTTONS) return []
   return options.map((option) => ({
     label: option,
     customId: chooseId(chooses, conversationKey, option),

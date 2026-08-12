@@ -165,25 +165,22 @@ const BUTTON = 2
 const SECONDARY = 2
 
 /**
- * How many buttons fit in one row, and how many rows in one message.
+ * How many buttons fit in one row.
  *
- * **Never let a row go past five.** Discord refuses the whole message, so a Menu
- * one button too wide is a Menu nobody is shown — and on the blocked path, an
- * Overflow offer that never reaches the person waiting on it. The Model Menu is
- * four and the Effort Menu six, so one row and two.
+ * **Never let a row go past five.** Discord refuses the whole message, so a row
+ * one button too wide is a Menu nobody is shown. The Model Menu is four and the
+ * Effort Menu six, so one row and two.
  *
- * Past five *rows* the tail is dropped rather than sent, which is the harmless
- * direction and is why the two limits are not guarded the same way: the text
- * still names every name, so a Menu that outgrew a card costs the shortcut and
- * not the answer.
+ * How many rows there may be is `MAX_BUTTONS`, and it is kept where the buttons
+ * are chosen rather than trimmed here: dropping a tail is a decision, and this
+ * file makes none.
  */
 const PER_ROW = 5
-const MAX_ROWS = 5
 
-/** Buttons as Discord takes them: rows of five, and never more rows than it allows. */
+/** Buttons as Discord takes them: rows of five, in the order they were given. */
 function componentRows(buttons: readonly DiscordButton[]): unknown[] {
   const rows: unknown[] = []
-  for (let at = 0; at < buttons.length && rows.length < MAX_ROWS; at += PER_ROW) {
+  for (let at = 0; at < buttons.length; at += PER_ROW) {
     rows.push({
       type: ACTION_ROW,
       components: buttons.slice(at, at + PER_ROW).map(({ label, customId }) => ({
