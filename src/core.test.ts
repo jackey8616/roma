@@ -1545,6 +1545,8 @@ describe('the model a Conversation runs on', () => {
     await core.handle(ingress('/model default'))
     await core.handle(ingress('/effort max'))
     await core.handle(ingress('/effort default'))
+    await core.handle(ingress('/caveman ultra'))
+    await core.handle(ingress('/caveman default'))
 
     for (const instruction of posted(adapter.instructions)) {
       expect(instruction).toMatchObject({ kind: 'result' })
@@ -2125,10 +2127,15 @@ describe('the Caveman a Conversation runs at', () => {
     await core.handle(ingress('/caveman terse'))
     await say('hello')
 
+    // A refusal rather than a failure, and it carries the Menu: this is the
+    // message where somebody has just shown they do not know it (ADR-0023).
     expect(posted(adapter.instructions)[0]).toEqual({
-      kind: 'failure',
+      kind: 'choice',
       conversationKey: KEY,
-      reason: expect.stringContaining('terse'),
+      text: expect.stringContaining('terse'),
+      chooses: 'caveman',
+      options: ['off', 'lite', 'full', 'ultra', 'wenyan-full', 'default'],
+      refused: 'terse',
     })
     expect(appendedTo(claude.lastSpawn)).toBeUndefined()
     // Refused as a Command rather than falling through to a Task: the only Turn
@@ -2147,8 +2154,13 @@ describe('the Caveman a Conversation runs at', () => {
       await core.handle(ingress(`/caveman ${level}`))
 
       expect(posted(adapter.instructions).at(-1)).toMatchObject({
-        kind: 'failure',
-        reason: expect.stringContaining(level),
+        kind: 'choice',
+        refused: level,
+      })
+      // Nor on the card, which is the half a Caller can see: a button roma
+      // cannot account for is one roma does not draw (ADR-0030).
+      expect(posted(adapter.instructions).at(-1)).not.toMatchObject({
+        options: expect.arrayContaining([level]),
       })
     }
     expect(claude.processes).toHaveLength(0)
@@ -2161,9 +2173,16 @@ describe('the Caveman a Conversation runs at', () => {
 
     expect(claude.processes).toHaveLength(0)
     const [reported] = posted(adapter.instructions)
-    expect(reported).toMatchObject({ kind: 'result' })
-    // Six names in the words, which is the whole answer on any Channel — #190
-    // is what makes them pressable as well, and pressing means what typing means.
+    expect(reported).toMatchObject({
+      kind: 'choice',
+      chooses: 'caveman',
+      options: ['off', 'lite', 'full', 'ultra', 'wenyan-full', 'default'],
+      // Nothing was refused: this one answers "what is on offer", and that is
+      // the only thing telling the two cards apart.
+      refused: null,
+    })
+    // Six names in the words too, which is the whole answer on any Channel and
+    // is what makes the buttons additive rather than the message (ADR-0023).
     for (const name of CAVEMAN_NAMES) {
       expect(reported).toMatchObject({ text: expect.stringContaining(name) })
     }
@@ -2267,7 +2286,7 @@ describe('the Caveman a Conversation runs at', () => {
 
     await core.handle(ingress('/caveman'))
 
-    expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'result' })
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'choice' })
     for (const { proc, task } of running) {
       feed(proc, OK)
       await task

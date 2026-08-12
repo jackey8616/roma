@@ -1131,6 +1131,12 @@ export class Core {
    * what reaches it is the ruleset the level renders to. So this reply is the
    * only account there is, on either side of the wire, of what a Session was
    * asked for.
+   *
+   * **Never give this an `#effortApplies` of its own.** The same two arms carry
+   * the Menu as on the other two, and unconditionally: `/effort` withholds its
+   * card only where the Effort Matrix says the model takes none, and there is no
+   * Matrix here and no model that declines a ruleset — so a condition would be
+   * roma withholding an offer on the strength of nothing (ADR-0023).
    */
   #answerCaveman(
     request: CavemanRequest,
@@ -1146,12 +1152,14 @@ export class Core {
       case 'unknown':
         // Nothing is written, so a typo — or a wenyan level, which is the
         // operator's — cannot move a Session somebody shares with other people.
-        return { kind: 'failure', ...address, reason: unknownCavemanReason(request.name) }
+        // The Menu rides along, because this is the message where somebody has
+        // just shown they do not know it (ADR-0023).
+        return cavemanChoice(address, unknownCavemanReason(request.name), request.name)
       case 'report':
         // No process, no Turn, no money, and no interruption of whatever this
         // Conversation is waiting on: roma owns the answer, so asking is never
         // the slow thing.
-        return { kind: 'result', ...address, text: this.#cavemanReport(sessionId) }
+        return cavemanChoice(address, this.#cavemanReport(sessionId), null)
       case 'default':
         this.#cavemen.usePinned(sessionId)
         return {
@@ -2034,6 +2042,15 @@ function effortChoice(
   refused: string | null,
 ): OutboundInstruction {
   return { kind: 'choice', ...address, text, chooses: 'effort', options: EFFORT_NAMES, refused }
+}
+
+/** A `/caveman` answer that carries the Caveman Menu to be chosen from. */
+function cavemanChoice(
+  address: TaskAddress,
+  text: string,
+  refused: string | null,
+): OutboundInstruction {
+  return { kind: 'choice', ...address, text, chooses: 'caveman', options: CAVEMAN_NAMES, refused }
 }
 
 /**

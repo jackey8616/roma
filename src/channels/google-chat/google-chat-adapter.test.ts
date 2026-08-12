@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { OutboundInstruction } from '../../channel-adapter.js'
+import { CAVEMAN_NAMES } from '../../caveman.js'
+import { readCommand } from '../../commands.js'
+import { EFFORT_NAMES } from '../../effort-menu.js'
+import { MENU_NAMES } from '../../model-menu.js'
 import { sessionIdFor } from '../../session-id.js'
 import { GoogleChatAdapter } from './google-chat-adapter.js'
 import type { ChatEvent, ChatEventLogRecord } from './chat-events.js'
@@ -1035,7 +1039,7 @@ describe('addressing the person who asked', () => {
  * captured, like every other event in this file: nothing in this repository can
  * produce a real interaction event.
  */
-describe('choosing a model or an effort by pressing', () => {
+describe('choosing a model, an effort or a Caveman by pressing', () => {
   /** A press on one Menu button, as Chat documents an interaction event. */
   function press(
     chooses: string,
@@ -1084,6 +1088,42 @@ describe('choosing a model or an effort by pressing', () => {
     ])
   })
 
+  /**
+   * The widest card this repository draws, and nothing here was written for it.
+   *
+   * `#choices` is generic over a Menu, so a third one arrives as six more buttons
+   * and no rendering code — which is what ADR-0023 meant by a Channel gaining
+   * this feature by doing nothing, applied to a Menu rather than to a Channel.
+   * Asserted anyway, because "it should just work" is how a card ships four
+   * buttons wide with two names missing.
+   */
+  it('draws the Caveman Menu six wide, and the operator’s two levels nowhere on it', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(
+      to(THREAD, {
+        kind: 'choice',
+        text: 'This conversation runs at caveman default (off).',
+        chooses: 'caveman',
+        options: ['off', 'lite', 'full', 'ultra', 'wenyan-full', 'default'],
+        refused: null,
+      }),
+    )
+
+    expect(api.messages[0]?.posted.actions).toEqual(
+      ['off', 'lite', 'full', 'ultra', 'wenyan-full', 'default'].map((option) => ({
+        label: option,
+        action: 'choose',
+        parameters: { chooses: 'caveman', option },
+      })),
+    )
+    for (const withheld of ['wenyan-lite', 'wenyan-ultra']) {
+      expect(api.messages[0]?.posted.actions).not.toContainEqual(
+        expect.objectContaining({ label: withheld }),
+      )
+    }
+  })
+
   // The text is the whole answer already — it names the Menu in words — so a
   // Channel that rendered no buttons would still have posted it.
   it('posts the words as well as the buttons', async () => {
@@ -1119,6 +1159,66 @@ describe('choosing a model or an effort by pressing', () => {
     const { adapter } = newAdapter()
 
     expect(adapter.toIngress(press('effort', 'xhigh'))?.text).toBe('/effort xhigh')
+  })
+
+  /**
+   * The third Menu, and the one whose press is worth its own case rather than a
+   * row in the round trip below.
+   *
+   * `wenyan-full` is the first hyphenated name any roma Menu has carried, and the
+   * hyphen is the shape that had never been through this path: what comes out
+   * here is a message, so a name that arrived as two words would be read as prose
+   * and billed as a Turn rather than answered as a Command (ADR-0023, ADR-0030).
+   */
+  it('reads a Caveman press, hyphen and all, as the Command it stands for', () => {
+    const { adapter } = newAdapter()
+
+    expect(adapter.toIngress(press('caveman', 'wenyan-full'))?.text).toBe('/caveman wenyan-full')
+  })
+
+  /**
+   * The round trip that begins at a Menu constant, over all three of the real
+   * ones and over the buttons this Adapter actually posted.
+   *
+   * `commands.test.ts` holds the same invariant one step earlier, over
+   * `commandFor` alone. This is the half that only exists once a Channel draws
+   * the Menu, and it is a claim about `#choices` and `readChosenOption` as a
+   * pair: they are one fact written in two files, and a name that does not
+   * survive the trip between them reaches the Core as prose, drives a Turn, and
+   * bills somebody for a button roma offered. Nothing in between reports it.
+   *
+   * Every Menu named outright rather than enumerated from a list of Menus, for
+   * the reason that check gives: the loop passes vacuously over a Menu nobody
+   * named.
+   */
+  it('reads every name on every Menu back as the Command a Caller would have typed', async () => {
+    const menus = [
+      { chooses: 'model' as const, names: MENU_NAMES },
+      { chooses: 'effort' as const, names: EFFORT_NAMES },
+      { chooses: 'caveman' as const, names: CAVEMAN_NAMES },
+    ]
+
+    for (const { chooses, names } of menus) {
+      const { adapter, api } = newAdapter()
+      await adapter.deliver(
+        to(THREAD, { kind: 'choice', text: 'pick one', chooses, options: names, refused: null }),
+      )
+      const actions = api.messages[0]?.posted.actions ?? []
+      expect(actions).toHaveLength(names.length)
+
+      for (const action of actions) {
+        // Only the envelope comes from `press`; what is under test is the button
+        // roma posted, so its own action and parameters are what is pressed.
+        const pressed = adapter.toIngress({
+          ...press('unread', 'unread'),
+          common: { invokedFunction: action.action, parameters: action.parameters },
+        })
+        expect(readCommand(pressed?.text ?? '')).toEqual({
+          command: chooses,
+          argument: action.label,
+        })
+      }
+    }
   })
 
   /**
@@ -1169,9 +1269,10 @@ describe('choosing a model or an effort by pressing', () => {
     ).toBe('/model haiku')
   })
 
-  // Only the two Commands that have a Menu. A parameter naming anything else is
-  // a press roma did not put out, and synthesising `/stop` or `/clear` from one
-  // would let a crafted event reach a Command through a door meant for a Menu.
+  // Only the three Commands that have a Menu. A parameter naming anything else
+  // is a press roma did not put out, and synthesising `/stop` or `/clear` from
+  // one would let a crafted event reach a Command through a door meant for a
+  // Menu.
   it('reads a press naming any other Command as no message at all', () => {
     const { adapter } = newAdapter()
 

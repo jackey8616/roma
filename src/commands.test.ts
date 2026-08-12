@@ -322,6 +322,21 @@ describe('a Menu name a Caller may press instead of type', () => {
     expect(readCavemanRequest('wenyan-full')).toEqual({ kind: 'chosen', level: 'wenyan-full' })
   })
 
+  // The same two shapes as claims about the real Menus, which the round trip
+  // above catches without ever naming. Kept because the person who trips it is
+  // adding a name, and "readCommand answered null" is a worse thing to hand them
+  // than the name that cannot be typed — `readCommand` lowercases the message
+  // before it splits it, so a capital never survives the trip and a space turns
+  // one name into a sentence.
+  it('carries no whitespace and no uppercase, on any of the three Menus', () => {
+    for (const names of [MENU_NAMES, EFFORT_NAMES, CAVEMAN_NAMES]) {
+      for (const name of names) {
+        expect(name).not.toMatch(/\s/)
+        expect(name).toBe(name.toLowerCase())
+      }
+    }
+  })
+
   // The two shapes that would break the round trip, spelled out so somebody
   // adding a name knows what the checks above are watching for. Neither looks
   // hypothetical once you know a button is a message: a level with a space in it

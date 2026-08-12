@@ -32,12 +32,12 @@ export const CAVEMAN_OFF = 'off'
  * one it inherited. `EFFORT_MENU`'s argument against `med`, at higher stakes —
  * the Audit Record would carry two spellings for one level.
  *
- * This is the Menu a Caller types, and ADR-0023 makes a Menu something a Channel
- * may draw as well — pressing means what typing means, so a name added here
- * eventually becomes a button, and a button is a message roma sends itself.
- * `commands.test.ts` is what stands between this list and a name that does not
- * round-trip through `readCommand`; the hyphen in `wenyan-full` is why that check
- * is not theoretical.
+ * This is the Menu a Caller types, and a Channel that can draw one draws it —
+ * pressing means what typing means, so a name added here **is** a button, and a
+ * button is a message roma sends itself (ADR-0023). `commands.test.ts` is what
+ * stands between this list and a name that does not round-trip through
+ * `readCommand`; the hyphen in `wenyan-full` is why that check is not
+ * theoretical, and `wiring.test.ts` presses that name across the whole distance.
  */
 export const CAVEMAN_MENU: readonly string[] = ['off', 'lite', 'full', 'ultra', 'wenyan-full']
 
