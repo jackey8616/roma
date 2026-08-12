@@ -20,6 +20,12 @@ in *Verification status* — and worth noting that it was not one of the reading
 those tiers doubted. It was arithmetic nobody checked against the rule it was
 describing.
 
+**And with one sentence that has stopped being true.** *The claim this design
+would fail on* says the split Session happens *"with no error anybody sees"*.
+Somebody sees it now, marked inline. Nothing else in that paragraph moves: the
+fallback still does not repair the Session, and the boot-time permission check is
+still not here.
+
 ADR-0003 defines the channel-agnostic Core and the Adapter contract every Channel
 binds to. ADR-0004 is Google Chat's binding. This is Discord's. ADR-0028 carries
 the two Core changes that adding it forces; everything below is a fact about
@@ -92,6 +98,26 @@ about to exist, and if it cannot be created, every message in that channel gets 
 Session of its own, forever, with no error anybody sees. The fallback below keeps
 the *reply* arriving; it does not repair the Session. A permission check at boot
 is the obvious remedy and is not specified here.
+
+**Amended — somebody sees it now, and it is still not repaired.** A thread
+refused here is written to the Operator Log as `thread-unopened`, naming the
+parent channel roma is answering in instead and the status Discord refused with
+(`discord-adapter.ts`'s `DiscordAdapterLogRecord`). Everything else above stands:
+the reply still arrives in the parent channel, the Conversation still gets a
+Session per message, and a line is evidence rather than a remedy. What it buys is
+that the three refusals stop looking alike — a 403 is this paragraph's missing
+`CREATE_PUBLIC_THREADS`, and it repeats for every message in that channel, where a
+400 is the route refusing a channel's type: either the harmless misclassification
+below or, for a forum, the case this document argues is never reached at all. One
+line per Conversation and none of them suppressed, because the repetition is the
+symptom.
+
+**The check at boot is still not here, and now by decision rather than by
+omission.** It would be written from documentation and never run, which is the
+footing this whole section exists to distrust, and a permission calculation wrong
+in the refusing direction refuses to boot a roma that would have worked — a worse
+failure than the silent one it replaces. So the line above is what this gets until
+somebody has run a permission read against a real guild.
 
 ## Context
 

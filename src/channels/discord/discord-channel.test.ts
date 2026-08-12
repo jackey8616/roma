@@ -6,6 +6,7 @@ import { EFFORT_NAMES } from '../../effort-menu.js'
 import { MENU_NAMES } from '../../model-menu.js'
 import { sessionIdFor } from '../../session-id.js'
 import type { Delivery } from '../../transport.js'
+import type { DiscordLogRecord } from './binding.js'
 import { ATTEMPTS, DiscordAdapter, RETRY_CEILING_MS, RETRY_FLOOR_MS } from './discord-adapter.js'
 import { DiscordRefusal, MAX_BUTTONS, type DiscordButton } from './discord-api.js'
 import {
@@ -21,7 +22,6 @@ import {
   INTENTS,
   RECONNECT_CEILING_MS,
   RECONNECT_FLOOR_MS,
-  type DiscordLogRecord,
 } from './gateway-transport.js'
 import { MAX_TEXT, OVERFLOW_BUTTON } from './render.js'
 import { FakeGatewayNetwork } from '../../../test/support/fake-gateway.js'
@@ -69,6 +69,8 @@ const FORUM = '400000000000000016'
 /** The channel a direct message arrives in, which has no guild at all. */
 const DM = '600000000000000008'
 const MESSAGE = '700000000000000009'
+/** A second question in the same channel, which is a second Conversation entirely. */
+const NEXT_MESSAGE = '700000000000000019'
 const QUOTED = '700000000000000010'
 /** A card roma posted, which is the message a press arrives carrying. */
 const CARD = '700000000000000017'
@@ -204,6 +206,10 @@ async function listening() {
   const waits: number[] = []
   const adapter = new DiscordAdapter({
     api,
+    // The same log the Transport writes to, because it is the same log: an
+    // operator reads one file, and a Conversation answered in the wrong place is
+    // a line beside the frames it arrived on.
+    log: (record) => log.push(record),
     wait: (ms) => {
       waits.push(ms)
       return Promise.resolve()
@@ -308,6 +314,11 @@ function to(
  */
 function refusal(status: number, retryAfterMs: number | null = null): DiscordRefusal {
   return new DiscordRefusal(`Discord answered ${status}`, status, retryAfterMs)
+}
+
+/** Every line roma wrote about a Conversation it was refused the thread for. */
+function unopened(log: readonly DiscordLogRecord[]): readonly DiscordLogRecord[] {
+  return log.filter(({ event }) => event === 'thread-unopened')
 }
 
 /**
@@ -987,6 +998,74 @@ describe('where an answer goes', () => {
 
     expect(channel.api.threads).toHaveLength(1)
     expect(channel.api.messages.map(({ posted }) => posted.channel)).toEqual([CHANNEL, CHANNEL])
+  })
+
+  /**
+   * **The claim ADR-0029 says this design would fail on, made visible.** The
+   * reply arrives, so nothing in the Conversation looks wrong; what is wrong is
+   * that the key named a thread that was never opened, so the next message in
+   * this channel mints another key and gets a Session that has never heard of
+   * this one. No Task fails and there is nobody to tell, which is why the ADR
+   * called it a fault with no error anybody sees — this line is the whole of the
+   * evidence, and the outcome beside it is unchanged.
+   */
+  it('writes down the channel it was refused a thread in, and answers anyway', async () => {
+    const channel = await messaged(addressed())
+    channel.api.failEvery('startThread', refusal(403))
+
+    await channel.adapter.deliver(to(MESSAGE, { kind: 'result', text: 'the answer' }))
+
+    expect(unopened(channel.log)).toEqual([
+      { event: 'thread-unopened', channel: CHANNEL, status: 403 },
+    ])
+    expect(channel.api.messages[0]?.posted.channel).toBe(CHANNEL)
+  })
+
+  // The three ways this call is refused share a fallback and are not one fault:
+  // a 403 is a permission roma will not hold tomorrow either, and a 400 is the
+  // route refusing the channel's type, which ADR-0029 says is either harmless or
+  // a fault in the classifier. Discord's own number is what separates them, and
+  // it is carried rather than read — a refusal nobody predicted comes out as
+  // itself instead of as whichever of the two roma guessed.
+  it('carries the number Discord refused with, rather than what roma makes of it', async () => {
+    const noPermission = await messaged(addressed())
+    noPermission.api.failEvery('startThread', refusal(403))
+    const wrongKindOfChannel = await messaged(addressed())
+    wrongKindOfChannel.api.failEvery('startThread', refusal(400))
+
+    await noPermission.adapter.deliver(to(MESSAGE, { kind: 'result', text: 'the answer' }))
+    await wrongKindOfChannel.adapter.deliver(to(MESSAGE, { kind: 'result', text: 'the answer' }))
+
+    expect(unopened(noPermission.log)).toEqual([
+      { event: 'thread-unopened', channel: CHANNEL, status: 403 },
+    ])
+    expect(unopened(wrongKindOfChannel.log)).toEqual([
+      { event: 'thread-unopened', channel: CHANNEL, status: 400 },
+    ])
+  })
+
+  /**
+   * **Once per Conversation, and the second Conversation is not deduplicated.**
+   * The thread is asked for once and the fallback remembered, so a Task saying
+   * five things says this once. A second question in the same channel is a
+   * second Session, which is precisely the thing going wrong — so it is a second
+   * line rather than a silence bought by remembering the channel, and the same
+   * `channel` arriving over and over is what tells a permission roma will never
+   * hold from a thread that was misread once.
+   */
+  it('says it once for a Task, and again for the next Conversation', async () => {
+    const channel = await messaged(addressed())
+    channel.api.failEvery('startThread', refusal(403))
+
+    await channel.adapter.deliver(to(MESSAGE, { kind: 'progress', progress: { phase: 'working' } }))
+    await channel.adapter.deliver(to(MESSAGE, { kind: 'result', text: 'the answer' }))
+    await channel.take(dispatch('MESSAGE_CREATE', addressed({ id: NEXT_MESSAGE })))
+    await channel.adapter.deliver(to(NEXT_MESSAGE, { kind: 'result', text: 'the answer' }))
+
+    expect(unopened(channel.log)).toEqual([
+      { event: 'thread-unopened', channel: CHANNEL, status: 403 },
+      { event: 'thread-unopened', channel: CHANNEL, status: 403 },
+    ])
   })
 
   // The Core cannot absorb this one: an instruction that reached nobody looks,

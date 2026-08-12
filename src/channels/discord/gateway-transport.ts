@@ -166,8 +166,13 @@ export type GatewayLogRecord =
       readonly reason: string
     }
 
-/** Everything the Discord Channel says to an operator: its Transport's and its own. */
-export type DiscordLogRecord = GatewayLogRecord | DiscordEventLogRecord
+/**
+ * What this Transport writes: its own records, and the reader's it lends its log
+ * to.
+ *
+ * Not everything the Channel says, which is `binding.ts`'s `DiscordLogRecord`.
+ */
+export type GatewayLog = OperatorLog<GatewayLogRecord | DiscordEventLogRecord>
 
 export interface GatewayTransportOptions {
   /**
@@ -188,7 +193,7 @@ export interface GatewayTransportOptions {
    * `toIngress` does none — see `completedQuotation`.
    */
   readonly api: DiscordApi
-  readonly log?: OperatorLog<DiscordLogRecord>
+  readonly log?: GatewayLog
   /**
    * How much of the first heartbeat interval to wait, as a fraction.
    *
@@ -266,7 +271,7 @@ export class GatewayTransport implements Transport<DiscordEvent> {
   readonly #url: string
   readonly #connect: ConnectGateway
   readonly #api: DiscordApi
-  readonly #log: OperatorLog<DiscordLogRecord>
+  readonly #log: GatewayLog
   readonly #jitter: () => number
 
   #receiver: Receiver<DiscordEvent> | null = null

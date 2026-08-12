@@ -1,16 +1,16 @@
 import type { OperatorLog } from '../../operator-log.js'
 import { bind, type ChannelBinding } from '../../serve.js'
-import { DiscordAdapter } from './discord-adapter.js'
+import { DiscordAdapter, type DiscordAdapterLogRecord } from './discord-adapter.js'
+import type { DiscordEventLogRecord } from './discord-events.js'
 import type { DiscordEnv } from './env-config.js'
-import { GatewayTransport, type DiscordLogRecord, type GatewaySocket } from './gateway-transport.js'
+import { GatewayTransport, type GatewayLogRecord, type GatewaySocket } from './gateway-transport.js'
 import { HttpDiscordApi } from './http-discord-api.js'
 
 /**
- * Everything this Channel has to say to an operator, from the one place it says
- * it: the Transport is the only half with a log, because the Adapter's own half
- * is a synchronous read that reports by returning null.
+ * Everything this Channel has to say to an operator: its Transport's, the event
+ * reader's, and the Adapter's own.
  */
-export type { DiscordLogRecord } from './gateway-transport.js'
+export type DiscordLogRecord = GatewayLogRecord | DiscordEventLogRecord | DiscordAdapterLogRecord
 
 /** Where it says it, which the composition root widens to every other part of roma. */
 export type DiscordLog = OperatorLog<DiscordLogRecord>
@@ -38,7 +38,7 @@ export function discordBinding(discord: DiscordEnv, log: DiscordLog): ChannelBin
   const api = new HttpDiscordApi({ botToken: discord.botToken, apiBase: discord.apiBase })
 
   return bind(
-    new DiscordAdapter({ api }),
+    new DiscordAdapter({ api, log }),
     new GatewayTransport({
       token: discord.botToken,
       url: discord.gatewayUrl,

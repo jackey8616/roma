@@ -5,6 +5,7 @@ import type {
   OutboundInstruction,
 } from '../../channel-adapter.js'
 import type { Command } from '../../commands.js'
+import { writeToStderr, type OperatorLog } from '../../operator-log.js'
 import { DiscordRefusal, MAX_BUTTONS, type DiscordApi, type DiscordButton } from './discord-api.js'
 import {
   asString,
@@ -87,6 +88,37 @@ interface Answered {
   place: Promise<string> | null
 }
 
+/** The one thing this Adapter does that no Conversation will ever hear about. */
+export type DiscordAdapterLogRecord = {
+  /**
+   * roma was refused the thread a Conversation Key names, so it is answering in
+   * the parent channel — and every message in that channel is getting a Session
+   * of its own.
+   *
+   * **The consequence is what this records, not the refusal.** A top-level key
+   * is the message's own id, minted on the promise that the thread about to be
+   * opened will share it; where none is opened the key names nothing, the next
+   * message mints another, and each one is a Session that has never heard of the
+   * last. The reply still arrives and no Task fails, so there is nothing for a
+   * Conversation to notice and nothing anywhere else in roma that says so
+   * (ADR-0029).
+   *
+   * **`status` is Discord's own number rather than roma's reading of it.** A 403
+   * is the dangerous one: roma holds no `CREATE_PUBLIC_THREADS` here, so this is
+   * every message in this channel from now until somebody grants it. A 400 is
+   * the route refusing the channel's type — either a thread read as top level,
+   * which ADR-0029 calls harmless and self-repairing, or a forum, which it
+   * argues is never reached and is a fault in the classifier if it is; `channel`
+   * is what tells those two apart. Anything else is a refusal nobody predicted,
+   * and it is written down as it came rather than filed under a meaning it may
+   * not have.
+   */
+  readonly event: 'thread-unopened'
+  /** Where roma is answering instead, and where a missing permission would be. */
+  readonly channel: string
+  readonly status: number
+}
+
 export interface DiscordAdapterOptions {
   /**
    * How roma reaches Discord over HTTP.
@@ -96,6 +128,17 @@ export interface DiscordAdapterOptions {
    * on this port.
    */
   readonly api: DiscordApi
+  /**
+   * Where to say that a Conversation is being answered somewhere other than
+   * where its key names.
+   *
+   * Optional the way every other log in this repo is, and defaulted to stderr
+   * rather than to silence — which is the one way this differs from Chat's, and
+   * it follows from what the record is: see `DiscordAdapterLogRecord`. A
+   * deployment that drops it would get back exactly the failure the record
+   * exists to end.
+   */
+  readonly log?: OperatorLog<DiscordAdapterLogRecord>
   /**
    * How roma waits between attempts at a call Discord refused.
    *
@@ -143,6 +186,7 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
   }
 
   readonly #api: DiscordApi
+  readonly #log: OperatorLog<DiscordAdapterLogRecord>
   readonly #wait: (ms: number) => Promise<void>
 
   /**
@@ -177,8 +221,9 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
    */
   readonly #acknowledgements = new Map<string, Promise<string>>()
 
-  constructor({ api, wait }: DiscordAdapterOptions) {
+  constructor({ api, log, wait }: DiscordAdapterOptions) {
     this.#api = api
+    this.#log = log ?? writeToStderr
     this.#wait = wait ?? sleep
   }
 
@@ -364,7 +409,8 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
    * does not work at all, or a thread may have been read as top level — and in
    * every one of them the reply belongs in the channel the message arrived in.
    * Thrown instead, an answer somebody paid for reaches nobody; fallen back,
-   * only the Session is in the wrong place (ADR-0029).
+   * only the Session is in the wrong place (ADR-0029). What being in the wrong
+   * place costs, and why it is worth a line, is `DiscordAdapterLogRecord`'s.
    */
   async #openThread(conversationKey: string, answered: Answered): Promise<string> {
     try {
@@ -373,6 +419,7 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
       )
     } catch (error) {
       if (!refused(error)) throw error
+      this.#log({ event: 'thread-unopened', channel: answered.channel, status: error.status })
       return answered.channel
     }
   }
@@ -463,7 +510,7 @@ function choiceButtons(
 }
 
 /** Whether Discord refused this on its own terms, rather than failing to serve it. */
-function refused(error: unknown): boolean {
+function refused(error: unknown): error is DiscordRefusal {
   return error instanceof DiscordRefusal && error.status !== 429 && error.status < 500
 }
 
