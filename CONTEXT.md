@@ -178,21 +178,26 @@ and describing it as showing the command, which is a beginning long enough to
 tell two tool calls apart and no more
 
 **Opening**:
-The first thing roma says in a Session: which Runtime it runs on, on which model,
-at what effort, and — only where this Session's Caveman is not `off` — how short
-roma is asking it to be. One per Session, so a Conversation gets one and gets
+The first thing roma says in a Session: which model it runs on, at what effort,
+and — only where this Session's Caveman is not `off` — how short roma is asking
+it to be. **Not which Runtime, though this entry said so until somebody counted
+the sentence against the code.** `#settingsReport` has never carried it: there is
+one Runtime, so the word would be the same for every Session on every deployment,
+and where it does earn its place — attributing a cost — it is on the Audit Record
+(ADR-0027). ADR-0025's card is what would make a Session's own Runtime worth
+saying here, and it is unbuilt. One per Session, so a Conversation gets one and gets
 another after every `/clear` — which is where it is worth most, because `/clear`
 returns a Session to the Pinned Model, the Pinned Effort and the Pinned Caveman
 without anything being deleted and the answer it gives names none of them
 (ADR-0024). Deliberately **not** roma speaking first: roma has nobody it can
 speak to first, so an Opening is a reply, sent before the Acknowledgement of the
 message that prompted it. `/config`'s sentence rather than a second one — five
-spellings over four roma-owned facts, not five sources of truth. The fourth is
-conditional where the other three are not, because an Opening exists to say what
+spellings over three roma-owned facts, not five sources of truth. The third is
+conditional where the other two are not, because an Opening exists to say what
 somebody is on when the answer is not obvious, and a deployment that never turns
 this on has nothing to say (ADR-0030). A Command prompts none, and that is
-what keeps the count at four rather than making it a repetition: a Command
-starts no Session, and the three that report anything have just answered the
+what keeps the count at five rather than making it a repetition: a Command
+starts no Session, and the four that report anything have just answered the
 question an Opening asks. A Session still awaiting its Runtime prompts none
 either, for the opposite reason: the question cannot be answered yet, because
 the model and the effort both follow the Runtime. There the click that chooses

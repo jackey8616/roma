@@ -4,11 +4,26 @@ Date: 2026-08-12
 
 ## Status
 
-Proposed — the decisions below came out of a design interview, not a build.
-Nothing here has been measured against roma's own traffic, and the claim the
-whole thing exists for — that it saves anything — is deliberately **not made**.
-What is written down is a mechanism and the reasons a cheaper-looking mechanism
-was rejected; what it is worth is the verification agenda at the end.
+Accepted, and **implemented** (#183–#190, under the map #182). `src/caveman.ts`
+holds the borrowed ruleset, the level filter and the Menu;
+`test/fixtures/caveman/SKILL.md` is the upstream file it was derived from and
+`src/caveman.test.ts` holds that file's hash and the four rewrites.
+`ROMA_CAVEMAN` is refused at boot in `src/env-config.ts`, `chosenCavemen` in
+`src/session-generation.ts` is the third Chosen Record adapter, `SpawnTerms` in
+`src/session-pool.ts` carries the level onto every spawn and the swap has its
+fourth reason, `Core.#answerCaveman` answers `/caveman` and `#settingsReport`
+says it where this Session's is not `off`, and `src/channels/google-chat/` draws
+the Menu as buttons and reads a press back.
+
+**Implemented is not verified, and holding those apart is most of what this file
+was written to do.** Nothing here has been measured against roma's own traffic,
+and the claim the whole thing exists for — that it saves anything — is still
+deliberately **not made**. What landed beside the mechanism is the instruments
+for making it: the Audit Record now carries the level and the Turn's output
+tokens, which is what lets a deployment answer agenda item 1 from its own months
+rather than from a synthetic prompt, and `src/append-on-resume.live.test.ts` is
+item 5's, built and unspent. The agenda at the end is shorter by one item and
+longer by another, both from the same re-reading — see *Verification status*.
 
 Follows ADR-0016 in shape and ADR-0014 in shape: a thing every Session runs
 with, pinned by the operator and moved by a person, kept in a Chosen Record and
