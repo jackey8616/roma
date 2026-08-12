@@ -217,10 +217,10 @@ function chosen([chooses, conversationKey, ...rest]: readonly string[]): Pressed
   // roma never put out, and synthesising `/stop` or `/clear` from it would reach
   // a Command through a door meant for a Menu.
   //
-  // **Never widen this alone, and never widen `OutboundInstruction`'s `chooses`
-  // alone.** A Menu the Core offers and this cannot read back is a button that
-  // does nothing, under a Caller who goes on waiting for it; the other way round
-  // is a Command reachable through a card roma never posts.
+  // **Never widen this without `choiceButtons`, or that without this.** Half a
+  // widening is a `custom_id` roma writes onto a button and then refuses to
+  // read: nothing fails, nothing is logged, and a Caller presses and goes on
+  // waiting (ADR-0023).
   if (chooses !== 'model' && chooses !== 'effort' && chooses !== 'caveman') return null
   if (conversationKey === undefined || conversationKey === '') return null
   const option = rest.join(FIELD)
