@@ -5,13 +5,13 @@ import { AuditLog } from './audit-log.js'
 import { buildEnv, type Credential } from './build-env.js'
 import { PINNED_EFFORT, PINNED_MODEL } from './claude-session.js'
 import type { CredentialEnvs } from './session-pool.js'
-import type { ChannelAdapter } from './channel-adapter.js'
 import type { SpawnClaudeProcess } from './claude-process.js'
 import type { RetryBudget } from './config.js'
 import { ReachUse } from './reach-use.js'
-import { Core, type CoreLogRecord } from './core.js'
+import { Core, type CoreLogRecord, type CoreOptions } from './core.js'
 import { FreshTokens } from './fresh-tokens.js'
 import { eachReach, type Reach, type Reaches } from './reach.js'
+import type { BoundChannel, ChannelBinding } from './serve.js'
 import { chosenEfforts, chosenModels, SessionGenerations } from './session-generation.js'
 import type { OperatorLog } from './operator-log.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
@@ -125,18 +125,27 @@ export interface StartRomaOptions {
     readonly monthlyCapUsd: number
   }
   /**
-   * The Channel roma answers on.
+   * The Channels roma answers on, each bound to the Transport its events arrive
+   * over.
    *
-   * One, because roma has one. A second Channel means a second Core over this
-   * same pool and queue — the Core's own contract already says so — and the
-   * shape of that is a change to make when there is a second Adapter to make it
-   * against, not machinery to build now against a Channel that does not exist.
+   * **One Core per Channel, over one of everything else here.** The queue, the
+   * pool, the Work Root, the Audit Log and the two Chosen Records are built once
+   * below and handed to every Core; what that buys the Core is
+   * `CoreOptions.channel`, which has said it since there was one Channel.
+   *
+   * **One process, and that is the half this adds.** Every cap roma has is a
+   * process's: the concurrency cap is three against one Shared Window rather
+   * than three per Channel, and the Overflow monthly cap is enforced against the
+   * sum of one month's Audit Records under one root. A process per Channel would
+   * double both with no configuration looking wrong, which is the alternative
+   * ADR-0028 rejected.
    *
    * Passed in rather than built here: constructing a Channel Adapter needs that
    * Channel's own API client and its own credentials, which is the deployment's
-   * business and not roma's.
+   * business and not roma's. `bind` is the only way to make one of these, and
+   * why is written there.
    */
-  readonly channel: ChannelAdapter
+  readonly channels: readonly ChannelBinding[]
   /** Where Sessions get their working directories, one each. */
   readonly workRoot: string
   /**
@@ -217,7 +226,8 @@ export interface StartRomaOptions {
 
 /** roma, running. */
 export interface Roma {
-  readonly core: Core
+  /** One Core per binding, in the order the bindings were given. */
+  readonly channels: readonly BoundChannel[]
   readonly pool: SessionPool
   readonly queue: TaskQueue
   readonly sessions: SessionGenerations
@@ -248,13 +258,13 @@ export interface Roma {
  * It is otherwise deliberately thin. Its only other decision is *ownership* —
  * the pool, the queue and the generation record are built here rather than by
  * the Core that uses them, because every cap and rule they carry is roma-wide,
- * and a Core that made its own would quietly turn each of them into one per
- * Channel the day a second Channel arrives.
+ * and a Core that made its own would turn each of them into one per Channel,
+ * which is now a live mistake rather than an anticipated one.
  */
 export async function startRoma({
   credential,
   overflow,
-  channel,
+  channels,
   workRoot,
   auditRoot,
   configDir,
@@ -447,27 +457,38 @@ export async function startRoma({
   const sessions = new SessionGenerations({ workRoot: work })
   const audit = new AuditLog({ auditRoot })
 
+  // Everything a Core is made of except the Channel it answers on, built once
+  // and given to each of them — `StartRomaOptions.channels` is why every one of
+  // these is roma's rather than any Channel's.
+  //
+  // The credential is handed over as well as the environment built from it,
+  // because the record has to say which of the two bills a Task landed on and
+  // the environment is a map of secrets rather than an answer to that.
+  const shared: Omit<CoreOptions, 'channel'> = {
+    pool,
+    // The same Work Root the pool was given, which is what makes an Enclosure
+    // land where the Session that was told about it will look.
+    workRoot: work,
+    queue,
+    sessions,
+    models,
+    efforts,
+    audit,
+    credential: credential.kind,
+    usedCloudReach: (taskId) => cloudUse.takeUsedBy(taskId),
+    usedDocumentReach: (taskId) => documentUse.takeUsedBy(taskId),
+    ...(overflow === undefined ? {} : { overflow: { monthlyCapUsd: overflow.monthlyCapUsd } }),
+    ...(log === undefined ? {} : { log }),
+  }
+
   return {
-    // The credential is handed over as well as the environment built from it,
-    // because the record has to say which of the two bills a Task landed on and
-    // the environment is a map of secrets rather than an answer to that.
-    core: new Core({
-      channel,
-      pool,
-      // The same Work Root the pool was given, which is what makes an Enclosure
-      // land where the Session that was told about it will look.
-      workRoot: work,
-      queue,
-      sessions,
-      models,
-      efforts,
-      audit,
-      credential: credential.kind,
-      usedCloudReach: (taskId) => cloudUse.takeUsedBy(taskId),
-      usedDocumentReach: (taskId) => documentUse.takeUsedBy(taskId),
-      ...(overflow === undefined ? {} : { overflow: { monthlyCapUsd: overflow.monthlyCapUsd } }),
-      ...(log === undefined ? {} : { log }),
-    }),
+    // Not built here and handed to a binding: a Core paired with the wrong
+    // Channel would answer every message into somebody else's product, and
+    // nothing downstream of here could tell. Each binding builds its own, over
+    // its own Adapter.
+    channels: channels.map((binding) =>
+      binding.coreOver((channel) => new Core({ channel, ...shared })),
+    ),
     pool,
     queue,
     sessions,

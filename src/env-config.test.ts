@@ -195,11 +195,21 @@ describe('reading roma out of the environment', () => {
   })
 })
 
-describe('the Core, its Channel and its Minter, read as one configuration', () => {
-  const readChannel = (env: Parameters<typeof readRomaEnv>[0]) => {
-    if (env['CHANNEL_THING'] === undefined)
-      throw new ConfigurationMissing(['CHANNEL_THING is not set.'])
-    return { thing: env['CHANNEL_THING'] }
+describe('the Core, its Channels and its Minter, read as one configuration', () => {
+  /**
+   * A Channel with two variables, one of them required.
+   *
+   * Two rather than one so that "named none of them" and "named half of them"
+   * are different answers, which is the whole of what makes a Channel optional:
+   * the first is a deployment serving somebody else's Channel and the second is
+   * one that meant to serve this one (ADR-0028).
+   */
+  const readChannel = (prefix: string) => (env: Parameters<typeof readRomaEnv>[0]) => {
+    const thing = env[`${prefix}_THING`]
+    const spare = env[`${prefix}_SPARE`]
+    if (thing === undefined && spare === undefined) return null
+    if (thing === undefined) throw new ConfigurationMissing([`${prefix}_THING is not set.`])
+    return { thing, spare: spare ?? 'a default' }
   }
 
   const readMinter = (env: Parameters<typeof readRomaEnv>[0]) => {
@@ -222,23 +232,25 @@ describe('the Core, its Channel and its Minter, read as one configuration', () =
     return thing === undefined ? null : { thing }
   }
 
+  const CHANNELS = { first: readChannel('FIRST'), second: readChannel('SECOND') }
+
   it('hands back all five parts', () => {
-    const { roma, channelEnv, minterEnv, cloudEnv, documentEnv } = readConfiguration(
+    const { roma, channels, minterEnv, cloudEnv, documentEnv } = readConfiguration(
       {
         ...MINIMAL,
-        CHANNEL_THING: 'yes',
+        FIRST_THING: 'yes',
         MINTER_THING: 'also yes',
         CLOUD_THING: 'and yes',
         DOCUMENT_THING: 'yes again',
       },
-      readChannel,
+      CHANNELS,
       readMinter,
       readCloud,
       readDocument,
     )
 
     expect(roma.workRoot).toBe('/srv/roma/sessions')
-    expect(channelEnv).toEqual({ thing: 'yes' })
+    expect(channels.first).toEqual({ thing: 'yes', spare: 'a default' })
     expect(minterEnv).toEqual({ thing: 'also yes' })
     expect(cloudEnv).toEqual({ thing: 'and yes' })
     expect(documentEnv).toEqual({ thing: 'yes again' })
@@ -248,8 +260,8 @@ describe('the Core, its Channel and its Minter, read as one configuration', () =
   // optional Reach is not half-configured, so this is not the Overflow shape.
   it('starts perfectly well with nothing to say about the cloud or the documents', () => {
     const { cloudEnv, documentEnv } = readConfiguration(
-      { ...MINIMAL, CHANNEL_THING: 'yes', MINTER_THING: 'also yes' },
-      readChannel,
+      { ...MINIMAL, FIRST_THING: 'yes', MINTER_THING: 'also yes' },
+      CHANNELS,
       readMinter,
       readCloud,
       readDocument,
@@ -259,14 +271,65 @@ describe('the Core, its Channel and its Minter, read as one configuration', () =
     expect(documentEnv).toBeNull()
   })
 
+  // The whole of what a second Channel costs a deployment that does not want
+  // one: nothing. Naming the other Channel's variables is not a condition of
+  // serving this one (ADR-0028).
+  it('serves one Channel without the other being configured at all', () => {
+    const { channels } = readConfiguration(
+      { ...MINIMAL, SECOND_THING: 'yes', MINTER_THING: 'also yes' },
+      CHANNELS,
+      readMinter,
+      readCloud,
+      readDocument,
+    )
+
+    expect(channels.first).toBeNull()
+    expect(channels.second).toMatchObject({ thing: 'yes' })
+  })
+
+  // The one deployment that is complete in every part and still cannot work: it
+  // would boot, prove its credential, subscribe to nothing and answer nobody,
+  // which is the failure that has no symptom anywhere else.
+  it('refuses a deployment that configured no Channel at all', () => {
+    expect(() =>
+      readConfiguration(
+        { ...MINIMAL, MINTER_THING: 'yes' },
+        CHANNELS,
+        readMinter,
+        readCloud,
+        readDocument,
+      ),
+    ).toThrow(/at least one of: first, second/)
+  })
+
+  // Half a Channel is a deployment that plainly meant to serve it, so it is
+  // refused naming what is missing — never read as a deployment that wanted a
+  // different Channel. It is also not told it configured no Channel: it did, and
+  // sending it to the other one would be advice about something it never asked
+  // for.
+  it('refuses a Channel configured by halves rather than answering nobody on it', () => {
+    try {
+      readConfiguration(
+        { ...MINIMAL, FIRST_SPARE: 'set', MINTER_THING: 'yes' },
+        CHANNELS,
+        readMinter,
+        readCloud,
+        readDocument,
+      )
+      expect.unreachable('should have refused')
+    } catch (error) {
+      expect((error as ConfigurationMissing).problems).toEqual(['FIRST_THING is not set.'])
+    }
+  })
+
   // Somebody standing roma up sets all of it in one go. Told about the Channel's
   // missing variable only after fixing the Core's, they boot twice to learn two
   // things they could have been told at once.
   it('refuses once, with what is wrong with any of them', () => {
     try {
       readConfiguration(
-        { CLOUD_THING: 'broken', DOCUMENT_THING: 'broken' },
-        readChannel,
+        { FIRST_SPARE: 'set', CLOUD_THING: 'broken', DOCUMENT_THING: 'broken' },
+        CHANNELS,
         readMinter,
         readCloud,
         readDocument,
@@ -279,7 +342,7 @@ describe('the Core, its Channel and its Minter, read as one configuration', () =
         'ROMA_AUDIT_ROOT is not set.',
         'ROMA_CLAUDE_CONFIG_DIR is not set.',
         'ROMA_SHIM_DIR is not set.',
-        'CHANNEL_THING is not set.',
+        'FIRST_THING is not set.',
         'MINTER_THING is not set.',
         'CLOUD_THING is nonsense.',
         'DOCUMENT_THING is nonsense.',
@@ -294,8 +357,10 @@ describe('the Core, its Channel and its Minter, read as one configuration', () =
     expect(() =>
       readConfiguration(
         MINIMAL,
-        () => {
-          throw new TypeError('the reader is broken')
+        {
+          first: () => {
+            throw new TypeError('the reader is broken')
+          },
         },
         readMinter,
         readCloud,

@@ -222,7 +222,7 @@ RUN mkdir -p /var/lib/roma/work /var/lib/roma/claude /var/lib/roma/audit /run/ro
 USER node
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "/app/dist/channels/google-chat/main.js"]
+CMD ["node", "/app/dist/channels/main.js"]
 
 # Last, so that a new version or revision reprints one layer rather than
 # rebuilding the install layers above it. Readable with `docker inspect`, without

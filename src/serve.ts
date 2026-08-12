@@ -55,8 +55,10 @@ export type IngressLogRecord =
        * was handed back.
        *
        * The one ingress failure that is worth another attempt, and the one whose
-       * cost is invisible: the Turn may well have run and spent quota, and the
-       * redelivery will run it again.
+       * cost is invisible: the Turn may well have run and spent quota, and a
+       * Transport with somewhere to hand it back to will run it again. Where
+       * there is nowhere, this line is the only trace the Task leaves anywhere
+       * (ADR-0028).
        */
       readonly event: 'ingress-failed'
       readonly deliveryId: string
@@ -87,72 +89,149 @@ export type ServeLog = OperatorLog<
   | SelfCheckLogRecord
 >
 
-export interface ServeOptions<Event> extends Omit<StartRomaOptions, 'log' | 'channel'> {
+/**
+ * One Channel roma answers on, and the Transport its events arrive over, paired
+ * and then erased.
+ *
+ * Opaque, and `bind` is the only way to make one — which is the whole of the
+ * design rather than a detail of it. What this hides is the type of event that
+ * Channel delivers: `serve` holds a list of these and can name no type variable
+ * per element, so the pairing is checked once, at the boundary that makes one,
+ * and nothing after it has to be able to state it (ADR-0028).
+ */
+export interface ChannelBinding {
   /**
-   * The Channel roma answers on, and the Transport its events arrive over.
+   * Give this Channel a Core of its own, out of what every Channel shares.
    *
-   * Named by one type variable, because the pairing is the one thing assembling
-   * roma can get wrong in a way nothing else would notice: a Transport
-   * delivering events this Adapter cannot read produces a roma that runs
-   * perfectly and ignores everything it is sent. Neither `Core` nor `Transport`
-   * can see that on its own — this is where the two meet.
-   *
-   * Both passed in rather than built here. What it takes to reach a Channel or a
-   * queue — a project, a subscription name, a credential — is the deployment's
-   * business, and roma reads what already exists rather than provisioning any of
-   * it.
+   * The Core is built here rather than handed in so that it is built over *this*
+   * binding's Adapter and cannot be built over another's. `build` is everything
+   * a Core is made of except the Channel — see `StartRomaOptions.channels` for
+   * why every one of those is roma-wide.
    */
-  readonly channel: ChannelAdapter<Event>
-  readonly transport: Transport<Event>
+  coreOver(build: (channel: ChannelAdapter) => Core): BoundChannel
+}
+
+/** One Channel's Core, and the Transport that has not started delivering yet. */
+export interface BoundChannel {
+  readonly core: Core
+  /**
+   * Start delivering this Channel's events into that Core.
+   *
+   * Resolves once roma has subscribed, and hands back the two things shutting
+   * down needs.
+   */
+  receive(log: ServeLog): Promise<Receiving>
+}
+
+/** One Channel, subscribed, and the two things ending it takes. */
+export interface Receiving {
+  /** Hand every Delivery back from here rather than finish with it. */
+  stop(): void
+  close(): Promise<void>
+}
+
+/**
+ * Pair one Channel with the Transport its events arrive over.
+ *
+ * **The one thing assembling roma can get wrong that nothing else would
+ * notice.** A Transport delivering events this Adapter cannot read produces a
+ * roma that runs perfectly and ignores everything it is sent. Neither `Core` nor
+ * `Transport` can see that on its own — this is where the two meet, and one type
+ * variable across both parameters is the whole of the check.
+ *
+ * A function rather than a field on `ServeOptions`, because roma serves several
+ * Channels and a list cannot carry a type variable per element: a `readonly
+ * { channel: ChannelAdapter<any>; transport: Transport<any> }[]` type-checks and
+ * pairs nothing. So the pair is made where it can be stated and `Event` is gone
+ * by the time `serve` holds it (ADR-0028).
+ *
+ * Both passed in rather than built here. What it takes to reach a Channel or a
+ * queue — a project, a subscription name, a credential — is the deployment's
+ * business, and roma reads what already exists rather than provisioning any of
+ * it.
+ */
+export function bind<Event>(
+  channel: ChannelAdapter<Event>,
+  transport: Transport<Event>,
+): ChannelBinding {
+  return {
+    coreOver: (build) => {
+      const core = build(channel)
+      return {
+        core,
+        receive: async (log) => {
+          const ingress = new Ingress<Event>({ core, channel, log })
+          await transport.receive((delivery) => ingress.take(delivery))
+          return { stop: () => ingress.stop(), close: () => transport.close() }
+        },
+      }
+    },
+  }
+}
+
+/**
+ * Everything `startRoma` takes, with a log wide enough for the subscriber too.
+ *
+ * The only member of its own, because the only thing `serve` adds to `startRoma`
+ * is the ingress: what roma is assembled out of is already `StartRomaOptions`,
+ * and restating any of it here would be a second place to keep it true.
+ */
+export interface ServeOptions extends Omit<StartRomaOptions, 'log'> {
   readonly log?: ServeLog
 }
 
 /** roma, running and listening. */
 export interface Serving extends Roma {
   /**
-   * Stop taking messages, then end every Resident Session.
+   * Stop taking messages on every Channel, then end every Resident Session.
    *
    * In that order, and the order is the point: a roma that killed its processes
    * while still subscribed would accept a message it had nothing left to serve
    * it with. Sessions survive this — their context is on disk.
    *
    * It does not wait for the Tasks already running. They are killed with the
-   * processes, and their Deliveries are handed back rather than finished with,
-   * so the queue delivers them again to whatever comes up next. That is a
-   * deliberate choice between two imperfect endings: waiting would make a
-   * SIGTERM take however long the slowest Turn takes, and finishing with them
-   * would tell somebody their Task failed and then lose it.
+   * processes, and their Deliveries are handed back rather than finished with.
+   * That is a deliberate choice between two imperfect endings: waiting would
+   * make a SIGTERM take however long the slowest Turn takes, and finishing with
+   * them would tell somebody their Task failed and then lose it.
    *
-   * The consequence worth knowing: a Task that finished in the moment between
-   * the shutdown starting and its answer being posted is answered *and* run
-   * again. Handing the Delivery back is what makes that possible, and it is the
-   * safer half of the trade — the other half loses work.
+   * **What handing back buys depends on the Transport.** One with somewhere to
+   * hand a Delivery back to delivers it again to whatever comes up next; one
+   * without loses the work and says nothing to the Conversation, which ADR-0028
+   * accepts and #171 is about. The consequence on the other side is worth
+   * knowing too: where a Delivery is redelivered, a Task that finished in the
+   * moment between the shutdown starting and its answer being posted is answered
+   * *and* run again.
    */
   shutdown(): Promise<void>
 }
 
 /**
- * Start roma and put it on the queue: the whole program, assembled.
+ * Start roma and put every Channel on its Transport: the whole program,
+ * assembled.
  *
  * Two steps, and the second cannot happen without the first. `startRoma` proves
- * the credential and builds the Core; only then is anything subscribed. That is
+ * the credential and builds the Cores; only then is anything subscribed. That is
  * the acceptance criterion "the process begins accepting messages only after the
  * startup self-check passes" made structural rather than remembered — a boot
  * that fails the check throws from here with nothing subscribed, so there is no
  * window in which a message can arrive at a roma that has not proved what it
  * runs on.
  */
-export async function serve<Event>(options: ServeOptions<Event>): Promise<Serving> {
-  const { transport, channel, log = writeToStderr, ...startOptions } = options
-  const roma = await startRoma({ ...startOptions, channel, log })
+export async function serve(options: ServeOptions): Promise<Serving> {
+  const { log = writeToStderr, ...startOptions } = options
+  const roma = await startRoma({ ...startOptions, log })
 
-  const ingress = new Ingress<Event>({ core: roma.core, channel, log })
+  const receiving: Receiving[] = []
   try {
-    await transport.receive((delivery) => ingress.take(delivery))
+    for (const channel of roma.channels) receiving.push(await channel.receive(log))
   } catch (error) {
     // Subscribing failed with roma already built. Ending it here rather than
     // leaving it: nothing can reach a pool nothing is subscribed to, and its
-    // processes would outlive the boot that failed.
+    // processes would outlive the boot that failed. Whatever had already
+    // subscribed goes with it — a Channel left delivering into a roma that is
+    // not there is the same fault by a longer route.
+    await Promise.allSettled(receiving.map((channel) => channel.close()))
     await roma.shutdown()
     throw error
   }
@@ -160,17 +239,20 @@ export async function serve<Event>(options: ServeOptions<Event>): Promise<Servin
   return {
     ...roma,
     shutdown: async () => {
-      // Before the queue is closed, not after: from here on every Delivery
+      // Before any Transport is closed, not after: from here on every Delivery
       // roma is holding is one it is about to kill the Task for, and settling
-      // one as done would throw that work away.
-      ingress.stop()
-      try {
-        await transport.close()
-      } finally {
-        // Whatever the queue did. A `close` that rejected and took the pool
-        // down with it would leave `claude` processes running with nothing to
-        // talk to, which is the one thing shutdown exists to prevent.
-        await roma.shutdown()
+      // one as done would throw that work away. Every Channel before any close
+      // rather than each in turn, because closing takes as long as it takes and
+      // the other Channels' Tasks are settling throughout it.
+      for (const channel of receiving) channel.stop()
+      const closed = await Promise.allSettled(receiving.map((channel) => channel.close()))
+      // Whatever any of them did, and once rather than once per Channel. A
+      // `close` that rejected and took the pool down with it would leave
+      // `claude` processes running with nothing to talk to, which is the one
+      // thing shutdown exists to prevent.
+      await roma.shutdown()
+      for (const closing of closed) {
+        if (closing.status === 'rejected') throw closing.reason
       }
     },
   }

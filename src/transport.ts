@@ -44,12 +44,19 @@ export interface Delivery<Event = unknown> {
    */
   ack(): void | Promise<void>
   /**
-   * Not finished with it. Hand it back, to be delivered again.
+   * Not finished with it, and roma is not going to be.
    *
    * For the failures another attempt could get past — the Channel being
    * unreachable, most of all. Not for an event roma cannot read: that one will
    * fail identically for ever, and giving it back makes it a message the
    * subscriber trips over on every pass.
+   *
+   * **What it buys is the Transport's, and may be nothing.** A Transport with
+   * somewhere to hand a Delivery back to delivers it again; one without — a
+   * socket roma holds open has no such place — says so by doing nothing, and the
+   * work is lost. roma does not ask which, and nothing here branches on it: a
+   * no-op and a declared inability produce identical behaviour, so the flag that
+   * would tell them apart is one nothing would read (ADR-0028).
    */
   nack(): void | Promise<void>
 }

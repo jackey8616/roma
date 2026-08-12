@@ -1,6 +1,7 @@
 import {
   ConfigurationMissing,
   certain,
+  envValue,
   required,
   wholeNumber,
   type Environment,
@@ -61,8 +62,32 @@ export interface ChatEnv {
   readonly maxLeaseMinutes: number
 }
 
-/** Read the Chat channel's own settings. Refuses with everything missing at once. */
-export function readChatEnv(env: Environment): ChatEnv {
+/**
+ * Every variable this Channel reads, required and optional alike.
+ *
+ * **Do not narrow this to the two that are required.** It is what tells "this
+ * deployment does not serve Chat" apart from "this deployment configured half a
+ * Chat", and narrowed, somebody who set a lease minute and nothing else gets a
+ * roma that starts, serves no Chat, and ignores the variable they did set.
+ */
+const CHAT_VARIABLES = [
+  'ROMA_PUBSUB_PROJECT_ID',
+  'ROMA_PUBSUB_SUBSCRIPTION',
+  'ROMA_PUBSUB_MAX_MESSAGES',
+  'ROMA_PUBSUB_MAX_LEASE_MINUTES',
+]
+
+/**
+ * Read the Chat Channel's own settings, or nothing where this deployment does
+ * not serve Chat.
+ *
+ * Refuses with everything missing at once, and null is not one of those things:
+ * `ReadChannelEnv` is where the difference between a Channel a deployment does
+ * not have and one it configured half of is argued.
+ */
+export function readChatEnv(env: Environment): ChatEnv | null {
+  if (CHAT_VARIABLES.every((name) => envValue(env, name) === null)) return null
+
   const problems: string[] = []
 
   const projectId = required(env, 'ROMA_PUBSUB_PROJECT_ID', problems)

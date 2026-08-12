@@ -8,10 +8,12 @@ import { ConfigurationMissing } from './env-config.js'
 import { sessionIdFor } from './session-id.js'
 import { askMinter } from './shim-client.js'
 import { socketPathIn } from './shim-protocol.js'
+import { bind } from './serve.js'
 import { startRoma, type Roma } from './startup.js'
 import { StartupSelfCheckFailed } from './startup-self-check.js'
 import { flush } from '../test/support/fake-claude.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
+import { FakeTransport } from '../test/support/fake-transport.js'
 import {
   fakeReaches,
   fakeShims,
@@ -50,7 +52,10 @@ function boot({
   let resolved = false
   const starting = startRoma({
     credential: OAUTH,
-    channel,
+    // One Channel, and a Transport it will never be asked to deliver over:
+    // `startRoma` builds the Cores and subscribes nothing, and `bind` is the
+    // only way a Channel gets in.
+    channels: [bind(channel, new FakeTransport())],
     ...fixture.dirs,
     reaches: fakeReaches({
       minter,
@@ -64,7 +69,9 @@ function boot({
   }).then((roma) => {
     resolved = true
     started.push(roma)
-    return roma
+    // The one Channel's Core, put back where every test below already looks for
+    // it. A roma serving two would have two, and this fixture binds one.
+    return { ...roma, core: onlyCore(roma) }
   })
   // Attached now rather than by whichever test awaits it. Answering the probe
   // takes two exchanges since ADR-0016 — the Turn, then the relayed `/effort
@@ -88,6 +95,13 @@ function boot({
     answerProbe: fixture.answerProbe,
     procFor: fixture.procFor,
   }
+}
+
+/** The Core of a roma that has exactly one Channel, which every test here does. */
+function onlyCore(roma: Roma) {
+  const [channel, ...rest] = roma.channels
+  if (channel === undefined || rest.length > 0) throw new Error('this roma has more than one Core')
+  return channel.core
 }
 
 /** What one Session was appended to its system prompt. */

@@ -57,6 +57,11 @@ export class RecordingAdapter implements ChannelAdapter<unknown> {
     this.#refusing.set(kind, error)
   }
 
+  /** And take them again, the way a Channel that has come back does. */
+  stopRefusing(kind: OutboundInstruction['kind']): void {
+    this.#refusing.delete(kind)
+  }
+
   /**
    * Make deliveries of one kind hang until the returned function is called.
    *

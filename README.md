@@ -22,7 +22,7 @@ npm install
 
 | command | does |
 | --- | --- |
-| `npm start` | Runs roma against Google Chat from the sources, via `tsx`. See below. |
+| `npm start` | Runs roma against whichever Channels the environment configures, from the sources, via `tsx`. See below. |
 | `npm test` | The default run. Fast, free, deterministic. |
 | `npm run test:watch` | The same, watching. |
 | `npm run typecheck` | `tsc --noEmit`, over `src` **and** `test`. |
@@ -48,13 +48,17 @@ architecture rests on goes unchecked.
 
 ## Running it
 
-`npm start` is roma over Google Chat: it reads the environment, proves the credential with
-the startup self-check, and only then subscribes. In development that runs the TypeScript
+`npm start` is roma over every Channel the environment names: it reads the configuration
+whole, proves the credential with the startup self-check, and only then subscribes. Each
+Channel is optional and **at least one is required** — a roma with none would start,
+subscribe to nothing and answer nobody, so it refuses instead. Google Chat is the only one
+so far, and one process serves however many there are: one Core each, over one pool, one
+queue, one Audit Log and one Work Root (ADR-0028). In development that runs the TypeScript
 directly through `tsx`, from a normal `npm install`.
 
 What ships is compiled. `npm run build` emits `src` alone to `dist/` — the tests are not
-in it — and the image runs `node dist/channels/google-chat/main.js` under `npm ci
---omit=dev`, so `tsx` is a development dependency in fact and not only in the manifest.
+in it — and the image runs `node dist/channels/main.js` under `npm ci --omit=dev`, so
+`tsx` is a development dependency in fact and not only in the manifest.
 
 ### The image
 
@@ -212,8 +216,8 @@ Terraform cannot do, in the order they have to happen.
 | `ROMA_GITHUB_APP_ID` | **Required.** roma's GitHub App. There is no installation id to set: roma lists the App's installations and refuses to start if there is anything but one, naming all of them. |
 | `ROMA_GITHUB_PRIVATE_KEY_FILE` | **Required.** A path to the App's private key, PEM. A path rather than the key inline, following `GOOGLE_APPLICATION_CREDENTIALS`: multi-line secrets belong in mounts. **Mount it read-only, and know what it is not:** roma is the only thing that reads it, but the agent runs in the same container under the same uid, so a shell can read it too. ADR-0008 claims otherwise and is wrong about that — `docs/github-app-verification.md` records the gap. |
 | `ROMA_SHIM_DIR` | **Required**, and **defaulted in the image** to `/run/roma`. Where the Credential Shim socket and the gitconfig every Session runs under live. Holds nothing that outlives a boot, which is why it has a default at all — and it is deliberately not under `ROMA_WORK_ROOT`, whose weekly reclaim would take the socket with it. Set it when running from source; `/run` is not writable on a developer's machine. |
-| `ROMA_PUBSUB_PROJECT_ID` | **Required.** The project the subscription lives in. |
-| `ROMA_PUBSUB_SUBSCRIPTION` | **Required.** The subscription's name. Read, never created. |
+| `ROMA_PUBSUB_PROJECT_ID` | **Required to serve Google Chat**, which is roma's only Channel so far and therefore required in practice. The project the subscription lives in. Name none of the four `ROMA_PUBSUB_` variables and roma serves no Chat at all; name some of them and it refuses, rather than starting and ignoring the ones you set. |
+| `ROMA_PUBSUB_SUBSCRIPTION` | Required on the same terms as the line above. The subscription's name. Read, never created. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Google's own, not roma's: a service account key file, or nothing at all on a Google host with a metadata server. This is the identity **roma** runs as — not the agent's. |
 | `ROMA_CLOUD_KEY_FILE` | A path to a service account key file, and the whole of what gives the agent a **Cloud Reach**. Unset — the usual case — roma starts normally, announces nothing about the cloud, and `roma-cloud-token` says this deployment has none. Set, roma reads the key at boot **by exactly that path**, mints one token with it and throws it away, and refuses to start if any of that fails; it never falls back to another identity, because the fallback on a Google host is roma's own. The roles on that identity are the entire boundary — every Conversation reaches all of it, and so does everyone who can message roma. It must not be the identity above. `infra/README.md` has the steps and says which project to put it in. **Mount it read-only, and know what it is not:** roma is the only thing that reads it, but the agent shares the container and the uid, so a shell can read it too — the same gap `ROMA_GITHUB_PRIVATE_KEY_FILE` has. |
 | `ROMA_DOCUMENT_KEY_FILE` | A path to a service account key file, and half of what gives the agent a **Document Reach** — the identity it creates the team's Docs and Sheets as. Unset, roma starts normally, announces nothing about documents, and `roma-document-token` says this deployment has none. Set, roma reads the key at boot **by exactly that path**, proves it, and refuses to start if that fails; it never falls back to another identity, for `ROMA_CLOUD_KEY_FILE`'s reason. Required **whenever** the line below is set, and vice versa. What has been shared with that identity is the entire boundary — every Conversation reaches all of it, and so does everyone who can message roma. **Mount it read-only, and know what it is not:** the agent shares the container and the uid, so a shell can read it too — the same gap the two keys above have. |
@@ -247,6 +251,10 @@ not Pub/Sub, not any other. A Channel Adapter goes in `src/channels/<channel>/`,
 the only place in `src/` that knowledge is allowed to exist — plus that Channel's own test
 doubles under `test/support/`. `src/channels/google-chat/` is the first and so far the
 only one.
+
+The one file that names *every* Channel is the composition root, `src/channels/main.ts`,
+which is what `npm start` and the image run. It sits under `src/channels/` and inside no
+Channel's directory, because a root naming two of them cannot live in either (ADR-0028).
 
 Nearly all of roma's user-facing wording lives there too, because how a fact reads to a
 person is the Channel's business. The exception is the sentence a failed Task carries: the
