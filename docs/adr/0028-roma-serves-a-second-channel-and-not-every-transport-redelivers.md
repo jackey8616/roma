@@ -7,6 +7,10 @@ Date: 2026-08-12
 Proposed. **Nothing here is implemented.** This ADR and ADR-0029 are the
 decisions; the code that keeps them is separate work.
 
+**Amended 2026-08-12 by that work** (#178–#181), in one place. The decisions are
+unchanged; what the amendment corrects is a name this file predicted and the
+build did not keep. Marked inline.
+
 With ADR-0029, this is the first exercise of the contract `src/channel-adapter.ts`
 calls provisional:
 
@@ -76,6 +80,17 @@ refuses any file in `src/` outside `channels/` that names a Channel, and
 therefore cannot live in `src/` proper, and should not live inside either
 Channel's directory. `startGoogleChatRoma` stays where it is and stops being the
 program.
+
+**Amended — it stayed where it is and stopped being called that.** It is
+`googleChatBinding` (`src/channels/google-chat/binding.ts`), with `discordBinding`
+beside it in Discord's own directory. What it does now is pair a Channel with the
+Transport its events arrive over and hand the pair back for the root to serve; it
+starts no roma, holds no pool and proves no credential, and a name that went on
+saying "start" would have to be read twice by everybody who met it. The decision
+is untouched — the composition root is `src/channels/main.ts`, and each Channel's
+half of the assembly is still in its own directory. What this file got wrong is
+that "stops being the program" is a change of job, and a job is what a function
+is named for.
 
 **Each Channel's configuration becomes optional, at least one required.** A
 deployment serving only Discord should not have to name a Pub/Sub subscription.

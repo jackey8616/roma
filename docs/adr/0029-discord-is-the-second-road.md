@@ -6,6 +6,13 @@ Date: 2026-08-12
 
 Proposed. **Nothing here is implemented and nothing here has been run.**
 
+**Amended 2026-08-12 by the work that keeps it** (#178–#181), with two decisions
+the build had to make and this file had not: what roma's own messages are allowed
+to mention, and what a deployment is asked to configure. Both are marked inline
+and nothing above them changed. They are here rather than in a comment because
+each is a product decision somebody could reverse, and a decision argued only
+beside the line that implements it is one nobody meets before they change it.
+
 ADR-0003 defines the channel-agnostic Core and the Adapter contract every Channel
 binds to. ADR-0004 is Google Chat's binding. This is Discord's. ADR-0028 carries
 the two Core changes that adding it forces; everything below is a fact about
@@ -227,6 +234,23 @@ are not.
 thread, a thread is a channel, and rate-limit buckets are per channel — so
 concurrent Tasks do not contend. The only burst is one split Result.
 
+**Amended — roma's own messages mention nobody.** A Result is written by a model
+that has read whatever anybody put in front of it, so an answer containing
+`@everyone` is one prompt away; on Discord that is not a rendering detail but a
+notification to a whole guild, and unlike a wrong answer it cannot be taken back.
+So every message roma posts carries `allowed_mentions` with an empty `parse`,
+which leaves the characters in the text and takes the ping out of them: what is
+said is unchanged, and who is summoned by saying it is nobody.
+
+This is a decision rather than a precaution, and it had to be made either way —
+posting without the field is the same decision taken by default and in the other
+direction. It costs the one case where a Caller asks roma to mention somebody and
+gets the plain text back instead, which is the trade being made deliberately. The
+reply is exempt because it is not the text's doing: naming `allowed_mentions` at
+all turns the reply ping off, so `replied_user` is what keeps Discord's own
+default rather than a second decision — and the reply is how a Caller is
+addressed here at all.
+
 ### Pressing is typing here too, and the press is answered in three seconds
 
 ADR-0023 holds unchanged: *"A press is a message the Caller did not have to type."*
@@ -310,6 +334,20 @@ it is the one unverified reading a decision here actually rests on.
   does not read anyway. What does bite is that the CDN links expire while a Task
   parked for the Shared Window can wait hours — `redeem()` is allowed to reject
   and this is one of the reasons it is (#173).
+- **Amended — a deployment names one secret, and may name two addresses.** The
+  bot token is the whole of what roma has to be told: the token names the
+  application, `READY` names roma's own user, `GUILD_CREATE` names every guild it
+  is in, and membership is the authorisation. The Gateway URL and the API base
+  are Discord's own addresses, so they are constants a deployment inherits rather
+  than variables it states — a deployment made to state them is one that can
+  state them wrong, and they must agree about the API version. They are readable
+  from the environment all the same, on two grounds: a proxy, or a fake in
+  something larger than a unit test, is a real thing to want and neither is
+  roma's to have an opinion about; and a Channel whose configuration is one
+  variable has no such state as "configured by halves", so the refusal ADR-0028
+  requires would have nothing to catch. Somebody who points the API base at a
+  proxy and forgets the token is refused, where with one variable they would get
+  a roma that starts, serves no Discord, and ignores what they did set.
 - **A retry that does not read a 429 can get roma banned from the whole API.**
   429s count toward the *"10,000 per 10 minutes"* invalid-request limit, whose
   penalty is not scoped to the channel that caused it. ADR-0028 moved the retry
