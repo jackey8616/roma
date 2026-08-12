@@ -3,6 +3,7 @@ import {
   certain,
   envValue,
   required,
+  unconfigured,
   type Environment,
 } from '../../env-config.js'
 
@@ -18,11 +19,9 @@ const API_VERSION = 10
 /**
  * Where a first connection goes, and where the REST calls go.
  *
- * Constants rather than required variables: they are Discord's addresses, the
- * same for every deployment, and a deployment made to state them would be one
- * that can state them wrong. Overridable all the same — a proxy, or a fake in
- * something bigger than a unit test, is a real thing to want, and neither is
- * roma's to have an opinion about.
+ * Constants a deployment inherits rather than variables it states, and
+ * overridable all the same — both halves of that are ADR-0029's, in its
+ * consequence about what a deployment is asked for.
  *
  * A resumed connection goes neither place: `READY` names its own URL, and the
  * Transport uses that.
@@ -47,15 +46,7 @@ export interface DiscordEnv {
   readonly apiBase: string
 }
 
-/**
- * Every variable this Channel reads, required and optional alike.
- *
- * **Do not narrow this to the one that is required.** It is what tells "this
- * deployment does not serve Discord" apart from "this deployment configured half
- * a Discord", and narrowed, somebody who pointed the API base at a proxy and
- * forgot the token gets a roma that starts, serves no Discord, and ignores the
- * variable they did set.
- */
+/** Every variable this Channel reads, required and optional alike. See `unconfigured`. */
 const DISCORD_VARIABLES = [
   'ROMA_DISCORD_BOT_TOKEN',
   'ROMA_DISCORD_GATEWAY_URL',
@@ -71,7 +62,7 @@ const DISCORD_VARIABLES = [
  * not have and one it configured half of is argued.
  */
 export function readDiscordEnv(env: Environment): DiscordEnv | null {
-  if (DISCORD_VARIABLES.every((name) => envValue(env, name) === null)) return null
+  if (unconfigured(env, DISCORD_VARIABLES)) return null
 
   const problems: string[] = []
   const botToken = required(env, 'ROMA_DISCORD_BOT_TOKEN', problems)

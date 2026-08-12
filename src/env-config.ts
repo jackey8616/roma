@@ -77,6 +77,20 @@ export type Environment = Readonly<Record<string, string | undefined>>
 export type ReadChannelEnv<ChannelEnv> = (env: Environment) => ChannelEnv | null
 
 /**
+ * Whether this deployment named nothing at all of one Channel's configuration —
+ * the first of `ReadChannelEnv`'s two answers, asked in one place.
+ *
+ * **Never hand it only the variables that are required.** Every variable that
+ * Channel reads goes in, optional ones included: narrowed to the required ones,
+ * somebody who set a lease minute or pointed an address at a proxy and forgot
+ * the credential gets a roma that starts, serves that Channel to nobody, and
+ * ignores the variable they did set. Whole, the same deployment is refused.
+ */
+export function unconfigured(env: Environment, names: readonly string[]): boolean {
+  return names.every((name) => envValue(env, name) === null)
+}
+
+/**
  * Read the Core's settings, every Channel's, the Minter's, the Cloud Reach's and
  * the Document Reach's, and refuse once with what is wrong with any of them.
  *

@@ -1,5 +1,6 @@
 import type { OutboundInstruction, TaskProgress } from '../../channel-adapter.js'
 import type { Command } from '../../commands.js'
+import { progressPhrase } from '../../progress-phrase.js'
 
 /**
  * Discord's limit on the text of one message.
@@ -159,64 +160,23 @@ function money(usd: number): string {
 }
 
 /**
- * The acknowledgement's text for one phase.
+ * The acknowledgement's text for one phase, fitted to Discord.
  *
- * Deliberately short. This message is edited every few seconds while a Task
- * runs, so it is read at a glance and never read twice — everything worth
- * keeping is in the result.
+ * The words are `progressPhrase`'s, which is where they are argued. What is
+ * Discord's is the limit, and nothing is addressed in words here — the reply
+ * does that, and it is the Adapter's (ADR-0029).
  */
 export function progressText(progress: TaskProgress): string {
-  return fitted(phrase(progress), MAX_TEXT)
+  return fitted(progressPhrase(progress), MAX_TEXT)
 }
 
-/**
- * Some text inside a budget, with the end taken off where it does not fit.
- *
- * Chat's `fitted`, at Discord's numbers and for its two arguments: a guard on
- * the finished string is the one the next phase cannot forget to ask for, and
- * #75 is what the last unguarded one cost.
- */
+/** Some text inside a budget, with the end taken off where it does not fit. Chat's `fitted`. */
 function fitted(text: string, budget: number): string {
   if (text.length <= budget) return text
   if (budget < 1) return ''
   // Clamped because a negative length reads from the *end* in JavaScript, which
   // is the one input that would turn this from a trim into its own opposite.
   return `${text.slice(0, Math.max(0, budget - 1))}…`
-}
-
-/** How much of a tool's command the acknowledgement quotes. See Chat's. */
-const MAX_TOOL_CHARS = 120
-
-/** The acknowledgement's words, with only the tool's own length to bound. */
-function phrase(progress: TaskProgress): string {
-  switch (progress.phase) {
-    case 'queued':
-      // The count includes this Task, so 1 means nothing is ahead of it. Said as
-      // a number of waiting Tasks rather than as a position, because a Task
-      // whose Session is busy is stepped over: this is the size of the backlog,
-      // not a place in a running order.
-      return progress.position === 1 ? 'Queued.' : `Queued — ${progress.position} waiting.`
-    case 'working':
-      return 'Working…'
-    case 'compacting':
-      // Claude Code's own word for it, and the one the person typed if they
-      // asked for this. Nothing about how far along: the figures arrive with the
-      // boundary, which is the moment it is over.
-      return 'Compacting…'
-    case 'thinking':
-      return `Thinking… (~${progress.estimatedTokens} tokens)`
-    case 'tool':
-      // Cut mid-character, against the example `split` sets below: `Running rm
-      // -rf…` reads as a whole command where `Running rm -rf /home/user/proj…`
-      // is visibly severed. A clean edge is the point when trimming prose and
-      // the lie when quoting a command.
-      return `Running ${progress.tool.slice(0, MAX_TOOL_CHARS)}…`
-    case 'writing':
-      // Never the prose: shown here it says what the Result is about to say,
-      // seconds later and one message down (ADR-0010). The number is what is
-      // left, and it is what keeps a writing Turn from reading as a dead one.
-      return `Writing… (${progress.characters} chars)`
-  }
 }
 
 /** What a Command did, in the two words a person can act on. */

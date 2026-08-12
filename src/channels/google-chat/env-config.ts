@@ -1,8 +1,8 @@
 import {
   ConfigurationMissing,
   certain,
-  envValue,
   required,
+  unconfigured,
   wholeNumber,
   type Environment,
 } from '../../env-config.js'
@@ -62,14 +62,7 @@ export interface ChatEnv {
   readonly maxLeaseMinutes: number
 }
 
-/**
- * Every variable this Channel reads, required and optional alike.
- *
- * **Do not narrow this to the two that are required.** It is what tells "this
- * deployment does not serve Chat" apart from "this deployment configured half a
- * Chat", and narrowed, somebody who set a lease minute and nothing else gets a
- * roma that starts, serves no Chat, and ignores the variable they did set.
- */
+/** Every variable this Channel reads, required and optional alike. See `unconfigured`. */
 const CHAT_VARIABLES = [
   'ROMA_PUBSUB_PROJECT_ID',
   'ROMA_PUBSUB_SUBSCRIPTION',
@@ -86,7 +79,7 @@ const CHAT_VARIABLES = [
  * not have and one it configured half of is argued.
  */
 export function readChatEnv(env: Environment): ChatEnv | null {
-  if (CHAT_VARIABLES.every((name) => envValue(env, name) === null)) return null
+  if (unconfigured(env, CHAT_VARIABLES)) return null
 
   const problems: string[] = []
 
