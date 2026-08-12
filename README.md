@@ -51,10 +51,14 @@ architecture rests on goes unchecked.
 `npm start` is roma over every Channel the environment names: it reads the configuration
 whole, proves the credential with the startup self-check, and only then subscribes. Each
 Channel is optional and **at least one is required** — a roma with none would start,
-subscribe to nothing and answer nobody, so it refuses instead. Google Chat is the only one
-so far, and one process serves however many there are: one Core each, over one pool, one
-queue, one Audit Log and one Work Root (ADR-0028). In development that runs the TypeScript
-directly through `tsx`, from a normal `npm install`.
+subscribe to nothing and answer nobody, so it refuses instead. There are two, Google Chat
+and Discord, and one process serves however many there are: one Core each, over one pool,
+one queue, one Audit Log and one Work Root (ADR-0028). In development that runs the
+TypeScript directly through `tsx`, from a normal `npm install`.
+
+Discord is **inbound only** today: roma holds the Gateway socket open, reads what is
+addressed to it and opens Sessions, and cannot yet post anything back — every outbound
+instruction is refused, and #180 is where posting lands (ADR-0029).
 
 What ships is compiled. `npm run build` emits `src` alone to `dist/` — the tests are not
 in it — and the image runs `node dist/channels/main.js` under `npm ci --omit=dev`, so
@@ -216,8 +220,11 @@ Terraform cannot do, in the order they have to happen.
 | `ROMA_GITHUB_APP_ID` | **Required.** roma's GitHub App. There is no installation id to set: roma lists the App's installations and refuses to start if there is anything but one, naming all of them. |
 | `ROMA_GITHUB_PRIVATE_KEY_FILE` | **Required.** A path to the App's private key, PEM. A path rather than the key inline, following `GOOGLE_APPLICATION_CREDENTIALS`: multi-line secrets belong in mounts. **Mount it read-only, and know what it is not:** roma is the only thing that reads it, but the agent runs in the same container under the same uid, so a shell can read it too. ADR-0008 claims otherwise and is wrong about that — `docs/github-app-verification.md` records the gap. |
 | `ROMA_SHIM_DIR` | **Required**, and **defaulted in the image** to `/run/roma`. Where the Credential Shim socket and the gitconfig every Session runs under live. Holds nothing that outlives a boot, which is why it has a default at all — and it is deliberately not under `ROMA_WORK_ROOT`, whose weekly reclaim would take the socket with it. Set it when running from source; `/run` is not writable on a developer's machine. |
-| `ROMA_PUBSUB_PROJECT_ID` | **Required to serve Google Chat**, which is roma's only Channel so far and therefore required in practice. The project the subscription lives in. Name none of the four `ROMA_PUBSUB_` variables and roma serves no Chat at all; name some of them and it refuses, rather than starting and ignoring the ones you set. |
+| `ROMA_PUBSUB_PROJECT_ID` | **Required to serve Google Chat.** The project the subscription lives in. Name none of the four `ROMA_PUBSUB_` variables and roma serves no Chat at all; name some of them and it refuses, rather than starting and ignoring the ones you set. At least one Channel is required, so a deployment serving no Discord needs these. |
 | `ROMA_PUBSUB_SUBSCRIPTION` | Required on the same terms as the line above. The subscription's name. Read, never created. |
+| `ROMA_DISCORD_BOT_TOKEN` | **Required to serve Discord**, on the same terms: name none of the three `ROMA_DISCORD_` variables and roma serves no Discord at all; name some and it refuses. The bot token roma identifies with, and the whole of what it needs — the guilds the application has been added to are the entire boundary, and that membership is administered by whoever holds Manage Server rather than by an offboarding process (ADR-0029). roma asks for the `GUILDS` and message intents and **not** `MESSAGE_CONTENT`, so in a guild it reads only what @-mentions it. |
+| `ROMA_DISCORD_GATEWAY_URL` | Where a first connection goes. Discord's own address by default; a resumed connection goes wherever `READY` said instead. |
+| `ROMA_DISCORD_API_BASE` | Where the REST calls go — the words behind a Quotation, and the bytes behind an attachment. Discord's own address by default, on the same API version as the Gateway URL above. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Google's own, not roma's: a service account key file, or nothing at all on a Google host with a metadata server. This is the identity **roma** runs as — not the agent's. |
 | `ROMA_CLOUD_KEY_FILE` | A path to a service account key file, and the whole of what gives the agent a **Cloud Reach**. Unset — the usual case — roma starts normally, announces nothing about the cloud, and `roma-cloud-token` says this deployment has none. Set, roma reads the key at boot **by exactly that path**, mints one token with it and throws it away, and refuses to start if any of that fails; it never falls back to another identity, because the fallback on a Google host is roma's own. The roles on that identity are the entire boundary — every Conversation reaches all of it, and so does everyone who can message roma. It must not be the identity above. `infra/README.md` has the steps and says which project to put it in. **Mount it read-only, and know what it is not:** roma is the only thing that reads it, but the agent shares the container and the uid, so a shell can read it too — the same gap `ROMA_GITHUB_PRIVATE_KEY_FILE` has. |
 | `ROMA_DOCUMENT_KEY_FILE` | A path to a service account key file, and half of what gives the agent a **Document Reach** — the identity it creates the team's Docs and Sheets as. Unset, roma starts normally, announces nothing about documents, and `roma-document-token` says this deployment has none. Set, roma reads the key at boot **by exactly that path**, proves it, and refuses to start if that fails; it never falls back to another identity, for `ROMA_CLOUD_KEY_FILE`'s reason. Required **whenever** the line below is set, and vice versa. What has been shared with that identity is the entire boundary — every Conversation reaches all of it, and so does everyone who can message roma. **Mount it read-only, and know what it is not:** the agent shares the container and the uid, so a shell can read it too — the same gap the two keys above have. |
@@ -249,8 +256,15 @@ with unrestricted network access, is what you get until that protection exists.
 Everything in `src/` is the Core, and none of it may name a Channel — not Google Chat,
 not Pub/Sub, not any other. A Channel Adapter goes in `src/channels/<channel>/`, which is
 the only place in `src/` that knowledge is allowed to exist — plus that Channel's own test
-doubles under `test/support/`. `src/channels/google-chat/` is the first and so far the
-only one.
+doubles under `test/support/`. `src/channels/google-chat/` is the first and
+`src/channels/discord/` is the second.
+
+The two agree about almost nothing, which is what makes the second one worth having: Chat
+publishes to a queue and Discord holds a socket open, Chat hands over a message with roma's
+mention already stripped and Discord does not, Chat's Adapter is the whole of its Channel
+and Discord's Transport decides things (ADR-0029). What did **not** move is
+`ChannelAdapter` — ADR-0028's headline result, and the reason a second Channel is an
+Adapter rather than a rewrite.
 
 The one file that names *every* Channel is the composition root, `src/channels/main.ts`,
 which is what `npm start` and the image run. It sits under `src/channels/` and inside no
@@ -286,6 +300,11 @@ which lives in this repo's GitHub issues (`gh issue view 1`).
   than captured, which the test file says out loud — nothing here can capture one. The
   same goes for `HttpChatApi`, whose tests assert on the request Google would have
   received, and for `PubSubTransport`, whose subscription is a double.
+  `src/channels/discord/discord-channel.test.ts` is the same seam a second time and
+  **wider**: a raw Gateway frame in and an ingress message out, covering the Transport as
+  well as the Adapter with only the socket and the REST call doubled. Wider because that
+  Transport decides things — which channels a guild has, and what a Quotation says — and
+  nothing that decides something may sit behind an untested port.
 
 `test/support/live-claude.test.ts` belongs to none of them. It is the default run
 asserting something about seam 2's *scaffolding* — that the directories handed to a live

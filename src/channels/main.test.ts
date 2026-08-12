@@ -26,7 +26,9 @@ describe('which Channels this deployment serves', () => {
   // and answer nobody — so the refusal names what it could have configured
   // rather than leaving somebody to find out from the silence.
   it('refuses a deployment that named no Channel at all, listing the ones it could', async () => {
-    await expect(startConfiguredRoma(MINIMAL, () => {})).rejects.toThrow(/at least one of: chat/)
+    await expect(startConfiguredRoma(MINIMAL, () => {})).rejects.toThrow(
+      /at least one of: chat, discord/,
+    )
   })
 
   // Half a Channel is refused at boot rather than served to nobody: somebody who
@@ -38,5 +40,14 @@ describe('which Channels this deployment serves', () => {
 
     await expect(startConfiguredRoma(half, () => {})).rejects.toThrow(ConfigurationMissing)
     await expect(startConfiguredRoma(half, () => {})).rejects.toThrow(/ROMA_PUBSUB_SUBSCRIPTION/)
+  })
+
+  // The same rule on the second Channel, which is the first evidence that it is
+  // a rule rather than something Chat's reader happens to do: a deployment that
+  // pointed Discord at a proxy and forgot the token is refused here too.
+  it('refuses a second Channel configured by halves on the same terms', async () => {
+    const half = { ...MINIMAL, ROMA_DISCORD_API_BASE: 'https://discord.internal/api/v10' }
+
+    await expect(startConfiguredRoma(half, () => {})).rejects.toThrow(/ROMA_DISCORD_BOT_TOKEN/)
   })
 })

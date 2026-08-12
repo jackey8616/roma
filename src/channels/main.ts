@@ -14,6 +14,8 @@ import type { PoolLogRecord } from '../session-pool.js'
 import type { ShimLogRecord } from '../shim-server.js'
 import type { ReachLogRecord } from '../startup.js'
 import type { SelfCheckLogRecord, StartupSelfCheckReport } from '../startup-self-check.js'
+import { discordBinding, type DiscordLogRecord } from './discord/binding.js'
+import { readDiscordEnv } from './discord/env-config.js'
 import { googleChatBinding, type ChatLogRecord } from './google-chat/binding.js'
 import { readChatEnv } from './google-chat/env-config.js'
 
@@ -31,9 +33,9 @@ import { readChatEnv } from './google-chat/env-config.js'
  * **Which Channels roma serves is the environment's answer, not this file's.**
  * Every Channel is optional and at least one is required, so a deployment that
  * names only Chat runs only Chat and pays nothing for the rest. Discord is the
- * second road (ADR-0029) and slots in as one more entry beside `chat` below:
- * one reader in the record handed to `readConfiguration`, and one binding built
- * where its configuration is there to build it from.
+ * second road (ADR-0029), and it cost this file exactly what the shape predicted
+ * it would: one reader in the record handed to `readConfiguration`, and one
+ * binding built where its configuration is there to build it from.
  *
  * Nothing is decided here. Every number is `env-config.ts`'s, every rule about
  * what happens to a message is `serve.ts`'s, and every Channel fact is that
@@ -66,6 +68,7 @@ type RomaLog = OperatorLog<
   | IngressLogRecord
   | ShimLogRecord
   | ChatLogRecord
+  | DiscordLogRecord
   | ReachLogRecord
   | SelfCheckLogRecord
   | ProcessLogRecord
@@ -87,7 +90,7 @@ export async function startConfiguredRoma(
 ): Promise<Serving> {
   const { roma, channels, minterEnv, cloudEnv, documentEnv } = readConfiguration(
     env,
-    { chat: readChatEnv },
+    { chat: readChatEnv, discord: readDiscordEnv },
     readMinterEnv,
     readCloudEnv,
     readDocumentEnv,
@@ -99,6 +102,10 @@ export async function startConfiguredRoma(
   // credential to resolve, so an unconfigured one costs a boot nothing at all.
   const bound: ChannelBinding[] = []
   if (channels.chat !== null) bound.push(await googleChatBinding(channels.chat, log))
+  // Nothing is awaited here and nothing has connected yet: Discord's credential
+  // is a token roma already holds, and the socket is opened when `serve`
+  // subscribes rather than when the binding is built (ADR-0029).
+  if (channels.discord !== null) bound.push(discordBinding(channels.discord, log))
 
   // The one place a forge is named, the one place the agent's cloud is, and the
   // one place the team's documents are, for the reason the Channels are named
