@@ -300,22 +300,39 @@ export interface SessionEfforts {
 /**
  * What a process is started for, and therefore what its Turns run on.
  *
- * The three things that are fixed at spawn and cannot be changed under a running
- * process: which bill its Turns land on, which model answers them, and how hard
- * that model is asked to think. Named as one thing because they are already one
- * thing everywhere they are talked about — `#acquire` takes a Session "for a Turn
- * on these terms", and `#swap` ends a process because "the next Turn's terms are
- * not the ones it was started for".
+ * The four things that are fixed at spawn and cannot be changed under a running
+ * process: which bill its Turns land on, which model answers them, how hard that
+ * model is asked to think, and what it is told about itself on top of Claude
+ * Code's own prompt. Named as one thing because they are already one thing
+ * everywhere they are talked about — `#acquire` takes a Session "for a Turn on
+ * these terms", and `#swap` ends a process because "the next Turn's terms are not
+ * the ones it was started for".
  *
  * They travel together through acquisition, spawning and the swap between them,
- * and they were three loose parameters until effort made them four. A tuple that
- * grows one at a time is one where a caller eventually passes the model where the
- * effort goes and nothing says so; this cannot be got wrong silently.
+ * and each one that arrives becomes a member here rather than another loose
+ * parameter beside them. A list that grows one at a time is one where a caller
+ * eventually passes the model where the effort goes and nothing says so; this
+ * cannot be got wrong silently.
+ *
+ * The append is the newest, and the only one that does not yet differ between two
+ * Sessions of one deployment — which is what makes its membership worth arguing
+ * rather than assuming. It is here because it is fixed at spawn in exactly the
+ * sense the other three are, an argument on the process's own command line, and
+ * because being here is what makes `#turn`'s retry respawn re-start on the append
+ * its Turn began under instead of on whatever the pool holds by then. ADR-0030 is
+ * what turns that last difference from theoretical into real.
  */
 export interface SpawnTerms {
   readonly credential: CredentialKind
   readonly model: string
   readonly effort: string
+  /**
+   * Absent where there is nothing to append, and never empty for it: the flag is
+   * gated on this being `undefined` and never on it being `''` (`ClaudeSession`'s
+   * argv). What that costs whoever assembles the text — an empty part dropped
+   * before the join rather than trimmed after it — is argued in `startup.ts`.
+   */
+  readonly appendSystemPrompt: string | undefined
 }
 
 export interface SessionPoolOptions {
@@ -364,9 +381,13 @@ export interface SessionPoolOptions {
   /**
    * What every Session is told about itself on top of Claude Code's own prompt.
    *
-   * The pool's rather than the Core's because the pool is what spawns, and it is
-   * the same text for every Session: what it says is what roma can reach, which
-   * is a property of the deployment and not of any Conversation.
+   * The pool's rather than the Core's because the pool is what spawns. Still one
+   * text for the whole deployment — what it says is what roma can reach, which is
+   * a property of the deployment and not of any Conversation — but no longer held
+   * here *because* it is one text. `#appendSystemPromptFor` reads it at every
+   * spawn the way `#modelFor` and `#effortFor` read theirs, so the per-Session
+   * part ADR-0030 adds joins it at one resolution point instead of finding its
+   * own way into `#spawnNow`.
    */
   readonly appendSystemPrompt?: string
   readonly maxResident?: number
@@ -433,6 +454,16 @@ interface Resident {
    * be asked afterwards what it was started at.
    */
   readonly effort: string
+  /**
+   * What this process was told about itself on top of Claude Code's own prompt.
+   *
+   * Not kept for the model's reason: nothing spawns a different process over
+   * this one, and `sameTerms` is where that is argued. It is kept because
+   * `#turn`'s retry respawn hands a Resident straight back as its own
+   * `SpawnTerms`, so one that had not written this down would re-start a Turn on
+   * whatever the pool holds by then rather than on what the Turn began under.
+   */
+  readonly appendSystemPrompt: string | undefined
   readonly session: ClaudeSession
   /** Whether this process was started with `--resume`. */
   readonly resumed: boolean
@@ -651,8 +682,8 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
         // On the terms the Turn began under rather than whatever the Session is
         // on now: this is one Turn being served twice, and a `/model` or
         // `/effort` that landed in between is aimed at the next message. A
-        // `Resident` already carries all three, which is what makes that
-        // "the same terms" rather than three fields copied by hand.
+        // `Resident` already carries all four, which is what makes that
+        // "the same terms" rather than four fields copied by hand.
         await this.#spawn(resident.sessionId, resident, correction.resume),
         text,
         true,
@@ -683,6 +714,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       credential,
       model: this.#modelFor(sessionId),
       effort: this.#effortFor(sessionId),
+      appendSystemPrompt: this.#appendSystemPromptFor(sessionId),
     }
     const resident = this.#residents.get(sessionId)
     if (resident !== undefined && resident.session.alive) {
@@ -720,6 +752,20 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     return this.#efforts?.inForce(sessionId) ?? this.#effort ?? PINNED_EFFORT
   }
 
+  /**
+   * What this Session's next process is told about itself, read for `#modelFor`'s
+   * reason.
+   *
+   * **Do not fold this back into `#spawnNow` because the `sessionId` goes
+   * unread.** One text for the whole deployment is the whole answer today, so
+   * this looks like a field read wearing a function. Inlining it takes the append
+   * back out of `SpawnTerms`, and `#turn`'s retry respawn then re-starts on
+   * whatever the pool holds by then rather than on what its Turn began under.
+   */
+  #appendSystemPromptFor(sessionId: string): string | undefined {
+    return this.#appendSystemPrompt
+  }
+
   async #spawn(sessionId: string, terms: SpawnTerms, resume?: boolean): Promise<Resident> {
     const spawned = this.#spawning.then(() => this.#spawnNow(sessionId, terms, resume))
     // The queue itself never carries a rejection onward: a Session that failed
@@ -730,7 +776,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
 
   async #spawnNow(
     sessionId: string,
-    { credential, model, effort }: SpawnTerms,
+    { credential, model, effort, appendSystemPrompt }: SpawnTerms,
     resume?: boolean,
   ): Promise<Resident> {
     const buildEnvFor = this.#envs[credential]
@@ -765,9 +811,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       spawn: this.#spawnProcess,
       model,
       effort,
-      ...(this.#appendSystemPrompt === undefined
-        ? {}
-        : { appendSystemPrompt: this.#appendSystemPrompt }),
+      ...(appendSystemPrompt === undefined ? {} : { appendSystemPrompt }),
     })
     const resident: Resident = {
       sessionId,
@@ -775,6 +819,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       credential,
       model,
       effort,
+      appendSystemPrompt,
       session,
       resumed: resuming,
       stderr: '',
@@ -1065,9 +1110,19 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
 /**
  * Whether a running process was started for the terms the next Turn needs.
  *
- * A function rather than three inline comparisons, so a fourth term added to
- * `SpawnTerms` cannot be checked at the spawn and forgotten here — the failure
- * with no symptom, a Session served by a process started for something else.
+ * A function rather than inline comparisons, so a term added to `SpawnTerms`
+ * cannot be checked at the spawn and forgotten here — the failure with no
+ * symptom, a Session served by a process started for something else.
+ *
+ * **The append is deliberately not compared — the first member of `SpawnTerms`
+ * that is not.** It is one text for the whole deployment, so two spawns of one
+ * roma cannot disagree about it and the comparison would never once be false;
+ * that is the weaker half of the reason. The stronger half is that adding it
+ * early would be worse than leaving it out: `#swap` knows three reasons and falls
+ * through to `credential`, so an append that did differ would end a process and
+ * tell an operator the bill had moved when it had not. ADR-0030 is what makes it
+ * able to differ, and it adds the fourth reason in the same breath; the
+ * comparison belongs with that and not ahead of it.
  */
 function sameTerms(resident: Resident, { credential, model, effort }: SpawnTerms): boolean {
   return (

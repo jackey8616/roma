@@ -436,6 +436,13 @@ export async function startRoma({
     // unavailable Reach says nothing, and `--append-system-prompt` is gated on
     // the value being `undefined` and never on it being empty — so a trailing
     // blank line would reach the argv rather than being tidied away.
+    //
+    // Joined here and resolved in the pool, which is a split rather than an
+    // oversight. What the Reaches announce is settled by the boot proof above and
+    // cannot move until roma restarts, so assembling it once is honest; *when* a
+    // spawn reads it is the pool's to say, because ADR-0030 adds a second part to
+    // this text that is per Session, and the pool is the only thing that knows
+    // which Session it is about to start.
     appendSystemPrompt: eachReach(reaches)
       .map((reach) => reach.announce())
       .filter((announcement) => announcement !== '')
