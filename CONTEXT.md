@@ -178,15 +178,19 @@ and describing it as showing the command, which is a beginning long enough to
 tell two tool calls apart and no more
 
 **Opening**:
-The first thing roma says in a Session: which Runtime it runs on, on which model
-and at what effort. One per Session, so a Conversation gets one and gets another
-after every `/clear` — which is where it is worth most, because `/clear` returns
-a Session to the Pinned Model and the Pinned Effort without anything being
-deleted and the answer it gives names neither (ADR-0024). Deliberately **not**
-roma speaking first: roma has nobody it can speak to first, so an Opening is a
-reply, sent before the Acknowledgement of the message that prompted it.
-`/config`'s sentence rather than a second one — four spellings over three
-roma-owned facts, not four sources of truth. A Command prompts none, and that is
+The first thing roma says in a Session: which Runtime it runs on, on which model,
+at what effort, and — only where this Session's Caveman is not `off` — how short
+roma is asking it to be. One per Session, so a Conversation gets one and gets
+another after every `/clear` — which is where it is worth most, because `/clear`
+returns a Session to the Pinned Model, the Pinned Effort and the Pinned Caveman
+without anything being deleted and the answer it gives names none of them
+(ADR-0024). Deliberately **not** roma speaking first: roma has nobody it can
+speak to first, so an Opening is a reply, sent before the Acknowledgement of the
+message that prompted it. `/config`'s sentence rather than a second one — five
+spellings over four roma-owned facts, not five sources of truth. The fourth is
+conditional where the other three are not, because an Opening exists to say what
+somebody is on when the answer is not obvious, and a deployment that never turns
+this on has nothing to say (ADR-0030). A Command prompts none, and that is
 what keeps the count at four rather than making it a repetition: a Command
 starts no Session, and the three that report anything have just answered the
 question an Opening asks. A Session still awaiting its Runtime prompts none
@@ -367,12 +371,13 @@ make room. Distinct from Eviction only in what prompted it.
 _Avoid_: timing out, garbage collection, idling out
 
 **Command**:
-One of the six messages roma answers itself instead of handing to the Runtime:
+One of the seven messages roma answers itself instead of handing to the Runtime:
 `/stop` ends the work this Conversation has in flight — running, queued, or
 still starting — `/clear` gives the Conversation a fresh Session, `/model` sets
-its Chosen Model, `/effort` sets its Chosen Effort, `/config` says what this
-Session is set to and refuses to set anything else, and `/usage` says what the
-deployment has spent this calendar month. Recognised in the Core, never in a
+its Chosen Model, `/effort` sets its Chosen Effort, `/caveman` sets its Chosen
+Caveman, `/config` says what this Session is set to and refuses to set anything
+else, and `/usage` says what the deployment has spent this calendar month.
+Recognised in the Core, never in a
 Channel Adapter, and only when the whole message is one of them — everything
 else is work, apart from the few Claude Code commands a Relay carries. `/clear`
 answers to `/reset` and `/new`, `/config` to `/settings`, and `/usage` to
@@ -383,15 +388,19 @@ the sharper case for it: relayed, it was free and answered by the real command
 rather than by a guess, and it reported the *process's* counters — which are
 zeroed at every spawn — so what leaving it unclaimed cost was not money but a
 wrong number, and a wrong number nobody is billed for announces itself to
-nobody (ADR-0027). Three of the six take an argument, and only
+nobody (ADR-0027). `/caveman` is the one claimed under a rule about Claude Code's
+spellings that is not one of Claude Code's spellings: it is a third-party skill's,
+and it is claimed because somebody who met that skill anywhere else arrives
+already typing it, which is the same billing fault by a longer route (ADR-0030).
+Four of the seven take an argument, and only
 a listed head may: nothing else does, which is what keeps the whole-message rule
-from widening into the prefix match ADR-0003 refused. That list is now three
+from widening into the prefix match ADR-0003 refused. That list is now four
 entries rather than one, so "a named list does not grow on its own" has become a
 thing somebody has to keep true rather than an observation. A Command is not a
 Task: it drives no Turn, is not queued, and is not counted against the
-concurrency cap. Five of the six answer about the Conversation that sent them and
+concurrency cap. Six of the seven answer about the Conversation that sent them and
 `/usage` does not: it answers about the deployment, so the same message returns
-the same figures wherever it is sent. Named because six Commands of which one
+the same figures wherever it is sent. Named because seven Commands of which one
 ignores the Conversation Key is the kind of asymmetry somebody tidies away
 (ADR-0027). Which of them **set** anything depends on the Runtime: on a
 Codex Session `/model` and `/effort` set nothing — with an argument they refuse
@@ -402,7 +411,11 @@ the standing offer, since what they set belongs to a Session and which Session
 this is has not been decided. `/stop`, `/clear` and `/usage` touch only what roma
 itself holds and read the same on either Runtime (ADR-0025) — the last one
 reports a line *per* Runtime, which is a different thing from depending on the
-one this Session runs on.
+one this Session runs on. `/caveman` touches only what roma holds too, and is
+listed apart from those three for a reason that is not about the wire: what it
+sets is text roma appends itself, so nothing about a second Runtime would stop it
+being *sent* — whether it buys anything there is unmeasured, and ADR-0030 leaves
+that on ADR-0026's agenda rather than answering it.
 _Avoid_: slash command (those are Claude Code's, and a Relay is the only way
 any of them reaches it), instruction (that is an Outbound Instruction)
 
@@ -445,8 +458,10 @@ already is (ADR-0025).
 _Avoid_: Readout (the retired name, and wrong for a member that writes rather than
 reads), passthrough, slash command (that is Claude Code's name for what a Relay
 carries, not for the carrying), and using this for `/stop`, `/clear`, `/model`,
-`/effort`, `/config` or `/usage` — those are roma's own and are Commands, and the
-last one was on this list until ADR-0027 took it off. The clauses have a sharpest
+`/effort`, `/caveman`, `/config` or `/usage` — those are roma's own and are
+Commands, and the last one was on this list until ADR-0027 took it off. `/caveman`
+was never on it and could not be: a Relay carries one of Claude Code's own
+commands, and this is not one — the build has never heard of it. The clauses have a sharpest
 case each, and all three are free and non-interactive on the pinned build.
 `/effort` and `/config` are the first's: `/effort` sets a value that lives in the
 process and dies with it, and `/config` writes a settings file every Session in
@@ -572,13 +587,14 @@ _Avoid_: override, preference, thinking budget (that is the provider's word for
 one mechanism behind this, not roma's word for the choice)
 
 **Chosen Record**:
-What roma keeps a Chosen Model or a Chosen Effort in, and the pinned value it
-falls back to when there is none. One idea written once and used twice: a file in
-the Work Root named for the Session, absent for almost every Session, refusing
-rather than falling back when it is there and cannot be read or names something
-roma no longer offers. The two are the same rules to the letter, which is why
-they are one thing with two adapters rather than two classes that have to be kept
-in step — they had already drifted once, in what each was tested for. What varies
+What roma keeps a Chosen Model, a Chosen Effort or a Chosen Caveman in, and the
+pinned value it falls back to when there is none. One idea written once and used
+three times: a file in the Work Root named for the Session, absent for almost
+every Session, refusing rather than falling back when it is there and cannot be
+read or names something roma no longer offers. The three are the same rules to
+the letter, which is why they are one thing with three adapters rather than three
+classes that have to be kept in step — the first two had already drifted once, in
+what each was tested for, which is the whole argument for the third. What varies
 is only which values are offered, which file the Work Root names, which refusal
 is raised, and what the deployment pinned.
 _Avoid_: setting, preference, config (a Chosen Record is what somebody chose for
@@ -608,6 +624,48 @@ and uses it to say something and to record something — never to refuse anythin
 (ADR-0016).
 _Avoid_: support table, capability matrix, and calling it measured — it is read
 from a build, and the reading can be wrong in ways only a person notices
+
+**Pinned Caveman**:
+How short roma asks the model to be, on every Session that has not been moved.
+The Pinned Effort's opposite number across the Turn — that one is how hard roma
+asks the model to think, this one is how short it asks it to be — and unlike
+either pin before it, **not** a thing that was always being set: nothing asked
+this before, so setting it changes what happens rather than only making roma able
+to say what happens. Optional, and a deployment that leaves it unset is one this
+changes nothing about (ADR-0030). One per deployment, and per Runtime the day
+there is a second Runtime. Named for the vendor whose rules roma appends, which
+is a deliberate exception to this glossary's habit and is argued where it is
+made: the values are that vendor's too, and a roma-native word over them would
+have been a translation with nothing on the far side.
+_Avoid_: verbosity and brevity (those are properties of an answer; this is what
+roma asked for), compression (that is a hair from Compaction and the two would be
+indistinguishable in a paragraph), caveman mode (the vendor's name for its whole
+feature, not roma's name for this setting)
+
+**Chosen Caveman**:
+The Caveman one Session runs at because somebody said so, in place of the Pinned
+Caveman. Roma's to keep rather than the process's, for the reason a Chosen Effort
+is — it rides in the spawn arguments, and processes end for reasons nobody using
+them can observe. Belongs to a Session and not to a Conversation, so `/clear`
+returns it to the Pinned Caveman without anything being deleted. Changing it ends
+the process it was not started for, which is the Session Pool's ordinary swap and
+costs what a swap costs.
+_Avoid_: override, preference, mode (that is the vendor's word for a value, not
+roma's word for the choice)
+
+**Caveman Menu**:
+The levels a Caller may pick a Chosen Caveman from — `off`, `lite`, `full`,
+`ultra`, `wenyan-full`, and the name that means the Pinned Caveman. Neither of
+the other two Menus' shape: unlike the Effort Menu it is not every level the
+vendor has, because two of them claim their saving in characters and roma is
+spent in tokens, so those reach roma only through the operator; and unlike the
+Model Menu the costly choice on it is `off`, which makes it a spending boundary
+pointing the other way — what a Caller can do here is decline to be cheap, not
+insist on being expensive. Pressable as well as typable on the Model Menu's terms
+(ADR-0023), and six wide, which is the Effort Menu's width and the most this
+repository has drawn.
+_Avoid_: intensity levels (that is the vendor's list; this is roma's offer),
+whitelist, allowlist
 
 ### Reaching the code
 
