@@ -104,9 +104,21 @@ and no `id`, and `search_issues` does not offer `id` even as an option in its `f
 learn the id of an issue this session did not create, the only route is an `issue_write` update
 — a write, which touches `updated_at`.
 
-**`sub_issue_write` itself is still unrun here.** Everything above is about obtaining its
-argument; nobody has yet called the tool. Per ADR-0003's citation rule, treat that sentence as
-what it is — an untested claim — and delete it once somebody has actually attached a child.
+**Run 2026-08-12: `sub_issue_write` works, and the create-then-attach path is the whole of it.**
+This paragraph used to say the tool was unrun and to delete the sentence once somebody had
+actually attached a child; #182 is that, eight times over. What was run: `issue_write` `create`
+for the map, then `issue_write` `create` for each child, then `sub_issue_write` `method: "add"`
+with `issue_number` set to the map's `#number` and `sub_issue_id` set to the **`id` the child's
+own create returned**. Each call answers with the *parent*, whose `sub_issues_summary.total`
+counts up — which is how you check the attachment landed without a second read.
+
+So the read-only gap above is real and does not bite: a session that creates both ends never
+needs to look an id up. It bites only where the child already exists and this session did not
+make it, which is the case that still costs an `issue_write` update.
+
+One thing that was **not** run: `remove` and `reprioritize`. Children arrive in the order they
+are added, which is enough to keep a map in dependency order if they are created that way, and
+nobody has yet needed to reorder one.
 
 One thing that's merely more expensive: `gh issue list --json body,labels,comments` returns
 everything in one shot, while `list_issues` returns no comments. `/triage` therefore needs one
@@ -132,8 +144,9 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 This section leans on `gh api` for sub-issues and dependencies, so it is the part that degrades
 most in a cloud container — but less than it used to. **Dependencies** have no equivalent: take
 the `Blocked by: #<n>` body-text fallback described below, which is what this repo already uses.
-**Sub-issues** are reachable, via the database id `issue_write` hands back on create; the
-`Part of #<map>` line stays worth writing regardless, since it is what a reader sees.
+**Sub-issues** are reachable, via the database id `issue_write` hands back on create, and #182 is
+a map built that way in a container; the `Part of #<map>` line stays worth writing regardless,
+since it is what a reader sees.
 
 - **Map**: a single issue labelled `wayfinder:map`, holding the Notes / Decisions-so-far / Fog body. `gh issue create --label wayfinder:map`.
 - **Child ticket**: an issue linked to the map as a GitHub sub-issue (`gh api` on the sub-issues endpoint). Where sub-issues aren't enabled, add the child to a task list in the map body and put `Part of #<map>` at the top of the child body. Labels: `wayfinder:<type>` (`research`/`prototype`/`grilling`/`task`). Once claimed, the ticket is assigned to the driving dev.
