@@ -11,6 +11,7 @@ import type { CredentialKind } from './build-env.js'
 import { attributed, relayed } from './attribution.js'
 import {
   CAVEMAN_NAMES,
+  CAVEMAN_OFF,
   PINNED_CAVEMAN_NAME,
   readCavemanRequest,
   type CavemanRequest,
@@ -1240,25 +1241,49 @@ export class Core {
   }
 
   /**
-   * Both of what this Session is set to, in one sentence.
+   * All of what this Session is set to, in one sentence.
    *
-   * Built from the same two methods `/model` and `/effort` report with, rather
-   * than from the records again. Four spellings over two roma-owned facts, not
-   * four sources of truth — and a second reading here is exactly how four
-   * spellings would come to answer differently.
+   * Built from the same methods `/model`, `/effort` and `/caveman` report with,
+   * rather than from the records again. Five spellings over three roma-owned
+   * facts, not five sources of truth — and a second reading here is exactly how
+   * five spellings would come to answer differently.
    *
    * Its own method because an Opening says it too, and says it *unprompted*
    * (ADR-0024) — which is what makes a second copy of this sentence worse than a
    * second copy of the others. Nobody compares the top of a thread against
    * `/config` a week later, so two versions would drift with nothing to notice.
+   *
+   * **Never make the third fact unconditional to match the other two.** A
+   * deployment that never turned this on has nothing to say, and the sentence
+   * would then lengthen the first message of every Conversation it serves — a
+   * feature whose whole purpose is fewer tokens, spending words on the
+   * deployments that declined it. The conditional tail is not a new shape here,
+   * because `#modelTakesNone` is already one; the conjunction moving with it is,
+   * and it moves because *either* was only ever true of two (ADR-0030).
    */
   #settingsReport(sessionId: string): string {
+    const caveman = this.#cavemanWorthSaying(sessionId)
     return (
       `This conversation is on ${this.#modelNamed(sessionId)}, ` +
-      `at ${this.#effortNamed(sessionId)}. ` +
-      `Change either with “/model” or “/effort”.` +
+      `at ${this.#effortNamed(sessionId)}` +
+      (caveman === null ? '' : `, at caveman ${caveman}`) +
+      '. ' +
+      (caveman === null
+        ? `Change either with “/model” or “/effort”.`
+        : `Change any with “/model”, “/effort” or “/caveman”.`) +
       this.#modelTakesNone(sessionId)
     )
+  }
+
+  /**
+   * **Not `chosenFor`, which is what `#cavemanNamed` below insists on.** Read
+   * that way, a Session nobody moved answers null, null is not `off`, and a
+   * deployment that pinned nothing carries `at caveman default (off)` in the
+   * first message of every Conversation it serves.
+   */
+  #cavemanWorthSaying(sessionId: string): string | null {
+    if (this.#cavemen.inForce(sessionId) === CAVEMAN_OFF) return null
+    return this.#cavemanNamed(sessionId)
   }
 
   /**

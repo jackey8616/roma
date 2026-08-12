@@ -389,6 +389,23 @@ function opening(key = KEY) {
 const OPENS_WITH = 'This conversation is on'
 
 /**
+ * That one sentence in both of the shapes it has, written out rather than
+ * composed.
+ *
+ * What ADR-0030 promises a deployment that declined the Caveman is that its
+ * Opening is *byte-identical*, and a string built the way the code builds it
+ * could not tell. Written out, these also hold the conjunction, which is the half
+ * of the difference a fragment match would step over: two things are changed with
+ * "either", and three are not.
+ */
+const SETTINGS_WITHOUT_A_CAVEMAN =
+  `This conversation is on default (${PINNED_MODEL}), at default (${PINNED_EFFORT}). ` +
+  `Change either with “/model” or “/effort”.`
+const SETTINGS_AT_A_PINNED_CAVEMAN =
+  `This conversation is on default (${PINNED_MODEL}), at default (${PINNED_EFFORT}), ` +
+  `at caveman default (full). Change any with “/model”, “/effort” or “/caveman”.`
+
+/**
  * The Openings among what the Channel was given.
  *
  * Told apart by the sentence, which a `/config` answer shares word for word — so
@@ -2306,15 +2323,17 @@ describe('a Chosen Caveman roma no longer offers', () => {
     return core
   }
 
-  // The Conversation still gets its Opening, where one whose Chosen Model has
-  // gone does not — the Opening reads the model and the effort and not this
-  // (ADR-0024, and #189 is where that stops being true). So the refusal is the
-  // last thing said rather than the only thing.
+  // No Opening either, where this Conversation used to get one — the Opening read
+  // the model and the effort and not this, and now reads all three (ADR-0030). So
+  // the reading that refuses the spawn is also the one that decides whether there
+  // is a Caveman to name, and a Session in this state is told what happened
+  // instead of being opened. The Chosen Model above has always behaved this way.
   it('tells the Conversation what happened and how to undo it', async () => {
     const { adapter, core } = withWithheldCaveman()
 
     await core.handle(ingress('hello'))
 
+    expect(openingsIn(adapter.instructions)).toEqual([])
     expect(posted(adapter.instructions).at(-1)).toEqual({
       kind: 'failure',
       conversationKey: KEY,
@@ -2334,6 +2353,23 @@ describe('a Chosen Caveman roma no longer offers', () => {
     await core.handle(ingress('/caveman'))
 
     expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      reason: expect.stringContaining('/caveman default'),
+    })
+  })
+
+  // And to the Command that used to answer this Session without reading its
+  // Caveman at all. `/config` is a fifth spelling of one sentence rather than a
+  // second copy of it (ADR-0030), so it reaches the same record the spawn does
+  // and fails where the spawn fails — which is what the Chosen Model has always
+  // done to `/config`, arrived at without either of them being told about it.
+  it('says the same to /config, which now reads the Caveman as well', async () => {
+    const { adapter, core } = withWithheldCaveman()
+
+    await core.handle(ingress('/config'))
+
+    expect(posted(adapter.instructions).at(-1)).toEqual({
+      kind: 'failure',
+      conversationKey: KEY,
       reason: expect.stringContaining('/caveman default'),
     })
   })
@@ -2788,6 +2824,79 @@ describe('the first thing roma says in a Session', () => {
       text: expect.stringContaining(PINNED_MODEL),
     })
     expect(said.at(0)).toMatchObject({ text: expect.stringContaining(PINNED_EFFORT) })
+  })
+
+  // The same equality one deployment along, where the sentence carries a third
+  // fact and a conjunction that had to move to take it. That tail is where a
+  // second copy would first be visible, because it is the half of the sentence
+  // the other four spellings have no equivalent of (ADR-0030).
+  it('says exactly what /config says where this Session runs at a Caveman', async () => {
+    const { adapter, core, say } = newCore({ pinnedCaveman: 'full' })
+
+    await say('hello')
+    await core.handle(ingress('/config'))
+
+    const said = posted(adapter.instructions)
+    expect(said.at(0)).toEqual(said.at(-1))
+    expect(said.at(0)).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: SETTINGS_AT_A_PINNED_CAVEMAN,
+    })
+  })
+
+  // The promise to every deployment that declined this, and the irony worth
+  // stating: a feature whose purpose is fewer tokens must not spend words on the
+  // first message of every Conversation on a roma that never turned it on.
+  it('is the Opening it has always been where this Session is off', async () => {
+    const { adapter, say } = newCore()
+
+    await say('hello')
+
+    expect(posted(openingsIn(adapter.instructions))).toEqual([
+      { kind: 'result', conversationKey: KEY, text: SETTINGS_WITHOUT_A_CAVEMAN },
+    ])
+  })
+
+  // The surprising one, asserted rather than left to be discovered in a thread:
+  // `off` is a level this Session chose, `/clear` moves the Session past the
+  // record without deleting it, and the sentence the choice suppressed comes back
+  // with the Pinned Caveman. Correct, and it will surprise somebody once
+  // (ADR-0030).
+  it('opens on the Pinned Caveman again when a Session that chose off is cleared', async () => {
+    const { adapter, core, say } = newCore({ pinnedCaveman: 'full' })
+    await core.handle(ingress('/caveman off'))
+    await say('hello')
+
+    await core.handle(ingress('/clear'))
+    await say('and now', { session: sessionIdFor(KEY, 1) })
+
+    expect(posted(openingsIn(adapter.instructions))).toEqual([
+      { kind: 'result', conversationKey: KEY, text: SETTINGS_WITHOUT_A_CAVEMAN },
+      { kind: 'result', conversationKey: KEY, text: SETTINGS_AT_A_PINNED_CAVEMAN },
+    ])
+  })
+
+  // An Opening is text roma writes and no Turn produces one, which is the kind of
+  // property that stops being true in a refactor and says nothing. Routed through
+  // this Session's own process, the sentence would come back stripped of the
+  // articles it is announcing the stripping of, and read as if roma had meant it.
+  it('is not shortened by the Caveman it is announcing', async () => {
+    const { adapter, claude, say } = newCore({ pinnedCaveman: 'ultra' })
+
+    await say('hello')
+
+    // The Session really is being asked to drop articles and fragment sentences.
+    expect(claude.lastSpawn.args).toContain(cavemanRuleset('ultra'))
+    expect(posted(openingsIn(adapter.instructions))).toEqual([
+      {
+        kind: 'result',
+        conversationKey: KEY,
+        text:
+          `This conversation is on default (${PINNED_MODEL}), at default (${PINNED_EFFORT}), ` +
+          `at caveman default (ultra). Change any with “/model”, “/effort” or “/caveman”.`,
+      },
+    ])
   })
 
   // What "first" means, and it is not a figure of speech: the acknowledgement is
