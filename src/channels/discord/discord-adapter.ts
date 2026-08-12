@@ -498,7 +498,7 @@ function offerButton(taskId: string): DiscordButton {
  * because the text names every name whether or not anything drew it (ADR-0023).
  */
 function choiceButtons(
-  chooses: Extract<Command, 'model' | 'effort'>,
+  chooses: Extract<Command, 'model' | 'effort' | 'caveman'>,
   conversationKey: string,
   options: readonly string[],
 ): readonly DiscordButton[] {

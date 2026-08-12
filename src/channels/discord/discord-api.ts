@@ -83,7 +83,8 @@ export interface DiscordPost {
  *
  * Here rather than beside the payload it is laid out in, because it bounds what
  * a caller may ask for rather than how a request is built. roma's own Menus are
- * four and six, so nothing reaches it today; what it stops is a Menu that grows.
+ * four, six and six, so nothing reaches it today; what it stops is a Menu that
+ * grows.
  *
  * **Twenty-five rather than the forty #181 names**, which is the count a message
  * carries under Discord's newer component set — a set roma neither asks for nor

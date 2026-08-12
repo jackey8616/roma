@@ -141,7 +141,7 @@ const FIELD = ':'
 export type Pressed =
   | {
       readonly kind: typeof CHOOSE
-      readonly chooses: Extract<Command, 'model' | 'effort'>
+      readonly chooses: Extract<Command, 'model' | 'effort' | 'caveman'>
       readonly conversationKey: string
       readonly option: string
     }
@@ -163,7 +163,7 @@ export type Pressed =
  * a `:` in it would otherwise arrive cut in half.
  */
 export function chooseId(
-  chooses: Extract<Command, 'model' | 'effort'>,
+  chooses: Extract<Command, 'model' | 'effort' | 'caveman'>,
   conversationKey: string,
   option: string,
 ): string {
@@ -213,10 +213,15 @@ export function readPress(customId: string): Pressed | null {
 
 /** A Menu press, or null where it names something roma never put on a Menu. */
 function chosen([chooses, conversationKey, ...rest]: readonly string[]): Pressed | null {
-  // Only the two Commands that have a Menu. A press naming anything else is one
+  // Only the three Commands that have a Menu. A press naming anything else is one
   // roma never put out, and synthesising `/stop` or `/clear` from it would reach
   // a Command through a door meant for a Menu.
-  if (chooses !== 'model' && chooses !== 'effort') return null
+  //
+  // **Never widen this alone, and never widen `OutboundInstruction`'s `chooses`
+  // alone.** A Menu the Core offers and this cannot read back is a button that
+  // does nothing, under a Caller who goes on waiting for it; the other way round
+  // is a Command reachable through a card roma never posts.
+  if (chooses !== 'model' && chooses !== 'effort' && chooses !== 'caveman') return null
   if (conversationKey === undefined || conversationKey === '') return null
   const option = rest.join(FIELD)
   return option === '' ? null : { kind: CHOOSE, chooses, conversationKey, option }

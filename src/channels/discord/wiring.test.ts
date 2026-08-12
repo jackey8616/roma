@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Credential } from '../../build-env.js'
+import { cavemanRuleset } from '../../caveman.js'
 import { PINNED_MODEL } from '../../claude-session.js'
 import { bind, serve, type IngressLogRecord, type Serving } from '../../serve.js'
 import { sessionIdFor } from '../../session-id.js'
@@ -501,6 +502,56 @@ describe('a Menu, out as buttons and back as a press', () => {
 
     expect(labelsOf(roma.requests)).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'default'])
     expect(said(roma.requests).at(-1)).not.toContain('takes none')
+  })
+
+  /**
+   * The third Menu across both seams, and the one whose press nothing else can
+   * see land.
+   *
+   * A `/model` press is visible in the argv as a model name and a `/effort`
+   * press as a number; this one reaches the argv as several thousand characters
+   * of ruleset that no other reading of the stream reports back. So the spawn is
+   * where it is asserted — what the next Session is actually told is the only
+   * place a press and a typed `/caveman wenyan-full` can be shown to have ended
+   * in the same state (ADR-0030).
+   *
+   * `wenyan-full` is also the first hyphenated name any roma Menu has carried,
+   * and a name that lost the trip would not fail as a refusal: it would arrive
+   * at the Core as prose, drive a Turn, and bill the Shared Window for a button
+   * roma offered.
+   *
+   * **The Menu is drawn whole and the operator's two levels are not on it.**
+   * `wenyan-lite` and `wenyan-ultra` reach roma through `ROMA_CAVEMAN` alone, so
+   * the six here are the Caveman Menu entire rather than the first six of
+   * something longer — the rule `discord-channel.test.ts` states about buttons,
+   * seen from the far end of both seams.
+   */
+  it('moves the Session onto the hyphenated Caveman whose button came back', async () => {
+    const roma = await boot()
+    await roma.take(HELLO)
+    await roma.take(READY)
+    await roma.take(GUILD_CREATE)
+
+    await roma.take(mentioned('/caveman'))
+    expect(labelsOf(roma.requests)).toEqual([
+      'off',
+      'lite',
+      'full',
+      'ultra',
+      'wenyan-full',
+      'default',
+    ])
+
+    await roma.take(pressing(customIdFor(roma.requests, 'wenyan-full')))
+    expect(said(roma.requests).at(-1)).toContain('wenyan-full')
+
+    await roma.take(inThread('hello', '700000000000000022'))
+    await flush()
+
+    const { args } = roma.claude.lastSpawn
+    expect(args[args.indexOf('--append-system-prompt') + 1]).toContain(
+      cavemanRuleset('wenyan-full'),
+    )
   })
 })
 

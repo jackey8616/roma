@@ -1,6 +1,7 @@
 import { sep } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { IngressMessage, OutboundInstruction } from '../../channel-adapter.js'
+import { CAVEMAN_NAMES, OFF_MENU_WENYAN } from '../../caveman.js'
 import { readCommand } from '../../commands.js'
 import { EFFORT_NAMES } from '../../effort-menu.js'
 import { MENU_NAMES } from '../../model-menu.js'
@@ -329,7 +330,7 @@ function unopened(log: readonly DiscordLogRecord[]): readonly DiscordLogRecord[]
  * the test rather than that a Menu survives the round trip.
  */
 function choice(
-  chooses: 'model' | 'effort',
+  chooses: 'model' | 'effort' | 'caveman',
   options: readonly string[],
   text = `You can choose: ${options.join(', ')}.`,
 ): Outcome<OutboundInstruction> {
@@ -1471,6 +1472,30 @@ describe('a Menu, out as buttons and back as a press', () => {
     expect(EFFORT_NAMES.length).toBeGreaterThan(5)
   })
 
+  /**
+   * The third Menu, which cost this Channel a type and no rendering at all —
+   * `choiceButtons` is generic over a Menu, so a Menu roma gained arrives as six
+   * more buttons. Asserted anyway, because "it should just work" is how a card
+   * ships four buttons wide with two names missing.
+   *
+   * **Six is the whole Menu and not the whole of what may be pinned.**
+   * `wenyan-lite` and `wenyan-ultra` are levels an operator sets in
+   * `ROMA_CAVEMAN` and no Caller may choose, so they are absent from `options`
+   * before this Channel sees it — which makes a card carrying one a Menu drawn
+   * from something other than the Core's own answer.
+   */
+  it('draws the Caveman Menu whole, and the operator’s two levels nowhere on it', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, choice('caveman', CAVEMAN_NAMES)))
+
+    expect(channel.buttons.map(({ label }) => label)).toEqual(CAVEMAN_NAMES)
+    expect(CAVEMAN_NAMES).toEqual(['off', 'lite', 'full', 'ultra', 'wenyan-full', 'default'])
+    for (const withheld of OFF_MENU_WENYAN) {
+      expect(channel.buttons.map(({ label }) => label)).not.toContain(withheld)
+    }
+  })
+
   // The one Menu shape Discord will not take: it refuses a message carrying more
   // than 25 buttons whole. Drawn in part it would be a card saying those are all
   // the names there are, with the rest unreachable by pressing anything — so
@@ -1517,6 +1542,65 @@ describe('a Menu, out as buttons and back as a press', () => {
 
     expect(channel.last).toMatchObject({ text: '/model opus', caller: CALLER, callerName: 'Ada' })
     expect(readCommand(channel.last?.text ?? '')).toEqual({ command: 'model', argument: 'opus' })
+  })
+
+  /**
+   * The whole trip, over every name on all three real Menus and over the buttons
+   * this Adapter actually posted.
+   *
+   * `commands.test.ts` holds the same invariant one step earlier, over
+   * `commandFor` alone. This is the half that only exists once a Channel draws
+   * the Menu, and it is a claim about `choiceButtons` and `readPress` as a pair:
+   * they are one fact written in two files, and widening either alone is a
+   * button Discord draws and roma refuses — a Caller presses, nothing happens,
+   * and nothing anywhere reports it.
+   *
+   * Every Menu named outright rather than enumerated from a list of Menus: a
+   * loop over a list nobody added the third Menu to passes vacuously, which is
+   * the failure this is here to catch.
+   */
+  it('reads every name on every Menu back as the Command a Caller would have typed', async () => {
+    const menus = [
+      { chooses: 'model' as const, names: MENU_NAMES },
+      { chooses: 'effort' as const, names: EFFORT_NAMES },
+      { chooses: 'caveman' as const, names: CAVEMAN_NAMES },
+    ]
+
+    for (const { chooses, names } of menus) {
+      const channel = await messaged(inDm())
+      await channel.adapter.deliver(to(DM, choice(chooses, names)))
+      expect(channel.buttons).toHaveLength(names.length)
+
+      for (const [at, { label, customId }] of channel.buttons.entries()) {
+        // The button roma posted, pressed — never a `custom_id` a test wrote. A
+        // press built out of a literal cannot tell an agreement from a
+        // collision.
+        await channel.take(press(customId, { id: `90000000000000002${at}` }))
+        expect(readCommand(channel.last?.text ?? '')).toEqual({
+          command: chooses,
+          argument: label,
+        })
+      }
+    }
+  })
+
+  /**
+   * `wenyan-full` is the first hyphenated name any roma Menu has carried, and the
+   * hyphen had never been through this path. What comes back out is a *message*,
+   * so a name that arrived as two words would reach the Core as prose, drive a
+   * Turn, and bill somebody for a button roma offered (ADR-0023, ADR-0030).
+   */
+  it('reads a Caveman press, hyphen and all, as the Command it stands for', async () => {
+    const channel = await messaged(inDm())
+    await channel.adapter.deliver(to(DM, choice('caveman', CAVEMAN_NAMES)))
+
+    await channel.take(press(customIdFor(channel.buttons, 'wenyan-full')))
+
+    expect(channel.last).toMatchObject({ text: '/caveman wenyan-full', caller: CALLER })
+    expect(readCommand(channel.last?.text ?? '')).toEqual({
+      command: 'caveman',
+      argument: 'wenyan-full',
+    })
   })
 
   // The Conversation Key is on the button, so a press answers the Conversation
@@ -1705,11 +1789,25 @@ describe('the Overflow offer, out as a button and back as a press', () => {
     // to look like the *other* encoding, and a test that borrowed roma's own
     // constants for them could not tell a collision from an agreement.
     const keys = ['1', MESSAGE, 'overflow:task-1']
-    const names = ['opus', 'default', 'a:name:with:separators', 'overflow', 'choose:x']
+    // `wenyan-full` is here rather than only on the Menu above because the
+    // hyphen is a separator in nothing this file encodes and would be in an id
+    // that gained one.
+    const names = [
+      'opus',
+      'default',
+      'wenyan-full',
+      'a:name:with:separators',
+      'overflow',
+      'choose:x',
+    ]
     const tasks = ['task-7', 'task:7', 'choose:model:1:opus', 'overflow', MESSAGE]
 
     const menu = keys.flatMap((key) =>
-      names.flatMap((name) => [chooseId('model', key, name), chooseId('effort', key, name)]),
+      names.flatMap((name) => [
+        chooseId('model', key, name),
+        chooseId('effort', key, name),
+        chooseId('caveman', key, name),
+      ]),
     )
     const offers = tasks.map((taskId) => overflowId(taskId))
 
