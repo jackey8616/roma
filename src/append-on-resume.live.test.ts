@@ -35,10 +35,13 @@ import { WorkRoot } from './work-root.js'
 // pass or fail, and "the original persists" and "nothing persists" cost roma
 // different things.
 //
-// **Two pools over one Work Root, and that is the mechanism.** A pool's append
-// is fixed at construction (ADR-0030 proposes moving it into `SpawnTerms`; that
-// is not built), so a second pool is the only way to resume a Session under a
-// different one. It is also a route roma really takes: the pool reads whether a
+// **Two pools over one Work Root, and that is the mechanism.** The append is
+// resolved per spawn now rather than fixed for the pool's life — ADR-0030
+// proposed that and it is built — but what varies per spawn is the Session's
+// Caveman, which is a ruleset and not arbitrary text. The announcements a
+// briefing has to ride on are still handed over at construction, so a second
+// pool is the only way to resume a Session under a different one. It is also a
+// route roma really takes: the pool reads whether a
 // Session already exists off the filesystem rather than out of memory, so a
 // second pool over the same Work Root is what a restart of roma looks like from
 // the spawn's point of view, and `WorkRoot`'s own comment says two of them over

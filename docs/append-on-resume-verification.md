@@ -45,9 +45,11 @@ Three things make this measure what it claims to.
 
 **One Session, resumed under a *different* append.** A run that resumed under the
 same text could report only pass or fail. Two texts tell apart the two ways of
-failing, which cost roma different things. The append is a pool-level constant
-today — ADR-0030 proposes moving it into `SpawnTerms`; that is not built — so the
-resumed process comes from a second `SessionPool` over the same Work Root. That
+failing, which cost roma different things. The append is resolved per spawn —
+ADR-0030 proposed that and it is built — but what varies per spawn is the
+Session's Caveman, a ruleset rather than arbitrary text, and the announcements a
+briefing rides on are still handed over at construction. So the resumed process
+comes from a second `SessionPool` over the same Work Root. That
 is a route roma really takes: the pool reads whether a Session exists off the
 filesystem rather than out of memory, so a second pool over one Work Root is what
 a **restart of roma** looks like from the spawn's point of view. The first

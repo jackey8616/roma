@@ -767,8 +767,8 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
         // On the terms the Turn began under rather than whatever the Session is
         // on now: this is one Turn being served twice, and a `/model` or
         // `/effort` that landed in between is aimed at the next message. A
-        // `Resident` already carries all four, which is what makes that
-        // "the same terms" rather than four fields copied by hand.
+        // `Resident` already carries every term, which is what makes that
+        // "the same terms" rather than a handful of fields copied by hand.
         await this.#spawn(resident.sessionId, resident, correction.resume),
         text,
         true,
@@ -1027,9 +1027,9 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   ): Promise<void> {
     this.#leave(resident)
     const sessionId = resident.sessionId
-    // One record per swap however many terms moved, and the model wins where two
-    // did: it is the larger fact, and every other term is on the `spawn` record
-    // that follows this one either way.
+    // One record per swap however many terms moved, and the model wins where
+    // more than one did: it is the largest fact, and every other term is on the
+    // `spawn` record that follows this one either way.
     this.#log(
       resident.model !== model
         ? { event: 'swap', sessionId, reason: 'model', from: resident.model, to: model }

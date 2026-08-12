@@ -193,22 +193,19 @@ export function cavemanRuleset(level: string): string {
  * fails the run, and a sentence tidied here and the test relaxed to match loses
  * the only account of what roma borrowed.
  *
- * Two of the three are ADR-0030's table, which argues them. The third is not in
- * that table, and the divergence is deliberate rather than sloppy:
+ * ADR-0030's table argues all four rewrites and the parenthetical that goes with
+ * the last of them. Three lines because the second carries two of the rows:
  *
- * - `Off only: …` and `Default: **full**. Switch: …` — the table's three rows,
- *   the second line carrying two of them. `Current level:` is what replaces the
- *   default, which is the spelling caveman's own hook writes when it cannot find
- *   this file. No switch list replaces the other half: roma answers no `/caveman`.
- * - **The Boundaries line is the fourth rewrite and the one ADR-0030 does not
- *   enumerate.** It carries a *second* prose off-switch — `"stop caveman" or
- *   "normal mode": revert.` — that the table's first row condemns exactly as
- *   well, and the requirement is "no prose off-switch" rather than a line count.
- *   The same line carries the carve-out that has to survive verbatim, so the cut
- *   is that sentence and nothing around it. `(/caveman-compress exempt)` goes
- *   with it, on the switch list's argument: that skill is one of the five
- *   siblings ADR-0030 leaves unclaimed, so the parenthetical would grant an
- *   exemption through a command nothing answers.
+ * - `Off only: …` and `Default: **full**. Switch: …` — the first three rows, the
+ *   second line carrying two. `Current level:` is what replaces the default, and
+ *   it is the spelling caveman's own hook writes when it cannot find this file.
+ *   **Nothing replaces the switch list, and `/caveman` existing is not a reason
+ *   to put one back**: what the table condemns is prose advertising names against
+ *   a Menu that does not offer them, and the Menu is `CAVEMAN_MENU`'s to state.
+ * - The `## Boundaries` line — the fourth row. The cut is its off-switch sentence
+ *   and `(/caveman-compress exempt)`, and nothing on either side of them: the
+ *   carve-out sharing that line is the one thing ADR-0030 requires survive
+ *   verbatim.
  *
  * The `CAVEMAN MODE ACTIVE` prefix is deliberately not here. The hook writes it
  * around the filtered body rather than inside it, and keeping that split is what

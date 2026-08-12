@@ -1334,7 +1334,7 @@ export class Core {
   }
 
   /**
-   * **Not `chosenFor`, which is what `#cavemanNamed` below insists on.** Read
+   * **Not `chosenFor`, which is what `#cavemanNamed` above insists on.** Read
    * that way, a Session nobody moved answers null, null is not `off`, and a
    * deployment that pinned nothing carries `at caveman default (off)` in the
    * first message of every Conversation it serves.
@@ -2463,13 +2463,9 @@ function chosenEffortGoneReason({ effort }: ChosenEffortNotOffered): string {
 }
 
 /**
- * The same, for a Chosen Caveman roma has stopped offering.
- *
- * The widest hole of the three, and answered identically because the way out is
- * identical. The other two are reachable only by roma removing a Menu entry; this
- * one is reachable that way and by a record naming a level `ROMA_CAVEMAN` accepts
- * and the Menu does not — so a Caller can meet it on a deployment where nothing
- * has been removed at all.
+ * The same, for a Chosen Caveman roma has stopped offering — the widest of the
+ * three holes, which `ChosenCavemanNotOffered` argues, and answered identically
+ * because the way out is identical.
  */
 function chosenCavemanGoneReason({ caveman }: ChosenCavemanNotOffered): string {
   return (

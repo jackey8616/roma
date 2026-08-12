@@ -241,19 +241,17 @@ function readEffort(env: Environment, problems: string[]): string | null {
 /**
  * The Pinned Caveman, or null where the deployment did not name one.
  *
- * **Validated locally because there is nowhere else it could be.** `readEffort`
- * above refuses a bad value here rather than letting Claude Code warn about it;
- * this one has no such alternative to decline. A Caveman is roma's own word for
- * text roma assembles itself and hands over already rendered, so no Runtime ever
- * sees the level and none could disagree with it. Unrefused, `bananas` would
- * append caveman's ruleset with an empty intensity table in the middle of it and
- * every Session would run on that in silence.
+ * **Validated locally because there is nowhere else it could be**, which is
+ * `isPinnableCaveman`'s argument rather than a second one: `readEffort` above
+ * declines an alternative, and this has none to decline. What it costs here is
+ * specific — unrefused, `bananas` appends caveman's ruleset with an empty
+ * intensity table in the middle of it, and every Session runs on that in silence.
  *
  * Optional, and unset is the deployment ADR-0030 changes nothing about: no level
  * means no ruleset, which is byte-for-byte what every spawn carried before this.
  *
- * The two wenyan levels are accepted here and only here, which is `ultracode`'s
- * shape and `ultracode`'s reason — the Menu bounds Callers and never the operator.
+ * The two wenyan levels are accepted here and only here — `OFF_MENU_WENYAN` says
+ * why they are held back from the Menu and not from an operator's hand.
  *
  * Compared exactly, never folded or trimmed, for `readEffort`'s reason. That
  * includes refusing `wenyan`, which caveman's own hook would have folded into

@@ -289,12 +289,12 @@ describe('the line roma would not have thought to write', () => {
 /**
  * The three lines of caveman's text roma does not carry as they are.
  *
- * Three lines and four rewrites, because the second is two of ADR-0030's three
- * rows at once — a hardcoded default and a switch list. The third is not in that
- * table at all: it carries a *second* prose off-switch, which the first row's
- * argument condemns exactly as well, and roma's acceptance criterion is stated as
- * a property rather than a line count. Held as literals so that a fourth line
- * being touched cannot arrive quietly.
+ * Three lines and four rewrites, because the second is two of ADR-0030's four
+ * rows at once — a hardcoded default and a switch list. The third line is the
+ * table's fourth row, added after the text was written: it carries a *second*
+ * prose off-switch, which the first row's argument condemns exactly as well, and
+ * roma's acceptance criterion is stated as a property rather than a line count.
+ * Held as literals so that a fourth line being touched cannot arrive quietly.
  */
 const REWRITTEN = [
   'ACTIVE EVERY RESPONSE. No revert after many turns. No filler drift. Still active if unsure. Off only: "stop caveman" / "normal mode".',

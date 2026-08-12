@@ -58,7 +58,7 @@ const CAVEMAN_SUFFIX = '.caveman'
 /**
  * What the record that a Session has had its Opening is called, beside the Cavemen.
  *
- * A file for the reason the other three are, and it is the one where the
+ * A file for the reason the other four are, and it is the one where the
  * contrast is the whole point: the Session Pool's spawn file says the same
  * Session has been started before and lives *inside* the Working Directory
  * precisely so the reclaim takes it, because a reclaimed Session must go on

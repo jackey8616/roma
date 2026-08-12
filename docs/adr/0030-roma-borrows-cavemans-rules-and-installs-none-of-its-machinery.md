@@ -301,16 +301,26 @@ of `jackey8616/caveman`, with three lines rewritten:
 | `Off only: "stop caveman" / "normal mode".` | The prose off-switch exists because `caveman-mode-tracker.js` watches `UserPromptSubmit` for that phrase. There is no tracker. Left in, roma's record would say `full` while the model had stopped, and `/caveman` would report a lie. |
 | `Switch: /caveman lite\|full\|ultra\|wenyan-lite\|wenyan-full\|wenyan-ultra\|off` | Advertises seven values against a Menu of five. ADR-0023's consequence list names this failure exactly — *one carrying uppercase makes roma refuse a name it just offered* — and this would be the same failure by a different route. |
 | `Default: **full**.` | Hardcodes a default that is `ROMA_CAVEMAN`'s to decide. |
+| `"stop caveman" or "normal mode": revert.`, in `## Boundaries` | **Found when the text was written, not when this table was.** A *second* prose off-switch, which the first row's argument condemns exactly as well. The requirement is *no prose off-switch* rather than a count, so it goes; the carve-out on the same line stays. |
 
-**All three describe the tracker hook**, which is the piece the section above
+**All four describe the tracker hook**, which is the piece the section above
 declines to install. Removing them is not editorial taste; it is deleting the
 manual for a part that is not in the box.
 
-Everything else is kept verbatim, including the line roma would probably not have
-thought to write: *Persisted outside chat: write normal prose — code, comments,
-commits, docs, issue/PR/MR text, memory files.* roma's agent opens issues and
-pull requests with `gh` (ADR-0008), and that carve-out is the evidence the text
-is worth borrowing rather than replacing.
+The fourth row is here because the first three were written from a reading of
+caveman's `## Persistence` section and the fourth line is in `## Boundaries`,
+which nobody re-read until `src/caveman.ts` had to name every divergence. A table
+that had stayed at three would have made the shipped text look like a mistake.
+
+Everything else is kept verbatim **but for one parenthetical**, including the
+line roma would probably not have thought to write: *Persisted outside chat:
+write normal prose — code, comments, commits, docs, issue/PR/MR text, memory
+files.* roma's agent opens issues and pull requests with `gh` (ADR-0008), and
+that carve-out is the evidence the text is worth borrowing rather than replacing.
+What goes with the fourth row is `(/caveman-compress exempt)`, on the switch
+list's argument: that skill is one of the five siblings *Consequences* leaves
+unclaimed, so the parenthetical would grant an exemption through a command
+nothing answers.
 
 Because roma owns it, `npx skills update` does not apply to it. The upstream file
 is vendored beside the derived one as **evidence**, and a test holds its hash the
