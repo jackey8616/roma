@@ -1441,4 +1441,26 @@ describe('what a Session is told about itself', () => {
 
     expect(appendedTo(claude.lastSpawn)).toBe(cavemanRuleset('full'))
   })
+
+  // What the Audit Record names a Task by (ADR-0030), and the reason the answer
+  // is the process's rather than the record's: a Chosen Caveman written while
+  // the Turn was running moves the next spawn, and a ledger that resolved it a
+  // second time would name a level nothing was asked for.
+  it('says what the process serving a Session was started at, not what is set now', async () => {
+    const chosen = new Map([[A, 'lite']])
+    const { pool, send } = newPool({
+      cavemen: { kind: 'caveman', inForce: (sessionId) => chosen.get(sessionId) ?? 'off' },
+    })
+
+    await send(A, 'hello', OK)
+    chosen.set(A, 'ultra')
+
+    expect(pool.cavemanOn(A)).toBe('lite')
+  })
+
+  it('says nothing about a Session no process is serving', () => {
+    const { pool } = newPool()
+
+    expect(pool.cavemanOn(A)).toBeNull()
+  })
 })

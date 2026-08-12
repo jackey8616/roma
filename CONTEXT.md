@@ -897,7 +897,8 @@ _Avoid_: paused, retrying, backing off, queued (that word is the Task Queue's)
 The line roma writes when a Task ends: the Caller, which Session ran it, how long
 they waited, what it cost, which credential paid, which Runtime and which model
 ran it, what effort
-it ran at, whether a Compaction happened inside it and who asked for that, which
+it ran at, how short it was asked to be and what it produced, whether a
+Compaction happened inside it and who asked for that, which
 repositories it minted an Installation Token for, and whether it used the Cloud
 Reach or the Document Reach. The Runtime is here because the credential beside it
 says only which of the two bills a Task landed on and never whose subscription:
@@ -912,7 +913,16 @@ which Task did (ADR-0014). The effort is here for the same reason and is weaker
 evidence, and says so: it is what roma sent and what the Effort Matrix says the
 model does with it, rather than anything roma watched — and where the Matrix says
 the model takes no effort at all, the record says that instead of naming a level
-nobody ran at (ADR-0016). The Compaction is here because it is the largest
+nobody ran at (ADR-0016). The Caveman is the third of that argument and the first
+whose answer is not trivially true from the day it lands, and it is the level the
+*process* served the Task at rather than what the Session is set to now — a
+`/caveman` that lands mid-Turn moves the next spawn. Where nothing on the
+deployment named one the record says so, in a word that is not a level, because a
+deployment that pinned `off` chose something and one that named nothing did not
+(ADR-0030). Beside it are the Turn's output tokens, differenced like the cost and
+recorded for the same reason the two above are: asking the model to be short is
+worth nothing anybody can state until a deployment can compare its own months,
+and roma claims nothing until one has. The Compaction is here because it is the largest
 unexplained variation there is in what a Task costs — measured at 4.9 times a
 quiet Turn — and because the same field says whether that money was somebody's
 choice or somebody's bad luck: an automatic one is a bill for a thread the whole

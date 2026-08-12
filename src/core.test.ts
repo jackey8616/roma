@@ -13,7 +13,7 @@ import type {
   Quotation,
 } from './channel-adapter.js'
 import { apiKeySourceFor, type CredentialKind } from './build-env.js'
-import { CAVEMAN_NAMES, CAVEMAN_OFF, cavemanRuleset } from './caveman.js'
+import { CAVEMAN_NAMES, CAVEMAN_NOT_PINNED, CAVEMAN_OFF, cavemanRuleset } from './caveman.js'
 import { PINNED_EFFORT, PINNED_MODEL } from './claude-session.js'
 import { EFFORT_NOT_APPLIED } from './effort-menu.js'
 import type { RetryBudget } from './config.js'
@@ -116,6 +116,7 @@ const EVERY_CORE_OPTION: Record<keyof CoreOptions, true> = {
   models: true,
   efforts: true,
   cavemen: true,
+  cavemanPinned: true,
   audit: true,
   credential: true,
   overflow: true,
@@ -129,7 +130,7 @@ function newCore({
   overflow = { monthlyCapUsd: 100 },
   capabilities,
   pinnedModel = PINNED_MODEL,
-  pinnedCaveman = CAVEMAN_OFF,
+  pinnedCaveman,
   ...options
 }: {
   /** An existing work root, for the one test that stands a second Core up over one. */
@@ -171,8 +172,11 @@ function newCore({
   // chose and the pool reads it at the next spawn.
   const efforts = chosenEfforts({ workRoot: work, pinnedEffort: PINNED_EFFORT })
   // And the third, to both again — a pool built without it answers `/caveman`
-  // and appends the Pinned Caveman to every Session regardless.
-  const cavemen = chosenCavemen({ workRoot: work, pinnedCaveman })
+  // and appends the Pinned Caveman to every Session regardless. A deployment
+  // that named nothing resolves to `off` here exactly as `startRoma` does, and
+  // the Core is told separately that nobody named it: the two are one string
+  // from this line on, and the Audit Record is where they have to stay two.
+  const cavemen = chosenCavemen({ workRoot: work, pinnedCaveman: pinnedCaveman ?? CAVEMAN_OFF })
   const poolLog: PoolLogRecord[] = []
   const pool = new SessionPool({
     workRoot: work,
@@ -215,6 +219,7 @@ function newCore({
     models,
     efforts,
     cavemen,
+    cavemanPinned: pinnedCaveman !== undefined,
     audit,
     credential: 'shared-window',
     log: (record) => log.push(record),
@@ -2534,12 +2539,17 @@ describe('what the deployment has spent this month', () => {
       credential = 'shared-window',
       apiKeySource = apiKeySourceFor(credential),
       runtime,
+      caveman,
+      outputTokens,
     }: {
       costUsd: number | null
       credential?: CredentialKind
       apiKeySource?: string
       /** Left off by default, which is what every record written before the field is. */
       runtime?: Runtime
+      /** The same, for the two fields ADR-0030 put on a record and not on the month. */
+      caveman?: string
+      outputTokens?: number | null
     },
   ) {
     audit.record({
@@ -2552,6 +2562,8 @@ describe('what the deployment has spent this month', () => {
       turnMs: 1_000,
       credential,
       ...(runtime === undefined ? {} : { runtime }),
+      ...(caveman === undefined ? {} : { caveman }),
+      ...(outputTokens === undefined ? {} : { outputTokens }),
       apiKeySource,
     })
   }
@@ -2605,6 +2617,24 @@ describe('what the deployment has spent this month', () => {
     for (const runtime of RUNTIMES) {
       expect(figures.filter((line) => line.includes(RUNTIME_NAMES[runtime]))).toHaveLength(2)
     }
+  })
+
+  // ADR-0030 adds two fields to every record and no summary to the month.
+  // `/usage` is what a deployment reads the month through, and a line here
+  // saying anything about output tokens would be roma making the claim the ADR
+  // declines to make — the records are the instrument, and whoever compares two
+  // months of them is the reader.
+  it('says nothing more for a month whose records carry a Caveman and what it produced', async () => {
+    const plain = newCore()
+    spent(plain.audit, { costUsd: 0.21 })
+    const measured = newCore({ pinnedCaveman: 'ultra' })
+    spent(measured.audit, { costUsd: 0.21, caveman: 'ultra', outputTokens: 1978 })
+
+    await plain.core.handle(ingress('/usage'))
+    await measured.core.handle(ingress('/usage'))
+
+    expect(textIn(measured.adapter)).toBe(textIn(plain.adapter))
+    expect(textIn(measured.adapter)).not.toMatch(/token/i)
   })
 
   // Three spellings, one Command. A `/cost` answering differently from the
@@ -3306,6 +3336,15 @@ describe('the record every Task leaves behind', () => {
         // since `system/init` carries no effort field to check it against
         // (ADR-0016).
         effort: PINNED_EFFORT,
+        // And how short it was asked to be. This deployment named no Caveman,
+        // which is a different fact from pinning `off` and is spelled so that a
+        // ledger read months later cannot mistake it for a level (ADR-0030).
+        caveman: CAVEMAN_NOT_PINNED,
+        // What the Turn produced, beside what it cost, so that the question
+        // ADR-0030 exists for is answerable from a month of these. The Turn's
+        // own delta and never the process's running total, exactly as the cost
+        // above it is.
+        outputTokens: 17,
         // Whether this Task obtained a Cloud Token — a yes or a no rather than
         // a count, since one token does unlimited API calls for an hour
         // (ADR-0015 §10). No, here: this Core was built with nothing to ask,
@@ -3338,6 +3377,102 @@ describe('the record every Task leaves behind', () => {
     expect(costs).toEqual([0.01, 0.01, 0.015, 0.015, 0.01])
     // The fifth Task is not the whole Session, and the five together are.
     expect(costs.reduce((sum, cost) => sum + cost, 0)).toBeCloseTo(0.06, 6)
+  })
+
+  /** What one recorded Turn left on its process's running output-token total. */
+  const cumulativeOutputIn = (events: readonly ClaudeEvent[]): number => {
+    const usage = events.at(-1)?.['modelUsage']
+    if (typeof usage !== 'object' || usage === null) {
+      throw new Error('that capture does not end on a measured result')
+    }
+    return Object.values(usage as Record<string, { outputTokens?: number }>).reduce(
+      (total, model) => total + (model.outputTokens ?? 0),
+      0,
+    )
+  }
+
+  // The cost's rule, on the figure beside it, and the reason ADR-0030 can ask
+  // one month to be compared with another at all: `modelUsage` accumulates for
+  // the process the way `total_cost_usd` does, so three Tasks written raw would
+  // each be recorded at what the Session had produced by then. The capture is
+  // one real process serving three Turns; its third one drops a model entry and
+  // walks the breakdown backwards, which `#outputTokenMark` refuses to read as
+  // negative — so this Task under-counts rather than blaming a later one.
+  it('records three Tasks of one Session at what each of them produced', async () => {
+    const { audit, say } = newCore()
+
+    for (const nth of [1, 2, 3]) {
+      await say('hello', { events: THREE_TURNS.turn(nth) })
+    }
+
+    expect(recordsIn(audit).map((record) => record.outputTokens)).toEqual([17, 0, 0])
+    // What the same three terminal events carried, which is what a record
+    // written raw would have said instead.
+    expect([1, 2, 3].map((nth) => cumulativeOutputIn(THREE_TURNS.turn(nth)))).toEqual([17, 17, 3])
+  })
+
+  // The pair the field is nullable for, and the discipline the cost beside it
+  // already keeps: a Turn nobody measured produced tokens that are real and
+  // unrecorded, and calling those nothing would understate the very month
+  // ADR-0030's question is settled by comparing.
+  it('tells a Task that produced nothing from one nothing ever measured', async () => {
+    const { audit, claude, core, procFor } = newCore()
+
+    const died = core.handle(ingress('hello'))
+    await flush()
+    claude.process.emitExit({ code: 1, signal: null })
+    await died
+
+    const busy = ['one', 'two', 'three'].map((key) => core.handle(ingress('hello', key)))
+    await flush()
+    const queued = core.handle(ingress('a long job', 'four'))
+    await flush()
+    await core.handle(ingress('/stop', 'four'))
+    for (const key of ['one', 'two', 'three']) {
+      feed(procFor(key), OK)
+    }
+    await Promise.all(busy)
+    await queued
+
+    const records = recordsIn(audit)
+    expect(records.at(0)).toMatchObject({ outcome: 'failure', outputTokens: null })
+    expect(records.find((record) => record.sessionId === sessionIdFor('four'))).toMatchObject({
+      outcome: 'stopped',
+      outputTokens: 0,
+    })
+  })
+
+  // The level the *process* served it at, taken off that process rather than
+  // resolved a second time — a `/caveman` that lands while the Turn is running
+  // moves the next spawn, and a record that read the Chosen Record again would
+  // name a level nothing was asked for.
+  it('records the Caveman the Task ran at, not the one chosen while it ran', async () => {
+    const { audit, core, say, start } = newCore({ pinnedCaveman: 'lite' })
+    const { task, proc } = await start('a long job')
+
+    await core.handle(ingress('/caveman ultra'))
+    feed(proc, OK)
+    await task
+    await say('and now')
+
+    expect(recordsIn(audit).map((record) => record.caveman)).toEqual(['lite', 'ultra'])
+  })
+
+  // A deployment that pinned `off` chose to append nothing; one that named no
+  // Caveman chose nothing at all, and both run their Sessions at `off`. The
+  // record is where the two stop being one string, because a month of Tasks
+  // filed under a level nobody set answers ADR-0030's first question with a
+  // setting the deployment never made.
+  it('says a deployment named no Caveman rather than naming a level nobody chose', async () => {
+    const { audit: named, say: sayPinned } = newCore({ pinnedCaveman: CAVEMAN_OFF })
+    const { audit: unnamed, say } = newCore()
+
+    await sayPinned('hello')
+    await say('hello')
+
+    expect(recordsIn(named).map((record) => record.caveman)).toEqual([CAVEMAN_OFF])
+    expect(recordsIn(unnamed).map((record) => record.caveman)).toEqual([CAVEMAN_NOT_PINNED])
+    expect(CAVEMAN_NAMES).not.toContain(CAVEMAN_NOT_PINNED)
   })
 
   // Two numbers because they answer different questions. The Task's own wall
@@ -4379,6 +4514,12 @@ describe('relaying a free Relay', () => {
       outcome: 'result',
       costUsd: 0,
       credential: 'shared-window',
+      // Both of ADR-0030's fields, on the record roma writes for a message that
+      // never reached the model: this deployment named no Caveman, and the
+      // entry produced no output tokens because it answered locally — which is
+      // the reading the drift check below is watching for a change in.
+      caveman: CAVEMAN_NOT_PINNED,
+      outputTokens: 0,
     })
     expect(audit.totalFor(MONTH)).toMatchObject({ tasks: 1, relays: 1 })
     // **Both records roma writes, read back through the real reader.** "Every
@@ -4464,6 +4605,18 @@ describe('relaying a free Relay', () => {
     await say('/context', { events: FREE_RELAY_DRIFTED })
 
     expect(audit.totalFor(MONTH)).toMatchObject({ tasks: 0, relays: 1, costUsd: 0.0549 })
+  })
+
+  // So does what it produced. The Operator Log says the pin has moved and is
+  // read by whoever is looking; the record is what the month is added up from
+  // afterwards, and an entry that started doing model work is output tokens the
+  // deployment spent whether or not anybody read the line.
+  it('puts what a drifted Relay produced on its record', async () => {
+    const { audit, say } = newCore()
+
+    await say('/context', { events: FREE_RELAY_DRIFTED })
+
+    expect(recordsIn(audit).at(-1)).toMatchObject({ kind: 'relay', outputTokens: 1978 })
   })
 })
 

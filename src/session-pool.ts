@@ -638,6 +638,26 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   }
 
   /**
+   * How short the process serving this Session was asked to be, or null where
+   * none is serving it.
+   *
+   * The Resident's own answer and never `#cavemanFor`'s. Resolving it again
+   * would be a second reading of a record a `/caveman` can have moved since the
+   * spawn, and what the Audit Record this feeds needs is what a Turn ran at
+   * rather than what the Session is set to now (ADR-0030) — the pool is the only
+   * place the first of those exists.
+   *
+   * Null for a Session with no process: a Task stopped in the queue, a
+   * Conversation roma could not name a Session for, a process that died with its
+   * Turn in flight. Nothing here invents a level for those, because what a
+   * record says instead is the Core's — it is the only thing that knows what the
+   * deployment would have given them.
+   */
+  cavemanOn(sessionId: string): string | null {
+    return this.#residents.get(sessionId)?.caveman ?? null
+  }
+
+  /**
    * Ask a resident Session to abandon its running Turn. Its process survives.
    *
    * False if there was no Turn to abandon — including the case where the Session

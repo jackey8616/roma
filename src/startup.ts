@@ -493,6 +493,12 @@ export async function startRoma({
       models,
       efforts,
       cavemen,
+      // Told separately from the record beside it, because this is the last
+      // line that can still see the difference: `pinnedCaveman` above folded a
+      // deployment that named nothing into the same `off` a deployment that
+      // pinned one has, and the Audit Record is the one place they may not be
+      // one string (ADR-0030).
+      cavemanPinned: caveman !== undefined,
       audit,
       credential: credential.kind,
       usedCloudReach: (taskId) => cloudUse.takeUsedBy(taskId),

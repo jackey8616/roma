@@ -11,6 +11,7 @@ import type { CredentialKind } from './build-env.js'
 import { attributed, relayed } from './attribution.js'
 import {
   CAVEMAN_NAMES,
+  CAVEMAN_NOT_PINNED,
   CAVEMAN_OFF,
   PINNED_CAVEMAN_NAME,
   readCavemanRequest,
@@ -269,6 +270,28 @@ export interface CoreOptions {
    */
   readonly cavemen: ChosenRecord<'caveman'>
   /**
+   * Whether this deployment named a Caveman at all.
+   *
+   * A second field for one setting because it is not derivable from `cavemen`
+   * above: `ROMA_CAVEMAN=off` and `ROMA_CAVEMAN` unset resolve to the same
+   * Pinned Caveman before either reaches a Chosen Record, and the Audit Record
+   * is the one place they may not be one string — `CAVEMAN_NOT_PINNED` is where
+   * that difference is argued.
+   *
+   * **What it deliberately does not narrow is the Session.** A Caller who types
+   * `/caveman off` on a deployment that named none chose something, and their
+   * Tasks are recorded as `CAVEMAN_NOT_PINNED` all the same. Answering that
+   * exactly means asking the Chosen Record a second question while the record is
+   * being written, and that call throws for a record naming a level roma no
+   * longer offers — which would take a Task's ending down with it, on the one
+   * path that must not fail. Both spellings mean no ruleset was appended, so
+   * what is lost is which of them said so.
+   *
+   * Omitted means no, which is what a deployment that named nothing has and what
+   * every Core built for a test about something else has.
+   */
+  readonly cavemanPinned?: boolean
+  /**
    * Where every Task is written down, and shared like everything else here.
    *
    * Required rather than optional, though an optional one would be easy: a Core
@@ -369,6 +392,20 @@ interface RunningTask extends TaskAddress {
    * true when it arrived.
    */
   effort: string
+  /**
+   * How short this Task was asked to be, for its Audit Record.
+   *
+   * Read off the *process* rather than the Chosen Record beside the two above,
+   * and that is the one place these three differ. What reaches the argv is
+   * several thousand characters of ruleset rendered at the moment of spawning,
+   * so the level it was rendered from is a fact about the process — and asking
+   * the record again would be a second resolution of something a `/caveman` can
+   * have moved since (ADR-0030).
+   *
+   * Null until a process has been given the message, which is every Task that
+   * was stopped in the queue or never got as far as a Session.
+   */
+  caveman: string | null
   /** Set by `/stop`, and read at each point the Task can still be stopped. */
   stopped: boolean
   /**
@@ -441,6 +478,7 @@ export class Core {
   readonly #models: ChosenRecord<'model'>
   readonly #efforts: ChosenRecord<'effort'>
   readonly #cavemen: ChosenRecord<'caveman'>
+  readonly #cavemanPinned: boolean
   readonly #audit: AuditLog
   readonly #credential: CredentialKind
   readonly #overflow: OverflowOptions | null
@@ -489,6 +527,7 @@ export class Core {
     models,
     efforts,
     cavemen,
+    cavemanPinned,
     audit,
     credential,
     overflow,
@@ -514,6 +553,7 @@ export class Core {
     this.#models = models
     this.#efforts = efforts
     this.#cavemen = cavemen
+    this.#cavemanPinned = cavemanPinned ?? false
     this.#audit = audit
     this.#credential = credential
     this.#overflow = overflow ?? null
@@ -846,6 +886,16 @@ export class Core {
       runtime: EVERY_SESSION_RUNS_ON,
       model: model ?? this.#models.pinned,
       effort: effortOn(model ?? this.#models.pinned, effort ?? this.#efforts.pinned),
+      // Off the process that answered rather than out of the record beside the
+      // two above, which is the rule the field carries everywhere. Read after
+      // the Turn because that is when a Relay has a process at all: it reaches
+      // whatever the Session has, and a Session that has been quiet all morning
+      // has none until this line's work spawns one.
+      caveman: this.#cavemanOnRecord(session === null ? null : this.#pool.cavemanOn(session)),
+      // Zero rather than null where no Turn ran, for the reason the cost above
+      // it is zero: a Relay that never reached Claude Code produced nothing, and
+      // that is a fact rather than an absence.
+      outputTokens: turn === null ? 0 : turn.outputTokens,
       // Asked rather than assumed false. A free Relay drives no Turn so nothing
       // it does can mint, but the answer is read-and-forget and a hard `false`
       // here would be roma writing down a fact it declined to check.
@@ -1437,6 +1487,7 @@ export class Core {
         sessionId,
         model: this.#models.inForce(sessionId),
         effort: this.#efforts.inForce(sessionId),
+        caveman: null,
         stopped: false,
         toldContextFull: false,
         attempts,
@@ -1571,6 +1622,12 @@ export class Core {
           running?.model ?? this.#models.pinned,
           running?.effort ?? this.#efforts.pinned,
         ),
+        // And how short. The level the process served it at, and what the
+        // deployment would have given it where there was no process to ask.
+        caveman: this.#cavemanOnRecord(running?.caveman ?? null),
+        // What it produced, beside what it cost and split the same way: the two
+        // Attempts of a Task that moved bills bought output on two of them.
+        outputTokens: paid.outputTokens,
         cloudReach,
         documentReach,
         // Only where one happened, which is what "absent means no Compaction"
@@ -1587,6 +1644,19 @@ export class Core {
     // message roma owes unconditionally.
     reporter.stop()
     await this.#deliverAfter(opened, instruction)
+  }
+
+  /**
+   * What the Audit Record says a Task was asked to be: the level the process
+   * served it at, or what the deployment would have given it where there was no
+   * process to ask.
+   *
+   * **Never let `off` stand for a deployment that named nothing** — see
+   * `CAVEMAN_NOT_PINNED`, which is the fact this line exists to keep.
+   */
+  #cavemanOnRecord(ranAt: string | null): string {
+    const level = ranAt ?? this.#cavemen.pinned
+    return !this.#cavemanPinned && level === CAVEMAN_OFF ? CAVEMAN_NOT_PINNED : level
   }
 
   /**
@@ -1935,6 +2005,11 @@ export class Core {
       // Also the moment this Task stops being free with certainty: from here it
       // has spent whatever it has spent, whether or not anything ever reports it.
       attempts.sent()
+      // And the moment the process serving it is known to exist, which is why
+      // the Caveman is taken here rather than at the record: a Turn that dies
+      // mid-flight leaves the pool holding no process to ask afterwards, and its
+      // record is the one the ledger can least afford to guess at.
+      task.caveman = this.#pool.cavemanOn(sessionId)
       if (task.stopped) this.#pool.interrupt(sessionId)
     }
     this.#pool.on('event', onEvent)

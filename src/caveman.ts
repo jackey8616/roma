@@ -18,6 +18,23 @@
 export const CAVEMAN_OFF = 'off'
 
 /**
+ * What the Audit Record carries where nothing on the deployment named a Caveman.
+ *
+ * **Not `off`, because a deployment that pinned `off` chose something and one
+ * that named nothing did not.** Both resolve to the same Pinned Caveman before
+ * anything downstream can tell them apart, and a month of records that spelled
+ * both `off` would attribute every Task on a roma that never heard of ADR-0030
+ * to a setting nobody made — which is the one reading that makes those records
+ * useless for the agenda they are the instrument for.
+ *
+ * Deliberately not spelled like a level, which is `EFFORT_NOT_APPLIED`'s move
+ * for `EFFORT_NOT_APPLIED`'s reason: a ledger read months later cannot mistake
+ * it for one, and `isPinnableCaveman` goes on refusing it if it is ever typed
+ * at roma.
+ */
+export const CAVEMAN_NOT_PINNED = 'not-pinned'
+
+/**
  * Every level a Caller will be able to pick, `off` among them.
  *
  * Five of caveman's eleven, and ADR-0030 says which are held back and why. The
