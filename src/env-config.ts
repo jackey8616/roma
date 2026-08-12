@@ -1,4 +1,5 @@
 import type { Credential } from './build-env.js'
+import { CAVEMAN_MENU, isPinnableCaveman, OFF_MENU_WENYAN } from './caveman.js'
 import { EFFORT_MENU, isPinnableEffort, ULTRACODE } from './effort-menu.js'
 import type { StartRomaOptions } from './startup.js'
 
@@ -19,6 +20,7 @@ export type RomaEnv = Pick<
   | 'configDir'
   | 'model'
   | 'effort'
+  | 'caveman'
   | 'maxConcurrentTasks'
 > & {
   /**
@@ -179,6 +181,7 @@ export function readRomaEnv(env: Environment): RomaEnv {
   const overflow = readOverflow(env, problems)
   const model = envValue(env, 'ROMA_MODEL')
   const effort = readEffort(env, problems)
+  const caveman = readCaveman(env, problems)
   const maxConcurrentTasks = wholeNumber(env, 'ROMA_MAX_CONCURRENT_TASKS', problems)
 
   if (problems.length > 0) throw new ConfigurationMissing(problems)
@@ -196,6 +199,7 @@ export function readRomaEnv(env: Environment): RomaEnv {
     ...(overflow === null ? {} : { overflow }),
     ...(model === null ? {} : { model }),
     ...(effort === null ? {} : { effort }),
+    ...(caveman === null ? {} : { caveman }),
     ...(maxConcurrentTasks === null ? {} : { maxConcurrentTasks }),
   }
 }
@@ -228,6 +232,42 @@ function readEffort(env: Environment, problems: string[]): string | null {
         `${EFFORT_MENU.join(', ')} — or ${ULTRACODE}, which is the operator's alone. ` +
         `Claude Code would not refuse this: an unrecognised --effort warns on stderr and ` +
         `starts on its own default, so roma refuses it here instead.`,
+    )
+    return null
+  }
+  return found
+}
+
+/**
+ * The Pinned Caveman, or null where the deployment did not name one.
+ *
+ * **Validated locally because there is nowhere else it could be.** `readEffort`
+ * above refuses a bad value here rather than letting Claude Code warn about it;
+ * this one has no such alternative to decline. A Caveman is roma's own word for
+ * text roma assembles itself and hands over already rendered, so no Runtime ever
+ * sees the level and none could disagree with it. Unrefused, `bananas` would
+ * append caveman's ruleset with an empty intensity table in the middle of it and
+ * every Session would run on that in silence.
+ *
+ * Optional, and unset is the deployment ADR-0030 changes nothing about: no level
+ * means no ruleset, which is byte-for-byte what every spawn carried before this.
+ *
+ * The two wenyan levels are accepted here and only here, which is `ultracode`'s
+ * shape and `ultracode`'s reason — the Menu bounds Callers and never the operator.
+ *
+ * Compared exactly, never folded or trimmed, for `readEffort`'s reason. That
+ * includes refusing `wenyan`, which caveman's own hook would have folded into
+ * `wenyan-full`; `CAVEMAN_MENU` is where that is argued.
+ */
+function readCaveman(env: Environment, problems: string[]): string | null {
+  const found = envValue(env, 'ROMA_CAVEMAN')
+  if (found === null) return null
+  if (!isPinnableCaveman(found)) {
+    problems.push(
+      `ROMA_CAVEMAN is "${found}", which is not a Caveman roma can pin. Set one of: ` +
+        `${CAVEMAN_MENU.join(', ')} — or ${OFF_MENU_WENYAN.join(', ')}, which are the ` +
+        `operator's alone. Nothing downstream would refuse this: the ruleset is roma's own ` +
+        `text, assembled here and handed over rendered, so no Runtime ever sees the level.`,
     )
     return null
   }

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AuditLog } from './audit-log.js'
 import { buildEnv, type Credential } from './build-env.js'
+import { CAVEMAN_OFF, cavemanRuleset } from './caveman.js'
 import { PINNED_EFFORT, PINNED_MODEL } from './claude-session.js'
 import type { CredentialEnvs } from './session-pool.js'
 import type { ChannelAdapter } from './channel-adapter.js'
@@ -190,6 +191,19 @@ export interface StartRomaOptions {
    * operator, exactly as `model` may already name a model off the Model Menu.
    */
   readonly effort?: string
+  /**
+   * The Pinned Caveman. Defaults to `off`, which appends no text at all.
+   *
+   * Optional in a stronger sense than the two above, and this is the half of that
+   * a caller has to know: they default to what a Session would have run on
+   * anyway, where omitting this leaves the spawn arguments byte for byte what
+   * they were before ADR-0030 — so a deployment that names nothing is not
+   * changed, rather than changed to a default.
+   *
+   * It may name `wenyan-lite` or `wenyan-ultra`, which are off the Caveman Menu,
+   * on the rule `effort` above already carries.
+   */
+  readonly caveman?: string
   readonly maxConcurrentTasks?: number
   readonly retryBudget?: RetryBudget
   readonly spawn?: SpawnClaudeProcess
@@ -262,6 +276,7 @@ export async function startRoma({
   shims,
   model,
   effort,
+  caveman,
   maxConcurrentTasks,
   retryBudget,
   spawn,
@@ -301,6 +316,13 @@ export async function startRoma({
   // cannot come to disagree. Validated in `readRomaEnv` before it reaches here —
   // Claude Code would not refuse a wrong one.
   const pinnedEffort = effort ?? PINNED_EFFORT
+  // The same again, and the default is the one that means "say nothing" — which
+  // is what makes a deployment that named none unchanged by ADR-0030. Read in one
+  // place rather than three, because a Pinned Caveman is one text for the whole
+  // deployment and there is nothing yet for a `/caveman default` to return a
+  // Session *to*. Validated in `readRomaEnv` before it reaches here, where unlike
+  // the effort there is no Runtime that could have refused it either.
+  const pinnedCaveman = caveman ?? CAVEMAN_OFF
 
   // Built once and handed to both the check and the pool, so that what was
   // verified is the environment roma actually runs on rather than one built the
@@ -427,25 +449,31 @@ export async function startRoma({
     // thing to keep in step.
     models,
     efforts,
-    // Every Reach that has something to say, in the order they were proved. A
-    // blank line between them rather than a joined paragraph, because they are
-    // separate capabilities and an agent skimming a system prompt reads a break
-    // as a change of subject — which it is.
+    // Every Reach that has something to say, in the order they were proved, and
+    // then the Caveman. A blank line between them rather than a joined paragraph,
+    // because they are separate capabilities and an agent skimming a system
+    // prompt reads a break as a change of subject — which it is.
     //
-    // An empty announcement is dropped rather than joined and trimmed. An
-    // unavailable Reach says nothing, and `--append-system-prompt` is gated on
-    // the value being `undefined` and never on it being empty — so a trailing
-    // blank line would reach the argv rather than being tidied away.
+    // An empty part is dropped rather than joined and trimmed. An unavailable
+    // Reach says nothing, an `off` Caveman says nothing, and
+    // `--append-system-prompt` is gated on the value being `undefined` and never
+    // on it being empty — so a trailing blank line would reach the argv rather
+    // than being tidied away.
+    //
+    // That the Caveman goes *after* the Reaches, on this same join, is
+    // ADR-0030's first Consequence and not this file's call.
     //
     // Joined here and resolved in the pool, which is a split rather than an
-    // oversight. What the Reaches announce is settled by the boot proof above and
-    // cannot move until roma restarts, so assembling it once is honest; *when* a
-    // spawn reads it is the pool's to say, because ADR-0030 adds a second part to
-    // this text that is per Session, and the pool is the only thing that knows
-    // which Session it is about to start.
-    appendSystemPrompt: eachReach(reaches)
-      .map((reach) => reach.announce())
-      .filter((announcement) => announcement !== '')
+    // oversight. Both parts are settled by boot — the Reaches by the proof above,
+    // the Caveman by one variable for the whole deployment — so assembling them
+    // once is honest; *when* a spawn reads the result is the pool's to say,
+    // because ADR-0030's Chosen Caveman is per Session, and the pool is the only
+    // thing that knows which Session it is about to start.
+    appendSystemPrompt: [
+      ...eachReach(reaches).map((reach) => reach.announce()),
+      cavemanRuleset(pinnedCaveman),
+    ]
+      .filter((part) => part !== '')
       .join('\n\n'),
     ...(retryBudget === undefined ? {} : { retryBudget }),
     ...(spawn === undefined ? {} : { spawn }),

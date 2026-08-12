@@ -4,6 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import { monthOf } from './audit-log.js'
 import type { Credential } from './build-env.js'
+import { CAVEMAN_MENU, CAVEMAN_OFF, cavemanRuleset, OFF_MENU_WENYAN } from './caveman.js'
 import { ConfigurationMissing } from './env-config.js'
 import { sessionIdFor } from './session-id.js'
 import { askMinter } from './shim-client.js'
@@ -33,12 +34,15 @@ function boot({
   minter = new FakeMinter(),
   cloudMinter,
   documentMinter,
+  caveman,
 }: {
   minter?: FakeMinter
   /** Omitted, this roma has no Cloud Reach — which is the ordinary deployment. */
   cloudMinter?: FakeCloudMinter
   /** Omitted, this roma has no Document Reach — also the ordinary deployment. */
   documentMinter?: FakeDocumentMinter
+  /** Omitted, this roma has no Pinned Caveman — also the ordinary deployment. */
+  caveman?: string
 } = {}) {
   const fixture = romaFixture('startup')
   fixtures.push(fixture)
@@ -61,6 +65,7 @@ function boot({
     spawn: fixture.claude.spawn,
     log: (record) => log.push(record as ReachLogRecord),
     selfCheckTimeoutMs: 1_000,
+    ...(caveman === undefined ? {} : { caveman }),
   }).then((roma) => {
     resolved = true
     started.push(roma)
@@ -1074,5 +1079,66 @@ describe('putting a credential in front of a Session’s tools', () => {
 
     expect(roma.minter.minted).toEqual([])
     expect(Object.keys(env)).not.toContain('GH_TOKEN')
+  })
+})
+
+/**
+ * ADR-0030: one variable, and every Session roma serves is asked to be shorter.
+ *
+ * Asserted off the spawned process's own arguments rather than off anything roma
+ * holds, because the claim is that the ruleset *reaches* a Session — everything
+ * between the variable and the argv is what could go wrong.
+ */
+describe('telling a Session how short to be', () => {
+  /** What one Session was appended, on a roma pinned to this Caveman. */
+  async function appendUnder(caveman?: string): Promise<string> {
+    const roma = boot(caveman === undefined ? {} : { caveman })
+    await roma.answerProbe()
+    const { core } = await roma.starting
+
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
+    await flush()
+    const spawn = roma.claude.lastSpawn
+    feed(roma.procFor(KEY), OK)
+    await handled
+
+    return announcedTo(spawn)
+  }
+
+  // Every level an operator may pin, the two that will never be on the Menu
+  // included. One boot each, because "an operator sets one variable" is the whole
+  // feature and a level that could not be set would be a level roma does not have.
+  it.each([...CAVEMAN_MENU, ...OFF_MENU_WENYAN].filter((level) => level !== CAVEMAN_OFF))(
+    'carries the ruleset for %s into the spawn arguments',
+    async (level) => {
+      expect(await appendUnder(level)).toContain(cavemanRuleset(level))
+    },
+  )
+
+  // After, on the blank-line rule the announcements already join by: the Caveman
+  // is about how to answer and a Reach is about what roma can reach.
+  it('puts it after whatever the Reaches had to say', async () => {
+    expect(await appendUnder('ultra')).toBe(`reaches a-team/roma\n\n${cavemanRuleset('ultra')}`)
+  })
+
+  // Not the ruleset filtered to a level called off, which is thousands of
+  // characters of instructions. caveman's own hook exits before filtering.
+  it('says nothing at all where the Caveman is off', async () => {
+    expect(await appendUnder(CAVEMAN_OFF)).toBe('reaches a-team/roma')
+  })
+
+  // **The deployment this ADR is not allowed to change.** The same string the
+  // suite asserted before any of this existed, and it is asserted here as an
+  // equality rather than a `toContain` so that a stray blank line or a default
+  // that quietly became `full` cannot pass.
+  it('leaves a deployment that named no Caveman byte-identical to before', async () => {
+    expect(await appendUnder()).toBe('reaches a-team/roma')
   })
 })
