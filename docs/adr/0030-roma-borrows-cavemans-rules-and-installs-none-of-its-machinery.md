@@ -182,6 +182,18 @@ Menu.
 that everything roma pins for Claude Code it pins for Codex applies, and the
 agenda item is at the end.
 
+**Not measured — whether the append survives a `--resume`.** Agenda item 5, and
+the one question here no bundle can answer. `#spawnNow` hands
+`appendSystemPrompt` to `ClaudeSession` without looking at `resuming`, so the
+flag is on a resumed process's argv — which says nothing about whether the
+Runtime applies it to a conversation that already has a system prompt. The
+**instrument exists**: `src/append-on-resume.live.test.ts` briefs a Session under
+one nonsense codeword, evicts it, resumes it under a **different** one, and asks
+for a codeword the conversation itself never contained, so one run tells apart
+the append applying, the original one persisting, and nothing persisting. It
+drives a real Turn against the Shared Window and **nobody has spent it yet**;
+`docs/append-on-resume-verification.md` is the method and the empty result.
+
 ## Context
 
 roma's agent talks to people through a Channel, and its Turns are billed to one
@@ -473,7 +485,9 @@ Ordered by how much falls if the answer is no.
    it spends Shared Window money, so it is asked once and written down.
 5. **Does `--append-system-prompt` survive a `--resume`?** roma's Sessions are
    resumed constantly, and a ruleset that applies only to a Session's first
-   process is a diet with a hole in it.
+   process is a diet with a hole in it. `src/append-on-resume.live.test.ts` is
+   the instrument and `docs/append-on-resume-verification.md` the method; it
+   distinguishes three outcomes rather than two, and the reading is outstanding.
 6. **Does the app-server take a system-prompt append, and is any of this
    measurable on Codex?** ADR-0026's agenda gains this item; nothing here is
    blocked on it.
