@@ -20,13 +20,9 @@ import { OVERFLOW_BUTTON, outcomeMessages, progressText, threadName } from './re
 /**
  * How many times roma makes one Discord call before it gives up on it.
  *
- * **Bounded, and the bound is the point.** ADR-0028 moved the remedy for a
- * failed post into `deliver` because re-reading the event repairs no POST; what
- * that inherits on this Channel is that a 429 counts toward an invalid-request
- * budget of *"10,000 per 10 minutes"* whose penalty is a temporary block on the
- * whole API rather than on the channel that earned it. So a loop that kept
- * trying would turn one unreachable Conversation into an outage of every
- * Conversation, roma's Gateway included (ADR-0029).
+ * **Never take the bound off.** A loop that kept trying turns one unreachable
+ * Conversation into an outage of every Conversation, roma's Gateway included —
+ * what a refused call spends is `DiscordRefusal`'s.
  *
  * Three, because the failure this exists to repair is a blip: a 503 while
  * Discord moves something, or a bucket roma shares with itself during a split
@@ -71,6 +67,12 @@ const REMEMBERED = 1_000
  * running, and its acknowledgement is still the message it will keep editing.
  */
 const ENDS_THE_TASK = new Set(['result', 'failure', 'stopped', 'command-outcome', 'choice'])
+
+/** Where one instruction's messages go, and the message the first of them answers. */
+interface Answering {
+  readonly channel: string
+  readonly replyTo: string | null
+}
 
 /** The message roma is answering in one Conversation, and where it arrived. */
 interface Answered {
@@ -214,10 +216,9 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
    * back on the press, so the Task id makes the round trip and roma needs to
    * remember nothing between the offer and its being taken.
    *
-   * Answers null for every press `toIngress` answered — `Ingress.#workFor` tries
-   * that one first and only reaches here where it returned null, so the two
-   * encodings are told apart by the first field of a `custom_id` and never by
-   * which reader was asked (`discord-events.ts`).
+   * Answers null for every press `toIngress` answered, and not because it is
+   * asked second: one reader reads every `custom_id` and answers one kind, so
+   * the order the subscriber asks in decides nothing (`Pressed`).
    */
   toOverflowTaken(event: DiscordEvent): string | null {
     return readOverflowTaken(event)
@@ -240,12 +241,11 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
    * run out of attempts on.
    */
   async deliver(instruction: OutboundInstruction): Promise<void> {
-    const { taskId, conversationKey, caller } = instruction
-    const answered = this.#answering.get(addressOf(conversationKey, caller))
-    const channel = await this.#place(conversationKey, answered)
+    const { taskId, conversationKey } = instruction
+    const answering = await this.#answeringFor(instruction)
 
     if (instruction.kind === 'progress') {
-      await this.#acknowledge(taskId, channel, answered, progressText(instruction.progress))
+      await this.#acknowledge(taskId, answering, progressText(instruction.progress))
       return
     }
 
@@ -276,15 +276,29 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
       // addresses the Caller here — Discord's own form, where Chat has only a
       // mention — and an answer long enough to split would otherwise notify
       // somebody once per 2000 characters of it (ADR-0029).
-      const replyTo = at === 0 ? (answered?.message ?? null) : null
+      const replyTo = at === 0 ? answering.replyTo : null
       // On the last piece rather than on every one, for the same reason the
       // reply is on the first: buttons belong under the text that explains them,
       // and a split answer would otherwise repeat the whole Menu under each
       // piece.
       const last = at === messages.length - 1
       await this.#retrying(() =>
-        this.#api.post({ channel, text, replyTo, buttons: last ? buttons : [] }),
+        this.#api.post({
+          channel: answering.channel,
+          text,
+          replyTo,
+          buttons: last ? buttons : [],
+        }),
       )
+    }
+  }
+
+  /** Where this instruction is said and what it replies to, out of one `#answering` entry. */
+  async #answeringFor({ conversationKey, caller }: OutboundInstruction): Promise<Answering> {
+    const answered = this.#answering.get(addressOf(conversationKey, caller))
+    return {
+      channel: await this.#place(conversationKey, answered),
+      replyTo: answered?.message ?? null,
     }
   }
 
@@ -347,10 +361,10 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
    *
    * **Never let a refusal here end the delivery.** roma may hold no permission
    * to open threads, the channel may be a forum or media channel where the route
-   * does not work at all, or the classifier may have read a thread as top level
-   * — and in every one of them the reply belongs in the channel the message
-   * arrived in. Thrown instead, an answer somebody paid for reaches nobody;
-   * fallen back, only the Session is in the wrong place (ADR-0029).
+   * does not work at all, or a thread may have been read as top level — and in
+   * every one of them the reply belongs in the channel the message arrived in.
+   * Thrown instead, an answer somebody paid for reaches nobody; fallen back,
+   * only the Session is in the wrong place (ADR-0029).
    */
   async #openThread(conversationKey: string, answered: Answered): Promise<string> {
     try {
@@ -364,12 +378,7 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
   }
 
   /** Post the acknowledgement, or edit the one this Task already has. */
-  async #acknowledge(
-    taskId: string,
-    channel: string,
-    answered: Answered | undefined,
-    text: string,
-  ): Promise<void> {
+  async #acknowledge(taskId: string, { channel, replyTo }: Answering, text: string): Promise<void> {
     const posted = this.#acknowledgements.get(taskId)
     if (posted !== undefined) {
       const id = await posted
@@ -382,9 +391,7 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     // waiting is who most needs to know which is theirs. Discord notifies on the
     // post and not on the edits, so this is one notification per Task rather
     // than one per update.
-    const posting = this.#retrying(() =>
-      this.#api.post({ channel, text, replyTo: answered?.message ?? null, buttons: [] }),
-    )
+    const posting = this.#retrying(() => this.#api.post({ channel, text, replyTo, buttons: [] }))
     this.#acknowledgements.set(taskId, posting)
     try {
       await posting
@@ -414,8 +421,9 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
 /**
  * One Conversation as one Caller is answered in it. See `#answering`.
  *
- * A space separates them because neither half can contain one: both are Discord
- * snowflakes, which are decimal.
+ * **Never join them with something a snowflake can hold.** Both halves are
+ * decimal, so a space cannot occur inside either; one that could would make two
+ * of these one entry, and the reply to Ada's question would go to Bob's.
  */
 function addressOf(conversationKey: string, caller: string): string {
   return `${conversationKey} ${caller}`
@@ -463,16 +471,15 @@ function refused(error: unknown): boolean {
  * How long to wait before trying this again, or null for a call not worth trying
  * again at all.
  *
- * **Never retry what `refused` answers true for.** Every attempt at a 401 or a
- * 403 is another entry in the invalid-request budget whose penalty is a block on
- * the whole API, so a loop over a permission roma does not have is how roma
- * loses the ones it does (ADR-0029).
+ * **Never retry what `refused` answers true for.** A 403 will be a 403 next
+ * time, and every attempt at one spends roma's way toward the block
+ * `DiscordRefusal` describes.
  *
- * Anything that is not a `DiscordRefusal` never reached Discord to be refused —
- * a socket that failed, a name that did not resolve — and *is* retried, at the
- * cost of a duplicate message where the request in fact arrived. A Conversation
- * told twice is a great deal better than one told nothing about a Turn that has
- * already been paid for.
+ * **Never narrow this to a `DiscordRefusal` either.** Anything else never
+ * reached Discord to be refused — a socket that failed, a name that did not
+ * resolve — and left unretried, an answer somebody has already paid for reaches
+ * nobody over a blip. The cost is a duplicate message where the request in fact
+ * arrived, and a Conversation told twice beats one told nothing.
  */
 function waitBefore(error: unknown, attempt: number): number | null {
   if (refused(error)) return null

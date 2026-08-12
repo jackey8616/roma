@@ -66,9 +66,10 @@ export const INTENTS = GUILDS | GUILD_MESSAGES | DIRECT_MESSAGES
 /**
  * How long roma waits before reconnecting, and the ceiling it doubles up to.
  *
- * A ceiling rather than a fixed wait because of the penalty at the other end: a
- * retry loop that does not back off spends its way into the invalid-request
- * limit, whose ban is not scoped to the connection that earned it (ADR-0029).
+ * **Never reconnect without backing off.** A loop that does not spends its way
+ * into the invalid-request limit `discord-api.ts`'s `DiscordRefusal` describes,
+ * whose block is not scoped to the connection that earned it — so the socket
+ * roma cannot get back on takes the REST API with it.
  */
 export const RECONNECT_FLOOR_MS = 1_000
 export const RECONNECT_CEILING_MS = 60_000
@@ -127,7 +128,7 @@ export type GatewayLogRecord =
       /**
        * A message arrived before roma knew enough to read it, and is being held.
        *
-       * The classifier is unanswerable until the guild's channel list has
+       * No Conversation Key can be derived until the guild's channel list has
        * arrived: a channel roma has not been told about looks exactly like a
        * thread, and a top-level message read as a thread is a Session per
        * message for as long as it lasts. So the event waits rather than being
@@ -295,12 +296,13 @@ export class GatewayTransport implements Transport<DiscordEvent> {
   #attempts = 0
 
   /**
-   * Which channels each guild has, which is the classifier and nothing else.
+   * Which channels each guild has, which is what a Conversation Key is derived
+   * from and nothing else.
    *
    * **Channels, never threads.** The guild's channel list is complete and its
    * thread list holds only the active ones, so a thread archived for a day is in
-   * neither — a classifier reading the thread list would call it a channel and
-   * split its Session (ADR-0029).
+   * neither — read against the thread list it would be taken for one of the
+   * guild's channels, and its Session would split (ADR-0029).
    */
   readonly #channels = new Map<string, Set<string>>()
   /** What is waiting for the state that makes it readable. See `gateway-held`. */
@@ -560,10 +562,10 @@ export class GatewayTransport implements Transport<DiscordEvent> {
   /** Whether roma holds the state this has to be read against. */
   #readable({ message, press }: Pending): boolean {
     if (this.#self === null) return false
-    // A press carries its own Conversation Key on the button, so the classifier
-    // — and the guild state behind it — is not a question it has to be read
-    // against. Held for one it does not ask, the person has already been told
-    // their press arrived and would then wait for an answer to it (ADR-0029).
+    // A press carries its own Conversation Key on the button, so the guild state
+    // a key is otherwise derived from is nothing it has to wait for. Held for
+    // state it does not need, the person has already been told their press
+    // arrived and would then wait for an answer to it (ADR-0029).
     if (press !== null) return true
     const guildId = asString(message['guild_id'])
     return guildId === null || this.#channels.has(guildId)
@@ -576,9 +578,9 @@ export class GatewayTransport implements Transport<DiscordEvent> {
    * resolves when one is finished with — so awaiting it stops roma reading the
    * socket, heartbeats included, which is a connection Discord drops.
    *
-   * **Never move the classifier below the fetch** either: it would then answer
-   * about the guild as it stands a round trip later rather than as it stood when
-   * the message arrived.
+   * **Never read the guild's channels below the fetch** either: the key would
+   * then be derived from the guild as it stands a round trip later rather than
+   * as it stood when the message arrived.
    */
   async #deliver({ id, message, press }: Pending): Promise<void> {
     const receiver = this.#receiver

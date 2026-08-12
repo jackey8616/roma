@@ -35,10 +35,11 @@ export interface DiscordEvent {
   /**
    * Whether `channel_id` is one of the guild's own channels.
    *
-   * The classifier, in the polarity ADR-0029 chose: the guild's channel list is
-   * complete and its thread list holds only the *active* threads, so "is this
-   * one of the guild's channels" is answerable and "is this a thread" is not.
-   * False for a direct message, which has no guild to ask about.
+   * What the Conversation Key below is derived from, asked in the polarity
+   * ADR-0029 chose: the guild's channel list is complete and its thread list
+   * holds only the *active* threads, so "is this one of the guild's channels" is
+   * answerable and "is this a thread" is not. False for a direct message, which
+   * has no guild to ask about.
    */
   readonly guildChannel: boolean
   /** The passage this message quotes, already completed. See `completedQuotation`. */
@@ -101,13 +102,7 @@ export interface Interaction {
   readonly press: DiscordPress
 }
 
-/**
- * Discord's kind for a press on something roma posted.
- *
- * The only interaction roma reads. An application command is the other kind that
- * arrives over this socket, and roma registers none — ADR-0029 leaves slash
- * commands open and explicitly not as something to add quietly.
- */
+/** Discord's kind for a press on something roma posted, and the only one roma reads. */
 const MESSAGE_COMPONENT = 3
 
 /**
@@ -124,19 +119,33 @@ const MESSAGE_COMPONENT = 3
  */
 export const MAX_CUSTOM_ID = 100
 
-/**
- * The two things a press can be, as the first field of a `custom_id`.
- *
- * **Never let these two collide.** `Ingress.#workFor` asks `toIngress` first and
- * only calls `toOverflowTaken` where it answered null, so an encoding both
- * readers accept would turn taking an Overflow offer into a paid Task
- * (`src/serve.ts`).
- */
+/** The two tags a `custom_id` begins with, which are `Pressed`'s two kinds. */
 const CHOOSE = 'choose'
 const TAKE_OVERFLOW = 'overflow'
 
 /** Between the fields of a `custom_id`. See `chooseId` for why the option is last. */
 const FIELD = ':'
+
+/**
+ * What one press means, which is the whole of what a `custom_id` carries back.
+ *
+ * **Two kinds no id can be both of, and that is what this type is for.**
+ * `Ingress.#workFor` asks `toIngress` first and reaches `toOverflowTaken` only
+ * where that answered null (`src/serve.ts`), so an encoding both readers
+ * accepted would turn taking an Overflow offer — the one thing in roma nobody
+ * can do by typing — into a paid Task. Every id is written by `pressId` and read
+ * by `readPress`, and the two kinds are one `switch` over one tag: telling them
+ * apart is not a rule either reader has to keep, and a collision is not
+ * something to be careful about but something there is nowhere to write.
+ */
+export type Pressed =
+  | {
+      readonly kind: typeof CHOOSE
+      readonly chooses: Extract<Command, 'model' | 'effort'>
+      readonly conversationKey: string
+      readonly option: string
+    }
+  | { readonly kind: typeof TAKE_OVERFLOW; readonly taskId: string }
 
 /**
  * What a Menu button carries, which is the Command and the Conversation both.
@@ -158,7 +167,7 @@ export function chooseId(
   conversationKey: string,
   option: string,
 ): string {
-  return [CHOOSE, chooses, conversationKey, option].join(FIELD)
+  return pressId({ kind: CHOOSE, chooses, conversationKey, option })
 }
 
 /**
@@ -169,7 +178,54 @@ export function chooseId(
  * Task blocked behind this one.
  */
 export function overflowId(taskId: string): string {
-  return [TAKE_OVERFLOW, taskId].join(FIELD)
+  return pressId({ kind: TAKE_OVERFLOW, taskId })
+}
+
+/** One meaning as the id that carries it, and the only place one is written. */
+function pressId(pressed: Pressed): string {
+  return pressed.kind === CHOOSE
+    ? [CHOOSE, pressed.chooses, pressed.conversationKey, pressed.option].join(FIELD)
+    : [TAKE_OVERFLOW, pressed.taskId].join(FIELD)
+}
+
+/**
+ * What one `custom_id` means, or null for one roma did not put out.
+ *
+ * The only reading of one there is, which is what makes `Pressed`'s claim true:
+ * both readers below are this plus a question about the kind, so neither can
+ * accept an id the other also accepts, whichever order they are asked in.
+ *
+ * Null covers a press on a card from an application that is not roma, a tag from
+ * a version of roma that encoded something else, and every id that carries a tag
+ * roma knows and nothing usable after it.
+ */
+export function readPress(customId: string): Pressed | null {
+  const [tag, ...rest] = customId.split(FIELD)
+  switch (tag) {
+    case CHOOSE:
+      return chosen(rest)
+    case TAKE_OVERFLOW:
+      return taken(rest)
+    default:
+      return null
+  }
+}
+
+/** A Menu press, or null where it names something roma never put on a Menu. */
+function chosen([chooses, conversationKey, ...rest]: readonly string[]): Pressed | null {
+  // Only the two Commands that have a Menu. A press naming anything else is one
+  // roma never put out, and synthesising `/stop` or `/clear` from it would reach
+  // a Command through a door meant for a Menu.
+  if (chooses !== 'model' && chooses !== 'effort') return null
+  if (conversationKey === undefined || conversationKey === '') return null
+  const option = rest.join(FIELD)
+  return option === '' ? null : { kind: CHOOSE, chooses, conversationKey, option }
+}
+
+/** An Overflow press, or null where it names no Task. */
+function taken(rest: readonly string[]): Pressed | null {
+  const taskId = rest.join(FIELD)
+  return taskId === '' ? null : { kind: TAKE_OVERFLOW, taskId }
 }
 
 /**
@@ -317,23 +373,15 @@ export function readIngressMessage(
 export function readChosenOption(event: DiscordEvent): IngressMessage | null {
   const { press } = event
   if (press === null) return null
-
-  const [tag, chooses, conversationKey, ...rest] = press.customId.split(FIELD)
-  if (tag !== CHOOSE) return null
-  // Only the two Commands that have a Menu. A press naming anything else is one
-  // roma never put out, and synthesising `/stop` or `/clear` from it would reach
-  // a Command through a door meant for a Menu.
-  if (chooses !== 'model' && chooses !== 'effort') return null
-  if (conversationKey === undefined || conversationKey === '') return null
-  const option = rest.join(FIELD)
-  if (option === '') return null
+  const pressed = readPress(press.customId)
+  if (pressed?.kind !== CHOOSE) return null
 
   return {
     // The button's own, never the channel the card sits in — see `chooseId`.
-    conversationKey,
+    conversationKey: pressed.conversationKey,
     caller: press.caller,
     callerName: press.callerName,
-    text: commandFor(chooses, option),
+    text: commandFor(pressed.chooses, pressed.option),
     enclosures: [],
     quotation: null,
   }
@@ -349,10 +397,8 @@ export function readChosenOption(event: DiscordEvent): IngressMessage | null {
 export function readOverflowTaken(event: DiscordEvent): string | null {
   const { press } = event
   if (press === null) return null
-  const [tag, ...rest] = press.customId.split(FIELD)
-  if (tag !== TAKE_OVERFLOW) return null
-  const taskId = rest.join(FIELD)
-  return taskId === '' ? null : taskId
+  const pressed = readPress(press.customId)
+  return pressed?.kind === TAKE_OVERFLOW ? pressed.taskId : null
 }
 
 /**

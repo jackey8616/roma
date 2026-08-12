@@ -8,7 +8,14 @@ import { sessionIdFor } from '../../session-id.js'
 import type { Delivery } from '../../transport.js'
 import { ATTEMPTS, DiscordAdapter, RETRY_CEILING_MS, RETRY_FLOOR_MS } from './discord-adapter.js'
 import { DiscordRefusal, MAX_BUTTONS, type DiscordButton } from './discord-api.js'
-import { MAX_CUSTOM_ID, type DiscordEvent, type DiscordMessage } from './discord-events.js'
+import {
+  chooseId,
+  MAX_CUSTOM_ID,
+  overflowId,
+  readPress,
+  type DiscordEvent,
+  type DiscordMessage,
+} from './discord-events.js'
 import {
   GatewayTransport,
   INTENTS,
@@ -93,7 +100,7 @@ function ready(sequence = 1): unknown {
 /**
  * The guild's state, as `GUILD_CREATE` carries it.
  *
- * Both lists, because the whole of the classifier is which one it reads:
+ * Both lists, because the whole of the key below is which one it is read against:
  * `channels` is *"Channels in the guild"* and `threads` is *"All active
  * threads…"* — so the archived one below is deliberately in neither.
  */
@@ -382,8 +389,8 @@ describe('which Conversation a Discord message belongs to', () => {
 
   // The polarity ADR-0029 chose, and the whole reason it chose it. An archived
   // thread is in neither of the guild's lists: `channels` is complete and
-  // `threads` holds only the active ones. A classifier reading the thread list
-  // would call this a channel and key it on the message — a Session per message,
+  // `threads` holds only the active ones. Read against the thread list this would be
+  // taken for one of the guild's channels and keyed on the message — a Session per message,
   // for ever, in a thread roma is already in.
   it('reads a thread archived out of both of the guild’s lists as a thread', async () => {
     const channel = await messaged(addressed({ channel_id: ARCHIVED }))
@@ -424,7 +431,7 @@ describe('which Conversation a Discord message belongs to', () => {
 // produce it — `GUILD_CREATE` names those and roma takes them straight back out
 // — so this is the archived one, which is in neither list and therefore free to
 // turn up in the wrong one.
-describe('every way the classifier can be wrong is the harmless direction', () => {
+describe('every way the key can be wrong is the harmless direction', () => {
   // A thread misread as top level. Every message gets a key of its own, so the
   // context resets visibly — and two people talking in it never share a Session,
   // which is the half that matters: nothing leaks between Callers. The reply
@@ -451,7 +458,7 @@ describe('every way the classifier can be wrong is the harmless direction', () =
     expect(sessionIdFor('1')).not.toBe(sessionIdFor('2'))
   })
 
-  // The place a reply belongs is on the event whichever way the classifier went,
+  // The place a reply belongs is on the event whichever way the key went,
   // which is what makes the fallback ADR-0029 describes possible at all: roma is
   // refused the thread, and posts in `channel_id`, which is where the reply
   // belonged. Carrying it is what this asserts; using it is the Adapter's.
@@ -656,7 +663,7 @@ describe('a Quotation is completed before the Core sees it', () => {
 })
 
 describe('nothing is processed before the state that makes it readable', () => {
-  // The classifier is unanswerable until the guild's channel list has arrived: a
+  // No key can be derived until the guild's channel list has arrived: a
   // channel roma has not been told about is indistinguishable from a thread. So
   // the message waits — and there is no queue behind this Transport to wait in,
   // which is why the waiting is roma's own.
@@ -929,8 +936,8 @@ describe('where an answer goes', () => {
   // claim.** The Start Thread route does not work on a forum or media channel at
   // all — and it is never reached for one, because every message in a forum is
   // inside a post, a post is a thread, and a thread is not among the guild's
-  // channels. So the classifier has already routed it to a reply in place.
-  it('opens no thread in a forum, because the classifier already replied in place', async () => {
+  // channels. So the key has already routed it to a reply in place.
+  it('opens no thread in a forum, because the key already put the reply in place', async () => {
     const post = '500000000000000015'
     const channel = await messaged(addressed({ channel_id: post }), [CHANNEL, FORUM])
 
@@ -956,8 +963,8 @@ describe('where an answer goes', () => {
 
   // The fallback ADR-0029 calls the harmless direction, and the property #179
   // carried the channel id for. roma may hold no `CREATE_PUBLIC_THREADS`, the
-  // channel may be one the route does not work on, or the classifier may have
-  // read a thread as top level — in every one of them the reply belongs in the
+  // channel may be one the route does not work on, or a thread may have been
+  // read as top level — in every one of them the reply belongs in the
   // channel the message arrived in, and only the Session is in the wrong place.
   it('falls back to the channel the message arrived in when a thread is refused', async () => {
     const channel = await messaged(addressed())
@@ -1602,6 +1609,40 @@ describe('the Overflow offer, out as a button and back as a press', () => {
     expect(channel.adapter.toOverflowTaken(takingOverflow)).toBe('task-7')
     expect(channel.adapter.toIngress(choosing)).toMatchObject({ text: '/model opus' })
     expect(channel.adapter.toOverflowTaken(choosing)).toBeNull()
+  })
+
+  /**
+   * **The same claim without an order to ask in.** The test above drives the two
+   * readers the way the subscriber does; this one asks what an id *is*, over
+   * every id either builder can be made to produce — including the ones written
+   * to look like the other encoding, since a Task id and a Menu name are the two
+   * fields whose spelling is not roma's to bound.
+   *
+   * It fails the moment one id parses as both kinds, which is the fault that
+   * turns taking an Overflow offer into a paid Task nobody asked for.
+   */
+  it('reads every id it writes as one kind and never as the other', () => {
+    // Spelled here rather than imported: the inputs below are the ones written
+    // to look like the *other* encoding, and a test that borrowed roma's own
+    // constants for them could not tell a collision from an agreement.
+    const keys = ['1', MESSAGE, 'overflow:task-1']
+    const names = ['opus', 'default', 'a:name:with:separators', 'overflow', 'choose:x']
+    const tasks = ['task-7', 'task:7', 'choose:model:1:opus', 'overflow', MESSAGE]
+
+    const menu = keys.flatMap((key) =>
+      names.flatMap((name) => [chooseId('model', key, name), chooseId('effort', key, name)]),
+    )
+    const offers = tasks.map((taskId) => overflowId(taskId))
+
+    for (const customId of menu) {
+      expect(readPress(customId)?.kind, customId).toBe('choose')
+    }
+    // And every offer comes back whole, which is the other half of what makes
+    // one kind the right answer rather than merely the only one: a Task id cut
+    // at a separator would name a Task roma never blocked.
+    expect(offers.map((customId) => readPress(customId))).toEqual(
+      tasks.map((taskId) => ({ kind: 'overflow', taskId })),
+    )
   })
 })
 

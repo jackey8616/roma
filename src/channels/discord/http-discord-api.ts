@@ -24,21 +24,15 @@ export interface HttpDiscordApiOptions {
 /**
  * Discord's own code for a message that already has a thread on it.
  *
- * **Never read this as a failure.** *"A message can only have a single thread
- * created from it"*, so the second attempt at one message is exactly what a
- * retry makes — and reported as an error it would make every retry permanent,
- * sending the answer to the parent channel of a thread roma had already opened.
- *
- * Read from Discord's JSON error code table rather than from the route's own
- * documentation, which is ADR-0029's second tier of verification. Being wrong
- * about the number fails in that ADR's harmless direction and no further: roma
- * takes the refusal at its word, answers in the channel the message arrived in,
- * and only the Session is in the wrong place.
+ * **Never read this as a failure.** Why the second attempt at one message is a
+ * success is `startThread`'s promise on the port. The number is off Discord's
+ * JSON error code table rather than the route's own documentation — ADR-0029's
+ * second tier — and being wrong about it costs a Session its thread and no more.
  */
 const THREAD_ALREADY_CREATED = 160004
 
 /**
- * The five REST calls, over HTTP.
+ * The six REST calls, over HTTP.
  *
  * The far side of seam 3 and deliberately the whole of what sits behind it: this
  * decides nothing. It puts a token on a request, checks that Discord answered,
@@ -197,16 +191,12 @@ function componentRows(buttons: readonly DiscordButton[]): unknown[] {
 /**
  * What roma will let a message of its own mention.
  *
- * **Nothing the text asks for.** The words in a Result are written by a model
- * that reads whatever anybody put in front of it, so an answer containing
- * `@everyone` is one prompt away — and on Discord that is not a rendering
- * detail but a notification to a whole guild. `parse: []` leaves the characters
- * in the message and takes the ping out of them.
- *
- * `replied_user` is on because the reply is how a Caller is addressed here at
- * all (ADR-0029), and naming `allowed_mentions` at all is what turns that ping
- * off by default — so this field is the reply staying what Discord's own default
- * would have made it, rather than a second decision.
+ * **Never let the text decide it.** A Result is written by a model that has read
+ * whatever anybody put in front of it, so an `@everyone` in one is a
+ * notification to a whole guild that nobody can take back — which is why an
+ * empty `parse` is a decision ADR-0029 records rather than a precaution taken
+ * here. `replied_user` is on because naming this field at all is what turns the
+ * reply ping off, and the reply is how a Caller is addressed on this Channel.
  */
 const ALLOWED_MENTIONS = { allowed_mentions: { parse: [], replied_user: true } } as const
 
