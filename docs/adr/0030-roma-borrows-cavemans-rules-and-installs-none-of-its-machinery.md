@@ -15,6 +15,11 @@ fourth reason, `Core.#answerCaveman` answers `/caveman` and `#settingsReport`
 says it where this Session's is not `off`, and `src/channels/google-chat/` draws
 the Menu as buttons and reads a press back.
 
+**Amended 2026-08-12 by ADR-0029's Channel** (#176). `src/channels/discord/`
+draws it and reads a press back too, on the same terms and with no change to
+`ChannelAdapter`. The decisions here are untouched; what the amendment corrects
+is a sentence that named the only Channel there was when it was written.
+
 **Implemented is not verified, and holding those apart is most of what this file
 was written to do.** Nothing here has been measured against roma's own traffic,
 and the claim the whole thing exists for — that it saves anything — is still

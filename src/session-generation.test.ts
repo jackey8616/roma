@@ -196,15 +196,16 @@ describe('starting a fresh Session', () => {
  * a reason to keep it rather than to drop it.
  */
 /**
- * The rules every Chosen Record keeps, whichever of the two it is.
+ * The rules every Chosen Record keeps, whichever of the three it is.
  *
- * Written once and run twice, because the record is written once and used twice
- * — and because the two suites had already drifted apart while the two classes
- * were separate: the effort's asserted six things the model's did not, on an
- * implementation that was byte-identical.
+ * Written once and run once per kind, because the record is written once and
+ * used three times — and because the first two suites had already drifted apart
+ * while those classes were separate: the effort's asserted six things the
+ * model's did not, on an implementation that was byte-identical.
  *
- * Only what is genuinely shared. `ultracode`, and the two records sitting beside
- * each other, are each one kind's own and stay in its own block below.
+ * Only what is genuinely shared. `ultracode`, the wenyan levels, and the records
+ * sitting beside each other, are each one kind's own and stay in its own block
+ * below.
  */
 function behavesLikeAChosenRecord({
   make,

@@ -58,7 +58,7 @@ jobs:
 
       - name: dist is src alone, and runnable
         run: |
-          if [ ! -f dist/channels/google-chat/main.js ]; then
+          if [ ! -f dist/channels/main.js ]; then
             echo 'dist/ has no entrypoint' >&2
             exit 1
           fi

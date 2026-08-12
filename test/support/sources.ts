@@ -31,14 +31,18 @@ export function sources(): Source[] {
 /**
  * The composition roots, which every containment rule excludes.
  *
- * One per deployment, and today there is one deployment. Excluded for the reason
- * it already names a Channel: assembling roma means saying what it is assembled
- * out of, and something has to import a Minter by the name of the directory it
- * lives in. Named here rather than by pattern, and named *once* rather than
- * per-rule, so that adding a second deployment cannot leave one rule watching a
- * file the others do not.
+ * One, and it is the program: `src/channels/main.ts`. Excluded for the reason it
+ * already names every Channel roma serves — assembling roma means saying what it
+ * is assembled out of, and something has to import a Minter by the name of the
+ * directory it lives in. Named here rather than by pattern, and named *once*
+ * rather than per-rule, so that adding a second deployment cannot leave one rule
+ * watching a file the others do not.
+ *
+ * A Channel's own half of the assembly is not one of these and does not need to
+ * be: it names its own product, which is what its directory is for, and it names
+ * no forge, no cloud and no Depot (ADR-0028).
  */
-export const COMPOSITION_ROOTS = [['channels', 'google-chat', 'main.ts'].join(sep)]
+export const COMPOSITION_ROOTS = [['channels', 'main.ts'].join(sep)]
 
 // The reader for one composition root is gone with its only caller. Rebuilding a
 // rule about the composition root means bringing it back, which ADR-0020 §7

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Credential } from '../../build-env.js'
 import { cavemanRuleset } from '../../caveman.js'
-import { serve, type Serving } from '../../serve.js'
+import { bind, serve, type Serving } from '../../serve.js'
 import { sessionIdFor } from '../../session-id.js'
 import { GoogleChatAdapter } from './google-chat-adapter.js'
 import { HttpChatApi, type ChatRequest } from './http-chat-api.js'
@@ -33,7 +33,7 @@ import { BLOCKED_WITH_OVERAGE, feed, OK } from '../../../test/support/recorded-s
 // It exists because every other test in this repo proves one of these in
 // isolation, and the failure they cannot see is the one at the joins — a
 // Transport emitting events the Adapter cannot read produces a roma that runs
-// perfectly and answers nobody. `serve`'s type parameter catches that at compile
+// perfectly and answers nobody. `bind`'s type parameter catches that at compile
 // time; this catches the rest of it.
 //
 // The Chat event below is still **written from Google's documentation, not
@@ -109,8 +109,9 @@ async function boot({
     },
     shims,
     overflow: { credential: METERED, monthlyCapUsd: 100 },
-    channel: new GoogleChatAdapter({ api }),
-    transport: new PubSubTransport({ subscription, log: () => {} }),
+    channels: [
+      bind(new GoogleChatAdapter({ api }), new PubSubTransport({ subscription, log: () => {} })),
+    ],
     ...fixture.dirs,
     spawn: fixture.claude.spawn,
     log: (record) => log.push(record as ShimLogRecord),

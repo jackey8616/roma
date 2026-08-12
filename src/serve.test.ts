@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Credential } from './build-env.js'
 import type { IngressMessage } from './channel-adapter.js'
-import { serve, type Serving } from './serve.js'
+import { bind, serve, type IngressLogRecord, type ServeLog, type Serving } from './serve.js'
 import { StartupSelfCheckFailed } from './startup-self-check.js'
 import { flush } from '../test/support/fake-claude.js'
 import { fakeReaches, fakeShims } from '../test/support/fake-minter.js'
@@ -49,11 +49,18 @@ function said(text: string, conversationKey = KEY): IngressMessage {
 let running: Serving[] = []
 let fixtures: RomaFixture[] = []
 
-function boot({ overflow = true }: { overflow?: boolean } = {}) {
+function boot({ overflow = true, channels = 1 }: { overflow?: boolean; channels?: number } = {}) {
   const fixture = romaFixture('serve')
   fixtures.push(fixture)
-  const channel = new RecordingAdapter()
-  const transport = new FakeTransport()
+  // One Channel and the Transport its events arrive over, per Channel asked for.
+  // Two instances of each double is the whole of what a second Channel takes
+  // here, which is the point: `FakeTransport` and `RecordingAdapter` were
+  // already parameterised, so nothing new had to be built to see two of them.
+  const bound = Array.from({ length: channels }, () => ({
+    channel: new RecordingAdapter(),
+    transport: new FakeTransport(),
+  }))
+  const log: IngressLogRecord[] = []
 
   let resolved = false
   const shims = fakeShims()
@@ -63,11 +70,10 @@ function boot({ overflow = true }: { overflow?: boolean } = {}) {
     reaches: fakeReaches(),
     shims,
     ...(overflow ? { overflow: { credential: METERED, monthlyCapUsd: 100 } } : {}),
-    channel,
-    transport,
+    channels: bound.map(({ channel, transport }) => bind(channel, transport)),
     ...fixture.dirs,
     spawn: fixture.claude.spawn,
-    log: () => {},
+    log: ingressOnly(log),
     selfCheckTimeoutMs: 1_000,
   }).then((roma) => {
     resolved = true
@@ -80,10 +86,14 @@ function boot({ overflow = true }: { overflow?: boolean } = {}) {
   // is still between them.
   serving.catch(() => {})
 
+  const [first] = bound
   return {
     claude: fixture.claude,
-    channel,
-    transport,
+    /** The first Channel's, for the tests that are about one Channel. */
+    channel: first!.channel,
+    transport: first!.transport,
+    channels: bound,
+    log,
     serving,
     hasStarted: () => resolved,
     answerProbe: fixture.answerProbe,
@@ -91,12 +101,30 @@ function boot({ overflow = true }: { overflow?: boolean } = {}) {
   }
 }
 
+/**
+ * The subscriber's own records, kept, and everything else dropped.
+ *
+ * The pool's and the Cores' lines are traffic to this file; `IngressLogRecord`
+ * is what `serve` itself decided, and two of its five are the only trace their
+ * Delivery leaves anywhere.
+ */
+function ingressOnly(kept: IngressLogRecord[]): ServeLog {
+  return (record) => {
+    if (record.event.startsWith('ingress-')) kept.push(record as IngressLogRecord)
+  }
+}
+
 /** Boot, pass the self-check, and be receiving. */
-async function booted(options?: { overflow?: boolean }) {
+async function booted(options?: { overflow?: boolean; channels?: number }) {
   const roma = boot(options)
   await roma.answerProbe()
   await roma.serving
   return roma
+}
+
+/** Which Conversations one Channel was asked to post into, in the order it was asked. */
+function conversationsOf(channel: RecordingAdapter): string[] {
+  return [...new Set(channel.instructions.map(({ conversationKey }) => conversationKey))]
 }
 
 afterEach(async () => {
@@ -242,6 +270,99 @@ describe('an event roma cannot or should not answer', () => {
   })
 })
 
+describe('serving more than one Channel from one process', () => {
+  // The whole of what a second Channel is: a second Core over the same
+  // everything, each with exactly one place to reply to. A Core that answered
+  // into the other Channel would be a message posted where nobody sent it, and
+  // no Adapter could tell — neither of them ever learns the other exists.
+  it('answers each Channel on itself, and neither on the other', async () => {
+    const roma = await booted({ channels: 2 })
+    const [first, second] = roma.channels
+
+    const one = first!.transport.deliver(said('hello', 'on-the-first'), 'm-1')
+    const two = second!.transport.deliver(said('hello', 'on-the-second'), 'm-2')
+    await flush()
+    feed(roma.procFor('on-the-first'), OK)
+    feed(roma.procFor('on-the-second'), OK)
+    await Promise.all([one, two])
+
+    expect(conversationsOf(first!.channel)).toEqual(['on-the-first'])
+    expect(conversationsOf(second!.channel)).toEqual(['on-the-second'])
+    expect(first!.transport.acked).toEqual(['m-1'])
+    expect(second!.transport.acked).toEqual(['m-2'])
+  })
+
+  // The cap is three across the whole of roma rather than three per Channel, and
+  // that is what one process buys: the queue is built once and handed to every
+  // Core. Two processes with a Channel each would run six Tasks against one
+  // Shared Window with no configuration looking wrong (ADR-0028).
+  it('runs three Tasks at once across both Channels, not three each', async () => {
+    const roma = await booted({ channels: 2 })
+    const [first, second] = roma.channels
+    // Counted rather than assumed zero: the Startup Self-Check has spawned its
+    // own probe by now, and what this is about is the three after it.
+    const started = roma.claude.processes.length
+
+    // Two Conversations on each, so nothing here waits by sharing a Session:
+    // what holds the fourth back is the cap, and only the cap.
+    const delivered = [
+      first!.transport.deliver(said('hello', 'one'), 'm-1'),
+      first!.transport.deliver(said('hello', 'two'), 'm-2'),
+      second!.transport.deliver(said('hello', 'three'), 'm-3'),
+      second!.transport.deliver(said('hello', 'four'), 'm-4'),
+    ]
+    await flush()
+
+    expect(roma.claude.processes).toHaveLength(started + 3)
+    // Told so rather than merely held: the fourth is the second Channel's, and
+    // it is waiting behind Tasks it can neither see nor be told about.
+    expect(second!.channel.instructions.at(-1)).toMatchObject({
+      kind: 'progress',
+      conversationKey: 'four',
+      progress: { phase: 'queued', position: 1 },
+    })
+
+    for (const key of ['one', 'two', 'three']) feed(roma.procFor(key), OK)
+    await Promise.all(delivered.slice(0, 3))
+    await flush()
+    feed(roma.procFor('four'), OK)
+    await delivered[3]
+  })
+})
+
+describe('a Transport with nowhere to hand a Delivery back to', () => {
+  // ADR-0028: what `nack` buys is the Transport's, and a socket roma holds open
+  // has nothing to give the event back to — `FakeTransport`'s `nack` is exactly
+  // that, a settlement that hands nothing anywhere. What has to survive it is
+  // `take`: the failure is written down, the Delivery is settled all the same,
+  // and the subscriber is still running afterwards. Nothing here branches on
+  // which kind of Transport it is, which is the decision rather than an omission.
+  it('logs the failure, settles anyway, and keeps serving', async () => {
+    const roma = await booted()
+    roma.channel.refuse('result', new Error('Chat is unreachable'))
+
+    const lost = roma.transport.deliver(said('hello'), 'm-1')
+    await flush()
+    feed(roma.procFor(), OK)
+    await lost
+
+    expect(roma.log).toContainEqual({
+      event: 'ingress-failed',
+      deliveryId: 'm-1',
+      reason: expect.stringContaining('Chat is unreachable'),
+    })
+    expect(roma.transport.nacked).toEqual(['m-1'])
+
+    roma.channel.stopRefusing('result')
+    const next = roma.transport.deliver(said('and again'), 'm-2')
+    await flush()
+    feed(roma.procFor(), THREE_TURNS.turn(2))
+    await next
+
+    expect(roma.transport.acked).toEqual(['m-2'])
+  })
+})
+
 describe('the same message delivered twice', () => {
   // At-least-once is what a queue promises, and roma holds a delivery for as
   // long as the Task takes — minutes, sometimes. A redelivery arriving in that
@@ -380,6 +501,26 @@ describe('shutting down', () => {
 
     expect(roma.transport.nacked).toEqual(['m-1'])
     expect(roma.transport.acked).toEqual([])
+  })
+
+  // Every Transport, and the pool once. Once is the half worth asserting: the
+  // pool, the queue and the Audit Log are roma's rather than a Channel's, so a
+  // shutdown that ended them per Channel would end them again under whatever the
+  // first one left running.
+  it('closes every Channel’s Transport, and ends the pool once', async () => {
+    const roma = await booted({ channels: 2 })
+    const serving = await roma.serving
+    let ended = 0
+    const ending = serving.pool.shutdown.bind(serving.pool)
+    serving.pool.shutdown = async () => {
+      ended += 1
+      await ending()
+    }
+
+    await serving.shutdown()
+
+    expect(roma.channels.map(({ transport }) => transport.closed)).toEqual([true, true])
+    expect(ended).toBe(1)
   })
 
   // The one failure that must not stop the rest of shutting down. A `close` that

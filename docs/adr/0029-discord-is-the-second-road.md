@@ -6,6 +6,26 @@ Date: 2026-08-12
 
 Proposed. **Nothing here is implemented and nothing here has been run.**
 
+**Amended 2026-08-12 by the work that keeps it** (#178–#181), with two decisions
+the build had to make and this file had not: what roma's own messages are allowed
+to mention, and what a deployment is asked to configure. Both are marked inline
+and nothing above them changed. They are here rather than in a comment because
+each is a product decision somebody could reverse, and a decision argued only
+beside the line that implements it is one nobody meets before they change it.
+
+**And with one figure this file got wrong.** The split below is measured at
+twelve messages rather than nine, marked inline. It is the first thing here to be
+corrected by running rather than by reading, which is the whole point of the tiers
+in *Verification status* — and worth noting that it was not one of the readings
+those tiers doubted. It was arithmetic nobody checked against the rule it was
+describing.
+
+**And with one sentence that has stopped being true.** *The claim this design
+would fail on* says the split Session happens *"with no error anybody sees"*.
+Somebody sees it now, marked inline. Nothing else in that paragraph moves: the
+fallback still does not repair the Session, and the boot-time permission check is
+still not here.
+
 ADR-0003 defines the channel-agnostic Core and the Adapter contract every Channel
 binds to. ADR-0004 is Google Chat's binding. This is Discord's. ADR-0028 carries
 the two Core changes that adding it forces; everything below is a fact about
@@ -78,6 +98,26 @@ about to exist, and if it cannot be created, every message in that channel gets 
 Session of its own, forever, with no error anybody sees. The fallback below keeps
 the *reply* arriving; it does not repair the Session. A permission check at boot
 is the obvious remedy and is not specified here.
+
+**Amended — somebody sees it now, and it is still not repaired.** A thread
+refused here is written to the Operator Log as `thread-unopened`, naming the
+parent channel roma is answering in instead and the status Discord refused with
+(`discord-adapter.ts`'s `DiscordAdapterLogRecord`). Everything else above stands:
+the reply still arrives in the parent channel, the Conversation still gets a
+Session per message, and a line is evidence rather than a remedy. What it buys is
+that the three refusals stop looking alike — a 403 is this paragraph's missing
+`CREATE_PUBLIC_THREADS`, and it repeats for every message in that channel, where a
+400 is the route refusing a channel's type: either the harmless misclassification
+below or, for a forum, the case this document argues is never reached at all. One
+line per Conversation and none of them suppressed, because the repetition is the
+symptom.
+
+**The check at boot is still not here, and now by decision rather than by
+omission.** It would be written from documentation and never run, which is the
+footing this whole section exists to distrust, and a permission calculation wrong
+in the refusing direction refuses to boot a roma that would have worked — a worse
+failure than the silent one it replaces. So the line above is what this gets until
+somebody has run a permission read against a real guild.
 
 ## Context
 
@@ -211,6 +251,21 @@ there is one — the rule ADR-0004 sets, at a smaller number. The recorded 17,70
 character generating turn in `test/fixtures/claude-stream/` is five messages on
 Chat and nine here.
 
+**Amended — it is twelve here, and nine was never what this rule produces.** Nine
+is 17,706 divided by 2000, which is what a splitter that cut mid-word would give;
+the rule cuts at the last paragraph boundary in the window, and a window whose
+last blank line falls just past halfway spends the rest of itself on nothing.
+Twelve is that cost, measured. Chat re-measured is still five, so the comparison
+this sentence was drawn for survives — the gap between the Channels is wider than
+stated, not narrower.
+
+The figure is now asserted in `src/channels/discord/discord-channel.test.ts`
+rather than restated anywhere, because that is the only place it can be wrong and
+say so. The rule is the decision; the count is its consequence, and a consequence
+written into prose is one that goes on being claimed after the rule changes. The
+nine in *"nine mentions are not"* below is the same arithmetic and the argument it
+carries is untouched: twelve @-mentions would be worse than nine, not better.
+
 **Embeds are rejected on ADR-0004's own argument**, which is stronger on Discord:
 *"a long answer inside a card is worse than a plain one at the two things the
 separate-result rule exists for: being searched for and being quoted."* Discord's
@@ -226,6 +281,23 @@ are not.
 **One property falls out of the Conversation model for free**: a Conversation is a
 thread, a thread is a channel, and rate-limit buckets are per channel — so
 concurrent Tasks do not contend. The only burst is one split Result.
+
+**Amended — roma's own messages mention nobody.** A Result is written by a model
+that has read whatever anybody put in front of it, so an answer containing
+`@everyone` is one prompt away; on Discord that is not a rendering detail but a
+notification to a whole guild, and unlike a wrong answer it cannot be taken back.
+So every message roma posts carries `allowed_mentions` with an empty `parse`,
+which leaves the characters in the text and takes the ping out of them: what is
+said is unchanged, and who is summoned by saying it is nobody.
+
+This is a decision rather than a precaution, and it had to be made either way —
+posting without the field is the same decision taken by default and in the other
+direction. It costs the one case where a Caller asks roma to mention somebody and
+gets the plain text back instead, which is the trade being made deliberately. The
+reply is exempt because it is not the text's doing: naming `allowed_mentions` at
+all turns the reply ping off, so `replied_user` is what keeps Discord's own
+default rather than a second decision — and the reply is how a Caller is
+addressed here at all.
 
 ### Pressing is typing here too, and the press is answered in three seconds
 
@@ -310,6 +382,20 @@ it is the one unverified reading a decision here actually rests on.
   does not read anyway. What does bite is that the CDN links expire while a Task
   parked for the Shared Window can wait hours — `redeem()` is allowed to reject
   and this is one of the reasons it is (#173).
+- **Amended — a deployment names one secret, and may name two addresses.** The
+  bot token is the whole of what roma has to be told: the token names the
+  application, `READY` names roma's own user, `GUILD_CREATE` names every guild it
+  is in, and membership is the authorisation. The Gateway URL and the API base
+  are Discord's own addresses, so they are constants a deployment inherits rather
+  than variables it states — a deployment made to state them is one that can
+  state them wrong, and they must agree about the API version. They are readable
+  from the environment all the same, on two grounds: a proxy, or a fake in
+  something larger than a unit test, is a real thing to want and neither is
+  roma's to have an opinion about; and a Channel whose configuration is one
+  variable has no such state as "configured by halves", so the refusal ADR-0028
+  requires would have nothing to catch. Somebody who points the API base at a
+  proxy and forgets the token is refused, where with one variable they would get
+  a roma that starts, serves no Discord, and ignores what they did set.
 - **A retry that does not read a 429 can get roma banned from the whole API.**
   429s count toward the *"10,000 per 10 minutes"* invalid-request limit, whose
   penalty is not scoped to the channel that caused it. ADR-0028 moved the retry

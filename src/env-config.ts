@@ -65,39 +65,89 @@ export class ConfigurationMissing extends Error {
 export type Environment = Readonly<Record<string, string | undefined>>
 
 /**
- * Read the Core's settings, a Channel's, the Minter's, the Cloud Reach's and the
- * Document Reach's, and refuse once with what is wrong with any of them.
+ * One Channel's own reader: its settings, or null where this deployment does not
+ * serve that Channel at all.
+ *
+ * Null and a refusal are different answers, and keeping them apart is the whole
+ * of what makes a Channel optional. A deployment that named none of a Channel's
+ * variables serves another Channel and is complete; a deployment that named some
+ * of them meant to serve this one, and left alone would get a roma that
+ * subscribes to nothing and answers nobody on it. So a reader returns null only
+ * for the first, and refuses for the second — the same rule `readOverflow`
+ * already applies to the two halves of metered billing (ADR-0028).
+ */
+export type ReadChannelEnv<ChannelEnv> = (env: Environment) => ChannelEnv | null
+
+/**
+ * Whether this deployment named nothing at all of one Channel's configuration —
+ * the first of `ReadChannelEnv`'s two answers, asked in one place.
+ *
+ * **Never hand it only the variables that are required.** Every variable that
+ * Channel reads goes in, optional ones included: narrowed to the required ones,
+ * somebody who set a lease minute or pointed an address at a proxy and forgot
+ * the credential gets a roma that starts, serves that Channel to nobody, and
+ * ignores the variable they did set. Whole, the same deployment is refused.
+ */
+export function unconfigured(env: Environment, names: readonly string[]): boolean {
+  return names.every((name) => envValue(env, name) === null)
+}
+
+/**
+ * Read the Core's settings, every Channel's, the Minter's, the Cloud Reach's and
+ * the Document Reach's, and refuse once with what is wrong with any of them.
  *
  * One refusal rather than five, because they are one configuration: somebody
  * standing roma up sets all of it in one go, and being told about the missing
  * subscription only after fixing the missing audit root turns that into a
  * sequence of boots. Every other reader is passed in rather than named, and for
- * the same reason in each case — which Channel roma has, which forge it mints
+ * the same reason in each case — which Channels roma has, which forge it mints
  * against, which cloud it reaches and whose documents it writes are not things
- * the Core is allowed to know.
+ * the Core is allowed to know. That extends to their names: the Channels are a
+ * record whose keys the composition root chose, so the refusal below can list
+ * them without this file ever naming one.
  *
- * The last two are the readers that may legitimately find nothing: most
- * deployments have neither Reach, and that is an answer rather than a problem.
- * They are readers all the same, so that a *broken* one lands in this refusal
- * beside everything else — which for the Document Reach includes a deployment
- * that named a key and no Depot, or a Depot and no key (ADR-0022 §2).
+ * The Channels and the last two Reaches are the readers that may legitimately
+ * find nothing. They differ in what nothing means. Most deployments have neither
+ * Reach and that is an answer; a deployment with no Channel at all would boot,
+ * subscribe to nothing and answer nobody, so **at least one is required** and
+ * which one is the deployment's to pick.
  */
-export function readConfiguration<ChannelEnv, MinterConfig, CloudConfig, DocumentConfig>(
+export function readConfiguration<
+  Channels extends Record<string, ReadChannelEnv<unknown>>,
+  MinterConfig,
+  CloudConfig,
+  DocumentConfig,
+>(
   env: Environment,
-  readChannelEnv: (env: Environment) => ChannelEnv,
+  readChannelEnvs: Channels,
   readMinterEnv: (env: Environment) => MinterConfig,
   readCloudEnv: (env: Environment) => CloudConfig | null,
   readDocumentEnv: (env: Environment) => DocumentConfig | null,
 ): {
   roma: RomaEnv
-  channelEnv: ChannelEnv
+  channels: { readonly [Name in keyof Channels]: ReturnType<Channels[Name]> }
   minterEnv: MinterConfig
   cloudEnv: CloudConfig | null
   documentEnv: DocumentConfig | null
 } {
   const problems: string[] = []
   const roma = attempted(() => readRomaEnv(env), problems)
-  const channelEnv = attempted(() => readChannelEnv(env), problems)
+
+  const beforeChannels = problems.length
+  const channels = Object.entries(readChannelEnvs).map(
+    ([name, read]) => [name, attempted(() => read(env), problems)] as const,
+  )
+  // Only where every Channel was silent rather than wrong. A reader that refused
+  // has already said what is missing from the Channel the deployment plainly
+  // meant to serve, and telling somebody they configured no Channel in the same
+  // breath would send them to a second one they never wanted.
+  if (problems.length === beforeChannels && channels.every(([, found]) => found === null)) {
+    problems.push(
+      `No Channel is configured — roma would start, subscribe to nothing and answer ` +
+        `nobody. Configure at least one of: ${channels.map(([name]) => name).join(', ')}.`,
+    )
+  }
+
   const minterEnv = attempted(() => readMinterEnv(env), problems)
   // Null twice over, and the two are not distinguished: a reader that refused
   // has already put its problem in the list, and a deployment with no Cloud
@@ -108,7 +158,11 @@ export function readConfiguration<ChannelEnv, MinterConfig, CloudConfig, Documen
   if (problems.length > 0) throw new ConfigurationMissing(problems)
   return {
     roma: certain(roma),
-    channelEnv: certain(channelEnv),
+    // `Object.fromEntries` has no way to say that the keys it returns are the
+    // keys it was handed, which is the whole of what this stands in for.
+    channels: Object.fromEntries(channels) as {
+      [Name in keyof Channels]: ReturnType<Channels[Name]>
+    },
     minterEnv: certain(minterEnv),
     cloudEnv,
     documentEnv,

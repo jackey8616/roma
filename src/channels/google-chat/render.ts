@@ -1,5 +1,6 @@
 import type { OutboundInstruction, TaskProgress } from '../../channel-adapter.js'
 import type { Command } from '../../commands.js'
+import { progressPhrase } from '../../progress-phrase.js'
 
 /**
  * Chat's limit on the text of one message.
@@ -154,15 +155,15 @@ function money(usd: number): string {
 }
 
 /**
- * The acknowledgement's text for one phase.
+ * The acknowledgement's text for one phase, addressed and fitted to Chat.
  *
- * Deliberately short. This message is edited every few seconds while a Task
- * runs, so it is read at a glance and never read twice — everything worth
- * keeping is in the result.
+ * The words are `progressPhrase`'s, which is where they are argued. What is
+ * Chat's is the mention in front of them and the limit they have to fit inside
+ * once it has been spent.
  */
 export function progressText(caller: string, progress: TaskProgress): string {
   const to = addressedTo(caller)
-  return to + fitted(phrase(progress), MAX_TEXT - to.length)
+  return to + fitted(progressPhrase(progress), MAX_TEXT - to.length)
 }
 
 /**
@@ -170,21 +171,21 @@ export function progressText(caller: string, progress: TaskProgress): string {
  *
  * **Nothing reaches this any more.** Every phase is bounded where it is written
  * — four of them are a fixed sentence around a small number, and the fifth is
- * cut to `MAX_TOOL_CHARS` — so the longest phrase this can be handed is around
- * 129 characters against a budget of roughly 4077. It is kept anyway, and the
- * reason is the sixth phase rather than any of the five: `tool` was added
- * without anybody thinking about its length, and this file went a release
- * carrying a phrase Chat could refuse outright (#75). A guard that sits on the
- * finished string is the one the next phase cannot forget to ask for.
+ * cut by `progressPhrase`'s own tool bound — so the longest phrase this can be
+ * handed is around 129 characters against a budget of roughly 4077. It is kept
+ * anyway, and the reason is the sixth phase rather than any of the five: `tool`
+ * was added without anybody thinking about its length, and this file went a
+ * release carrying a phrase Chat could refuse outright (#75). A guard that sits
+ * on the finished string is the one the next phase cannot forget to ask for.
  *
  * Which is why it is exported and tested directly. Reached through
  * `progressText` it cannot be made to fire, so a test that drives a long tool
- * through the Adapter is testing `MAX_TOOL_CHARS` and would stay green if this
- * function were deleted.
+ * through the Adapter is testing `progressPhrase`'s bound and would stay green
+ * if this function were deleted.
  *
  * Over the limit is not a longer message but no message: Chat refuses the whole
- * thing rather than trimming it. The **end** is what goes, for the reason the
- * `tool` phase gives below.
+ * thing rather than trimming it. The **end** is what goes, for the reason
+ * `progressPhrase` gives about the tool it quotes.
  *
  * The budget is passed in rather than read off `MAX_TEXT` for the reason `split`
  * gives below — the mention is already spent out of the limit.
@@ -204,72 +205,6 @@ export function fitted(text: string, budget: number): string {
   // Clamped because a negative length reads from the *end* in JavaScript, which
   // is the one input that would turn this from a trim into its own opposite.
   return `${text.slice(0, Math.max(0, budget - 1))}…`
-}
-
-/**
- * How much of a tool's command the acknowledgement quotes.
- *
- * A judgement, not a measurement — unlike the throttle's 2641ms and `MAX_TEXT`,
- * which is Chat's own. Behind it are two recorded `task_started` descriptions at
- * 8 and 56 characters, which says the ordinary case is never cut and nothing
- * about the tail.
- *
- * Counts the command alone, where `fitted` spends its ellipsis out of the
- * budget: that budget is somebody else's hard limit where one character over is
- * a refused message, and this one is roma's own reading limit.
- */
-const MAX_TOOL_CHARS = 120
-
-/**
- * The acknowledgement without its mention.
- *
- * Every phrase is a fixed sentence around a small number, except the tool's,
- * which is named by Claude Code's own description of it and is bounded here.
- * `fitted` bounds whatever this returns a second time, and by a different
- * measure — see there for why that is not the same guard twice.
- */
-function phrase(progress: TaskProgress): string {
-  switch (progress.phase) {
-    case 'queued':
-      // The count includes this Task, so 1 means nothing is ahead of it. Said as
-      // a number of waiting Tasks rather than as a position, because a Task
-      // whose Session is busy is stepped over: this is the size of the backlog,
-      // not a place in a running order.
-      return progress.position === 1 ? 'Queued.' : `Queued — ${progress.position} waiting.`
-    case 'working':
-      return 'Working…'
-    case 'compacting':
-      // Claude Code's own word for it, and the one the person typed if they
-      // asked for this. Nothing about how far along it is: the figures arrive
-      // with the boundary, which is the moment it is finished.
-      return 'Compacting…'
-    case 'thinking':
-      return `Thinking… (~${progress.estimatedTokens} tokens)`
-    case 'tool':
-      // The one thing that keeps a tool window from reading as a hang: the
-      // stream says nothing at all until the tool finishes, 25 seconds in the
-      // capture this was designed against.
-      //
-      // Cut mid-character rather than at a word boundary, against the example
-      // `split` sets below: a command cut at a space reads as a whole command,
-      // and `Running rm -rf…` is a worse thing to put in front of somebody at a
-      // glance than the visibly severed `Running rm -rf /home/user/proj…`.
-      // `split` trims prose, where a clean edge is the point; this quotes a
-      // command, where a clean edge is the lie.
-      //
-      // The sentence's own `…` carries both meanings at once — the tool is
-      // still running, and the command goes on past here. There is no second
-      // marker deliberately: a reader who learned how much was cut would do
-      // nothing differently with it, and this message is read at a glance.
-      return `Running ${progress.tool.slice(0, MAX_TOOL_CHARS)}…`
-    case 'writing':
-      // Deliberately not the prose. Shown here it would say what the Result is
-      // about to say, seconds later and one message further down — the
-      // duplicate ADR-0010 is about. What is left is the one thing this message
-      // is for: a number that keeps moving, so a Turn that is writing does not
-      // read as a Turn that has died.
-      return `Writing… (${progress.characters} chars)`
-  }
 }
 
 function commandText(command: Command, carriedOut: boolean): string {

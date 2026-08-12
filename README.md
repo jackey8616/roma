@@ -22,7 +22,7 @@ npm install
 
 | command | does |
 | --- | --- |
-| `npm start` | Runs roma against Google Chat from the sources, via `tsx`. See below. |
+| `npm start` | Runs roma against whichever Channels the environment configures, from the sources, via `tsx`. See below. |
 | `npm test` | The default run. Fast, free, deterministic. |
 | `npm run test:watch` | The same, watching. |
 | `npm run typecheck` | `tsc --noEmit`, over `src` **and** `test`. |
@@ -48,13 +48,38 @@ architecture rests on goes unchecked.
 
 ## Running it
 
-`npm start` is roma over Google Chat: it reads the environment, proves the credential with
-the startup self-check, and only then subscribes. In development that runs the TypeScript
-directly through `tsx`, from a normal `npm install`.
+`npm start` is roma over every Channel the environment names: it reads the configuration
+whole, proves the credential with the startup self-check, and only then subscribes. Each
+Channel is optional and **at least one is required** — a roma with none would start,
+subscribe to nothing and answer nobody, so it refuses instead. There are two, Google Chat
+and Discord, and one process serves however many there are: one Core each, over one pool,
+one queue, one Audit Log and one Work Root (ADR-0028). In development that runs the
+TypeScript directly through `tsx`, from a normal `npm install`.
+
+Discord answers in **plain text**, not embeds and not an attached file: a long answer
+inside a card is worse at the two things a separate Result exists for, being searched for
+and being quoted, and Discord's search reads message content while no part of an embed can
+be quote-replied (ADR-0029). An answer over Discord's 2000 characters is split at a
+paragraph boundary where there is one, the Caller is addressed by replying to their
+message on the first piece only, and a top-level @-mention is answered in a thread roma
+opens from it. A post Discord refuses is retried inside the Adapter, waiting exactly as
+long as Discord's own headers ask for — nothing about a rate limit is hard coded, because
+a retry that ignores a 429 spends its way toward a block on the whole API (ADR-0028).
+
+Both Menus and the Overflow offer are **buttons** here as they are on Chat, and pressing
+one means exactly what typing it means: the button carries the Command and the
+Conversation, the Adapter reads a press into an ordinary message, and it travels the path
+a typed Command travels (ADR-0023). Presses arrive over the same socket messages do — an
+HTTP interactions endpoint is the other half of a mutually exclusive pair and roma
+registers none — so buttons cost no inbound port either. A press is acknowledged inside
+Discord's three seconds and the card is left exactly as it was, because roma's answer takes
+minutes and typing does not rewrite the message you typed into. Effort buttons are the one
+thing not always drawn: on a model the Effort Matrix says takes no effort, the reply
+already says so and roma declines to invite an action it has just called inert.
 
 What ships is compiled. `npm run build` emits `src` alone to `dist/` — the tests are not
-in it — and the image runs `node dist/channels/google-chat/main.js` under `npm ci
---omit=dev`, so `tsx` is a development dependency in fact and not only in the manifest.
+in it — and the image runs `node dist/channels/main.js` under `npm ci --omit=dev`, so
+`tsx` is a development dependency in fact and not only in the manifest.
 
 ### The image
 
@@ -212,8 +237,11 @@ Terraform cannot do, in the order they have to happen.
 | `ROMA_GITHUB_APP_ID` | **Required.** roma's GitHub App. There is no installation id to set: roma lists the App's installations and refuses to start if there is anything but one, naming all of them. |
 | `ROMA_GITHUB_PRIVATE_KEY_FILE` | **Required.** A path to the App's private key, PEM. A path rather than the key inline, following `GOOGLE_APPLICATION_CREDENTIALS`: multi-line secrets belong in mounts. **Mount it read-only, and know what it is not:** roma is the only thing that reads it, but the agent runs in the same container under the same uid, so a shell can read it too. ADR-0008 claims otherwise and is wrong about that — `docs/github-app-verification.md` records the gap. |
 | `ROMA_SHIM_DIR` | **Required**, and **defaulted in the image** to `/run/roma`. Where the Credential Shim socket and the gitconfig every Session runs under live. Holds nothing that outlives a boot, which is why it has a default at all — and it is deliberately not under `ROMA_WORK_ROOT`, whose weekly reclaim would take the socket with it. Set it when running from source; `/run` is not writable on a developer's machine. |
-| `ROMA_PUBSUB_PROJECT_ID` | **Required.** The project the subscription lives in. |
-| `ROMA_PUBSUB_SUBSCRIPTION` | **Required.** The subscription's name. Read, never created. |
+| `ROMA_PUBSUB_PROJECT_ID` | **Required to serve Google Chat.** The project the subscription lives in. Name none of the four `ROMA_PUBSUB_` variables and roma serves no Chat at all; name some of them and it refuses, rather than starting and ignoring the ones you set. At least one Channel is required, so a deployment serving no Discord needs these. |
+| `ROMA_PUBSUB_SUBSCRIPTION` | Required on the same terms as the line above. The subscription's name. Read, never created. |
+| `ROMA_DISCORD_BOT_TOKEN` | **Required to serve Discord**, on the same terms: name none of the three `ROMA_DISCORD_` variables and roma serves no Discord at all; name some and it refuses. The bot token roma identifies with, and the whole of what it needs — the guilds the application has been added to are the entire boundary, and that membership is administered by whoever holds Manage Server rather than by an offboarding process (ADR-0029). roma asks for the `GUILDS` and message intents and **not** `MESSAGE_CONTENT`, so in a guild it reads only what @-mentions it. |
+| `ROMA_DISCORD_GATEWAY_URL` | Where a first connection goes. Discord's own address by default; a resumed connection goes wherever `READY` said instead. |
+| `ROMA_DISCORD_API_BASE` | Where the REST calls go — the words behind a Quotation, and the bytes behind an attachment. Discord's own address by default, on the same API version as the Gateway URL above. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Google's own, not roma's: a service account key file, or nothing at all on a Google host with a metadata server. This is the identity **roma** runs as — not the agent's. |
 | `ROMA_CLOUD_KEY_FILE` | A path to a service account key file, and the whole of what gives the agent a **Cloud Reach**. Unset — the usual case — roma starts normally, announces nothing about the cloud, and `roma-cloud-token` says this deployment has none. Set, roma reads the key at boot **by exactly that path**, mints one token with it and throws it away, and refuses to start if any of that fails; it never falls back to another identity, because the fallback on a Google host is roma's own. The roles on that identity are the entire boundary — every Conversation reaches all of it, and so does everyone who can message roma. It must not be the identity above. `infra/README.md` has the steps and says which project to put it in. **Mount it read-only, and know what it is not:** roma is the only thing that reads it, but the agent shares the container and the uid, so a shell can read it too — the same gap `ROMA_GITHUB_PRIVATE_KEY_FILE` has. |
 | `ROMA_DOCUMENT_KEY_FILE` | A path to a service account key file, and half of what gives the agent a **Document Reach** — the identity it creates the team's Docs and Sheets as. Unset, roma starts normally, announces nothing about documents, and `roma-document-token` says this deployment has none. Set, roma reads the key at boot **by exactly that path**, proves it, and refuses to start if that fails; it never falls back to another identity, for `ROMA_CLOUD_KEY_FILE`'s reason. Required **whenever** the line below is set, and vice versa. What has been shared with that identity is the entire boundary — every Conversation reaches all of it, and so does everyone who can message roma. **Mount it read-only, and know what it is not:** the agent shares the container and the uid, so a shell can read it too — the same gap the two keys above have. |
@@ -246,8 +274,19 @@ with unrestricted network access, is what you get until that protection exists.
 Everything in `src/` is the Core, and none of it may name a Channel — not Google Chat,
 not Pub/Sub, not any other. A Channel Adapter goes in `src/channels/<channel>/`, which is
 the only place in `src/` that knowledge is allowed to exist — plus that Channel's own test
-doubles under `test/support/`. `src/channels/google-chat/` is the first and so far the
-only one.
+doubles under `test/support/`. `src/channels/google-chat/` is the first and
+`src/channels/discord/` is the second.
+
+The two agree about almost nothing, which is what makes the second one worth having: Chat
+publishes to a queue and Discord holds a socket open, Chat hands over a message with roma's
+mention already stripped and Discord does not, Chat's Adapter is the whole of its Channel
+and Discord's Transport decides things (ADR-0029). What did **not** move is
+`ChannelAdapter` — ADR-0028's headline result, and the reason a second Channel is an
+Adapter rather than a rewrite.
+
+The one file that names *every* Channel is the composition root, `src/channels/main.ts`,
+which is what `npm start` and the image run. It sits under `src/channels/` and inside no
+Channel's directory, because a root naming two of them cannot live in either (ADR-0028).
 
 Nearly all of roma's user-facing wording lives there too, because how a fact reads to a
 person is the Channel's business. The exception is the sentence a failed Task carries: the
@@ -279,6 +318,14 @@ which lives in this repo's GitHub issues (`gh issue view 1`).
   than captured, which the test file says out loud — nothing here can capture one. The
   same goes for `HttpChatApi`, whose tests assert on the request Google would have
   received, and for `PubSubTransport`, whose subscription is a double.
+  `src/channels/discord/discord-channel.test.ts` is the same seam a second time and
+  **wider**: a raw Gateway frame in and an ingress message out, an outbound instruction in
+  and a recorded Discord API call out, covering the Transport as well as the Adapter with
+  only the socket and the REST call doubled. Wider because that Transport decides things —
+  which channels a guild has, and what a Quotation says — and nothing that decides
+  something may sit behind an untested port. The frame comes first even in the outbound
+  tests, because what an answer needs beyond the Conversation Key is learned from the
+  event and nowhere else.
 
 `test/support/live-claude.test.ts` belongs to none of them. It is the default run
 asserting something about seam 2's *scaffolding* — that the directories handed to a live
@@ -286,12 +333,16 @@ Session sit outside the checkout, so the Session inherits neither roma's `CLAUDE
 its project skills. It lives in the free run because seam 2 cannot catch that class of
 bug: the contamination it guards against made those tests pass, expensively (#101).
 
-`src/channels/google-chat/wiring.test.ts` is the one place the seams meet: roma assembled
-out of its real parts, with only Claude Code and the network replaced. A Pub/Sub message
-goes in and the request Google would have received comes out. It exists because every other
-test proves one component in isolation, and the failure they cannot see is the one at the
-joins — a Transport emitting events the Adapter cannot read gives you a roma that runs
-perfectly and answers nobody.
+There is a `wiring.test.ts` in each Channel's directory, and they are where the seams meet:
+roma assembled out of its real parts, with only Claude Code and the network replaced. A
+Pub/Sub message goes in and the request Google would have received comes out; a Gateway
+frame goes in and the request Discord would have received comes out. They exist because
+every other test proves one component in isolation, and the failure they cannot see is the
+one at the joins — a Transport emitting events the Adapter cannot read gives you a roma
+that runs perfectly and answers nobody. It is also the only place a button can be proved
+at all: one seam knows the Core answers `/model opus`, the other knows a press becomes
+that text, and neither can see whether the button roma actually posted carries what its
+own reader actually reads.
 
 Two things have no seam and cannot have one until roma runs against a real Workspace:
 Google's auth library resolving a credential, and the fields a real Chat interaction event
