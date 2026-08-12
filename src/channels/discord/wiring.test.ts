@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Credential } from '../../build-env.js'
 import { PINNED_MODEL } from '../../claude-session.js'
-import { bind, serve, type Serving } from '../../serve.js'
+import { bind, serve, type IngressLogRecord, type Serving } from '../../serve.js'
 import { sessionIdFor } from '../../session-id.js'
 import type { ClaudeEvent } from '../../stream-events.js'
 import { DiscordAdapter } from './discord-adapter.js'
-import { GatewayTransport, type DiscordLogRecord } from './gateway-transport.js'
+import { GatewayTransport, RECONNECT_FLOOR_MS, type DiscordLogRecord } from './gateway-transport.js'
 import { HttpDiscordApi } from './http-discord-api.js'
 import { flush } from '../../../test/support/fake-claude.js'
 import { FakeGatewayNetwork } from '../../../test/support/fake-gateway.js'
@@ -76,6 +76,9 @@ interface RecordedRequest {
 
 /** Discord's own hello, and the only thing it says. */
 const HELLO = { op: 10, d: { heartbeat_interval: 41_250 } }
+
+/** Discord's opcode for resuming, which is how a replay is asked for. */
+const OP_RESUME = 6
 
 const READY = {
   op: 0,
@@ -196,6 +199,10 @@ async function boot({ model = PINNED_MODEL }: { model?: string } = {}) {
 
   const network = new FakeGatewayNetwork()
   const log: DiscordLogRecord[] = []
+  // What the subscriber said about each Delivery, which is the only place some
+  // endings exist at all — a redelivery is answered by doing nothing, so nothing
+  // in the Conversation and nothing in the requests below records one.
+  const ingress: IngressLogRecord[] = []
   const minter = new FakeMinter({ installation: INSTALLATION })
   const shims = fakeShims()
   fixture.alsoRemove(shims.dir)
@@ -220,7 +227,9 @@ async function boot({ model = PINNED_MODEL }: { model?: string } = {}) {
     ...(model === PINNED_MODEL ? {} : { model }),
     ...fixture.dirs,
     spawn: fixture.claude.spawn,
-    log: () => {},
+    log: (record) => {
+      if ('deliveryId' in record) ingress.push(record)
+    },
     selfCheckTimeoutMs: 1_000,
   })
 
@@ -233,6 +242,7 @@ async function boot({ model = PINNED_MODEL }: { model?: string } = {}) {
     requests,
     network,
     log,
+    ingress,
     roma,
     /** Push one frame, and let the work behind it get as far as it can. */
     async take(frame: unknown): Promise<void> {
@@ -327,6 +337,55 @@ describe('a Discord message, all the way through and back', () => {
     await flush()
 
     expect(roma.claude.lastSpawn.cwd).toContain(sessionIdFor(MESSAGE))
+  })
+
+  /**
+   * **What a Gateway costs, met by the thing that pays it.** A resumed session
+   * replays what roma missed, so the same message arrives twice — and the only
+   * thing that tells that from a second message saying the same words is the
+   * Delivery's id, which is the event's own snowflake (ADR-0028).
+   *
+   * Driven through `serve`/`bind` rather than over the Transport alone, because
+   * the recognition is `Ingress.take`'s and the id is the Transport's: neither
+   * half proves the pair agree. The Task is deliberately left running, since in
+   * flight is the whole of what the check is about — a replay arriving after the
+   * answer was posted is a message roma genuinely has no memory of, which is the
+   * trade `Ingress.#inFlight` records.
+   */
+  it('recognises a replay after a resume as the Delivery it is already doing', async () => {
+    const roma = await boot()
+    await roma.take(HELLO)
+    await roma.take(READY)
+    await roma.take(GUILD_CREATE)
+
+    await roma.take(mentioned('summarise this'))
+    await flush()
+    const running = roma.claude.processes.length
+    const posted = roma.requests.length
+
+    // The connection breaks and roma goes back to where `READY` said, naming the
+    // session and the last event it saw — which is what makes Discord replay.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] })
+    roma.network.socket.hangUp(1006)
+    vi.advanceTimersByTime(RECONNECT_FLOOR_MS)
+    vi.useRealTimers()
+    roma.network.socket.push(HELLO)
+    // A second connection, resuming rather than identifying — so what arrives
+    // next is Discord replaying, not somebody sending the message again.
+    expect(roma.network.sockets).toHaveLength(2)
+    expect(roma.network.socket.sentWith(OP_RESUME)).toHaveLength(1)
+    await roma.take(mentioned('summarise this'))
+
+    expect(roma.ingress).toContainEqual({ event: 'ingress-redelivered', deliveryId: MESSAGE })
+    // No second Turn, and nothing said about one: the attempt already doing the
+    // work owns both the answer and the settling.
+    expect(roma.claude.processes).toHaveLength(running)
+    expect(roma.requests).toHaveLength(posted)
+
+    // And the Task the replay did not disturb still ends in one answer.
+    feed(roma.procFor(), OK)
+    await until(() => said(roma.requests).includes('ok'))
+    expect(said(roma.requests).filter((text) => text === 'ok')).toHaveLength(1)
   })
 })
 
