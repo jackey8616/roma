@@ -1,23 +1,24 @@
+import { CAVEMAN_MENU } from './caveman.js'
 import { EFFORT_MENU } from './effort-menu.js'
 import { MENU } from './model-menu.js'
 import { sessionIdFor } from './session-id.js'
 import type { WorkRoot } from './work-root.js'
 
 /**
- * The three things roma remembers about a Conversation, in one place.
+ * The four things roma remembers about a Conversation, in one place.
  *
- * Which Session it is on, since ADR-0014 which model that Session runs on, and
- * since ADR-0016 what effort it runs at. They are here together because they are
- * the same trick and share the same three rules: a record in the Work Root, a
- * file rather than a directory, and a missing one meaning "almost every
- * Conversation" rather than "something is wrong". Everything else roma knows is
- * derived or is Claude Code's.
+ * Which Session it is on, since ADR-0014 which model that Session runs on, since
+ * ADR-0016 what effort it runs at, and since ADR-0030 how short it is asked to
+ * be. They are here together because they are the same trick and share the same
+ * three rules: a record in the Work Root, a file rather than a directory, and a
+ * missing one meaning "almost every Conversation" rather than "something is
+ * wrong". Everything else roma knows is derived or is Claude Code's.
  *
  * The first two of those rules are the Work Root's and are argued there — where
  * the record is named, and why the sweep that walks that tree steps over it.
  * What is left here is the third, which is the only one that differs between the
- * three: a missing generation is zero, and a missing model or effort is the
- * pinned one.
+ * four: a missing generation is zero, and a missing model, effort or Caveman is
+ * the pinned one.
  */
 
 /** A generation as it is written down: a whole count and nothing else. */
@@ -42,6 +43,21 @@ const OFFERED = new Set(Object.values(MENU))
  * `ROMA_EFFORT`, which writes nothing and is not read here.
  */
 const OFFERED_EFFORTS = new Set(EFFORT_MENU)
+
+/**
+ * Every Caveman a record may name: the Caveman Menu's own, and nothing else.
+ *
+ * `OFFERED_EFFORTS`' reasoning, and it holds the same way round twice over:
+ * `wenyan-lite` and `wenyan-ultra` reach roma through `ROMA_CAVEMAN` alone, so a
+ * record naming either is one nothing in roma wrote.
+ *
+ * **Never drop `off` from here on the grounds that it means "no record".** It is
+ * a level a Caller may choose and so a value a record may name; `default` is the
+ * one that is written down as nothing at all. Dropped, a Caller who asked to be
+ * left alone on a deployment that pinned a Caveman would have every message they
+ * sent afterwards refused.
+ */
+const OFFERED_CAVEMEN = new Set(CAVEMAN_MENU)
 
 export interface SessionGenerationsOptions {
   /**
@@ -181,8 +197,28 @@ export class ChosenEffortNotOffered extends Error {
   }
 }
 
-/** The two things a Session can be moved onto, one Chosen Record each. */
-export type ChosenKind = 'model' | 'effort'
+/**
+ * A Session's Chosen Caveman record names a level roma does not offer.
+ *
+ * The third of these, and a class of its own for the reason the second is: the
+ * Core routes on `instanceof` to a sentence per kind, because `/caveman default`
+ * is a third way out and names a third Command.
+ *
+ * The widest hole of the three. The other two are reachable only by roma
+ * *removing* something it offered; this one is reachable that way and by an
+ * operator's own hand — `ROMA_CAVEMAN=wenyan-lite` is a value roma accepts and
+ * this Set does not, so a record that named it would have to have been written
+ * by something other than a Command.
+ */
+export class ChosenCavemanNotOffered extends Error {
+  constructor(readonly caveman: string) {
+    super(`the Chosen Caveman for this Session is not one roma offers: ${caveman}`)
+    this.name = 'ChosenCavemanNotOffered'
+  }
+}
+
+/** The three things a Session can be moved onto, one Chosen Record each. */
+export type ChosenKind = 'model' | 'effort' | 'caveman'
 
 export interface ChosenRecordOptions<K extends ChosenKind> {
   readonly kind: K
@@ -213,16 +249,17 @@ export interface ChosenRecordOptions<K extends ChosenKind> {
 /**
  * What one Session was moved onto, kept by roma rather than by the process.
  *
- * Written once and paid back twice — `chosenModels` and `chosenEfforts` below are
- * the two adapters, and this knows about neither. That is the whole of what makes
- * it a seam: nothing here imports a Menu or an error class.
+ * Written once and paid back three times — `chosenModels`, `chosenEfforts` and
+ * `chosenCavemen` below are the three adapters, and this knows about none of
+ * them. That is the whole of what makes it a seam: nothing here imports a Menu or
+ * an error class.
  *
- * roma's rather than the process's, and that is the decision both ADR-0014 and
- * ADR-0016 make. A choice handed to a process lives and dies with it — `--model`
- * and `--effort` are fixed at spawn, and processes end at an Eviction, a Reaping
- * or a deploy, which `CONTEXT.md` defines as unobservable to the person using the
- * Session. Kept there, a choice would be a setting that reverts at a moment
- * nobody can see.
+ * roma's rather than the process's, and that is the decision ADR-0014, ADR-0016
+ * and ADR-0030 all make. A choice handed to a process lives and dies with it —
+ * `--model`, `--effort` and `--append-system-prompt` are fixed at spawn, and
+ * processes end at an Eviction, a Reaping or a deploy, which `CONTEXT.md` defines
+ * as unobservable to the person using the Session. Kept there, a choice would be
+ * a setting that reverts at a moment nobody can see.
  *
  * **Keyed by the Session id, never by the Conversation Key.** The Session id
  * derives from the Conversation Key and the Session Generation, and the reset
@@ -241,16 +278,16 @@ export interface ChosenRecordOptions<K extends ChosenKind> {
  */
 export class ChosenRecord<K extends ChosenKind> {
   /**
-   * Which of the two this is.
+   * Which of the three this is.
    *
    * **Never remove this, and never replace it with an empty named subclass.** `K`
-   * has to appear on a member of the class: without it `ChosenRecord<'model'>`
-   * and `ChosenRecord<'effort'>` are structurally identical, and `CoreOptions`
-   * holds them in adjacent fields — swapping the two compiles clean, and a
-   * Conversation is then told the effort it runs at as the model it runs on.
-   * Measured both ways: with this field the swap is a TS2322, and empty named
-   * subclasses do *not* fix it, because they share this class's `#private` and
-   * add nothing structural.
+   * has to appear on a member of the class: without it `ChosenRecord<'model'>`,
+   * `ChosenRecord<'effort'>` and `ChosenRecord<'caveman'>` are structurally
+   * identical, and `CoreOptions` holds them in adjacent fields — swapping any two
+   * compiles clean, and a Conversation is then told the effort it runs at as the
+   * model it runs on. Measured both ways: with this field the swap is a TS2322,
+   * and empty named subclasses do *not* fix it, because they share this class's
+   * `#private` and add nothing structural.
    */
   readonly kind: K
 
@@ -350,7 +387,7 @@ export interface ChosenModelsOptions {
 /**
  * The Chosen Model record: which model each Session runs on.
  *
- * One of the two adapters over `ChosenRecord`. What it supplies is the whole of
+ * One of the three adapters over `ChosenRecord`. What it supplies is the whole of
  * what makes a model's record a model's: the Model Menu, the file the Work Root
  * files a model under, and the error a record off the Menu raises.
  */
@@ -397,5 +434,40 @@ export function chosenEfforts({
     offered: OFFERED_EFFORTS,
     pinned: pinnedEffort,
     notOffered: (written) => new ChosenEffortNotOffered(written),
+  })
+}
+
+export interface ChosenCavemenOptions {
+  readonly workRoot: WorkRoot
+  /**
+   * Whatever `ROMA_CAVEMAN` resolved to for this deployment, which is `off` where
+   * it named nothing. May be `wenyan-lite` or `wenyan-ultra`, which are off the
+   * Caveman Menu — the shape a Pinned Effort of `ultracode` already has, and
+   * handled the same way: `offered` gates the record and never this.
+   */
+  readonly pinnedCaveman: string
+}
+
+/**
+ * The Chosen Caveman record: how short each Session is asked to be.
+ *
+ * The third adapter, and the one whose value never reaches a flag of its own.
+ * `--model` and `--effort` are arguments naming what roma wrote down; a Caveman
+ * is rendered into `--append-system-prompt` as English, so what is written here
+ * is not merely the only account of what a Session was asked for — it is the only
+ * place the answer exists as a *word* rather than as several thousand characters
+ * of somebody else's prose.
+ */
+export function chosenCavemen({
+  workRoot,
+  pinnedCaveman,
+}: ChosenCavemenOptions): ChosenRecord<'caveman'> {
+  return new ChosenRecord({
+    kind: 'caveman',
+    workRoot,
+    recordFor: (sessionId) => workRoot.cavemanRecord(sessionId),
+    offered: OFFERED_CAVEMEN,
+    pinned: pinnedCaveman,
+    notOffered: (written) => new ChosenCavemanNotOffered(written),
   })
 }

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AuditLog } from './audit-log.js'
 import { buildEnv, type Credential } from './build-env.js'
+import { CAVEMAN_OFF } from './caveman.js'
 import { PINNED_EFFORT, PINNED_MODEL } from './claude-session.js'
 import type { CredentialEnvs } from './session-pool.js'
 import type { ChannelAdapter } from './channel-adapter.js'
@@ -12,7 +13,12 @@ import { ReachUse } from './reach-use.js'
 import { Core, type CoreLogRecord } from './core.js'
 import { FreshTokens } from './fresh-tokens.js'
 import { eachReach, type Reach, type Reaches } from './reach.js'
-import { chosenEfforts, chosenModels, SessionGenerations } from './session-generation.js'
+import {
+  chosenCavemen,
+  chosenEfforts,
+  chosenModels,
+  SessionGenerations,
+} from './session-generation.js'
 import type { OperatorLog } from './operator-log.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
 import { socketPathIn, type CredentialWanted } from './shim-protocol.js'
@@ -190,6 +196,19 @@ export interface StartRomaOptions {
    * operator, exactly as `model` may already name a model off the Model Menu.
    */
   readonly effort?: string
+  /**
+   * The Pinned Caveman. Defaults to `off`, which appends no text at all.
+   *
+   * Optional in a stronger sense than the two above, and this is the half of that
+   * a caller has to know: they default to what a Session would have run on
+   * anyway, where omitting this leaves the spawn arguments byte for byte what
+   * they were before ADR-0030 — so a deployment that names nothing is not
+   * changed, rather than changed to a default.
+   *
+   * It may name `wenyan-lite` or `wenyan-ultra`, which are off the Caveman Menu,
+   * on the rule `effort` above already carries.
+   */
+  readonly caveman?: string
   readonly maxConcurrentTasks?: number
   readonly retryBudget?: RetryBudget
   readonly spawn?: SpawnClaudeProcess
@@ -262,6 +281,7 @@ export async function startRoma({
   shims,
   model,
   effort,
+  caveman,
   maxConcurrentTasks,
   retryBudget,
   spawn,
@@ -301,6 +321,13 @@ export async function startRoma({
   // cannot come to disagree. Validated in `readRomaEnv` before it reaches here —
   // Claude Code would not refuse a wrong one.
   const pinnedEffort = effort ?? PINNED_EFFORT
+  // The same again, and the default is the one that means "say nothing" — which
+  // is what makes a deployment that named none unchanged by ADR-0030.
+  // `/caveman default` returns a Session to *this* rather than to a literal, for
+  // the reason the two above do. Validated in `readRomaEnv` before it reaches
+  // here, where unlike the effort there is no Runtime that could have refused it
+  // either.
+  const pinnedCaveman = caveman ?? CAVEMAN_OFF
 
   // Built once and handed to both the check and the pool, so that what was
   // verified is the environment roma actually runs on rather than one built the
@@ -418,28 +445,32 @@ export async function startRoma({
   // and runs every Turn at the Pinned Effort — with nothing anywhere in the
   // stream to contradict it, because `system/init` carries no effort field.
   const efforts = chosenEfforts({ workRoot: work, pinnedEffort })
+  // And the third, handed to both for the reason the first two are, at stakes of
+  // a third kind: a pool built without this answers `/caveman` perfectly, writes
+  // a perfect record, and appends the Pinned Caveman's ruleset to every Session —
+  // and what contradicts it is nothing anybody can point at, only roma answering
+  // at the wrong length.
+  const cavemen = chosenCavemen({ workRoot: work, pinnedCaveman })
 
   const pool = new SessionPool({
     workRoot: work,
     envs,
-    // No `model` or `effort` beside them: `models` and `efforts` are what
-    // answer, and a second copy of either pinned value here would be a second
-    // thing to keep in step.
+    // No `model`, `effort` or `caveman` beside them: the three records are what
+    // answer, and a second copy of any pinned value here would be a second thing
+    // to keep in step.
     models,
     efforts,
-    // Every Reach that has something to say, in the order they were proved. A
-    // blank line between them rather than a joined paragraph, because they are
-    // separate capabilities and an agent skimming a system prompt reads a break
-    // as a change of subject — which it is.
+    cavemen,
+    // What every Reach has to say, in the order they were proved, and no more
+    // than that. What a Session is *told* is this plus its own Caveman, joined in
+    // the pool — because half of it is the deployment's and half is the Session's,
+    // and the pool is the only thing that knows which Session it is about to
+    // start (ADR-0030's first Consequence).
     //
-    // An empty announcement is dropped rather than joined and trimmed. An
-    // unavailable Reach says nothing, and `--append-system-prompt` is gated on
-    // the value being `undefined` and never on it being empty — so a trailing
-    // blank line would reach the argv rather than being tidied away.
-    appendSystemPrompt: eachReach(reaches)
-      .map((reach) => reach.announce())
-      .filter((announcement) => announcement !== '')
-      .join('\n\n'),
+    // Handed over unfiltered: an unavailable Reach announces nothing, and
+    // dropping the empty parts is one rule applied at the join rather than at
+    // both ends of this seam.
+    announcements: eachReach(reaches).map((reach) => reach.announce()),
     ...(retryBudget === undefined ? {} : { retryBudget }),
     ...(spawn === undefined ? {} : { spawn }),
     ...(log === undefined ? {} : { log }),
@@ -461,6 +492,13 @@ export async function startRoma({
       sessions,
       models,
       efforts,
+      cavemen,
+      // Told separately from the record beside it, because this is the last
+      // line that can still see the difference: `pinnedCaveman` above folded a
+      // deployment that named nothing into the same `off` a deployment that
+      // pinned one has, and the Audit Record is the one place they may not be
+      // one string (ADR-0030).
+      cavemanPinned: caveman !== undefined,
       audit,
       credential: credential.kind,
       usedCloudReach: (taskId) => cloudUse.takeUsedBy(taskId),

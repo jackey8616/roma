@@ -2,8 +2,15 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, describe, expect, it } from 'vitest'
-import { monthOf } from './audit-log.js'
+import { monthOf, type AuditRecord } from './audit-log.js'
 import type { Credential } from './build-env.js'
+import {
+  CAVEMAN_MENU,
+  CAVEMAN_NOT_PINNED,
+  CAVEMAN_OFF,
+  cavemanRuleset,
+  OFF_MENU_WENYAN,
+} from './caveman.js'
 import { ConfigurationMissing } from './env-config.js'
 import { sessionIdFor } from './session-id.js'
 import { askMinter } from './shim-client.js'
@@ -33,12 +40,15 @@ function boot({
   minter = new FakeMinter(),
   cloudMinter,
   documentMinter,
+  caveman,
 }: {
   minter?: FakeMinter
   /** Omitted, this roma has no Cloud Reach — which is the ordinary deployment. */
   cloudMinter?: FakeCloudMinter
   /** Omitted, this roma has no Document Reach — also the ordinary deployment. */
   documentMinter?: FakeDocumentMinter
+  /** Omitted, this roma has no Pinned Caveman — also the ordinary deployment. */
+  caveman?: string
 } = {}) {
   const fixture = romaFixture('startup')
   fixtures.push(fixture)
@@ -61,6 +71,7 @@ function boot({
     spawn: fixture.claude.spawn,
     log: (record) => log.push(record as ReachLogRecord),
     selfCheckTimeoutMs: 1_000,
+    ...(caveman === undefined ? {} : { caveman }),
   }).then((roma) => {
     resolved = true
     started.push(roma)
@@ -1074,5 +1085,108 @@ describe('putting a credential in front of a Session’s tools', () => {
 
     expect(roma.minter.minted).toEqual([])
     expect(Object.keys(env)).not.toContain('GH_TOKEN')
+  })
+})
+
+/**
+ * ADR-0030: one variable, and every Session roma serves is asked to be shorter.
+ *
+ * Asserted off the spawned process's own arguments rather than off anything roma
+ * holds, because the claim is that the ruleset *reaches* a Session — everything
+ * between the variable and the argv is what could go wrong.
+ */
+describe('telling a Session how short to be', () => {
+  /** What one Session was appended, on a roma pinned to this Caveman. */
+  async function appendUnder(caveman?: string): Promise<string> {
+    const roma = boot(caveman === undefined ? {} : { caveman })
+    await roma.answerProbe()
+    const { core } = await roma.starting
+
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
+    await flush()
+    const spawn = roma.claude.lastSpawn
+    feed(roma.procFor(KEY), OK)
+    await handled
+
+    return announcedTo(spawn)
+  }
+
+  // Every level an operator may pin, the two that will never be on the Menu
+  // included. One boot each, because "an operator sets one variable" is the whole
+  // feature and a level that could not be set would be a level roma does not have.
+  it.each([...CAVEMAN_MENU, ...OFF_MENU_WENYAN].filter((level) => level !== CAVEMAN_OFF))(
+    'carries the ruleset for %s into the spawn arguments',
+    async (level) => {
+      expect(await appendUnder(level)).toContain(cavemanRuleset(level))
+    },
+  )
+
+  // After, on the blank-line rule the announcements already join by: the Caveman
+  // is about how to answer and a Reach is about what roma can reach.
+  it('puts it after whatever the Reaches had to say', async () => {
+    expect(await appendUnder('ultra')).toBe(`reaches a-team/roma\n\n${cavemanRuleset('ultra')}`)
+  })
+
+  // Not the ruleset filtered to a level called off, which is thousands of
+  // characters of instructions. caveman's own hook exits before filtering.
+  it('says nothing at all where the Caveman is off', async () => {
+    expect(await appendUnder(CAVEMAN_OFF)).toBe('reaches a-team/roma')
+  })
+
+  // **The deployment this ADR is not allowed to change.** The same string the
+  // suite asserted before any of this existed, and it is asserted here as an
+  // equality rather than a `toContain` so that a stray blank line or a default
+  // that quietly became `full` cannot pass.
+  it('leaves a deployment that named no Caveman byte-identical to before', async () => {
+    expect(await appendUnder()).toBe('reaches a-team/roma')
+  })
+
+  /** What one Session's Task was written down as, on a roma pinned to this Caveman. */
+  async function recordUnder(caveman?: string): Promise<AuditRecord | undefined> {
+    const roma = boot(caveman === undefined ? {} : { caveman })
+    await roma.answerProbe()
+    const { core, audit } = await roma.starting
+
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
+    await flush()
+    feed(roma.procFor(KEY), OK)
+    await handled
+
+    return audit.readMonth(monthOf(new Date())).at(0)
+  }
+
+  // **The half of ADR-0030 that only the composition root can get right.** An
+  // unset `ROMA_CAVEMAN` becomes the Pinned Caveman `off` on its way into the
+  // Chosen Record, so from there on a deployment that named nothing and one that
+  // pinned `off` are one string — and a month of records that spelled both `off`
+  // would answer the ADR's first verification question with a setting nobody
+  // made. This is the only place the difference can be lost, which is why it is
+  // asserted here rather than only where the Core resolves it.
+  it('writes down that nothing named a Caveman, and tells that from pinning off', async () => {
+    expect(await recordUnder()).toMatchObject({ caveman: CAVEMAN_NOT_PINNED })
+    expect(await recordUnder(CAVEMAN_OFF)).toMatchObject({ caveman: CAVEMAN_OFF })
+    expect(await recordUnder('ultra')).toMatchObject({ caveman: 'ultra' })
+  })
+
+  // The figure beside it, from a real boot: already computed for ADR-0018's
+  // drift check and now written down, which is what makes the ADR's question
+  // answerable from a deployment's own traffic. The record and never the month —
+  // `/usage` is unchanged, and whoever compares two months is the reader.
+  it('writes down what the Turn produced, as the Turn’s own delta', async () => {
+    expect(await recordUnder('ultra')).toMatchObject({ outputTokens: 17 })
   })
 })

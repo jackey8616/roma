@@ -9,6 +9,14 @@ import {
 } from './audit-log.js'
 import type { CredentialKind } from './build-env.js'
 import { attributed, relayed } from './attribution.js'
+import {
+  CAVEMAN_NAMES,
+  CAVEMAN_NOT_PINNED,
+  CAVEMAN_OFF,
+  PINNED_CAVEMAN_NAME,
+  readCavemanRequest,
+  type CavemanRequest,
+} from './caveman.js'
 import type {
   ChannelAdapter,
   IngressMessage,
@@ -38,6 +46,7 @@ import { readRelay, type RelayRequest } from './relays.js'
 import { ProgressReporter } from './progress-reporter.js'
 import { RUNTIME_NAMES, type Runtime } from './runtime.js'
 import {
+  ChosenCavemanNotOffered,
   ChosenEffortNotOffered,
   ChosenModelNotOffered,
   type ChosenRecord,
@@ -250,6 +259,39 @@ export interface CoreOptions {
    */
   readonly efforts: ChosenRecord<'effort'>
   /**
+   * How short each Session is asked to be, and what the deployment pinned.
+   *
+   * Given to the Session Pool as well, for the reason the two above are, and the
+   * symptomless failure it forecloses is the quietest of the three: a pool built
+   * without this answers `/caveman`, writes the record, and appends the Pinned
+   * Caveman's ruleset to every Session — where the model has `system/init` to
+   * contradict it and the effort has nothing, this has *the prose itself*, which
+   * nobody reads as evidence.
+   */
+  readonly cavemen: ChosenRecord<'caveman'>
+  /**
+   * Whether this deployment named a Caveman at all.
+   *
+   * A second field for one setting because it is not derivable from `cavemen`
+   * above: `ROMA_CAVEMAN=off` and `ROMA_CAVEMAN` unset resolve to the same
+   * Pinned Caveman before either reaches a Chosen Record, and the Audit Record
+   * is the one place they may not be one string — `CAVEMAN_NOT_PINNED` is where
+   * that difference is argued.
+   *
+   * **What it deliberately does not narrow is the Session.** A Caller who types
+   * `/caveman off` on a deployment that named none chose something, and their
+   * Tasks are recorded as `CAVEMAN_NOT_PINNED` all the same. Answering that
+   * exactly means asking the Chosen Record a second question while the record is
+   * being written, and that call throws for a record naming a level roma no
+   * longer offers — which would take a Task's ending down with it, on the one
+   * path that must not fail. Both spellings mean no ruleset was appended, so
+   * what is lost is which of them said so.
+   *
+   * Omitted means no, which is what a deployment that named nothing has and what
+   * every Core built for a test about something else has.
+   */
+  readonly cavemanPinned?: boolean
+  /**
    * Where every Task is written down, and shared like everything else here.
    *
    * Required rather than optional, though an optional one would be easy: a Core
@@ -350,6 +392,20 @@ interface RunningTask extends TaskAddress {
    * true when it arrived.
    */
   effort: string
+  /**
+   * How short this Task was asked to be, for its Audit Record.
+   *
+   * Read off the *process* rather than the Chosen Record beside the two above,
+   * and that is the one place these three differ. What reaches the argv is
+   * several thousand characters of ruleset rendered at the moment of spawning,
+   * so the level it was rendered from is a fact about the process — and asking
+   * the record again would be a second resolution of something a `/caveman` can
+   * have moved since (ADR-0030).
+   *
+   * Null until a process has been given the message, which is every Task that
+   * was stopped in the queue or never got as far as a Session.
+   */
+  caveman: string | null
   /** Set by `/stop`, and read at each point the Task can still be stopped. */
   stopped: boolean
   /**
@@ -421,6 +477,8 @@ export class Core {
   readonly #sessions: SessionGenerations
   readonly #models: ChosenRecord<'model'>
   readonly #efforts: ChosenRecord<'effort'>
+  readonly #cavemen: ChosenRecord<'caveman'>
+  readonly #cavemanPinned: boolean
   readonly #audit: AuditLog
   readonly #credential: CredentialKind
   readonly #overflow: OverflowOptions | null
@@ -468,6 +526,8 @@ export class Core {
     sessions,
     models,
     efforts,
+    cavemen,
+    cavemanPinned,
     audit,
     credential,
     overflow,
@@ -492,6 +552,8 @@ export class Core {
     this.#sessions = sessions
     this.#models = models
     this.#efforts = efforts
+    this.#cavemen = cavemen
+    this.#cavemanPinned = cavemanPinned ?? false
     this.#audit = audit
     this.#credential = credential
     this.#overflow = overflow ?? null
@@ -824,6 +886,16 @@ export class Core {
       runtime: EVERY_SESSION_RUNS_ON,
       model: model ?? this.#models.pinned,
       effort: effortOn(model ?? this.#models.pinned, effort ?? this.#efforts.pinned),
+      // Off the process that answered rather than out of the record beside the
+      // two above, which is the rule the field carries everywhere. Read after
+      // the Turn because that is when a Relay has a process at all: it reaches
+      // whatever the Session has, and a Session that has been quiet all morning
+      // has none until this line's work spawns one.
+      caveman: this.#cavemanOnRecord(session === null ? null : this.#pool.cavemanOn(session)),
+      // Zero rather than null where no Turn ran, for the reason the cost above
+      // it is zero: a Relay that never reached Claude Code produced nothing, and
+      // that is a fact rather than an absence.
+      outputTokens: turn === null ? 0 : turn.outputTokens,
       // Asked rather than assumed false. A free Relay drives no Turn so nothing
       // it does can mint, but the answer is read-and-forget and a hard `false`
       // here would be roma writing down a fact it declined to check.
@@ -859,28 +931,31 @@ export class Core {
 
     let instruction: OutboundInstruction
     try {
-      // The four that answer with prose and the two that answer with an
+      // The five that answer with prose and the two that answer with an
       // outcome, told apart here rather than inside `#carryOut` — "it was
-      // carried out" is not what any of the first four say. Never define
-      // `#carryOut`'s parameter by subtracting these four: naming the two it
+      // carried out" is not what any of the first five say. Never define
+      // `#carryOut`'s parameter by subtracting these five: naming the two it
       // handles is what made the sixth Command a compile error here until this
-      // said which of the two it is. Subtracted, it would have landed inside
-      // that type and been answered as a second `/stop`.
+      // said which of the two it is, and the seventh the same. Subtracted,
+      // either would have landed inside that type and been answered as a second
+      // `/stop`.
       instruction =
         request.command === 'model'
           ? this.#answerModel(readModelRequest(request.argument), conversationKey, address)
           : request.command === 'effort'
             ? this.#answerEffort(readEffortRequest(request.argument), conversationKey, address)
-            : request.command === 'config'
-              ? this.#answerConfig(request.argument, conversationKey, address)
-              : request.command === 'usage'
-                ? this.#answerUsage(address)
-                : {
-                    kind: 'command-outcome',
-                    ...address,
-                    command: request.command,
-                    carriedOut: this.#carryOut(request.command, conversationKey),
-                  }
+            : request.command === 'caveman'
+              ? this.#answerCaveman(readCavemanRequest(request.argument), conversationKey, address)
+              : request.command === 'config'
+                ? this.#answerConfig(request.argument, conversationKey, address)
+                : request.command === 'usage'
+                  ? this.#answerUsage(address)
+                  : {
+                      kind: 'command-outcome',
+                      ...address,
+                      command: request.command,
+                      carriedOut: this.#carryOut(request.command, conversationKey),
+                    }
     } catch (error) {
       // Silence is not an outcome here either. Nothing routine reaches this —
       // it takes a generation record roma cannot read, or a Conversation Key an
@@ -1092,6 +1167,95 @@ export class Core {
   }
 
   /**
+   * Say how short this Conversation is asked to be, or move it, and say so.
+   *
+   * The third of these, and the one where "never relayed" is not a decision roma
+   * took: a Relay carries one of Claude Code's own commands and the pinned build
+   * has never heard of this one, so there is nothing to hand it to. What is
+   * claimed is the *spelling*, because somebody who met caveman elsewhere types
+   * it here on their first day and would otherwise be billed for a Turn about
+   * their own message (ADR-0030).
+   *
+   * Nothing anywhere echoes a Caveman back. `--model` returns in `system/init`
+   * and `--effort` returns nowhere; this does not even reach the argv as itself —
+   * what reaches it is the ruleset the level renders to. So this reply is the
+   * only account there is, on either side of the wire, of what a Session was
+   * asked for.
+   *
+   * **Never give this an `#effortApplies` of its own.** The same two arms carry
+   * the Menu as on the other two, and unconditionally: `/effort` withholds its
+   * card only where the Effort Matrix says the model takes none, and there is no
+   * Matrix here and no model that declines a ruleset — so a condition would be
+   * roma withholding an offer on the strength of nothing (ADR-0023).
+   */
+  #answerCaveman(
+    request: CavemanRequest,
+    conversationKey: string,
+    address: TaskAddress,
+  ): OutboundInstruction {
+    // Which Session, not which Conversation — a Chosen Caveman belongs to a
+    // Session, which is what makes `/clear` return it to the Pinned Caveman
+    // without anything being deleted.
+    const sessionId = this.#sessions.sessionFor(conversationKey)
+
+    switch (request.kind) {
+      case 'unknown':
+        // Nothing is written, so a typo — or a wenyan level, which is the
+        // operator's — cannot move a Session somebody shares with other people.
+        // The Menu rides along, because this is the message where somebody has
+        // just shown they do not know it (ADR-0023).
+        return cavemanChoice(address, unknownCavemanReason(request.name), request.name)
+      case 'report':
+        // No process, no Turn, no money, and no interruption of whatever this
+        // Conversation is waiting on: roma owns the answer, so asking is never
+        // the slow thing.
+        return cavemanChoice(address, this.#cavemanReport(sessionId), null)
+      case 'default':
+        this.#cavemen.usePinned(sessionId)
+        return {
+          kind: 'result',
+          ...address,
+          text: atNextCaveman(PINNED_CAVEMAN_NAME, this.#cavemen.pinned),
+        }
+      case 'chosen':
+        this.#cavemen.choose(sessionId, request.level)
+        return {
+          kind: 'result',
+          ...address,
+          text: atNextCaveman(request.level, request.level),
+        }
+    }
+  }
+
+  /**
+   * How short this Session is asked to be, and what else it may be asked.
+   *
+   * `#effortReport`'s shape: the name a Caller types is the level roma renders
+   * the ruleset from, so there is only ever one spelling of it.
+   */
+  #cavemanReport(sessionId: string): string {
+    return (
+      `This conversation runs at caveman ${this.#cavemanNamed(sessionId)}. ` +
+      `You can choose: ${CAVEMAN_LIST}.`
+    )
+  }
+
+  /**
+   * This Session's Caveman as a person would say it back.
+   *
+   * `chosenFor`, never `inForce`, for `#effortNamed`'s reason — and with a second
+   * one this Menu has and the others do not: `off` is a level a Caller may choose
+   * and `default` is the absence of a record, so on a deployment pinned to `off`
+   * the two answer the same string and mean opposite things. Naming a chosen
+   * `off` as "default" would tell somebody who asked to be left alone that an
+   * operator turning this on takes them along.
+   */
+  #cavemanNamed(sessionId: string): string {
+    const chosen = this.#cavemen.chosenFor(sessionId)
+    return chosen ?? `${PINNED_CAVEMAN_NAME} (${this.#cavemen.pinned})`
+  }
+
+  /**
    * Say what this Session is set to, and refuse to set anything else.
    *
    * Claimed and answered rather than left to fall through (ADR-0017).
@@ -1121,7 +1285,7 @@ export class Core {
    * Say what the deployment has spent this calendar month.
    *
    * **Never narrow it to the Conversation that asked.** It is the one Command
-   * that ignores the Conversation Key, and six Commands tidied into a single
+   * that ignores the Conversation Key, and seven Commands tidied into a single
    * shape is how that would go: the figures are the deployment's, so a `/usage`
    * that answered differently by thread would be answering a different question
    * rather than a narrower one (ADR-0027).
@@ -1135,25 +1299,49 @@ export class Core {
   }
 
   /**
-   * Both of what this Session is set to, in one sentence.
+   * All of what this Session is set to, in one sentence.
    *
-   * Built from the same two methods `/model` and `/effort` report with, rather
-   * than from the records again. Four spellings over two roma-owned facts, not
-   * four sources of truth — and a second reading here is exactly how four
-   * spellings would come to answer differently.
+   * Built from the same methods `/model`, `/effort` and `/caveman` report with,
+   * rather than from the records again. Five spellings over three roma-owned
+   * facts, not five sources of truth — and a second reading here is exactly how
+   * five spellings would come to answer differently.
    *
    * Its own method because an Opening says it too, and says it *unprompted*
    * (ADR-0024) — which is what makes a second copy of this sentence worse than a
    * second copy of the others. Nobody compares the top of a thread against
    * `/config` a week later, so two versions would drift with nothing to notice.
+   *
+   * **Never make the third fact unconditional to match the other two.** A
+   * deployment that never turned this on has nothing to say, and the sentence
+   * would then lengthen the first message of every Conversation it serves — a
+   * feature whose whole purpose is fewer tokens, spending words on the
+   * deployments that declined it. The conditional tail is not a new shape here,
+   * because `#modelTakesNone` is already one; the conjunction moving with it is,
+   * and it moves because *either* was only ever true of two (ADR-0030).
    */
   #settingsReport(sessionId: string): string {
+    const caveman = this.#cavemanWorthSaying(sessionId)
     return (
       `This conversation is on ${this.#modelNamed(sessionId)}, ` +
-      `at ${this.#effortNamed(sessionId)}. ` +
-      `Change either with “/model” or “/effort”.` +
+      `at ${this.#effortNamed(sessionId)}` +
+      (caveman === null ? '' : `, at caveman ${caveman}`) +
+      '. ' +
+      (caveman === null
+        ? `Change either with “/model” or “/effort”.`
+        : `Change any with “/model”, “/effort” or “/caveman”.`) +
       this.#modelTakesNone(sessionId)
     )
+  }
+
+  /**
+   * **Not `chosenFor`, which is what `#cavemanNamed` above insists on.** Read
+   * that way, a Session nobody moved answers null, null is not `off`, and a
+   * deployment that pinned nothing carries `at caveman default (off)` in the
+   * first message of every Conversation it serves.
+   */
+  #cavemanWorthSaying(sessionId: string): string | null {
+    if (this.#cavemen.inForce(sessionId) === CAVEMAN_OFF) return null
+    return this.#cavemanNamed(sessionId)
   }
 
   /**
@@ -1299,6 +1487,7 @@ export class Core {
         sessionId,
         model: this.#models.inForce(sessionId),
         effort: this.#efforts.inForce(sessionId),
+        caveman: null,
         stopped: false,
         toldContextFull: false,
         attempts,
@@ -1433,6 +1622,12 @@ export class Core {
           running?.model ?? this.#models.pinned,
           running?.effort ?? this.#efforts.pinned,
         ),
+        // And how short. The level the process served it at, and what the
+        // deployment would have given it where there was no process to ask.
+        caveman: this.#cavemanOnRecord(running?.caveman ?? null),
+        // What it produced, beside what it cost and split the same way: the two
+        // Attempts of a Task that moved bills bought output on two of them.
+        outputTokens: paid.outputTokens,
         cloudReach,
         documentReach,
         // Only where one happened, which is what "absent means no Compaction"
@@ -1449,6 +1644,19 @@ export class Core {
     // message roma owes unconditionally.
     reporter.stop()
     await this.#deliverAfter(opened, instruction)
+  }
+
+  /**
+   * What the Audit Record says a Task was asked to be: the level the process
+   * served it at, or what the deployment would have given it where there was no
+   * process to ask.
+   *
+   * **Never let `off` stand for a deployment that named nothing** — see
+   * `CAVEMAN_NOT_PINNED`, which is the fact this line exists to keep.
+   */
+  #cavemanOnRecord(ranAt: string | null): string {
+    const level = ranAt ?? this.#cavemen.pinned
+    return !this.#cavemanPinned && level === CAVEMAN_OFF ? CAVEMAN_NOT_PINNED : level
   }
 
   /**
@@ -1797,6 +2005,11 @@ export class Core {
       // Also the moment this Task stops being free with certainty: from here it
       // has spent whatever it has spent, whether or not anything ever reports it.
       attempts.sent()
+      // And the moment the process serving it is known to exist, which is why
+      // the Caveman is taken here rather than at the record: a Turn that dies
+      // mid-flight leaves the pool holding no process to ask afterwards, and its
+      // record is the one the ledger can least afford to guess at.
+      task.caveman = this.#pool.cavemanOn(sessionId)
       if (task.stopped) this.#pool.interrupt(sessionId)
     }
     this.#pool.on('event', onEvent)
@@ -1885,6 +2098,9 @@ const MENU_LIST = MENU_NAMES.join(', ')
 /** The Effort Menu as a sentence names it, held once for `MENU_LIST`'s reason. */
 const EFFORT_LIST = EFFORT_NAMES.join(', ')
 
+/** The Caveman Menu as a sentence names it, held once for `MENU_LIST`'s reason. */
+const CAVEMAN_LIST = CAVEMAN_NAMES.join(', ')
+
 /** A `/model` answer that carries the Model Menu to be chosen from. */
 function modelChoice(
   address: TaskAddress,
@@ -1901,6 +2117,15 @@ function effortChoice(
   refused: string | null,
 ): OutboundInstruction {
   return { kind: 'choice', ...address, text, chooses: 'effort', options: EFFORT_NAMES, refused }
+}
+
+/** A `/caveman` answer that carries the Caveman Menu to be chosen from. */
+function cavemanChoice(
+  address: TaskAddress,
+  text: string,
+  refused: string | null,
+): OutboundInstruction {
+  return { kind: 'choice', ...address, text, chooses: 'caveman', options: CAVEMAN_NAMES, refused }
 }
 
 /**
@@ -1928,6 +2153,22 @@ function atNextMessage(name: string, effort: string): string {
   return (
     `This conversation runs at ${name === effort ? name : `${name} (${effort})`} ` +
     `from your next message. Anything already running finishes at the effort it started at.`
+  )
+}
+
+/**
+ * The same again, for the Caveman.
+ *
+ * Its own sentence rather than a third caller of `atNextMessage`, and the word
+ * "caveman" in it is why. Both settings are things a Conversation *runs at*, so
+ * the effort's sentence reused here would say "This conversation runs at full"
+ * — true, and silent about which of the two just moved, in a thread where
+ * somebody has been typing both.
+ */
+function atNextCaveman(name: string, caveman: string): string {
+  return (
+    `This conversation runs at caveman ${name === caveman ? name : `${name} (${caveman})`} ` +
+    `from your next message. Anything already running finishes at the caveman it started at.`
   )
 }
 
@@ -1965,16 +2206,38 @@ function unknownEffortReason(name: string): string {
 }
 
 /**
+ * What roma says about a Caveman it does not offer.
+ *
+ * `unknownEffortReason`'s shape and its reasons, and `ultracode`'s rule applies
+ * to two names here rather than one: `wenyan-lite` and `wenyan-ultra` arrive like
+ * any other unknown name and must stay that way, because naming them would
+ * advertise something no Caller can have.
+ */
+function unknownCavemanReason(name: string): string {
+  return (
+    `roma does not offer a caveman called “${name}”. ` +
+    `Choose one of: ${CAVEMAN_LIST}. Nothing has changed.`
+  )
+}
+
+/**
  * What roma says to a `/config key=value`.
  *
  * Names the alternatives rather than a bare no: the person typing it is reaching
  * for one of the 35 keys Claude Code's own `/config` sets, and can have none of
  * them, because roma passes one config dir to every spawn.
+ *
+ * **Every Command that sets something, unconditionally.** Not the same list as
+ * the report `/config` answers with, and not for the same reason: that sentence
+ * says what this Session *is*, which ADR-0030 makes conditional on the
+ * deployment having pinned a Caveman at all, where this one says what a Caller
+ * *may type* — and `/caveman` is typable on every deployment there is.
  */
 const CONFIG_SETS_NOTHING =
   'roma does not set Claude Code settings — every Session in this deployment shares one ' +
   'configuration, so a change here would be a change for everybody, permanently. ' +
-  'What you can set for this conversation is “/model” and “/effort”. Nothing has changed.'
+  'What you can set for this conversation is “/model”, “/effort” and “/caveman”. ' +
+  'Nothing has changed.'
 
 /**
  * What the deployment drew and what it was billed, for one calendar month.
@@ -2151,6 +2414,7 @@ function reasonFor(error: unknown): string {
   if (error instanceof EnclosureUnreadable) return `roma could not read ${error.message}`
   if (error instanceof ChosenModelNotOffered) return chosenModelGoneReason(error)
   if (error instanceof ChosenEffortNotOffered) return chosenEffortGoneReason(error)
+  if (error instanceof ChosenCavemanNotOffered) return chosenCavemanGoneReason(error)
   // Before the general failed Turn, which this is a kind of: it carries no text
   // at all, so left to that line it falls through to `ROMA_FAILED` — which is
   // what a whole Conversation was told, message after message, in #105.
@@ -2163,6 +2427,7 @@ function reasonFor(error: unknown): string {
 function commandReasonFor(error: unknown): string {
   if (error instanceof ChosenModelNotOffered) return chosenModelGoneReason(error)
   if (error instanceof ChosenEffortNotOffered) return chosenEffortGoneReason(error)
+  if (error instanceof ChosenCavemanNotOffered) return chosenCavemanGoneReason(error)
   return ROMA_FAILED_COMMAND
 }
 
@@ -2193,6 +2458,19 @@ function chosenEffortGoneReason({ effort }: ChosenEffortNotOffered): string {
   return (
     `This conversation runs at ${effort}, which roma no longer offers. ` +
     `Send “/effort ${PINNED_EFFORT_NAME}” to put it back at the Pinned Effort, ` +
+    `keeping everything it has said.`
+  )
+}
+
+/**
+ * The same, for a Chosen Caveman roma has stopped offering — the widest of the
+ * three holes, which `ChosenCavemanNotOffered` argues, and answered identically
+ * because the way out is identical.
+ */
+function chosenCavemanGoneReason({ caveman }: ChosenCavemanNotOffered): string {
+  return (
+    `This conversation runs at caveman ${caveman}, which roma no longer offers. ` +
+    `Send “/caveman ${PINNED_CAVEMAN_NAME}” to put it back at the Pinned Caveman, ` +
     `keeping everything it has said.`
   )
 }

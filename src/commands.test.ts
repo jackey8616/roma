@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { CAVEMAN_NAMES, readCavemanRequest } from './caveman.js'
 import { commandFor, readCommand } from './commands.js'
 import { EFFORT_NAMES, readEffortRequest } from './effort-menu.js'
 import { MENU_NAMES, readModelRequest } from './model-menu.js'
@@ -9,13 +10,36 @@ function commandIn(text: string): string | null {
 }
 
 describe('reading a message as a Command', () => {
-  it('recognises the six Commands roma has', () => {
+  it('recognises the seven Commands roma has', () => {
     expect(commandIn('/stop')).toBe('stop')
     expect(commandIn('/clear')).toBe('clear')
     expect(commandIn('/model')).toBe('model')
     expect(commandIn('/effort')).toBe('effort')
+    expect(commandIn('/caveman')).toBe('caveman')
     expect(commandIn('/config')).toBe('config')
     expect(commandIn('/usage')).toBe('usage')
+  })
+
+  // The seventh, and the first claimed spelling that is nobody's build. Every
+  // one above it is Claude Code's own, claimed because a spelling roma leaves
+  // unclaimed is one somebody is billed for; this is a third-party skill's, and
+  // it is claimed because people who met that skill elsewhere arrive already
+  // typing it — the same billing fault by a longer route (ADR-0030). One
+  // spelling, because there is no vendor alias table to inherit from.
+  it('claims a spelling that is nobody’s build, and only the one', () => {
+    expect(commandIn('/caveman')).toBe('caveman')
+    expect(readCommand('/caveman ultra')).toEqual({ command: 'caveman', argument: 'ultra' })
+  })
+
+  // ADR-0030 records this rather than fixing it. caveman ships five sibling
+  // commands, each of which defers to a skill roma does not install, so
+  // somebody who knows them from elsewhere types one and is billed for a Task
+  // that explains it. The same idiom as the `/settings key=value` gap below,
+  // and closing it means deciding what roma would answer.
+  it('leaves caveman’s five sibling commands unclaimed, which ADR-0030 records rather than fixes', () => {
+    for (const sibling of ['stats', 'compress', 'commit', 'review', 'help']) {
+      expect(readCommand(`/caveman-${sibling}`)).toBeNull()
+    }
   })
 
   // ADR-0013. `clear` is Claude Code's name for this and `new` is one of its two
@@ -64,11 +88,11 @@ describe('reading a message as a Command', () => {
     expect(commandIn('/stats')).toBe('usage')
   })
 
-  // ADR-0014's rule, now carrying three heads: a listed head may take an
+  // ADR-0014's rule, now carrying four heads: a listed head may take an
   // argument and nothing else may. What that keeps out is the prefix match
   // ADR-0003 refused — a general "begins with a slash and looks like ours" rule
   // inherits every command a later Claude Code release adds. The list still does
-  // not grow on its own; it has grown by hand, three times, deliberately.
+  // not grow on its own; it has grown by hand, four times, deliberately.
   describe('the Commands that take an argument', () => {
     it('carries the argument it was given', () => {
       expect(readCommand('/model opus')).toEqual({ command: 'model', argument: 'opus' })
@@ -101,11 +125,22 @@ describe('reading a message as a Command', () => {
       expect(readCommand('/models')).toBeNull()
     })
 
-    it('carries the arguments the other two take', () => {
+    it('carries the arguments the other three take', () => {
       expect(readCommand('/effort max')).toEqual({ command: 'effort', argument: 'max' })
+      expect(readCommand('/caveman lite')).toEqual({ command: 'caveman', argument: 'lite' })
       expect(readCommand('/config theme=dark')).toEqual({
         command: 'config',
         argument: 'theme=dark',
+      })
+    })
+
+    // The hyphen is the case that had never existed before ADR-0030's Menu:
+    // `readCommand` splits on whitespace, so a name with one in it is a single
+    // argument and a name with a space in it is a sentence.
+    it('carries a hyphenated name as one argument', () => {
+      expect(readCommand('/caveman wenyan-full')).toEqual({
+        command: 'caveman',
+        argument: 'wenyan-full',
       })
     })
 
@@ -115,6 +150,7 @@ describe('reading a message as a Command', () => {
     // mean in one (ADR-0017).
     it('is the same Command with nothing after it', () => {
       expect(readCommand('/effort')).toEqual({ command: 'effort', argument: null })
+      expect(readCommand('/caveman')).toEqual({ command: 'caveman', argument: null })
       expect(readCommand('/config')).toEqual({ command: 'config', argument: null })
     })
 
@@ -220,19 +256,21 @@ describe('reading a message as a Command', () => {
  * Driven over the real Menus, never a copy. `relays.test.ts` records what a copy
  * costs: the hardcoded one it replaced held four of eight spellings and went on
  * passing while covering half the table. So this also needs that check's second
- * half — both Menus named outright, so an emptied Menu fails rather than passing
+ * half — every Menu named outright, so an emptied Menu fails rather than passing
  * vacuously.
  *
- * Both Menus need this and neither is stable: each declares itself a person's
- * judgement about one pinned Claude Code build, to be re-audited when the pin
- * moves. This is the mechanism `effort-menu.ts` says "somebody remembers"
- * stopped being.
+ * All three Menus need this and none is stable: the first two declare themselves
+ * a person's judgement about one pinned Claude Code build, to be re-audited when
+ * the pin moves, and the Caveman Menu is a person's judgement about a
+ * third-party repository that no Claude Code version dates (ADR-0030). This is
+ * the mechanism `effort-menu.ts` says "somebody remembers" stopped being.
  */
 describe('a Menu name a Caller may press instead of type', () => {
-  it('round-trips through the Command reader, for every name on both Menus', () => {
+  it('round-trips through the Command reader, for every name on all three Menus', () => {
     const menus = [
       { command: 'model' as const, names: MENU_NAMES },
       { command: 'effort' as const, names: EFFORT_NAMES },
+      { command: 'caveman' as const, names: CAVEMAN_NAMES },
     ]
 
     for (const { command, names } of menus) {
@@ -256,14 +294,47 @@ describe('a Menu name a Caller may press instead of type', () => {
       expect(request.kind).not.toBe('unknown')
       if (request.kind === 'chosen') expect(request.level).toBe(name)
     }
+    for (const name of CAVEMAN_NAMES) {
+      const request = readCavemanRequest(readCommand(commandFor('caveman', name))?.argument ?? null)
+      expect(request.kind).not.toBe('unknown')
+      if (request.kind === 'chosen') expect(request.level).toBe(name)
+    }
   })
 
   // The checks above pass vacuously against an empty Menu, and a re-audit that
   // dropped a name is exactly how that happens. Named here so losing one is a
   // failure rather than a silently shorter card.
-  it('has both Menus say what they hold, so neither can empty unnoticed', () => {
+  it('has all three Menus say what they hold, so none can empty unnoticed', () => {
     expect(MENU_NAMES).toEqual(['opus', 'sonnet', 'haiku', 'default'])
     expect(EFFORT_NAMES).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'default'])
+    expect(CAVEMAN_NAMES).toEqual(['off', 'lite', 'full', 'ultra', 'wenyan-full', 'default'])
+  })
+
+  // The shape that had never been on a Menu until ADR-0030's, asserted rather
+  // than assumed: `readCommand` splits on `/\s+/`, so a hyphen rides through as
+  // part of one argument where a space would have made the message a sentence
+  // and billed somebody for it.
+  it('survives the hyphen the Caveman Menu was the first to carry', () => {
+    expect(readCommand(commandFor('caveman', 'wenyan-full'))).toEqual({
+      command: 'caveman',
+      argument: 'wenyan-full',
+    })
+    expect(readCavemanRequest('wenyan-full')).toEqual({ kind: 'chosen', level: 'wenyan-full' })
+  })
+
+  // The same two shapes as claims about the real Menus, which the round trip
+  // above catches without ever naming. Kept because the person who trips it is
+  // adding a name, and "readCommand answered null" is a worse thing to hand them
+  // than the name that cannot be typed — `readCommand` lowercases the message
+  // before it splits it, so a capital never survives the trip and a space turns
+  // one name into a sentence.
+  it('carries no whitespace and no uppercase, on any of the three Menus', () => {
+    for (const names of [MENU_NAMES, EFFORT_NAMES, CAVEMAN_NAMES]) {
+      for (const name of names) {
+        expect(name).not.toMatch(/\s/)
+        expect(name).toBe(name.toLowerCase())
+      }
+    }
   })
 
   // The two shapes that would break the round trip, spelled out so somebody
@@ -273,5 +344,7 @@ describe('a Menu name a Caller may press instead of type', () => {
   it('would fail on a name with whitespace or the wrong case', () => {
     expect(readCommand(commandFor('model', 'claude opus'))).toBeNull()
     expect(readModelRequest('Opus').kind).toBe('unknown')
+    expect(readCommand(commandFor('caveman', 'wenyan full'))).toBeNull()
+    expect(readCavemanRequest('Ultra').kind).toBe('unknown')
   })
 })

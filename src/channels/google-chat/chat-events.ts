@@ -389,10 +389,15 @@ export function readChosenOption(event: ChatEvent): IngressMessage | null {
   const chooses = pressed(event, CHOOSE, CHOOSES_PARAMETER)
   const option = pressed(event, CHOOSE, OPTION_PARAMETER)
   if (chooses === null || option === null) return null
-  // Only the two Commands that have a Menu. A parameter naming anything else is
-  // a press roma never put out, and synthesising `/stop` or `/clear` from one
+  // Only the three Commands that have a Menu. A parameter naming anything else
+  // is a press roma never put out, and synthesising `/stop` or `/clear` from one
   // would reach a Command through a door meant for a Menu.
-  if (chooses !== 'model' && chooses !== 'effort') return null
+  //
+  // **Never widen this alone, and never widen `OutboundInstruction`'s `chooses`
+  // alone.** A Menu the Core offers and this cannot read back is a button that
+  // does nothing, under a Caller who goes on waiting for it; the other way round
+  // is a Command reachable through a card roma never posts.
+  if (chooses !== 'model' && chooses !== 'effort' && chooses !== 'caveman') return null
 
   const user = asRecord(event['user'])
   const caller = asString(user?.['name'])

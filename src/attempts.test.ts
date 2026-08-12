@@ -146,7 +146,52 @@ describe('what a Task spent', () => {
     expect(new Attempts('shared-window').spentOn('overflow')).toEqual({
       costUsd: null,
       turnMs: null,
+      outputTokens: null,
       compaction: null,
+    })
+  })
+
+  // What a Turn produced is accumulated exactly as what it cost is, because it
+  // is the same kind of number arriving the same way: a per-Turn delta, one per
+  // Attempt, belonging to whichever credential paid for that Attempt. Summed
+  // across the two, a metered record would claim output the subscription bought.
+  it('keeps the two bills’ output tokens apart, and adds each credential’s up', () => {
+    const attempts = new Attempts('shared-window')
+
+    attempted(attempts, turn({ outputTokens: 200 }))
+    attempted(attempts, turn({ outputTokens: 300 }))
+    attempts.payWith('overflow')
+    attempted(attempts, turn({ outputTokens: 50 }))
+
+    expect(attempts.spentOn('shared-window').outputTokens).toBe(500)
+    expect(attempts.spentOn('overflow').outputTokens).toBe(50)
+  })
+
+  // The pair the Audit Record has to be able to tell apart. Zero is a claim and
+  // is only made where it is certain; a Turn that began and reported no usage
+  // produced tokens nothing will ever name, and calling those nothing would
+  // flatter whatever setting the month is being compared against.
+  it('produced nothing with certainty only where the message never went', () => {
+    const never = new Attempts('shared-window')
+    neverSent(never)
+    const unmeasured = new Attempts('shared-window')
+    attempted(unmeasured, null)
+
+    expect(never.spentOn('shared-window').outputTokens).toBe(0)
+    expect(unmeasured.spentOn('shared-window').outputTokens).toBeNull()
+  })
+
+  // A Turn the build priced and said nothing else about. The two figures are
+  // reported independently by the terminal event, so they are accumulated
+  // independently — a cost that arrived is no evidence that a usage figure did.
+  it('is unmeasured on a Turn that was priced and reported no usage', () => {
+    const attempts = new Attempts('shared-window')
+
+    attempted(attempts, turn({ costUsd: 0.02, outputTokens: null }))
+
+    expect(attempts.spentOn('shared-window')).toMatchObject({
+      costUsd: 0.02,
+      outputTokens: null,
     })
   })
 

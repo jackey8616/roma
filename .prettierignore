@@ -16,6 +16,12 @@ package-lock.json
 # longer be the bytes the stream contract was read from.
 test/fixtures/claude-stream/
 
+# caveman's `SKILL.md`, vendored as the evidence roma's own ruleset was derived from.
+# `*.md` below already covers it and this entry is what keeps that true: the day
+# Markdown is widened into, a reformatted copy would fail its hash test as though
+# upstream had moved.
+test/fixtures/caveman/
+
 # Prose is hand-wrapped here — `CONTEXT.md`, the ADRs, `docs/agents/`. Prettier is
 # scoped to code for now; widening it to Markdown is a deliberate change with its own
 # commit, not something that arrives as a side effect of formatting a `.ts` file.

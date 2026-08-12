@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { CAVEMAN_MENU, OFF_MENU_WENYAN } from './caveman.js'
 import { ConfigurationMissing, readConfiguration, readRomaEnv } from './env-config.js'
 
 /** Everything roma insists on, and nothing it does not. */
@@ -131,11 +132,13 @@ describe('reading roma out of the environment', () => {
           ...MINIMAL,
           ROMA_MODEL: 'claude-sonnet-5',
           ROMA_EFFORT: 'max',
+          ROMA_CAVEMAN: 'lite',
           ROMA_MAX_CONCURRENT_TASKS: '5',
         }),
       ).toMatchObject({
         model: 'claude-sonnet-5',
         effort: 'max',
+        caveman: 'lite',
         maxConcurrentTasks: 5,
       })
     })
@@ -161,6 +164,48 @@ describe('reading roma out of the environment', () => {
       expect(readRomaEnv({ ...MINIMAL, ROMA_EFFORT: 'ultracode' })).toMatchObject({
         effort: 'ultracode',
       })
+    })
+
+    // **Refused here because nothing downstream would ever see it.** A mistyped
+    // effort at least reaches Claude Code, which warns about it on stderr; a
+    // mistyped Caveman is roma's own word for text roma assembles itself, so
+    // there is no process anywhere that could disagree with it — unrefused, it
+    // would append a ruleset whose intensity table had no rows (ADR-0030).
+    it('refuses a Caveman roma has no ruleset for', () => {
+      for (const caveman of ['bananas', 'FULL', 'default', 'commit']) {
+        expect(() => readRomaEnv({ ...MINIMAL, ROMA_CAVEMAN: caveman })).toThrow(/ROMA_CAVEMAN/)
+      }
+    })
+
+    // A refusal an operator can act on without opening the README. Written out
+    // here rather than joined from the constants, so that a list quietly losing a
+    // level fails instead of agreeing with itself.
+    it('names every level it would have taken instead', () => {
+      expect(() => readRomaEnv({ ...MINIMAL, ROMA_CAVEMAN: 'bananas' })).toThrow(
+        /Set one of: off, lite, full, ultra, wenyan-full — or wenyan-lite, wenyan-ultra/,
+      )
+    })
+
+    // The alias caveman's own hook rewrites to `wenyan-full`. roma relays nothing
+    // to that hook, so accepting it would be a second spelling roma had chosen to
+    // claim for a level it already has one for — `ROMA_EFFORT`'s refusal of `med`,
+    // and the refusal names the spelling roma does take.
+    it('refuses wenyan, and says which spelling of it roma pins', () => {
+      expect(() => readRomaEnv({ ...MINIMAL, ROMA_CAVEMAN: 'wenyan' })).toThrow(/wenyan-full/)
+    })
+
+    // All seven at the variable an operator actually sets, rather than at the
+    // function behind it — this is the whole of ADR-0030's operator half, and a
+    // level that could not be set would be a level roma does not have. The last
+    // two are the Caveman Menu's `ultracode`: held back from a Caller because
+    // wenyan's own row claims its saving in characters and roma is spent in
+    // tokens, and reachable by an operator all the same, because the Menu bounds
+    // Callers and never the operator.
+    it('takes every level an operator may pin, the two no Caller may ask for included', () => {
+      for (const caveman of [...CAVEMAN_MENU, ...OFF_MENU_WENYAN]) {
+        expect(readRomaEnv({ ...MINIMAL, ROMA_CAVEMAN: caveman })).toMatchObject({ caveman })
+      }
+      for (const caveman of OFF_MENU_WENYAN) expect(CAVEMAN_MENU).not.toContain(caveman)
     })
 
     // Optional, which is the opposite of what the Overflow cap is, and the
