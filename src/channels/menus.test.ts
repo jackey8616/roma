@@ -10,6 +10,7 @@ import {
   readChosenOption as readDiscordChoice,
   type DiscordEvent,
 } from './discord/discord-events.js'
+import type { ChatAction } from './google-chat/chat-api.js'
 import { readChosenOption as readChatChoice, type ChatEvent } from './google-chat/chat-events.js'
 import { GoogleChatAdapter } from './google-chat/google-chat-adapter.js'
 
@@ -47,8 +48,8 @@ const EVERY_MENU: readonly Menu[] = ['model', 'effort', 'caveman']
 /** roma's own id on Discord, which a press never reads. */
 const SELF = '800000000000000001'
 const DISCORD_CALLER = '700000000000000002'
-/** The Conversation the button carries, which is the reason a press is self-describing. */
-const DISCORD_CONVERSATION = '900000000000000003'
+/** The Conversation Key the button carries, which is what makes a press self-describing. */
+const DISCORD_CONVERSATION_KEY = '900000000000000003'
 
 const CHAT_SPACE = 'spaces/AAAA'
 const CHAT_THREAD = `${CHAT_SPACE}/threads/thread-1`
@@ -60,10 +61,10 @@ const CHAT_CALLER = 'users/17'
  * A true round trip: `chooseId` is what `choiceButtons` writes with, and both it
  * and the reader are exported, so nothing here re-implements either half.
  */
-function discordReadsBack(chooses: Menu, option: string): string | null {
+function readBackByDiscord(chooses: Menu, option: string): string | null {
   const event: DiscordEvent = {
     // roma's own card. Nothing on a press is read off it — the person is on the
-    // event and the Conversation is on the button (ADR-0023).
+    // event and the Conversation Key is on the button (ADR-0023).
     message: {},
     self: SELF,
     guildChannel: false,
@@ -71,7 +72,7 @@ function discordReadsBack(chooses: Menu, option: string): string | null {
     press: {
       caller: DISCORD_CALLER,
       callerName: 'Ada',
-      customId: chooseId(chooses, DISCORD_CONVERSATION, option),
+      customId: chooseId(chooses, DISCORD_CONVERSATION_KEY, option),
     },
   }
   return readDiscordChoice(event)?.text ?? null
@@ -88,7 +89,7 @@ function discordReadsBack(chooses: Menu, option: string): string | null {
  * Channel's surface to suit a test, and the recording double exists for exactly
  * this.
  */
-async function chatReadsBack(
+async function readBackByChat(
   chooses: Menu,
   options: readonly string[],
 ): Promise<(string | null)[]> {
@@ -110,24 +111,26 @@ async function chatReadsBack(
   // The last message, because that is the one the buttons go under: an answer
   // long enough to split would otherwise repeat the Menu under every piece.
   const actions = api.messages.at(-1)?.posted.actions ?? []
-  return actions.map((action) => chatPressed(action.action, action.parameters))
+  return actions.map(pressed)
 }
 
 /**
- * One press on a card roma posted, as Chat documents an interaction event.
+ * One button off a recorded card, pressed, as Chat documents an interaction
+ * event.
  *
- * The envelope is written here and the action and parameters are not: those come
- * off the card the Adapter recorded, which is the half a hand-built event would
- * have quietly copied.
+ * The whole `ChatAction` rather than its two halves, because the point is that
+ * neither is the test's: both come off the card the Adapter recorded, which is
+ * the part a hand-built event would have quietly copied. Only the envelope
+ * around them is written here.
  */
-function chatPressed(action: string, parameters: Readonly<Record<string, string>>): string | null {
+function pressed(button: ChatAction): string | null {
   const event: ChatEvent = {
     type: 'CARD_CLICKED',
     // Whoever pressed, who is never the card's own sender.
     user: { name: CHAT_CALLER, displayName: 'Ada' },
     space: { name: CHAT_SPACE, type: 'ROOM', spaceType: 'SPACE' },
     message: { name: `${CHAT_SPACE}/messages/msg-9`, thread: { name: CHAT_THREAD } },
-    common: { invokedFunction: action, parameters },
+    common: { invokedFunction: button.action, parameters: button.parameters },
   }
   return readChatChoice(event)?.text ?? null
 }
@@ -178,7 +181,7 @@ describe('a Menu the Core offers, read back by every Channel that draws it', () 
   it('is read back by Discord as the Command a Caller would have typed', () => {
     for (const chooses of EVERY_MENU) {
       for (const option of MENUS[chooses]) {
-        expect(readCommand(discordReadsBack(chooses, option) ?? '')).toEqual({
+        expect(readCommand(readBackByDiscord(chooses, option) ?? '')).toEqual({
           command: chooses,
           argument: option,
         })
@@ -192,7 +195,7 @@ describe('a Menu the Core offers, read back by every Channel that draws it', () 
   it('is read back by Chat as the same Command, off the card it actually posted', async () => {
     for (const chooses of EVERY_MENU) {
       const names = MENUS[chooses]
-      const texts = await chatReadsBack(chooses, names)
+      const texts = await readBackByChat(chooses, names)
 
       // One button per name. A card that drew fewer would otherwise shorten the
       // loop rather than fail it.
@@ -209,8 +212,11 @@ describe('a Menu the Core offers, read back by every Channel that draws it', () 
   // the `Record` forced somebody to add and nothing drove fails here. What each
   // Menu *holds* is named outright in `commands.test.ts`, so this asks only that
   // none of them is empty.
+  //
+  // Sorted, because the claim is coverage and not order: reordering `MENUS` is a
+  // no-op edit, and one that failed a test would teach somebody to distrust it.
   it('covers every Menu in the table, and finds none of them empty', () => {
-    expect(EVERY_MENU).toEqual(Object.keys(MENUS))
+    expect([...EVERY_MENU].sort()).toEqual(Object.keys(MENUS).sort())
     for (const chooses of EVERY_MENU) expect(MENUS[chooses].length).toBeGreaterThan(0)
   })
 })
