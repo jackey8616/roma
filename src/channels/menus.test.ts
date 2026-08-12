@@ -161,9 +161,15 @@ function chatPressed(action: string, parameters: Readonly<Record<string, string>
  * is the letter of the rule against its spirit, and it would leave the Core's own
  * test file naming two Channels.
  *
- * **What this does not catch:** a `Command` widened in `commands.ts` and
- * `choice.chooses` left behind. That is a Core-internal mismatch, and this keys
- * on `chooses`, which is the thing the Adapters must agree with.
+ * **What this does not catch**, both of them for one reason — it keys on
+ * `chooses`, which is the thing the Adapters must agree with. A `Command`
+ * widened in `commands.ts` and `choice.chooses` left behind is a Core-internal
+ * mismatch and passes here. So does a Channel that runs *ahead* of the Core: a
+ * reader widened to a Menu nothing offers leaves the table below unchanged, and
+ * every loop goes on passing. That direction is the inert half — a `custom_id`
+ * arrives only on a card roma posted, so a Menu the Core never draws is a
+ * Command with no door to reach it through, which is why the two Adapters say so
+ * in prose (`chosen()`, `readChosenOption`) and this says so here.
  */
 describe('a Menu the Core offers, read back by every Channel that draws it', () => {
   // From the identifier Discord actually writes onto a button, back through
