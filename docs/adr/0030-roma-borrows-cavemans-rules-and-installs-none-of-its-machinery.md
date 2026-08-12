@@ -29,33 +29,112 @@ ADR-0029 are about Channels and touch nothing here.
 
 ### Verification status
 
-Read off the bundle rather than run, on **2.1.227** — which is **not the pinned
-build**. ADR-0007 pins 2.1.220 and every measurement in this repository is
-evidence about that build and no other, so every reading below is one patch
-version away from the thing roma ships and is re-read, not inherited, when this
-is built.
+Read rather than run. The readings about Claude Code — the two immediately
+below, on where a skill is found and what an uninvoked one costs — are off the
+pinned build, **2.1.220**, the version `Dockerfile` and `src/packaging.test.ts`
+both carry. The **Measured** ones after them are off `jackey8616/caveman` at its
+pinned commit — readings about a third-party repository, which no Claude Code
+version dates.
+
+The two were first taken on 2.1.227 and have been re-taken here, because a
+reading inherited from the build next door is not evidence about the build roma
+ships, and ADR-0007's pin is what makes that a requirement rather than a
+courtesy. The pin was checked rather than assumed: #160 reports npm's `latest`
+at 2.1.226 and is open, unacted on, and asks for nothing — declining that check
+is a normal outcome, and 2.1.220 is what the image installs until somebody
+decides otherwise.
+
+**The method changed, because the artefact did.** 2.1.220's npm package is a
+500-byte `bin/claude.exe` and a postinstall that copies a native binary over it,
+so there is no bundle to open: the quotes below are the JavaScript embedded in
+`@anthropic-ai/claude-code-linux-x64@2.1.220`, recovered with `strings` and
+`grep -a`. Minified names therefore differ from the 2.1.227 quotes this section
+used to carry — `O8` is `fn` here — and that is not a finding, because a build
+renames them for free. Behaviour moving is the finding, and where it moved it is
+said so below.
 
 **Measured — where Claude Code looks for a skill.**
 
 ```js
-function O8(){return(process.env.CLAUDE_CONFIG_DIR??xnA(gFq(),".claude")).normalize("NFC")}
+function Akl(){return process.env.CLAUDE_CONFIG_DIR}
+fn=Vr(()=>(Akl()??dye.join(Tkl.homedir(),".claude")).normalize("NFC"),Akl)
 …
-let q=xo(O8(),"skills"),K=xo(af(),".claude","skills"),Y=SJA("skills",A);
-h(`Loading skills from: managed=${K}, user=${q}, project=[${Y.join(", ")}]`)
+let t=E_.join(fn(),"skills"),r=E_.join(cB(),".claude","skills"),n=J$t("skills",e);
+w(`Loading skills from: managed=${r}, user=${t}, project=[${n.join(", ")}]`)
 ```
 
 A user skill lives under `CLAUDE_CONFIG_DIR`, which for roma is
 `ROMA_CLAUDE_CONFIG_DIR` — the volume the README requires be durable and
-ADR-0006 forbids roma to delete from. A project skill lives under `<cwd>/.claude`,
-which for roma is the Session's Working Directory, reclaimed after seven idle
-days. **There is no path an image can bake a skill into that a running roma
-would read**: the one the image could write is mounted over at boot.
+ADR-0006 forbids roma to delete from. That reading holds unchanged; 2.1.220
+splits the environment read from its fallback where 2.1.227 inlined the two, and
+lands on the same directory.
 
-**Measured — what an installed skill costs when nothing invokes it.** Claude
-Code's own `/skills` list renders each entry as `… · ${K} description tokens`,
-which is the build saying out loud that an installed-and-unused skill costs its
-description and not its body. caveman's frontmatter description is 404
-characters; the body filtered to one level is 4,107.
+The project reading holds as well, and **this file stated it narrower than the
+resolver it was describing** — which is what re-reading it turned up. `project`
+is a list rather than a path, and `n.join(", ")` was saying so on 2.1.227 too:
+
+```js
+function J$t(e,t){let r=nX.resolve(xap.homedir()).normalize("NFC"),n=P2_(t),o=nX.resolve(t),i=[];while(!0){if(pv(o)===pv(r))break;let s=nX.join(o,".claude",e);try{Cap.statSync(s),i.push(s)}catch(l){…}if(n&&pv(o)===pv(n))break;let a=nX.dirname(o);if(a===o)break;o=a}return i}
+```
+
+Its own error path names it `getProjectDirsUpToHome`. So a project skill is
+resolved under `<cwd>/.claude` **and under every ancestor of it**, stopping at
+the home directory, at the enclosing git repository's root — `P2_`, which is
+null outside a repository — or at `/`.
+
+For roma that is not a detail. `HOME` is `/home/node`, `ROMA_WORK_ROOT` defaults
+to `/var/lib/roma/work`, and a Working Directory is `<work root>/<sessionId>`
+made with `mkdirSync` and never `git init`-ed — so the climb meets no home
+directory on the chain and no repository root to stop at, and runs to `/`. On
+the way it stats `.claude/skills` under `/var/lib/roma/work`, `/var/lib/roma`,
+`/var/lib`, `/var` and `/`. The first of those may be a mounted volume. **The
+other four are the image's own filesystem, and a `COPY` can write any of them.**
+
+**So the sentence this section used to end on is wrong, and the decision it
+supported is not.** It read: *there is no path an image can bake a skill into
+that a running roma would read.* There are four, and a skill baked into any of
+them would be read. What that costs is a leg rather than the decision — "an
+image cannot put anything there" was the mechanical half of rejecting the
+`COPY`, and it has gone. The other half carries it alone and always could: a
+skill is model-elected, caveman's description is trigger-phrase shaped, and
+roma's Sessions supply no trigger. *Not the skill, because a skill is
+model-elected* is unchanged, and its own summary — **yes, and it would not do
+the thing** — is now the whole of the reason rather than the better of two.
+
+Read off the binary and the image's own paths, not run: nothing here has watched
+roma load a skill out of `/var/lib/roma/.claude/skills`, and the agenda below
+gains that question.
+
+**Measured — what an installed skill costs when nothing invokes it.** The
+evidence this file cited for that — `/skills` rendering each entry as
+`… · ${K} description tokens` — **is not in the pinned build.** The string
+`description tokens` does not occur in the 2.1.220 binary at all. The claim is
+re-established on better evidence, which is the listing itself rather than a
+counter drawn beside it:
+
+```js
+function DMt(e){return e.whenToUse?`${e.description} - ${e.whenToUse}`:e.description}
+function Why(e){let t=DMt(e),r=RMt();return t.length>r?t.slice(0,r-1)+"\u2026":t}
+function qhy(e){…return `- ${e.name}: ${Why(e)}`}
+function RMt(){return eo().skillListingMaxDescChars??Uhy}
+…
+Uhy=1536
+```
+
+An entry is `- name: description`, truncated at `skillListingMaxDescChars`,
+whose own settings help calls it *"Per-skill description character cap in the
+skill listing sent to Claude (default: 1536). Descriptions longer than this are
+truncated. Raise to opt in to higher per-turn context cost."* The body is not in
+it. caveman's frontmatter description is 404 characters and the body filtered to
+one level is 4,107 — so the description is carried whole, well under the cap,
+and the 4,107 is not carried at all. This is a stronger reading than the one it
+replaces: a UI counter said what the build believed, and this is the string the
+model is sent.
+
+2.1.220 also takes a per-skill `name-only` override, which lists a skill without
+its description. It does not rescue the installed-skill alternative below: it
+would save the 404 characters by removing the only thing that could ever elect
+the skill.
 
 **Measured — the fork is the upstream.** `jackey8616/caveman` HEAD and
 `JuliusBrussee/caveman` `main` are both `3098342`, and `git diff` between them
@@ -116,10 +195,11 @@ leaving code, errors and technical terms untouched. It claims 65% off prose
 output. It ships as a skill, as a plugin, and as an installer.
 
 The obvious reading of "can roma pre-install this skill?" is a `COPY` in the
-Dockerfile. The measurement above is why that reading does not survive: the only
-directory a running roma reads user skills from is a mounted volume, so an image
-cannot put anything there. Every remaining shape is a real decision with a real
-cost, and this file is those decisions.
+Dockerfile. That reading does not survive — though not for the reason this file
+first gave, which the re-read against 2.1.220 retired. An image *can* write a
+directory a Session reads; what it cannot do is get the skill elected. Every
+remaining shape is a real decision with a real cost, and this file is those
+decisions.
 
 ## The decision
 
@@ -379,9 +459,12 @@ Ordered by how much falls if the answer is no.
    else is decoration if it does not. Answerable from the deployment's own Audit
    Records once they carry the level and `outputTokens` — which is why that is
    part of this ADR and not a follow-up.
-2. **Do the bundle readings above hold on 2.1.220?** They were taken on 2.1.227.
-   Re-read before building; ADR-0007's pin is what makes this a required step
-   rather than a courtesy.
+2. **Does a `.claude/skills` above the Work Root actually reach a Session?** The
+   resolver stats every ancestor up to `/` and the image owns four of them, so
+   the answer decides whether this image has a skill-shaped hole in it. Read off
+   the binary, never run. This replaces the item asking whether the readings
+   above held on 2.1.220 — they were re-read against it, which is how this
+   question got asked.
 3. **Is the append inside the cached prefix?** Decides whether the per-spawn cost
    is paid once or every Turn. Nothing in this repository has read Claude Code's
    request construction; this would be the first.
