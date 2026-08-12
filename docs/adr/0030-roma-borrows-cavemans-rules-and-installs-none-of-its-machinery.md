@@ -4,11 +4,29 @@ Date: 2026-08-12
 
 ## Status
 
-Proposed — the decisions below came out of a design interview, not a build.
-Nothing here has been measured against roma's own traffic, and the claim the
-whole thing exists for — that it saves anything — is deliberately **not made**.
-What is written down is a mechanism and the reasons a cheaper-looking mechanism
-was rejected; what it is worth is the verification agenda at the end.
+Accepted, and **implemented** (#183–#190, under the map #182). `src/caveman.ts`
+holds the borrowed ruleset, the level filter and the Menu;
+`test/fixtures/caveman/SKILL.md` is the upstream file it was derived from and
+`src/caveman.test.ts` holds that file's hash and the four rewrites.
+`ROMA_CAVEMAN` is refused at boot in `src/env-config.ts`, `chosenCavemen` in
+`src/session-generation.ts` is the third Chosen Record adapter, `SpawnTerms` in
+`src/session-pool.ts` carries the level onto every spawn and the swap has its
+fourth reason, `Core.#answerCaveman` answers `/caveman` and `#settingsReport`
+says it where this Session's is not `off`, and `src/channels/google-chat/` draws
+the Menu as buttons and reads a press back.
+
+**Implemented is not verified, and holding those apart is most of what this file
+was written to do.** Nothing here has been measured against roma's own traffic,
+and the claim the whole thing exists for — that it saves anything — is still
+deliberately **not made**. What landed beside the mechanism is the instruments
+for making it: the Audit Record now carries the level and the Turn's output
+tokens, which is what lets a deployment answer agenda item 1 from its own months
+rather than from a synthetic prompt, and `src/append-on-resume.live.test.ts` is
+item 5's. That one has since been spent, and it is the only claim in this file
+that has moved from assumed to measured: **the append survives a `--resume` on
+2.1.220**, so a Caveman applies for as long as a Session lives. The agenda at the
+end is shorter by one item and longer by another, both from the same re-reading —
+see *Verification status*.
 
 Follows ADR-0016 in shape and ADR-0014 in shape: a thing every Session runs
 with, pinned by the operator and moved by a person, kept in a Chosen Record and
@@ -29,33 +47,115 @@ ADR-0029 are about Channels and touch nothing here.
 
 ### Verification status
 
-Read off the bundle rather than run, on **2.1.227** — which is **not the pinned
-build**. ADR-0007 pins 2.1.220 and every measurement in this repository is
-evidence about that build and no other, so every reading below is one patch
-version away from the thing roma ships and is re-read, not inherited, when this
-is built.
+Read rather than run, with one exception, and the exception is the load-bearing
+one. The readings about Claude Code taken off the binary — the two immediately
+below, on where a skill is found and what an uninvoked one costs — are off the
+pinned build, **2.1.220**, the version `Dockerfile` and `src/packaging.test.ts`
+both carry. The **Measured** ones after them are off `jackey8616/caveman` at its
+pinned commit — readings about a third-party repository, which no Claude Code
+version dates. The last **Measured** block is neither: it is a run, two real
+Turns against the Shared Window, and it names 2.1.220 for itself rather than
+inheriting it from this paragraph.
+
+The two were first taken on 2.1.227 and have been re-taken here, because a
+reading inherited from the build next door is not evidence about the build roma
+ships, and ADR-0007's pin is what makes that a requirement rather than a
+courtesy. The pin was checked rather than assumed: #160 reports npm's `latest`
+at 2.1.226 and is open, unacted on, and asks for nothing — declining that check
+is a normal outcome, and 2.1.220 is what the image installs until somebody
+decides otherwise.
+
+**The method changed, because the artefact did.** 2.1.220's npm package is a
+500-byte `bin/claude.exe` and a postinstall that copies a native binary over it,
+so there is no bundle to open: the quotes below are the JavaScript embedded in
+`@anthropic-ai/claude-code-linux-x64@2.1.220`, recovered with `strings` and
+`grep -a`. Minified names therefore differ from the 2.1.227 quotes this section
+used to carry — `O8` is `fn` here — and that is not a finding, because a build
+renames them for free. Behaviour moving is the finding, and where it moved it is
+said so below.
 
 **Measured — where Claude Code looks for a skill.**
 
 ```js
-function O8(){return(process.env.CLAUDE_CONFIG_DIR??xnA(gFq(),".claude")).normalize("NFC")}
+function Akl(){return process.env.CLAUDE_CONFIG_DIR}
+fn=Vr(()=>(Akl()??dye.join(Tkl.homedir(),".claude")).normalize("NFC"),Akl)
 …
-let q=xo(O8(),"skills"),K=xo(af(),".claude","skills"),Y=SJA("skills",A);
-h(`Loading skills from: managed=${K}, user=${q}, project=[${Y.join(", ")}]`)
+let t=E_.join(fn(),"skills"),r=E_.join(cB(),".claude","skills"),n=J$t("skills",e);
+w(`Loading skills from: managed=${r}, user=${t}, project=[${n.join(", ")}]`)
 ```
 
 A user skill lives under `CLAUDE_CONFIG_DIR`, which for roma is
 `ROMA_CLAUDE_CONFIG_DIR` — the volume the README requires be durable and
-ADR-0006 forbids roma to delete from. A project skill lives under `<cwd>/.claude`,
-which for roma is the Session's Working Directory, reclaimed after seven idle
-days. **There is no path an image can bake a skill into that a running roma
-would read**: the one the image could write is mounted over at boot.
+ADR-0006 forbids roma to delete from. That reading holds unchanged; 2.1.220
+splits the environment read from its fallback where 2.1.227 inlined the two, and
+lands on the same directory.
 
-**Measured — what an installed skill costs when nothing invokes it.** Claude
-Code's own `/skills` list renders each entry as `… · ${K} description tokens`,
-which is the build saying out loud that an installed-and-unused skill costs its
-description and not its body. caveman's frontmatter description is 404
-characters; the body filtered to one level is 4,107.
+The project reading holds as well, and **this file stated it narrower than the
+resolver it was describing** — which is what re-reading it turned up. `project`
+is a list rather than a path, and `n.join(", ")` was saying so on 2.1.227 too:
+
+```js
+function J$t(e,t){let r=nX.resolve(xap.homedir()).normalize("NFC"),n=P2_(t),o=nX.resolve(t),i=[];while(!0){if(pv(o)===pv(r))break;let s=nX.join(o,".claude",e);try{Cap.statSync(s),i.push(s)}catch(l){…}if(n&&pv(o)===pv(n))break;let a=nX.dirname(o);if(a===o)break;o=a}return i}
+```
+
+Its own error path names it `getProjectDirsUpToHome`. So a project skill is
+resolved under `<cwd>/.claude` **and under every ancestor of it**, stopping at
+the home directory, at the enclosing git repository's root — `P2_`, which is
+null outside a repository — or at `/`.
+
+For roma that is not a detail. `HOME` is `/home/node`, `ROMA_WORK_ROOT` defaults
+to `/var/lib/roma/work`, and a Working Directory is `<work root>/<sessionId>`
+made with `mkdirSync` and never `git init`-ed — so the climb meets no home
+directory on the chain and no repository root to stop at, and runs to `/`. On
+the way it stats `.claude/skills` under `/var/lib/roma/work`, `/var/lib/roma`,
+`/var/lib`, `/var` and `/`. The first of those may be a mounted volume. **The
+other four are the image's own filesystem, and a `COPY` can write any of them.**
+
+**So the sentence this section used to end on is wrong, and the decision it
+supported is not.** It read: *there is no path an image can bake a skill into
+that a running roma would read.* There are four, and a skill baked into any of
+them would be read. What that costs is a leg rather than the decision — "an
+image cannot put anything there" was the mechanical half of rejecting the
+`COPY`, and it has gone. The other half carries it alone and always could: a
+skill is model-elected, caveman's description is trigger-phrase shaped, and
+roma's Sessions supply no trigger. *Not the skill, because a skill is
+model-elected* is unchanged, and its own summary — **yes, and it would not do
+the thing** — is now the whole of the reason rather than the better of two.
+
+Read off the binary and the image's own paths, not run: nothing here has watched
+roma load a skill out of `/var/lib/roma/.claude/skills`, and the agenda below
+gains that question.
+
+**Measured — what an installed skill costs when nothing invokes it.** The
+evidence this file cited for that — `/skills` rendering each entry as
+`… · ${K} description tokens` — **is not in the pinned build.** The string
+`description tokens` does not occur in the 2.1.220 binary at all. The claim is
+re-established on better evidence, which is the listing itself rather than a
+counter drawn beside it:
+
+```js
+function DMt(e){return e.whenToUse?`${e.description} - ${e.whenToUse}`:e.description}
+function Why(e){let t=DMt(e),r=RMt();return t.length>r?t.slice(0,r-1)+"\u2026":t}
+function qhy(e){…return `- ${e.name}: ${Why(e)}`}
+function RMt(){return eo().skillListingMaxDescChars??Uhy}
+…
+Uhy=1536
+```
+
+An entry is `- name: description`, truncated at `skillListingMaxDescChars`,
+whose own settings help calls it *"Per-skill description character cap in the
+skill listing sent to Claude (default: 1536). Descriptions longer than this are
+truncated. Raise to opt in to higher per-turn context cost."* The body is not in
+it. caveman's frontmatter description is 404 characters and the body filtered to
+one level is 4,107 — so the description is carried whole, well under the cap,
+and the 4,107 is not carried at all. This is a stronger reading than the one it
+replaces: a UI counter said what the build believed, and this is the string the
+model is sent.
+
+2.1.220 also takes a per-skill `name-only` override, which lists a skill without
+its description. It does not rescue the installed-skill alternative below: it
+would save the 404 characters by removing the only thing that could ever elect
+the skill.
 
 **Measured — the fork is the upstream.** `jackey8616/caveman` HEAD and
 `JuliusBrussee/caveman` `main` are both `3098342`, and `git diff` between them
@@ -82,6 +182,39 @@ wenyan-lite, wenyan, wenyan-full, wenyan-ultra, commit, review, compress`.
 `wenyan` is an alias the hook rewrites to `wenyan-full`. `commit`, `review` and
 `compress` are `INDEPENDENT_MODES`, for which the hook emits one line deferring
 to a separate skill — skills this decision does not install.
+
+**Measured — the append survives a `--resume`.** Agenda item 5, the one question
+here no bundle could answer, and the assumption the whole decision rests on.
+`#spawnNow` hands `appendSystemPrompt` to `ClaudeSession` without looking at
+`resuming`, so the flag is on a resumed process's argv — which says nothing about
+whether the Runtime applies it to a conversation that already has a system
+prompt. `src/append-on-resume.live.test.ts` briefs a Session under one nonsense
+codeword, ends it with `evict`, resumes it under a **different** one, and asks
+for a codeword the inherited conversation never contained, so one run tells apart
+the append applying, the original one persisting, and nothing persisting. It was
+run on 2026-08-12 at `ab48d09`, two Turns for $0.118313, and both processes
+reported **Claude Code 2.1.220** — which the run asserts rather than assumes,
+going red rather than letting a reading span two builds:
+
+```
+verdict  append-applies — the append applies on resume — agenda item 5 answered yes
+first    briefed ZARQUON-7413, said "BRIEFING-IN-FORCE"
+resumed  briefed VELMOTH-2856, said "VELMOTH-2856"
+spawns   resume=false resume=true
+```
+
+The resumed process answered with the codeword of the briefing **it was resumed
+under**. So a Caveman applies for as long as a Session lives — across every
+Eviction, Reaping, restart and swap — and `/caveman` reports a level the model is
+on rather than one it abandoned at the first Eviction. This decision needs no
+change, which is why nothing below was rewritten around it.
+
+The reading is wider than the Caveman, and the failure it rules out was wider
+still. The briefing was handed to the pool as an **announcement** — the same
+argument a Reach announcement rides (`startup.ts`'s `eachReach`) — so what
+survived the Eviction here is the channel itself, and ADR-0020's capabilities
+survive it with the ruleset. `docs/append-on-resume-verification.md` is the
+method and the reading in full.
 
 **Not measured — that any of this saves a token.** The 65% is caveman's own
 number, measured by a third party on prompts nobody here has seen, and it is
@@ -116,10 +249,11 @@ leaving code, errors and technical terms untouched. It claims 65% off prose
 output. It ships as a skill, as a plugin, and as an installer.
 
 The obvious reading of "can roma pre-install this skill?" is a `COPY` in the
-Dockerfile. The measurement above is why that reading does not survive: the only
-directory a running roma reads user skills from is a mounted volume, so an image
-cannot put anything there. Every remaining shape is a real decision with a real
-cost, and this file is those decisions.
+Dockerfile. That reading does not survive — though not for the reason this file
+first gave, which the re-read against 2.1.220 retired. An image *can* write a
+directory a Session reads; what it cannot do is get the skill elected. Every
+remaining shape is a real decision with a real cost, and this file is those
+decisions.
 
 ## The decision
 
@@ -209,16 +343,26 @@ of `jackey8616/caveman`, with three lines rewritten:
 | `Off only: "stop caveman" / "normal mode".` | The prose off-switch exists because `caveman-mode-tracker.js` watches `UserPromptSubmit` for that phrase. There is no tracker. Left in, roma's record would say `full` while the model had stopped, and `/caveman` would report a lie. |
 | `Switch: /caveman lite\|full\|ultra\|wenyan-lite\|wenyan-full\|wenyan-ultra\|off` | Advertises seven values against a Menu of five. ADR-0023's consequence list names this failure exactly — *one carrying uppercase makes roma refuse a name it just offered* — and this would be the same failure by a different route. |
 | `Default: **full**.` | Hardcodes a default that is `ROMA_CAVEMAN`'s to decide. |
+| `"stop caveman" or "normal mode": revert.`, in `## Boundaries` | **Found when the text was written, not when this table was.** A *second* prose off-switch, which the first row's argument condemns exactly as well. The requirement is *no prose off-switch* rather than a count, so it goes; the carve-out on the same line stays. |
 
-**All three describe the tracker hook**, which is the piece the section above
+**All four describe the tracker hook**, which is the piece the section above
 declines to install. Removing them is not editorial taste; it is deleting the
 manual for a part that is not in the box.
 
-Everything else is kept verbatim, including the line roma would probably not have
-thought to write: *Persisted outside chat: write normal prose — code, comments,
-commits, docs, issue/PR/MR text, memory files.* roma's agent opens issues and
-pull requests with `gh` (ADR-0008), and that carve-out is the evidence the text
-is worth borrowing rather than replacing.
+The fourth row is here because the first three were written from a reading of
+caveman's `## Persistence` section and the fourth line is in `## Boundaries`,
+which nobody re-read until `src/caveman.ts` had to name every divergence. A table
+that had stayed at three would have made the shipped text look like a mistake.
+
+Everything else is kept verbatim **but for one parenthetical**, including the
+line roma would probably not have thought to write: *Persisted outside chat:
+write normal prose — code, comments, commits, docs, issue/PR/MR text, memory
+files.* roma's agent opens issues and pull requests with `gh` (ADR-0008), and
+that carve-out is the evidence the text is worth borrowing rather than replacing.
+What goes with the fourth row is `(/caveman-compress exempt)`, on the switch
+list's argument: that skill is one of the five siblings *Consequences* leaves
+unclaimed, so the parenthetical would grant an exemption through a command
+nothing answers.
 
 Because roma owns it, `npx skills update` does not apply to it. The upstream file
 is vendored beside the derived one as **evidence**, and a test holds its hash the
@@ -379,18 +523,26 @@ Ordered by how much falls if the answer is no.
    else is decoration if it does not. Answerable from the deployment's own Audit
    Records once they carry the level and `outputTokens` — which is why that is
    part of this ADR and not a follow-up.
-2. **Do the bundle readings above hold on 2.1.220?** They were taken on 2.1.227.
-   Re-read before building; ADR-0007's pin is what makes this a required step
-   rather than a courtesy.
+2. **Does a `.claude/skills` above the Work Root actually reach a Session?** The
+   resolver stats every ancestor up to `/` and the image owns four of them, so
+   the answer decides whether this image has a skill-shaped hole in it. Read off
+   the binary, never run. This replaces the item asking whether the readings
+   above held on 2.1.220 — they were re-read against it, which is how this
+   question got asked.
 3. **Is the append inside the cached prefix?** Decides whether the per-spawn cost
    is paid once or every Turn. Nothing in this repository has read Claude Code's
    request construction; this would be the first.
 4. **Does `wenyan-full` cost fewer tokens than `full` on Chinese prompts?**
    Decides whether it earns a button. `npm run test:seam2` is the instrument, and
    it spends Shared Window money, so it is asked once and written down.
-5. **Does `--append-system-prompt` survive a `--resume`?** roma's Sessions are
-   resumed constantly, and a ruleset that applies only to a Session's first
-   process is a diet with a hole in it.
+5. **Does `--append-system-prompt` survive a `--resume`? — asked and answered:
+   yes, on 2.1.220.** It stays on the agenda with its answer rather than being
+   deleted, because it is the item the rest of this file leaned on and a reader
+   who wonders whether anybody checked deserves to find that they did.
+   `src/append-on-resume.live.test.ts` is the instrument and
+   `docs/append-on-resume-verification.md` the reading. Moving the pin re-opens
+   it — that is what ADR-0007 means by a re-verification event — and re-running
+   that one file is the whole of what re-opening costs.
 6. **Does the app-server take a system-prompt append, and is any of this
    measurable on Codex?** ADR-0026's agenda gains this item; nothing here is
    blocked on it.

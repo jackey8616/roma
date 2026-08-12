@@ -1,21 +1,21 @@
 /**
- * The six things a person can say that roma answers itself.
+ * The seven things a person can say that roma answers itself.
  *
  * `stop` ends the Task running now and leaves the Session intact, so the next
  * message can redirect it rather than start over. `clear` gives the
  * Conversation a Session with nothing in it, for when the context has gone
  * stale or wrong. `model` says which model that Session runs on, `effort` says
- * how hard it is asked to think, `config` says both at once and refuses to set
- * anything else, and `usage` says what the deployment has spent this calendar
- * month.
+ * how hard it is asked to think, `caveman` says how short it is asked to be,
+ * `config` says what it is set to and refuses to set anything else, and `usage`
+ * says what the deployment has spent this calendar month.
  *
- * There are six here, and the number has moved three times: ADR-0014 took
- * ADR-0003's two to three, ADR-0016 and ADR-0017 take it to five, and ADR-0027
- * takes it to six. Everything else a person types is work for Claude Code —
- * apart from the few of Claude Code's own commands ADR-0012 relays as a Relay.
- * Six is a count of Commands and not of spellings: ADR-0013 gives the reset
- * three, ADR-0017 gives `/config` two and ADR-0027 gives `usage` three, and none
- * of them moved the number here.
+ * There are seven here, and the number has moved four times: ADR-0014 took
+ * ADR-0003's two to three, ADR-0016 and ADR-0017 take it to five, ADR-0027
+ * takes it to six, and ADR-0030 takes it to seven. Everything else a person
+ * types is work for Claude Code — apart from the few of Claude Code's own
+ * commands ADR-0012 relays as a Relay. Seven is a count of Commands and not of
+ * spellings: ADR-0013 gives the reset three, ADR-0017 gives `/config` two and
+ * ADR-0027 gives `usage` three, and none of them moved the number here.
  *
  * This comment used to say that every Claude Code slash command was passed
  * through as work, and it was never true. What is passed through is the *text*
@@ -37,13 +37,24 @@
  * money but a wrong number, read off counters that belong to a process roma
  * replaces at every Eviction. A wrong number nobody is billed for announces
  * itself to nobody, which is why it outranks the ones that do (ADR-0027).
+ *
+ * `caveman` is the seventh and **the first claimed spelling that is nobody's
+ * build**. Every one above it is Claude Code's own, claimed so that a spelling
+ * roma leaves unclaimed does not cost a Turn; this one is a third-party skill's,
+ * and a build that has never heard of it would answer `Unknown command` rather
+ * than guess — so it is not a relayed spelling roma took back, it is one nothing
+ * downstream would ever have answered. What makes it worth claiming is the
+ * arrival: somebody who met that skill anywhere else types `/caveman` on their
+ * first day here, and unclaimed that is prose above a Caller Marker and a Turn
+ * spent on a plausible sentence about a mode roma is already in. Same fault,
+ * longer route (ADR-0030).
  */
-export type Command = 'stop' | 'clear' | 'model' | 'effort' | 'config' | 'usage'
+export type Command = 'stop' | 'clear' | 'model' | 'effort' | 'caveman' | 'config' | 'usage'
 
 /**
  * One Command as it was typed: which one, and what followed it.
  *
- * The argument is null for the three Commands that take none, and for the three
+ * The argument is null for the three Commands that take none, and for the four
  * that do when nothing followed them — which is a request in its own right
  * rather than a malformed one.
  */
@@ -65,8 +76,12 @@ export interface CommandRequest {
  * to a session roma believes in and Claude Code has left; `readCommand`
  * answering before `readRelay` is what keeps it out of reach.
  *
- * The three argument-taking heads repeat in `TAKES_AN_ARGUMENT` on purpose —
+ * The four argument-taking heads repeat in `TAKES_AN_ARGUMENT` on purpose —
  * dropping them from here would stop `/model` on its own being a Command.
+ *
+ * `/caveman` is the one entry that is not a spelling Claude Code declares, so
+ * the rule above cannot be what put it here; `Command` is where its own reason
+ * is written down.
  */
 const COMMANDS: Readonly<Record<string, Command>> = {
   '/stop': 'stop',
@@ -75,6 +90,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   '/new': 'clear',
   '/model': 'model',
   '/effort': 'effort',
+  '/caveman': 'caveman',
   '/config': 'config',
   '/settings': 'config',
   '/usage': 'usage',
@@ -91,10 +107,18 @@ const COMMANDS: Readonly<Record<string, Command>> = {
  *
  * `/settings` is absent on purpose, so `/settings key=value` falls through to a
  * Task — a gap ADR-0017 records rather than fixes, and `commands.test.ts` pins.
+ *
+ * caveman's five sibling commands are absent from both tables, which is what
+ * makes them the same shape of gap: `/caveman-stats`, `/caveman-compress`,
+ * `/caveman-commit`, `/caveman-review` and `/caveman-help` each fall through as
+ * prose and are billed. Recorded rather than closed, because closing it means
+ * deciding what roma would answer about five skills it does not install
+ * (ADR-0030).
  */
 const TAKES_AN_ARGUMENT: Readonly<Record<string, Command>> = {
   '/model': 'model',
   '/effort': 'effort',
+  '/caveman': 'caveman',
   '/config': 'config',
 }
 
@@ -120,11 +144,12 @@ export function commandSpellings(): readonly string[] {
  * Here rather than in a Channel because a Command's spelling is this module's,
  * and this one has to survive `readCommand` reading it back: a name that does
  * not round-trip becomes a message that falls through as work, and somebody is
- * billed for a Turn. `commands.test.ts` drives it over both Menus, which is the
- * only thing standing between a re-audited Menu and a button that costs money.
+ * billed for a Turn. `commands.test.ts` drives it over all three Menus, which is
+ * the only thing standing between a re-audited Menu and a button that costs
+ * money.
  */
 export function commandFor(
-  command: Extract<Command, 'model' | 'effort'>,
+  command: Extract<Command, 'model' | 'effort' | 'caveman'>,
   argument: string,
 ): string {
   return `/${command} ${argument}`
@@ -147,9 +172,9 @@ export function commandFor(
  * deciding what a name would mean to roma. `/config foo bar` is the same opening
  * and is left open for the same reason (ADR-0017).
  *
- * A `/model` or `/effort` whose argument is not on its Menu is still a Command,
- * and is refused as one; so is any `/config` with an argument at all. Falling
- * through would reproduce the exact fault this exists to fix.
+ * A `/model`, `/effort` or `/caveman` whose argument is not on its Menu is still
+ * a Command, and is refused as one; so is any `/config` with an argument at all.
+ * Falling through would reproduce the exact fault this exists to fix.
  *
  * Case is ignored because a phone keyboard capitalises the first letter of a
  * message on its own, and `/Stop` is nobody asking for something else. The

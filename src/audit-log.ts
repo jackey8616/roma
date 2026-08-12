@@ -23,9 +23,10 @@ const OUTCOMES: readonly TaskOutcome[] = ['result', 'failure', 'stopped']
  * Whether a written figure is one this can be read back: a finite number, or the
  * null that says nothing reported one.
  *
- * Named for the shape rather than for the field, because two of them have it and
- * the null means something different in each — a Turn that began and was never
- * priced, and a Compaction the stream said no token count for.
+ * Named for the shape rather than for the field, because several of them have it
+ * and the null means something different in each — a Turn that began and was
+ * never priced, a Turn that began and was never measured, and a Compaction the
+ * stream said no token count for.
  */
 function isFigure(value: unknown): boolean {
   return value === null || (typeof value === 'number' && Number.isFinite(value))
@@ -227,6 +228,67 @@ export interface AuditRecord {
    * month's total is what the Overflow cap is enforced against.
    */
   readonly effort?: string
+  /**
+   * How short roma asked the model to be: the Caveman the process that served
+   * this Task was spawned at, or `CAVEMAN_NOT_PINNED` where nothing named one.
+   *
+   * The third field here on the argument the two above are here on, and the
+   * first of the three whose answer is not trivially true from the day it lands
+   * (ADR-0030): `model` and `runtime` went on the record while their answer was
+   * the only answer there was, and this one can differ per Session from its
+   * first hour.
+   *
+   * The level the *process* ran at rather than the record the pool would consult
+   * now. A Chosen Caveman written while the Turn was running moves the next
+   * spawn and not this one, and a ledger that resolved it a second time would
+   * name a level nothing was asked for.
+   *
+   * Where nothing named one, `CAVEMAN_NOT_PINNED` rather than a level — that
+   * constant is where the difference is argued.
+   *
+   * Optional, and **absent reads as unknown rather than as `off`** — the effort's
+   * rule rather than the model's. A record written before this field ran on
+   * whatever the deployment's spawn arguments happened to carry, and labelling
+   * those retroactively would be inventing a fact. Optional for the reason every
+   * field above it is, too: `readRecord` drops a line it cannot parse, a dropped
+   * line leaves the month's total, and the month's total is what the Overflow cap
+   * is enforced against.
+   */
+  readonly caveman?: string
+  /**
+   * What the Turn produced, as the per-Turn delta.
+   *
+   * Beside the Caveman above and the reason it is worth having: a Caveman is
+   * roma asking for fewer output tokens, and these two together are what let a
+   * deployment settle from its own traffic whether asking did anything —
+   * ADR-0030's first verification question, which roma answers by writing the
+   * figures down and claims nothing about until somebody has compared two
+   * months of them. Already computed for ADR-0018's drift check before this
+   * field existed; a reading nothing records is one nobody can compare.
+   *
+   * Never a running total, which is `costUsd`'s rule for `costUsd`'s reason:
+   * `modelUsage` accumulates for the process, so a fifth Task logged raw would
+   * be recorded at the sum of Tasks one through five and every Task after the
+   * first would look more expensive than it was. `Turn.outputTokens` is where
+   * the differencing is done, once, and this carries what it says.
+   *
+   * Three values rather than two, exactly as `costUsd` has three:
+   *
+   * - a **number**, where a Turn ended and the terminal event reported usage;
+   * - **zero**, where no Turn ever began, or where one produced nothing — a
+   *   Task stopped while it was still queued produced nothing, and that is a
+   *   fact rather than an absence;
+   * - **null**, where a Turn began and nothing measured it. A Turn abandoned
+   *   mid-retry-storm or cut short by a process that died produced tokens that
+   *   are real and unrecorded, and calling that zero would report work as
+   *   nothing — which would put a month's comparison the wrong way round, in
+   *   the direction that flatters the setting under test.
+   *
+   * Optional for the reason `caveman` above it is: `readRecord` drops a line it
+   * cannot parse, and requiring this would make every record written before it
+   * unreadable at once.
+   */
+  readonly outputTokens?: number | null
   /**
    * Whether this Task obtained a Cloud Token.
    *
@@ -770,6 +832,15 @@ function readRecord(line: string): AuditRecord | null {
   // answers is what a Turn was asked to think at, and a line answering it with a
   // number answers it wrongly.
   if (record['effort'] !== undefined && typeof record['effort'] !== 'string') return null
+  // Absent is unknown, as an absent effort is. Present and not a name is a torn
+  // line for the line above's reason: the question this field answers is how
+  // short a Turn was asked to be, and a line answering it with a number answers
+  // it wrongly.
+  if (record['caveman'] !== undefined && typeof record['caveman'] !== 'string') return null
+  // Absent is a record written before roma wrote this down. Present and not a
+  // figure is a torn line — and the null `isFigure` allows here is its third
+  // meaning: a Turn that began and that nothing ever measured.
+  if (record['outputTokens'] !== undefined && !isFigure(record['outputTokens'])) return null
   // Absent is a no, which is what every record written before there were Cloud
   // Reaches means. Present and not a boolean is a torn line rather than a record
   // with a hole in it: the one question this field answers is yes or no, and a

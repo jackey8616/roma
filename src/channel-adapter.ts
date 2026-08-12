@@ -463,10 +463,10 @@ export type OutboundInstruction = TaskAddress &
         /**
          * Say what a Conversation may choose, and offer the choices themselves.
          *
-         * What `/model` and `/effort` answer with when somebody asked what is on
-         * offer, or named something that is not. The other two things each can
-         * mean — a name on the Menu, and `default` — are a `result`, because
-         * somebody who has just chosen is not being asked to choose again.
+         * What `/model`, `/effort` and `/caveman` answer with when somebody asked
+         * what is on offer, or named something that is not. The other two things
+         * each can mean — a name on the Menu, and `default` — are a `result`,
+         * because somebody who has just chosen is not being asked to choose again.
          *
          * **The text is the whole answer already.** It names the Menu in words,
          * so a Channel that cannot render a choice posts the text and is
@@ -489,7 +489,7 @@ export type OutboundInstruction = TaskAddress &
          * Caller would otherwise have typed, which is what makes it need no new
          * authority, no expiry and nothing remembered (ADR-0023).
          */
-        readonly chooses: Extract<Command, 'model' | 'effort'>
+        readonly chooses: Extract<Command, 'model' | 'effort' | 'caveman'>
         /**
          * Every name that may be chosen, in the order the Menu lists them.
          *

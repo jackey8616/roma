@@ -25,17 +25,29 @@ const MAX_PARKS = 2
 const MIN_PARK_MS = 60_000
 
 /**
- * What one credential paid for.
+ * What one credential paid for, and what it bought.
  *
  * `costUsd` is the sum of the Attempts anything priced, and null only where
  * nothing priced any of them — a floor rather than a claim, which is the same
- * promise the Audit Record makes about it. `turnMs` is the most recent Attempt
- * that produced a Turn, because it answers "how long was Claude Code working"
- * and an Attempt that produced none did none of that work.
+ * promise the Audit Record makes about it. `outputTokens` is the same sum of the
+ * same Attempts' other figure, under the same promise. `turnMs` is the most
+ * recent Attempt that produced a Turn, because it answers "how long was Claude
+ * Code working" and an Attempt that produced none did none of that work.
  */
 export interface Spend {
   readonly costUsd: number | null
   readonly turnMs: number | null
+  /**
+   * What the Turns this credential paid for produced, or null where nothing
+   * measured any of them.
+   *
+   * Accumulated beside the money rather than reported once for the Task,
+   * because a Task blocked on the Shared Window and rerun on Overflow bought
+   * output on two bills — and the Audit Record puts what a Task cost and what it
+   * produced on one line per credential, which is arithmetic that only works
+   * where both halves were split the same way.
+   */
+  readonly outputTokens: number | null
   /**
    * The Compaction this credential paid for, or null where it paid for none.
    *
@@ -54,7 +66,31 @@ export interface Spend {
 }
 
 /** A Task that spent nothing yet, or spent nothing at all. */
-const NOTHING_SPENT: Spend = { costUsd: null, turnMs: null, compaction: null }
+const NOTHING_SPENT: Spend = {
+  costUsd: null,
+  turnMs: null,
+  outputTokens: null,
+  compaction: null,
+}
+
+/**
+ * One Attempt's figure folded into the running one, for a Turn that may report
+ * neither of the two this is used for.
+ *
+ * **Never `reported ?? 0`.** A Turn that began and reported nothing spent
+ * whatever it spent, and a zero there reports real money and real tokens as
+ * none. The zero this does return is reached only where no message ever went,
+ * which is the one case where free is certain — so the `sent` argument is not
+ * optional either.
+ */
+function withAttempt(
+  soFar: number | null,
+  reported: number | null | undefined,
+  sent: boolean,
+): number | null {
+  if (reported == null) return soFar ?? (sent ? null : 0)
+  return (soFar ?? 0) + reported
+}
 
 /** The terms of one wait on the Shared Window. */
 export interface Park {
@@ -263,23 +299,20 @@ export class Attempts {
     // that never sent one would otherwise overwrite an earlier unpriced Attempt
     // and report real tokens as free.
     let sent = false
-    // The money alone, because the two are accumulated differently and folding
-    // them together would put a `compaction` in every literal below that neither
-    // reads nor changes.
+    // The figures alone, because the Compaction is accumulated differently and
+    // folding it in would put one in every literal below that neither reads nor
+    // changes.
     let spend: Omit<Spend, 'compaction'> = NOTHING_SPENT
     let compaction: Compaction | null = null
     for (const attempt of this.#made) {
       sent ||= attempt.sent
       if (attempt.credential !== credential) continue
       compaction ??= attempt.compaction
-      const turnMs = attempt.turn?.durationMs ?? spend.turnMs
-      if (attempt.turn?.costUsd != null) {
-        spend = { costUsd: (spend.costUsd ?? 0) + attempt.turn.costUsd, turnMs }
-        continue
+      spend = {
+        turnMs: attempt.turn?.durationMs ?? spend.turnMs,
+        costUsd: withAttempt(spend.costUsd, attempt.turn?.costUsd, sent),
+        outputTokens: withAttempt(spend.outputTokens, attempt.turn?.outputTokens, sent),
       }
-      // Nothing priced this Attempt. What earlier ones were priced at stands, and
-      // is now known to be less than the whole.
-      spend = { costUsd: spend.costUsd ?? (sent ? null : 0), turnMs }
     }
     return { ...spend, compaction }
   }

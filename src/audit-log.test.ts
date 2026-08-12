@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuditLog, type UnstampedRecord } from './audit-log.js'
+import { CAVEMAN_MENU, CAVEMAN_NOT_PINNED, OFF_MENU_WENYAN } from './caveman.js'
 import { EFFORT_MENU, EFFORT_NOT_APPLIED } from './effort-menu.js'
 
 /** The month the clock below is in, as the file on disk names it. */
@@ -727,6 +728,127 @@ describe('what effort spent the month', () => {
     appendFileSync(
       join(dir, `${MONTH}.jsonl`),
       `${JSON.stringify({ ...entry(), effort: 3, at: new Date().toISOString() })}\n`,
+    )
+
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+  })
+})
+
+/**
+ * ADR-0030: the third instance of the argument the two fields above are here
+ * on, and the first of the three that is not trivially true from the day it
+ * lands — which is what makes it the urgent one.
+ */
+describe('how short a Task was asked to be', () => {
+  it('keeps the Caveman across a restart', () => {
+    const dir = newDir()
+    new AuditLog({ auditRoot: dir }).record(entry({ caveman: 'ultra' }))
+
+    const [record] = new AuditLog({ auditRoot: dir }).readMonth(MONTH)
+    expect(record?.caveman).toBe('ultra')
+  })
+
+  // Absent reads as unknown, which is the effort's rule rather than the model's:
+  // a record written before this field ran on whatever the deployment's spawn
+  // arguments happened to carry, and roma does not know what that was. Requiring
+  // it would make every one of them unreadable at once — a dropped line leaves
+  // the month's total, and the month's total is what the Overflow cap is
+  // enforced against.
+  it('reads a record written before roma knew how short it had asked for', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), at: new Date().toISOString() })}\n`,
+    )
+
+    const [record] = log.readMonth(MONTH)
+    expect(record?.caveman).toBeUndefined()
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 0, costUsd: 0.0103129 })
+  })
+
+  // A deployment that pinned `off` chose something and a deployment that named
+  // nothing did not, and `off` is a level on the Menu — so a month of records
+  // spelled `off` would attribute every Task to a setting nobody made. The word
+  // is deliberately not one of the levels, on `EFFORT_NOT_APPLIED`'s reasoning.
+  it('keeps a record that says nothing named a Caveman at all', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ caveman: CAVEMAN_NOT_PINNED }))
+
+    const [record] = log.readMonth(MONTH)
+    expect(record?.caveman).toBe(CAVEMAN_NOT_PINNED)
+    expect(CAVEMAN_MENU).not.toContain(record?.caveman)
+    expect(OFF_MENU_WENYAN).not.toContain(record?.caveman)
+  })
+
+  it('refuses a Caveman that is not a name', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ caveman: 'lite' }))
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), caveman: 2, at: new Date().toISOString() })}\n`,
+    )
+
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+  })
+})
+
+/**
+ * ADR-0030: the figure beside the Caveman, and the other half of what makes the
+ * question answerable from a deployment's own traffic rather than from a
+ * synthetic prompt.
+ */
+describe('what a Task produced', () => {
+  it('keeps the output tokens across a restart', () => {
+    const dir = newDir()
+    new AuditLog({ auditRoot: dir }).record(entry({ outputTokens: 1978 }))
+
+    const [record] = new AuditLog({ auditRoot: dir }).readMonth(MONTH)
+    expect(record?.outputTokens).toBe(1978)
+  })
+
+  it('reads a record written before roma wrote down what a Turn produced', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), at: new Date().toISOString() })}\n`,
+    )
+
+    const [record] = log.readMonth(MONTH)
+    expect(record?.outputTokens).toBeUndefined()
+    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 0, costUsd: 0.0103129 })
+  })
+
+  // `costUsd`'s discipline, on the field beside it: a Turn nobody can measure
+  // and a Turn that produced nothing are different facts, and only one of them
+  // can be compared with a month elsewhere. Zero is a claim and is only made
+  // where it is certain — a Task stopped in the queue drove no Turn.
+  it('tells a Task that produced nothing from one nothing measured', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+
+    log.record(entry({ taskId: 'produced-nothing', outputTokens: 0 }))
+    log.record(entry({ taskId: 'never-measured', outputTokens: null }))
+
+    expect(log.readMonth(MONTH).map((record) => [record.taskId, record.outputTokens])).toEqual([
+      ['produced-nothing', 0],
+      ['never-measured', null],
+    ])
+  })
+
+  // A torn line rather than a record with a hole in it, for the reason a missing
+  // cost is one: a line answering "how much did this Turn produce" with a word
+  // answers it wrongly, and the month is compared against other months on it.
+  it('refuses a figure that is not one', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ outputTokens: 21 }))
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ ...entry(), outputTokens: 'lots', at: new Date().toISOString() })}\n`,
     )
 
     expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })

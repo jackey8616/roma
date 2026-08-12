@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Credential } from '../../build-env.js'
+import { cavemanRuleset } from '../../caveman.js'
 import { bind, serve, type Serving } from '../../serve.js'
 import { sessionIdFor } from '../../session-id.js'
 import { GoogleChatAdapter } from './google-chat-adapter.js'
@@ -354,6 +355,49 @@ describe('a Menu, out on a card and back on a press', () => {
 
     expect(roma.texts().at(-1)).toContain(TO)
     expect(roma.texts().at(-1)).toContain('xhigh')
+  })
+
+  /**
+   * The third Menu, and the reason this file gets a third case rather than the
+   * other two getting a Caveman row.
+   *
+   * `wenyan-full` is the first hyphenated name any roma Menu has carried, and the
+   * whole distance it travels is what nothing else can see: it leaves as a Menu
+   * constant, is posted as a real card by `HttpChatApi`, comes back on a press
+   * `pressOf` builds out of *that card's own parameters*, is read into the text
+   * `/caveman wenyan-full`, and has to survive `readCommand` splitting on
+   * whitespace at the far end. A name that lost the trip anywhere along it would
+   * not fail here as a refusal — it would arrive at the Core as prose, drive a
+   * Turn, and bill the Shared Window for a button roma offered (ADR-0023).
+   *
+   * Asserted through the spawn as well as through the reply, because the reply
+   * is a sentence and the record is the thing a press had to produce: what the
+   * next Session is actually told is the only place a press and a typed Command
+   * can be shown to have ended in the same state.
+   */
+  it('moves the Session onto the hyphenated Caveman whose button came back', async () => {
+    const roma = await boot()
+
+    roma.subscription.publishJson(mentioned('/caveman'), 'msg-1')
+    await flush()
+
+    const card = roma.requests.findLast(({ body }) => body['cardsV2'] !== undefined)
+    expect(labelsOf(card)).toEqual(['off', 'lite', 'full', 'ultra', 'wenyan-full', 'default'])
+
+    roma.subscription.publishJson(pressOf(card, 'wenyan-full'), 'msg-2')
+    await flush()
+    expect(roma.texts().at(-1)).toContain(TO)
+    expect(roma.texts().at(-1)).toContain('wenyan-full')
+
+    const message = roma.subscription.publishJson(mentioned('hello'), 'msg-3')
+    await flush()
+    feed(roma.procFor(), OK)
+    await until(() => message.settlements.length > 0)
+
+    const { args } = roma.claude.lastSpawn
+    expect(args[args.indexOf('--append-system-prompt') + 1]).toContain(
+      cavemanRuleset('wenyan-full'),
+    )
   })
 })
 
