@@ -1,10 +1,11 @@
 import { sep } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { IngressMessage } from '../../channel-adapter.js'
+import type { IngressMessage, OutboundInstruction } from '../../channel-adapter.js'
 import { readCommand } from '../../commands.js'
 import { sessionIdFor } from '../../session-id.js'
 import type { Delivery } from '../../transport.js'
-import { DiscordAdapter } from './discord-adapter.js'
+import { ATTEMPTS, DiscordAdapter, RETRY_CEILING_MS, RETRY_FLOOR_MS } from './discord-adapter.js'
+import { DiscordRefusal } from './discord-api.js'
 import type { DiscordEvent, DiscordMessage } from './discord-events.js'
 import {
   GatewayTransport,
@@ -13,7 +14,9 @@ import {
   RECONNECT_FLOOR_MS,
   type DiscordLogRecord,
 } from './gateway-transport.js'
+import { MAX_TEXT } from './render.js'
 import { FakeGatewayNetwork } from '../../../test/support/fake-gateway.js'
+import { recordedStream } from '../../../test/support/recorded-stream.js'
 import { RecordingDiscordApi } from '../../../test/support/recording-discord-api.js'
 import { sources } from '../../../test/support/sources.js'
 
@@ -49,6 +52,8 @@ const CHANNEL = '400000000000000005'
 const THREAD = '500000000000000006'
 /** A thread nobody has posted in for a day: in the channel list and the thread list alike, absent. */
 const ARCHIVED = '500000000000000007'
+/** A forum channel: one of the guild's own, and every message in it is inside a post. */
+const FORUM = '400000000000000016'
 /** The channel a direct message arrives in, which has no guild at all. */
 const DM = '600000000000000008'
 const MESSAGE = '700000000000000009'
@@ -138,7 +143,17 @@ async function listening() {
   const api = new RecordingDiscordApi()
   const network = new FakeGatewayNetwork()
   const log: DiscordLogRecord[] = []
-  const adapter = new DiscordAdapter({ api })
+  // Every wait roma sat through, in order, spent instantly. What a retry policy
+  // does that a test can see is *how long it waited before trying again*, so the
+  // clock is the thing that has to be recorded rather than mocked away.
+  const waits: number[] = []
+  const adapter = new DiscordAdapter({
+    api,
+    wait: (ms) => {
+      waits.push(ms)
+      return Promise.resolve()
+    },
+  })
   const transport = new GatewayTransport({
     token: TOKEN,
     url: GATEWAY,
@@ -164,6 +179,7 @@ async function listening() {
     api,
     network,
     log,
+    waits,
     adapter,
     transport,
     deliveries,
@@ -194,6 +210,46 @@ async function messaged(message: DiscordMessage, channels: readonly string[] = [
   const channel = await connected(channels)
   await channel.take(dispatch('MESSAGE_CREATE', message))
   return channel
+}
+
+/**
+ * What an instruction says, with the address taken off.
+ *
+ * Distributed over the union rather than `Partial<…>`, so that a test asking for
+ * a `result` with no text is a type error here rather than a passing test of
+ * something the Core cannot send.
+ */
+type Outcome<T> = T extends unknown
+  ? Omit<T, 'taskId' | 'conversationKey' | 'caller' | 'callerName'>
+  : never
+
+/** An instruction addressed to one Conversation, as the Core would send it. */
+function to(
+  conversationKey: string,
+  outcome: Outcome<OutboundInstruction>,
+  taskId = 'task-1',
+  caller = CALLER,
+  callerName: string | null = 'Ada',
+): OutboundInstruction {
+  return { ...outcome, taskId, conversationKey, caller, callerName }
+}
+
+/**
+ * A refusal as `HttpDiscordApi` would have built one from a response.
+ *
+ * The two fields a retry acts on and nothing else — a status, and however long
+ * Discord's own headers asked roma to wait.
+ */
+function refusal(status: number, retryAfterMs: number | null = null): DiscordRefusal {
+  return new DiscordRefusal(`Discord answered ${status}`, status, retryAfterMs)
+}
+
+/** The complete answer of the recorded 72-second generating Turn. */
+function recordedAnswer(): string {
+  const [finished] = recordedStream('generation-partial-messages')
+    .turn(1)
+    .filter((event) => event.type === 'result')
+  return String(finished?.['result'] ?? '')
 }
 
 describe('which Conversation a Discord message belongs to', () => {
@@ -284,9 +340,9 @@ describe('which Conversation a Discord message belongs to', () => {
 describe('every way the classifier can be wrong is the harmless direction', () => {
   // A thread misread as top level. Every message gets a key of its own, so the
   // context resets visibly — and two people talking in it never share a Session,
-  // which is the half that matters: nothing leaks between Callers. What is *not*
-  // asserted here is the reply arriving in `channel_id` after Discord refuses a
-  // thread inside a thread — that is outbound, and #180's.
+  // which is the half that matters: nothing leaks between Callers. The reply
+  // still arrives, in `channel_id`, once Discord refuses a thread inside a
+  // thread — that half is asserted under "where an answer goes".
   it('gives a misread thread a Session per message, and mixes nobody', async () => {
     const channel = await connected([CHANNEL, ARCHIVED])
 
@@ -311,7 +367,7 @@ describe('every way the classifier can be wrong is the harmless direction', () =
   // The place a reply belongs is on the event whichever way the classifier went,
   // which is what makes the fallback ADR-0029 describes possible at all: roma is
   // refused the thread, and posts in `channel_id`, which is where the reply
-  // belonged. Reading it back is stage 3's (#180); carrying it is this stage's.
+  // belonged. Carrying it is what this asserts; using it is the Adapter's.
   it('carries the channel the message arrived in, whatever the key says', async () => {
     const channel = await connected([CHANNEL, ARCHIVED])
 
@@ -742,23 +798,576 @@ describe('the connection roma holds open', () => {
   })
 })
 
-describe('what this Channel cannot do yet', () => {
-  // Stage 2 is inbound only. Rejecting is the honest answer to `deliver`'s own
-  // sentence — "Rejecting means it reached nobody" — and a silent no-op would be
-  // the lie: the Core would take it for a Conversation that had been told.
-  it('refuses an outbound instruction rather than pretending to post it', async () => {
-    const { adapter } = await listening()
+// The outbound half, driven the way the inbound half is: a real Gateway frame
+// goes in first, because everything an answer needs beyond the Conversation Key
+// — the message it replies to, the channel a thread has to be opened in — is
+// learned from the event and cannot be learned anywhere else.
+describe('where an answer goes', () => {
+  // Row three of ADR-0029's table, completed. The key is the message's own id
+  // because that is the id the thread will take, and this is the moment the
+  // thread has to come to exist.
+  it('opens a thread from a top-level message and answers in it', async () => {
+    const channel = await messaged(addressed())
+
+    await channel.adapter.deliver(to(MESSAGE, { kind: 'result', text: 'the answer' }))
+
+    expect(channel.api.threads).toEqual([
+      { channel: CHANNEL, message: MESSAGE, name: 'summarise this' },
+    ])
+    expect(channel.api.messages[0]?.posted).toEqual({
+      channel: MESSAGE,
+      text: 'the answer',
+      replyTo: MESSAGE,
+    })
+  })
+
+  // Rows one and two. Both are already a place roma can speak, so there is
+  // nothing to open — and asking Discord for a thread inside a thread would be a
+  // refused call roma spends its invalid-request budget on for nothing.
+  it('answers in place in a thread and in a direct message', async () => {
+    const inThread = await messaged(addressed({ channel_id: THREAD }))
+    const direct = await messaged(inDm())
+
+    await inThread.adapter.deliver(to(THREAD, { kind: 'result', text: 'in the thread' }))
+    await direct.adapter.deliver(to(DM, { kind: 'result', text: 'in the dm' }))
+
+    expect(inThread.api.threads).toEqual([])
+    expect(direct.api.threads).toEqual([])
+    expect(inThread.api.messages[0]?.posted.channel).toBe(THREAD)
+    expect(direct.api.messages[0]?.posted.channel).toBe(DM)
+  })
+
+  // **A forum needs no special case, and this is the proof rather than the
+  // claim.** The Start Thread route does not work on a forum or media channel at
+  // all — and it is never reached for one, because every message in a forum is
+  // inside a post, a post is a thread, and a thread is not among the guild's
+  // channels. So the classifier has already routed it to a reply in place.
+  it('opens no thread in a forum, because the classifier already replied in place', async () => {
+    const post = '500000000000000015'
+    const channel = await messaged(addressed({ channel_id: post }), [CHANNEL, FORUM])
+
+    await channel.adapter.deliver(to(post, { kind: 'result', text: 'the answer' }))
+
+    expect(channel.last?.conversationKey).toBe(post)
+    expect(channel.api.threads).toEqual([])
+    expect(channel.api.messages[0]?.posted.channel).toBe(post)
+  })
+
+  // One thread for a Conversation, however much roma says in it. The key names
+  // the thread once it exists, so nothing has to be remembered to find it again
+  // — which is also what makes a restart mid-Conversation harmless.
+  it('opens one thread however many messages a Task posts', async () => {
+    const channel = await messaged(addressed())
+
+    await channel.adapter.deliver(to(MESSAGE, { kind: 'progress', progress: { phase: 'working' } }))
+    await channel.adapter.deliver(to(MESSAGE, { kind: 'result', text: 'the answer' }))
+
+    expect(channel.api.threads).toHaveLength(1)
+    expect(channel.api.messages.map(({ posted }) => posted.channel)).toEqual([MESSAGE, MESSAGE])
+  })
+
+  // The fallback ADR-0029 calls the harmless direction, and the property #179
+  // carried the channel id for. roma may hold no `CREATE_PUBLIC_THREADS`, the
+  // channel may be one the route does not work on, or the classifier may have
+  // read a thread as top level — in every one of them the reply belongs in the
+  // channel the message arrived in, and only the Session is in the wrong place.
+  it('falls back to the channel the message arrived in when a thread is refused', async () => {
+    const channel = await messaged(addressed())
+    channel.api.failEvery('startThread', refusal(403))
+
+    await channel.adapter.deliver(to(MESSAGE, { kind: 'result', text: 'the answer' }))
+
+    expect(channel.api.messages[0]?.posted.channel).toBe(CHANNEL)
+  })
+
+  // Remembered, so that the rest of a Task lands where its first message did. A
+  // second attempt would also be a second 403, and 403s are what the ban roma
+  // must not earn is counted in.
+  it('keeps answering where it fell back to, without asking again', async () => {
+    const channel = await messaged(addressed())
+    channel.api.failEvery('startThread', refusal(403))
+
+    await channel.adapter.deliver(to(MESSAGE, { kind: 'progress', progress: { phase: 'working' } }))
+    await channel.adapter.deliver(to(MESSAGE, { kind: 'result', text: 'the answer' }))
+
+    expect(channel.api.threads).toHaveLength(1)
+    expect(channel.api.messages.map(({ posted }) => posted.channel)).toEqual([CHANNEL, CHANNEL])
+  })
+
+  // The Core cannot absorb this one: an instruction that reached nobody looks,
+  // from the Conversation, exactly like a message that was never received.
+  it('does not swallow a refusal it has run out of attempts on', async () => {
+    const channel = await messaged(inDm())
+    channel.api.failEvery('post', refusal(403))
 
     await expect(
-      adapter.deliver({
-        kind: 'result',
-        text: 'done',
-        taskId: 'task-1',
-        conversationKey: MESSAGE,
-        caller: CALLER,
-        callerName: 'Ada',
+      channel.adapter.deliver(to(DM, { kind: 'result', text: 'the answer' })),
+    ).rejects.toThrow(/403/)
+  })
+})
+
+/**
+ * ADR-0029's outbound decision: the Caller is addressed with Discord's own
+ * reply, on the first message and no other.
+ */
+describe('addressing the person who asked', () => {
+  it('replies to the Caller’s message on the first piece and on nothing else', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, { kind: 'result', text: 'word '.repeat(2000) }))
+
+    const replies = channel.api.messages.map(({ posted }) => posted.replyTo)
+    expect(replies.length).toBeGreaterThan(2)
+    expect(replies[0]).toBe(MESSAGE)
+    expect(replies.slice(1).every((replyTo) => replyTo === null)).toBe(true)
+  })
+
+  // Nothing in the words, which is the whole difference from Chat: a mention
+  // spends characters out of a limit half the size, and Discord has a form for
+  // this that costs none.
+  it('says nothing in the text about who it is for', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, { kind: 'result', text: 'the answer' }))
+
+    expect(channel.api.texts).toEqual(['the answer'])
+  })
+
+  // A thread is many people sharing one Conversation, and two Tasks can be in
+  // flight in it at once. Keyed on the Conversation alone, Ada's answer would
+  // reply to whichever question arrived last — which is Bob's (ADR-0009).
+  it('answers each of a thread’s two Callers on their own message', async () => {
+    const channel = await connected()
+    await channel.take(dispatch('MESSAGE_CREATE', addressed({ id: 'ada-1', channel_id: THREAD })))
+    await channel.take(
+      dispatch(
+        'MESSAGE_CREATE',
+        addressed({ id: 'bob-1', channel_id: THREAD, author: person(SOMEBODY_ELSE) }),
+      ),
+    )
+
+    await channel.adapter.deliver(to(THREAD, { kind: 'result', text: 'for Ada' }))
+    await channel.adapter.deliver(
+      to(THREAD, { kind: 'result', text: 'for Bob' }, 'task-2', SOMEBODY_ELSE, 'Bob'),
+    )
+
+    expect(channel.api.messages.map(({ posted }) => posted.replyTo)).toEqual(['ada-1', 'bob-1'])
+  })
+})
+
+describe('an answer longer than Discord will take', () => {
+  // 17706 characters is what the recorded generating Turn produced, and Discord
+  // refuses anything over 2000. Without this the longest answers — the ones
+  // worth having — would be the ones that never arrive.
+  //
+  // **Twelve, and ADR-0029 predicted nine.** Nine is 17706 divided by 2000 and
+  // is what a splitter that cut mid-word would produce; twelve is what the
+  // paragraph rule costs, because a window whose last blank line falls just past
+  // halfway spends the rest of itself on nothing. The rule is the decision and
+  // the count is its consequence, so the count is asserted here rather than
+  // written down anywhere that could go on claiming nine.
+  it('splits the recorded 17,706-character Turn into twelve messages', async () => {
+    const channel = await messaged(inDm())
+    const answer = recordedAnswer()
+
+    await channel.adapter.deliver(to(DM, { kind: 'result', text: answer }))
+
+    expect(answer).toHaveLength(17706)
+    expect(channel.api.messages).toHaveLength(12)
+    for (const message of channel.api.messages) {
+      expect(message.text.length).toBeLessThanOrEqual(MAX_TEXT)
+    }
+    // Nothing dropped and nothing duplicated: the words arrive in order and
+    // whole, which is the only thing a split may not cost.
+    expect(channel.api.texts.join('\n\n').replace(/\s+/g, ' ')).toBe(answer.replace(/\s+/g, ' '))
+  })
+
+  // At a blank line where there is one. Cutting mid-word makes a long answer
+  // read as corrupted rather than as continued.
+  it('breaks at a paragraph boundary, in order', async () => {
+    const channel = await messaged(inDm())
+    const paragraphs = Array.from({ length: 12 }, (_, n) =>
+      `Paragraph ${n}. ${'word '.repeat(60)}`.trim(),
+    )
+
+    await channel.adapter.deliver(to(DM, { kind: 'result', text: paragraphs.join('\n\n') }))
+
+    expect(channel.api.messages.length).toBeGreaterThan(1)
+    for (const text of channel.api.texts) {
+      expect(text.startsWith('Paragraph ')).toBe(true)
+      expect(text.endsWith('word')).toBe(true)
+    }
+  })
+
+  // A failed Turn's reason is the Turn's own text, which has no more of a length
+  // limit than an answer does. Posted whole, Discord refuses it and the
+  // Conversation is told nothing at all about a Task that is already dead.
+  it('splits a failure the same way it splits an answer', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(
+      to(DM, { kind: 'failure', reason: `Failed after ${'a very long explanation '.repeat(400)}` }),
+    )
+
+    expect(channel.api.messages.length).toBeGreaterThan(1)
+    for (const message of channel.api.messages) {
+      expect(message.text.length).toBeLessThanOrEqual(MAX_TEXT)
+    }
+  })
+
+  it('says something even when a Turn produced no text at all', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, { kind: 'result', text: '' }))
+
+    expect(channel.api.messages).toHaveLength(1)
+    expect(channel.api.texts[0]).not.toBe('')
+  })
+})
+
+describe('the acknowledgement', () => {
+  // One message, edited. ADR-0029 declares message mutation, so progress
+  // reporting runs in its full ADR-0003 form — and a renderer that posted per
+  // update would make a Task that ran for five minutes into sixty messages
+  // burying the Conversation it is reporting on.
+  it('is edited in place rather than posted again', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, { kind: 'progress', progress: { phase: 'working' } }))
+    await channel.adapter.deliver(
+      to(DM, { kind: 'progress', progress: { phase: 'tool', tool: 'awk' } }),
+    )
+    await channel.adapter.deliver(
+      to(DM, { kind: 'progress', progress: { phase: 'writing', characters: 14 } }),
+    )
+
+    expect(channel.api.calls).toEqual(['post', 'edit', 'edit'])
+    expect(channel.api.messages).toHaveLength(1)
+    expect(channel.api.messages[0]).toMatchObject({ text: 'Writing… (14 chars)', edits: 2 })
+  })
+
+  // The rule ADR-0003 makes unconditional, and Discord is where it pays most:
+  // its search reads message content and no part of an edited-over
+  // acknowledgement is a thing anybody can quote-reply to months later.
+  it('is never what the result is written into', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, { kind: 'progress', progress: { phase: 'working' } }))
+    await channel.adapter.deliver(to(DM, { kind: 'result', text: 'the answer' }))
+
+    expect(channel.api.calls).toEqual(['post', 'post'])
+    expect(channel.api.texts).toEqual(['Working…', 'the answer'])
+  })
+
+  it('is one per Task, not one per Conversation', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, { kind: 'progress', progress: { phase: 'working' } }))
+    await channel.adapter.deliver(
+      to(DM, { kind: 'progress', progress: { phase: 'queued', position: 2 } }, 'task-2'),
+    )
+
+    expect(channel.api.calls).toEqual(['post', 'post'])
+    expect(channel.api.texts).toEqual(['Working…', 'Queued — 2 waiting.'])
+  })
+
+  it('is finished with once the Task ends', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, { kind: 'progress', progress: { phase: 'working' } }))
+    await channel.adapter.deliver(to(DM, { kind: 'stopped' }))
+    await channel.adapter.deliver(to(DM, { kind: 'progress', progress: { phase: 'working' } }))
+
+    expect(channel.api.calls).toEqual(['post', 'post', 'post'])
+  })
+
+  // Not an ending, the way a block is not: it arrives mid-Task and the Task goes
+  // on to whatever ending it has. Forgetting the acknowledgement here would
+  // strand the message the person is watching and post a second one under it.
+  it('keeps the one it was mutating for a message that is not an ending', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, { kind: 'progress', progress: { phase: 'working' } }))
+    await channel.adapter.deliver(to(DM, { kind: 'context-full' }))
+    await channel.adapter.deliver(
+      to(DM, { kind: 'progress', progress: { phase: 'writing', characters: 14 } }),
+    )
+
+    expect(channel.api.calls).toEqual(['post', 'post', 'edit'])
+  })
+
+  // A post that failed left no message to edit. Remembered anyway, every later
+  // update for that Task would try to edit an id that never existed — so one
+  // Discord hiccup would silence the acknowledgement for the rest of a Task that
+  // is running perfectly well.
+  it('tries again after a post that failed, rather than editing nothing', async () => {
+    const channel = await messaged(inDm())
+    channel.api.failNext('post', refusal(403))
+
+    await expect(
+      channel.adapter.deliver(to(DM, { kind: 'progress', progress: { phase: 'working' } })),
+    ).rejects.toThrow(/403/)
+    await channel.adapter.deliver(
+      to(DM, { kind: 'progress', progress: { phase: 'tool', tool: 'awk' } }),
+    )
+
+    expect(channel.api.calls).toEqual(['post', 'post'])
+    expect(channel.api.texts).toEqual(['Running awk…'])
+  })
+
+  // The one phase whose length roma does not control: a tool is named by Claude
+  // Code's own description of it, which is the command itself. It is cut to
+  // something that can be read at a glance, well before Discord's limit is in
+  // question — a message edited every few seconds is not where a thousand
+  // characters of shell belongs.
+  it('quotes only as much of a tool command as can be read at a glance', async () => {
+    const channel = await messaged(inDm())
+    const tool = `awk ${'-v x=1 '.repeat(1000)}`
+
+    await channel.adapter.deliver(to(DM, { kind: 'progress', progress: { phase: 'tool', tool } }))
+
+    const text = channel.api.texts[0] ?? ''
+    expect(text.length).toBe('Running '.length + 120 + '…'.length)
+    expect(text.length).toBeLessThanOrEqual(MAX_TEXT)
+    // The beginning is what names the command, so it is the end that goes.
+    expect(text.startsWith('Running awk -v x=1 ')).toBe(true)
+  })
+})
+
+describe('what a Conversation is told', () => {
+  it('says what happened, in words a person can act on', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, { kind: 'stopped' }))
+    await channel.adapter.deliver(
+      to(DM, { kind: 'command-outcome', command: 'stop', carriedOut: false }),
+    )
+    await channel.adapter.deliver(
+      to(DM, { kind: 'command-outcome', command: 'clear', carriedOut: true }),
+    )
+    await channel.adapter.deliver(
+      to(DM, { kind: 'failure', reason: 'roma could not run this Task.' }),
+    )
+
+    expect(channel.api.texts).toEqual([
+      'Stopped.',
+      'Nothing to stop.',
+      expect.stringContaining('fresh session'),
+      'roma could not run this Task.',
+    ])
+  })
+
+  // Plainly that quota is spent, with the reset time the event gave — and that
+  // the Task is kept, because told only that quota is spent people send the
+  // message again, which is the behaviour the acknowledgement exists to prevent.
+  // No button on it: the Overflow offer is #181's.
+  it('says quota is spent, when it comes back, and that the Task is kept', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(
+      to(DM, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: true }),
+    )
+
+    expect(channel.api.texts).toEqual([
+      'The shared Claude quota is spent. It comes back at 2026-07-28 20:40 UTC — I have kept your task and will run it then.',
+    ])
+  })
+
+  it('says what the cap was when Overflow is refused, and that the Task waits on', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, { kind: 'overflow-refused', capUsd: 20, spentUsd: 21.5 }))
+
+    expect(channel.api.texts).toEqual([
+      'Overflow is capped at $20.00 a month and this month has spent $21.50, so it is off ' +
+        'until the month turns. Your task is still waiting for the shared quota to reset.',
+    ])
+  })
+
+  // The one place roma knows an exit the person cannot guess, said as the
+  // consequence rather than the cause — two codes arrive here and only one of
+  // them is a thread that got too long.
+  it('names /clear when the context cannot be reduced any further', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, { kind: 'context-full' }))
+
+    expect(channel.api.texts).toEqual([
+      'Claude cannot shorten this conversation any further, so it cannot take another ' +
+        'message. Send /clear to start a fresh session — nothing from this one carries over.',
+    ])
+  })
+
+  // ADR-0023 says a Channel that ignores `options` is *correct* rather than
+  // degraded, because the text names the Menu in words. So a Discord with no
+  // buttons on it yet posts the whole answer, and #181 adds the shortcut.
+  it('posts a Menu as the words it already is, and no buttons yet', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(
+      to(DM, {
+        kind: 'choice',
+        text: 'This conversation is on sonnet (claude-sonnet-5). You can choose: opus, sonnet, haiku, default.',
+        chooses: 'model',
+        options: ['opus', 'sonnet', 'haiku', 'default'],
+        refused: null,
       }),
-    ).rejects.toThrow(/#180/)
+    )
+
+    expect(channel.api.texts).toEqual([
+      'This conversation is on sonnet (claude-sonnet-5). You can choose: opus, sonnet, haiku, default.',
+    ])
+  })
+
+  // ADR-0002 requires the spend in the reply, and its own message rather than
+  // appended to the answer: the answer is what gets quoted months later, and a
+  // price tag inside it would be quoted with it.
+  it('posts the answer and then what an Overflow Turn cost', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, { kind: 'result', text: 'done', overflowCostUsd: 0.42 }))
+
+    expect(channel.api.texts).toEqual(['done', 'Ran on metered billing: $0.42.'])
+  })
+
+  // "$0.00" would report money as free, which is the one claim the Audit Record
+  // refuses to make about a Turn nothing priced.
+  it('does not price a Turn nothing priced', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, { kind: 'result', text: 'done', overflowCostUsd: null }))
+
+    expect(channel.api.texts).toEqual([
+      'done',
+      'Ran on metered billing. What it cost was never reported.',
+    ])
+  })
+
+  it('declares message mutation and a stable Conversation Key', async () => {
+    const { adapter } = await listening()
+
+    expect(adapter.capabilities).toEqual({ messageMutation: true, stableConversationKey: true })
+  })
+
+  // ADR-0024: an Opening is a reply, sent before the Acknowledgement of the
+  // message that prompted it. On this Channel it is also what opens the thread —
+  // so the first thing said in a Session is the first thing in the thread, and
+  // the acknowledgement lands underneath it rather than in the parent channel.
+  it('says the Opening first, and acknowledges underneath it', async () => {
+    const channel = await messaged(addressed())
+
+    await channel.adapter.deliver(
+      to(MESSAGE, { kind: 'result', text: 'Running on claude-sonnet-5.' }, 'opening-1'),
+    )
+    await channel.adapter.deliver(to(MESSAGE, { kind: 'progress', progress: { phase: 'working' } }))
+
+    expect(channel.api.texts).toEqual(['Running on claude-sonnet-5.', 'Working…'])
+    expect(channel.api.messages.map(({ posted }) => posted.channel)).toEqual([MESSAGE, MESSAGE])
+    expect(channel.api.threads).toHaveLength(1)
+  })
+})
+
+// ADR-0028 moved the remedy for a failed post into `deliver`, because
+// re-reading a socket repairs no POST. What that retry inherits here is a
+// penalty Chat has no counterpart for: a 429 counts toward an invalid-request
+// budget of 10,000 per 10 minutes whose block is on the whole API rather than on
+// the channel that earned it, so a loop in one Conversation is an outage of
+// every Conversation — the Gateway included.
+describe('a call Discord refused', () => {
+  it('waits exactly as long as Discord asked before trying again', async () => {
+    const channel = await messaged(inDm())
+    channel.api.failNext('post', refusal(429, 1_500))
+
+    await channel.adapter.deliver(to(DM, { kind: 'result', text: 'the answer' }))
+
+    // Read off the response, never hard coded: Discord's per-route limits are
+    // dynamic and its reference says so in as many words.
+    expect(channel.waits).toEqual([1_500])
+    expect(channel.api.texts).toEqual(['the answer'])
+  })
+
+  // Where Discord named no time at all — a 503, or a socket that never answered
+  // — roma backs off on its own clock rather than hammering.
+  it('backs off on its own clock where Discord named no time', async () => {
+    const channel = await messaged(inDm())
+    channel.api.failNext('post', refusal(503))
+
+    await channel.adapter.deliver(to(DM, { kind: 'result', text: 'the answer' }))
+
+    expect(channel.waits).toEqual([RETRY_FLOOR_MS])
+  })
+
+  it('gives up rather than trying for ever', async () => {
+    const channel = await messaged(inDm())
+    channel.api.failEvery('post', refusal(429, 100))
+
+    await expect(
+      channel.adapter.deliver(to(DM, { kind: 'result', text: 'the answer' })),
+    ).rejects.toThrow(/429/)
+    expect(channel.api.calls.filter((call) => call === 'post')).toHaveLength(ATTEMPTS)
+  })
+
+  // A wait this long is a block on the whole API rather than a bucket refilling,
+  // and sleeping through one inside `deliver` holds the Task and everything
+  // queued behind it for as long as it lasts.
+  it('gives up rather than sleeping through a ban', async () => {
+    const channel = await messaged(inDm())
+    channel.api.failEvery('post', refusal(429, RETRY_CEILING_MS + 1))
+
+    await expect(
+      channel.adapter.deliver(to(DM, { kind: 'result', text: 'the answer' })),
+    ).rejects.toThrow(/429/)
+    expect(channel.waits).toEqual([])
+    expect(channel.api.calls.filter((call) => call === 'post')).toHaveLength(1)
+  })
+
+  // Every attempt at something Discord will go on refusing is another entry in
+  // the budget whose penalty is the block above. A 403 is a permission roma does
+  // not have, and it will not have it a second later either.
+  it('does not try again where trying again cannot work', async () => {
+    const channel = await messaged(inDm())
+    channel.api.failEvery('post', refusal(403))
+
+    await expect(
+      channel.adapter.deliver(to(DM, { kind: 'result', text: 'the answer' })),
+    ).rejects.toThrow(/403/)
+    expect(channel.waits).toEqual([])
+    expect(channel.api.calls.filter((call) => call === 'post')).toHaveLength(1)
+  })
+
+  /**
+   * **Opening a thread is not idempotent, and forgetting that makes every retry
+   * permanent.** *"A message can only have a single thread created from it"* —
+   * so a creation that Discord carried out and then failed to report is one
+   * roma re-attempts, and the second attempt must be read as the thread it
+   * wanted rather than as a refusal. Read as a refusal, the answer goes to the
+   * parent channel of a thread roma had already opened.
+   *
+   * What `HttpDiscordApi` reads out of the 400 to decide that is asserted in
+   * `http-discord-api.test.ts`; what is asserted here is that roma asks again
+   * and speaks in what it is handed back.
+   */
+  it('treats a re-attempted thread as the thread it wanted, and posts into it', async () => {
+    const channel = await messaged(addressed())
+    channel.api.failNext('startThread', refusal(500))
+
+    await channel.adapter.deliver(to(MESSAGE, { kind: 'result', text: 'the answer' }))
+
+    expect(channel.api.threads).toHaveLength(2)
+    expect(channel.api.messages[0]?.posted.channel).toBe(MESSAGE)
+  })
+
+  // A socket that failed carries no status, so there is nothing to say Discord
+  // refused anything — and the request may in fact have arrived. Retried anyway:
+  // a Conversation told twice is a great deal better than one told nothing about
+  // a Turn that has already been paid for.
+  it('tries again after a fault that never reached Discord at all', async () => {
+    const channel = await messaged(inDm())
+    channel.api.failNext('post', new Error('socket hang up'))
+
+    await channel.adapter.deliver(to(DM, { kind: 'result', text: 'the answer' }))
+
+    expect(channel.api.texts).toEqual(['the answer'])
   })
 })
 

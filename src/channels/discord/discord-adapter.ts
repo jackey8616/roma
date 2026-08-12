@@ -4,33 +4,116 @@ import type {
   IngressMessage,
   OutboundInstruction,
 } from '../../channel-adapter.js'
-import type { DiscordApi } from './discord-api.js'
-import { readIngressMessage, type DiscordEvent } from './discord-events.js'
+import { DiscordRefusal, type DiscordApi } from './discord-api.js'
+import { asString, readIngressMessage, type DiscordEvent } from './discord-events.js'
+import { outcomeMessages, progressText, threadName } from './render.js'
+
+/**
+ * How many times roma makes one Discord call before it gives up on it.
+ *
+ * **Bounded, and the bound is the point.** ADR-0028 moved the remedy for a
+ * failed post into `deliver` because re-reading the event repairs no POST; what
+ * that inherits on this Channel is that a 429 counts toward an invalid-request
+ * budget of *"10,000 per 10 minutes"* whose penalty is a temporary block on the
+ * whole API rather than on the channel that earned it. So a loop that kept
+ * trying would turn one unreachable Conversation into an outage of every
+ * Conversation, roma's Gateway included (ADR-0029).
+ *
+ * Three, because the failure this exists to repair is a blip: a 503 while
+ * Discord moves something, or a bucket roma shares with itself during a split
+ * answer. A fault that survives three attempts spread over a wait Discord itself
+ * named is not transient, and the honest thing then is to reject.
+ */
+export const ATTEMPTS = 3
+
+/**
+ * How long roma waits before a retry Discord gave it no time for, and the
+ * longest wait it will sit through at all.
+ *
+ * The floor is doubled per attempt, and only ever used where the response
+ * carried no `Retry-After` — a 503, or a socket that never answered. Where
+ * Discord *did* say how long, that is what roma waits, because its per-route
+ * limits are dynamic and its reference says *"rate limits should not be hard
+ * coded into your app"*.
+ *
+ * The ceiling is a limit on roma's patience rather than on Discord's: a wait
+ * longer than this is a block on the whole API rather than a bucket refilling,
+ * and sleeping through one inside `deliver` holds the Task, the Session's
+ * Opening and everything queued behind them for as long as it lasts. roma gives
+ * up and says so instead.
+ */
+export const RETRY_FLOOR_MS = 500
+export const RETRY_CEILING_MS = 30_000
+
+/**
+ * How many Conversations roma keeps the answering address of.
+ *
+ * **Never take the bound off.** roma runs for weeks and every top-level mention
+ * makes a Conversation, so one entry per Conversation ever seen is a leak with
+ * no ceiling. What eviction costs is `#answering`'s.
+ */
+const REMEMBERED = 1_000
+
+/**
+ * The instructions after which a Task has no acknowledgement left to keep.
+ *
+ * Named as a set rather than asked as "not progress", because that is no longer
+ * the same question: a blocked Task has been told something and is still
+ * running, and its acknowledgement is still the message it will keep editing.
+ */
+const ENDS_THE_TASK = new Set(['result', 'failure', 'stopped', 'command-outcome', 'choice'])
+
+/** The message roma is answering in one Conversation, and where it arrived. */
+interface Answered {
+  readonly channel: string
+  readonly message: string
+  readonly name: string
+  /**
+   * **Not the channel: the promise of it.** The entry has to exist from the
+   * instant the thread is first asked for, or two instructions arriving together
+   * both open one — and a message can only ever have the one.
+   */
+  place: Promise<string> | null
+}
 
 export interface DiscordAdapterOptions {
   /**
    * How roma reaches Discord over HTTP.
    *
-   * Here for the Enclosures alone today: an attachment's bytes are redeemed long
-   * after the message was read, so the Adapter has to be able to hand out a way
-   * of fetching them rather than the bytes (ADR-0011).
+   * Both directions: an attachment's bytes are redeemed long after the message
+   * was read (ADR-0011), and everything roma ever says on this Channel is a call
+   * on this port.
    */
   readonly api: DiscordApi
+  /**
+   * How roma waits between attempts at a call Discord refused.
+   *
+   * Injectable only so that a test can pin the moment rather than spend it;
+   * nothing else should pass it.
+   */
+  readonly wait?: (ms: number) => Promise<void>
 }
 
 /**
  * Discord, and one of the two modules in roma that knows Discord exists.
  *
- * A Discord event goes in and an ingress message comes out. Everything
- * Discord-specific is on this side of it — snowflakes, mentions, guilds — and
- * nothing on the other side has ever heard of any of it.
+ * A Discord event goes in and an ingress message comes out; an outbound
+ * instruction goes in and a Discord API call comes out. Everything
+ * Discord-specific is on this side of it — snowflakes, mentions, guilds, the
+ * 2000-character limit, the words roma uses — and nothing on the other side has
+ * ever heard of any of it.
  *
- * It keeps no record of who is talking to whom, which is ADR-0029's claim that
- * Discord needs no adapter-side identity storage, and it can afford that for a
- * reason Chat could not have used: a Conversation Key *is* a channel id, or the
- * id of a message a thread is about to take, because a thread and the message it
- * was started from share one id. So the key minted before the thread exists is
- * the id the thread will have, and no lookup and no state stand behind it.
+ * A Conversation Key needs neither minting nor storage here, which is ADR-0029's
+ * claim and survives: a key *is* a channel id, or the id of a message a thread
+ * is about to take, because a thread and the message it was started from share
+ * one id. So the key minted before the thread exists is the id the thread will
+ * have, and no lookup and no state stand behind it.
+ *
+ * What it does keep is `#answering`, and that is a different thing from
+ * identity: a message id and a parent channel, so that an answer can reply to
+ * the question and a thread can be opened where the question was asked. Both are
+ * facts about the message roma is answering, both are learned at the only moment
+ * they are available, and losing either costs no Conversation its Session.
  *
  * The other module is the Transport, unlike Chat, where the Adapter is the whole
  * of the Channel. `GatewayTransport` decides the two things a synchronous reader
@@ -49,9 +132,43 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
   }
 
   readonly #api: DiscordApi
+  readonly #wait: (ms: number) => Promise<void>
 
-  constructor({ api }: DiscordAdapterOptions) {
+  /**
+   * The message roma is answering in each Conversation, by Conversation and
+   * Caller.
+   *
+   * **Keyed by the Caller as well.** A thread is many people sharing one
+   * Conversation and two Tasks can be in flight in it at once, so keyed on the
+   * Conversation alone Ada's answer replies to Bob's question (ADR-0009). A
+   * top-level key names one message and therefore one Caller, so the thread on
+   * it is one entry's whichever way this is keyed.
+   *
+   * **Never persist it, and never leave it unbounded.** An entry that is gone
+   * costs the answer its reply and asks Discord a second time for a thread it
+   * has already made — which is a success, because a message can only have one.
+   * So both a restart and an eviction repair themselves, and the one thing that
+   * does not is a Conversation whose thread was never opened at all, where the
+   * Task is gone too.
+   */
+  readonly #answering = new Map<string, Answered>()
+
+  /**
+   * Each Task's acknowledgement, as the promise of the message that carries it.
+   *
+   * The promise rather than the id, so that the entry exists from the instant
+   * the first update is sent rather than from when Discord answers. In between,
+   * a second update would otherwise find nothing and post a second
+   * acknowledgement — and the Task would have two messages mutating at once.
+   *
+   * Dropped when the Task ends. A post still in flight then resolves into
+   * nothing, which is what should happen: the acknowledgement is finished with.
+   */
+  readonly #acknowledgements = new Map<string, Promise<string>>()
+
+  constructor({ api, wait }: DiscordAdapterOptions) {
     this.#api = api
+    this.#wait = wait ?? sleep
   }
 
   /**
@@ -63,31 +180,220 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
    * thread and an @-mention have become a key, a Caller and some text.
    */
   toIngress(event: DiscordEvent): IngressMessage | null {
-    return readIngressMessage(event, {
+    const message = readIngressMessage(event, {
       // Bound rather than called: `toIngress` stays synchronous, and what an
       // Enclosure costs is paid once the Core knows the Session and knows the
       // bytes are wanted (ADR-0011).
       download: (url) => this.#api.download(url),
     })
+    if (message !== null) this.#remember(event, message)
+    return message
   }
 
   /**
-   * Nothing yet, and it says so by rejecting.
+   * Carry out one instruction, as one or more Discord messages.
    *
-   * **Stage 2 is inbound only** (#179): posting a Result, splitting it at 2000
-   * characters, opening the thread a top-level Conversation Key names and
-   * drawing the Menus are all #180's, and none of them is sketched here. What is
-   * here is the honest answer to the interface's own sentence — *"Rejecting means
-   * it reached nobody"* — which is exactly what is true of every instruction
-   * until that lands. A silent no-op would be the lie: the Core would take it for
-   * a Conversation that had been told, and nobody anywhere would be waiting for
-   * an answer that was never coming.
+   * Progress edits the acknowledgement in place; everything else is a new
+   * message, which is the rule ADR-0003 makes unconditional for a result and
+   * this Adapter has no reason to bend for the rest.
+   *
+   * Everything it posts goes through `#retrying`, because ADR-0028 put the
+   * remedy for a failed post here: the Gateway being fine while the REST API
+   * answers 503 is the ordinary shape of a Discord outage, and re-reading a
+   * socket repairs no POST.
+   *
+   * Rejecting means the Conversation was not told, and the Core treats that as
+   * the one failure it cannot absorb — so nothing here swallows a refusal it has
+   * run out of attempts on.
    */
-  deliver(instruction: OutboundInstruction): Promise<void> {
-    return Promise.reject(
-      new Error(
-        `roma cannot post to Discord yet — outbound is #180, and this ${instruction.kind} reached nobody`,
-      ),
-    )
+  async deliver(instruction: OutboundInstruction): Promise<void> {
+    const { taskId, conversationKey, caller } = instruction
+    const answered = this.#answering.get(addressOf(conversationKey, caller))
+    const channel = await this.#place(conversationKey, answered)
+
+    if (instruction.kind === 'progress') {
+      await this.#acknowledge(taskId, channel, answered, progressText(instruction.progress))
+      return
+    }
+
+    // Only where the Task is actually over. `blocked`, `overflow-refused` and
+    // `context-full` are messages about a Task that is still going: forgetting
+    // its acknowledgement there would strand the one the person is watching and
+    // post a second one when the Task started again. Dropped before the messages
+    // are posted rather than after, so that a post that throws still leaves
+    // nothing behind.
+    if (ENDS_THE_TASK.has(instruction.kind)) this.#acknowledgements.delete(taskId)
+
+    const messages = outcomeMessages(instruction)
+    for (const [at, text] of messages.entries()) {
+      // The reply on the first piece and nothing on the rest. It is what
+      // addresses the Caller here — Discord's own form, where Chat has only a
+      // mention — and an answer long enough to split would otherwise notify
+      // somebody once per 2000 characters of it (ADR-0029).
+      const replyTo = at === 0 ? (answered?.message ?? null) : null
+      await this.#retrying(() => this.#api.post({ channel, text, replyTo }))
+    }
   }
+
+  /**
+   * Keep what an answer to this message will need and no instruction carries.
+   *
+   * **Never look for it later.** The Task id is minted in the Core after
+   * `toIngress` has returned, so nothing downstream links the event roma read to
+   * the instruction it is handed (`TaskAddress`) — here is the only place the
+   * two are the same thing.
+   */
+  #remember(event: DiscordEvent, message: IngressMessage): void {
+    const channel = asString(event.message['channel_id'])
+    const id = asString(event.message['id'])
+    if (channel === null || id === null) return
+
+    const at = addressOf(message.conversationKey, message.caller)
+    // Deleted before it is set, because a `Map` keeps the order things were
+    // *first* put in it: without this, a Conversation somebody has been talking
+    // in all day is evicted ahead of one nobody has touched since this morning.
+    this.#answering.delete(at)
+    if (this.#answering.size >= REMEMBERED) {
+      const oldest = this.#answering.keys().next().value
+      if (oldest !== undefined) this.#answering.delete(oldest)
+    }
+    this.#answering.set(at, { channel, message: id, name: threadName(message.text), place: null })
+  }
+
+  /** Which channel this Conversation is answered in, opening its thread if it has none. */
+  #place(conversationKey: string, answered: Answered | undefined): Promise<string> {
+    // Rows one and two of ADR-0029's table: a key that names the channel its
+    // message arrived in is already somewhere roma can speak. Row three is the
+    // one with work in it — the key is a message's id, and the thread that will
+    // carry that id does not exist until roma opens it.
+    if (answered === undefined || answered.channel === conversationKey) {
+      return Promise.resolve(conversationKey)
+    }
+    if (answered.place !== null) return answered.place
+
+    const opening = this.#openThread(conversationKey, answered)
+    answered.place = opening
+    return opening.catch((error: unknown) => {
+      // Forgotten so that the next instruction tries again, exactly as a failed
+      // acknowledgement is. Kept, one bad minute would leave every later message
+      // in this Conversation waiting on a promise that had already rejected.
+      if (answered.place === opening) answered.place = null
+      throw error
+    })
+  }
+
+  /**
+   * Open the thread a top-level Conversation Key names, or answer with somewhere
+   * roma may actually speak.
+   *
+   * **Never let a refusal here end the delivery.** roma may hold no permission
+   * to open threads, the channel may be a forum or media channel where the route
+   * does not work at all, or the classifier may have read a thread as top level
+   * — and in every one of them the reply belongs in the channel the message
+   * arrived in. Thrown instead, an answer somebody paid for reaches nobody;
+   * fallen back, only the Session is in the wrong place (ADR-0029).
+   */
+  async #openThread(conversationKey: string, answered: Answered): Promise<string> {
+    try {
+      return await this.#retrying(() =>
+        this.#api.startThread(answered.channel, conversationKey, answered.name),
+      )
+    } catch (error) {
+      if (!refused(error)) throw error
+      return answered.channel
+    }
+  }
+
+  /** Post the acknowledgement, or edit the one this Task already has. */
+  async #acknowledge(
+    taskId: string,
+    channel: string,
+    answered: Answered | undefined,
+    text: string,
+  ): Promise<void> {
+    const posted = this.#acknowledgements.get(taskId)
+    if (posted !== undefined) {
+      const id = await posted
+      await this.#retrying(() => this.#api.edit(channel, id, text))
+      return
+    }
+
+    // Replied to like the answer is, and for the same reason: a thread can carry
+    // two of these at once — one running, one queued behind it — and the person
+    // waiting is who most needs to know which is theirs. Discord notifies on the
+    // post and not on the edits, so this is one notification per Task rather
+    // than one per update.
+    const posting = this.#retrying(() =>
+      this.#api.post({ channel, text, replyTo: answered?.message ?? null }),
+    )
+    this.#acknowledgements.set(taskId, posting)
+    try {
+      await posting
+    } catch (error) {
+      // A post that failed left no message to edit. Forgetting it is what lets
+      // the next update try again — kept, every later update for this Task would
+      // edit an id that never existed and fail with an error from minutes ago.
+      if (this.#acknowledgements.get(taskId) === posting) this.#acknowledgements.delete(taskId)
+      throw error
+    }
+  }
+
+  /** One call, tried again where trying again could work. ADR-0028's remedy, bounded. */
+  async #retrying<T>(call: () => Promise<T>): Promise<T> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await call()
+      } catch (error) {
+        const wait = attempt < ATTEMPTS ? waitBefore(error, attempt) : null
+        if (wait === null) throw error
+        await this.#wait(wait)
+      }
+    }
+  }
+}
+
+/**
+ * One Conversation as one Caller is answered in it. See `#answering`.
+ *
+ * A space separates them because neither half can contain one: both are Discord
+ * snowflakes, which are decimal.
+ */
+function addressOf(conversationKey: string, caller: string): string {
+  return `${conversationKey} ${caller}`
+}
+
+/** Whether Discord refused this on its own terms, rather than failing to serve it. */
+function refused(error: unknown): boolean {
+  return error instanceof DiscordRefusal && error.status !== 429 && error.status < 500
+}
+
+/**
+ * How long to wait before trying this again, or null for a call not worth trying
+ * again at all.
+ *
+ * **Never retry what `refused` answers true for.** Every attempt at a 401 or a
+ * 403 is another entry in the invalid-request budget whose penalty is a block on
+ * the whole API, so a loop over a permission roma does not have is how roma
+ * loses the ones it does (ADR-0029).
+ *
+ * Anything that is not a `DiscordRefusal` never reached Discord to be refused —
+ * a socket that failed, a name that did not resolve — and *is* retried, at the
+ * cost of a duplicate message where the request in fact arrived. A Conversation
+ * told twice is a great deal better than one told nothing about a Turn that has
+ * already been paid for.
+ */
+function waitBefore(error: unknown, attempt: number): number | null {
+  if (refused(error)) return null
+  const asked = error instanceof DiscordRefusal ? error.retryAfterMs : null
+  if (asked === null) return Math.min(RETRY_FLOOR_MS * 2 ** (attempt - 1), RETRY_CEILING_MS)
+  return asked > RETRY_CEILING_MS ? null : asked
+}
+
+/** Waiting, as everything but a test does it. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    // Unreferenced for `ProgressReporter`'s reason: a wait roma is sitting
+    // through is not a reason to keep the process up.
+    setTimeout(resolve, ms).unref?.()
+  })
 }

@@ -56,9 +56,17 @@ and Discord, and one process serves however many there are: one Core each, over 
 one queue, one Audit Log and one Work Root (ADR-0028). In development that runs the
 TypeScript directly through `tsx`, from a normal `npm install`.
 
-Discord is **inbound only** today: roma holds the Gateway socket open, reads what is
-addressed to it and opens Sessions, and cannot yet post anything back — every outbound
-instruction is refused, and #180 is where posting lands (ADR-0029).
+Discord answers in **plain text**, not embeds and not an attached file: a long answer
+inside a card is worse at the two things a separate Result exists for, being searched for
+and being quoted, and Discord's search reads message content while no part of an embed can
+be quote-replied (ADR-0029). An answer over Discord's 2000 characters is split at a
+paragraph boundary where there is one, the Caller is addressed by replying to their
+message on the first piece only, and a top-level @-mention is answered in a thread roma
+opens from it. A post Discord refuses is retried inside the Adapter, waiting exactly as
+long as Discord's own headers ask for — nothing about a rate limit is hard coded, because
+a retry that ignores a 429 spends its way toward a block on the whole API (ADR-0028).
+What is **not** drawn yet is buttons: a Menu arrives as the words it already is, and the
+Overflow offer cannot yet be taken here. #181 is where those land.
 
 What ships is compiled. `npm run build` emits `src` alone to `dist/` — the tests are not
 in it — and the image runs `node dist/channels/main.js` under `npm ci --omit=dev`, so
@@ -301,10 +309,13 @@ which lives in this repo's GitHub issues (`gh issue view 1`).
   same goes for `HttpChatApi`, whose tests assert on the request Google would have
   received, and for `PubSubTransport`, whose subscription is a double.
   `src/channels/discord/discord-channel.test.ts` is the same seam a second time and
-  **wider**: a raw Gateway frame in and an ingress message out, covering the Transport as
-  well as the Adapter with only the socket and the REST call doubled. Wider because that
-  Transport decides things — which channels a guild has, and what a Quotation says — and
-  nothing that decides something may sit behind an untested port.
+  **wider**: a raw Gateway frame in and an ingress message out, an outbound instruction in
+  and a recorded Discord API call out, covering the Transport as well as the Adapter with
+  only the socket and the REST call doubled. Wider because that Transport decides things —
+  which channels a guild has, and what a Quotation says — and nothing that decides
+  something may sit behind an untested port. The frame comes first even in the outbound
+  tests, because what an answer needs beyond the Conversation Key is learned from the
+  event and nowhere else.
 
 `test/support/live-claude.test.ts` belongs to none of them. It is the default run
 asserting something about seam 2's *scaffolding* — that the directories handed to a live

@@ -1,5 +1,5 @@
-import type { DiscordApi } from './discord-api.js'
-import type { DiscordMessage } from './discord-events.js'
+import { DiscordRefusal, type DiscordApi, type DiscordPost } from './discord-api.js'
+import { asNumber, asRecord, asString, type DiscordMessage } from './discord-events.js'
 
 export interface HttpDiscordApiOptions {
   readonly botToken: string
@@ -17,12 +17,32 @@ export interface HttpDiscordApiOptions {
 }
 
 /**
- * The two REST calls, over HTTP.
+ * Discord's own code for a message that already has a thread on it.
  *
- * The far side of seam 3 and deliberately the whole of what sits behind it:
- * this decides nothing. It puts a token on a request, checks that Discord
- * answered, and hands back what came — everything that could be wrong about
- * *which* request to make was decided before it got here.
+ * **Never read this as a failure.** *"A message can only have a single thread
+ * created from it"*, so the second attempt at one message is exactly what a
+ * retry makes — and reported as an error it would make every retry permanent,
+ * sending the answer to the parent channel of a thread roma had already opened.
+ *
+ * Read from Discord's JSON error code table rather than from the route's own
+ * documentation, which is ADR-0029's second tier of verification. Being wrong
+ * about the number fails in that ADR's harmless direction and no further: roma
+ * takes the refusal at its word, answers in the channel the message arrived in,
+ * and only the Session is in the wrong place.
+ */
+const THREAD_ALREADY_CREATED = 160004
+
+/**
+ * The five REST calls, over HTTP.
+ *
+ * The far side of seam 3 and deliberately the whole of what sits behind it: this
+ * decides nothing. It puts a token on a request, checks that Discord answered,
+ * and hands back what came — everything that could be wrong about *which*
+ * request to make was decided before it got here.
+ *
+ * The two things it does read out of a response are the two a caller cannot get
+ * anywhere else: how long Discord asked roma to wait, and whether a refused
+ * thread was refused because it already exists.
  */
 export class HttpDiscordApi implements DiscordApi {
   readonly #botToken: string
@@ -36,21 +56,8 @@ export class HttpDiscordApi implements DiscordApi {
   }
 
   async message(channelId: string, messageId: string): Promise<DiscordMessage> {
-    const response = await this.#fetch(
-      `${this.#apiBase}/channels/${channelId}/messages/${messageId}`,
-      {
-        headers: {
-          // **Never send the bare token.** Discord reads the scheme to decide what
-          // kind of credential this is, and a token with no `Bot ` in front of it
-          // is refused as unauthorized — which arrives here as a Quotation that
-          // silently never resolves.
-          authorization: `Bot ${this.#botToken}`,
-        },
-      },
-    )
-    if (!response.ok) {
-      throw new Error(`Discord answered ${response.status} for a message roma was pointed at`)
-    }
+    const response = await this.#call(`/channels/${channelId}/messages/${messageId}`)
+    refuseUnless(response, 'a message roma was pointed at')
     return (await response.json()) as DiscordMessage
   }
 
@@ -60,11 +67,117 @@ export class HttpDiscordApi implements DiscordApi {
     // is a credential handed to whatever is on the other end of a URL that
     // arrived in a message.
     const response = await this.#fetch(url)
-    if (!response.ok) {
-      throw new Error(
-        `Discord answered ${response.status} for an attachment — its links expire, and a Task can wait hours`,
-      )
-    }
+    refuseUnless(response, 'an attachment — its links expire, and a Task can wait hours')
     return new Uint8Array(await response.arrayBuffer())
   }
+
+  async post({ channel, text, replyTo }: DiscordPost): Promise<string> {
+    const response = await this.#call(`/channels/${channel}/messages`, 'POST', {
+      content: text,
+      ...(replyTo === null
+        ? {}
+        : {
+            // **Never let this default.** `fail_if_not_exists` is true unless it
+            // is said otherwise, so a reply to a message somebody deleted while
+            // the Task ran is not a plainer answer but no answer at all — the
+            // Conversation is told nothing about work that has already been paid
+            // for.
+            message_reference: { message_id: replyTo, fail_if_not_exists: false },
+          }),
+      ...ALLOWED_MENTIONS,
+    })
+    refuseUnless(response, 'a message roma tried to post')
+    return asString(asRecord(await response.json())?.['id']) ?? ''
+  }
+
+  async edit(channelId: string, messageId: string, text: string): Promise<void> {
+    const response = await this.#call(`/channels/${channelId}/messages/${messageId}`, 'PATCH', {
+      content: text,
+      ...ALLOWED_MENTIONS,
+    })
+    refuseUnless(response, 'an acknowledgement roma tried to edit')
+  }
+
+  async startThread(channelId: string, messageId: string, name: string): Promise<string> {
+    const response = await this.#call(
+      `/channels/${channelId}/messages/${messageId}/threads`,
+      'POST',
+      { name },
+    )
+    // A thread and the message it was started from share one id, so a message
+    // that already has one is the thread roma was asking for — see `startThread`
+    // on the port for why that is a success.
+    if (!response.ok && (await codeOf(response)) !== THREAD_ALREADY_CREATED) {
+      refuseUnless(response, 'a thread roma tried to open')
+    }
+    return messageId
+  }
+
+  #call(path: string, method = 'GET', body?: unknown): Promise<Response> {
+    return this.#fetch(`${this.#apiBase}${path}`, {
+      method,
+      headers: {
+        // **Never send the bare token.** Discord reads the scheme to decide what
+        // kind of credential this is, and a token with no `Bot ` in front of it
+        // is refused as unauthorized — which arrives here as a Quotation that
+        // silently never resolves, or as an answer nobody is ever told.
+        authorization: `Bot ${this.#botToken}`,
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    })
+  }
+}
+
+/**
+ * What roma will let a message of its own mention.
+ *
+ * **Nothing the text asks for.** The words in a Result are written by a model
+ * that reads whatever anybody put in front of it, so an answer containing
+ * `@everyone` is one prompt away — and on Discord that is not a rendering
+ * detail but a notification to a whole guild. `parse: []` leaves the characters
+ * in the message and takes the ping out of them.
+ *
+ * `replied_user` is on because the reply is how a Caller is addressed here at
+ * all (ADR-0029), and naming `allowed_mentions` at all is what turns that ping
+ * off by default — so this field is the reply staying what Discord's own default
+ * would have made it, rather than a second decision.
+ */
+const ALLOWED_MENTIONS = { allowed_mentions: { parse: [], replied_user: true } } as const
+
+/** Discord's own error code on a response, or null where it said none. */
+async function codeOf(response: Response): Promise<number | null> {
+  try {
+    return asNumber(asRecord(await response.clone().json())?.['code'])
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Turn anything but a success into the refusal a retry can read.
+ *
+ * **Never let a wait be inferred instead of read.** This is the one place a
+ * `Retry-After` comes off a response, and `DiscordRefusal` is where what a
+ * guessed one costs is written down. `retry-after` is Discord's answer to a 429
+ * and `x-ratelimit-reset-after` is the same figure on the bucket it belongs to;
+ * both are seconds, and either may be fractional.
+ */
+function refuseUnless(response: Response, what: string): void {
+  if (response.ok) return
+  const seconds =
+    asSeconds(response.headers.get('retry-after')) ??
+    asSeconds(response.headers.get('x-ratelimit-reset-after'))
+  throw new DiscordRefusal(
+    `Discord answered ${response.status} for ${what}`,
+    response.status,
+    seconds === null ? null : Math.round(seconds * 1000),
+  )
+}
+
+/** A header that should hold a number of seconds, or null for one that does not. */
+function asSeconds(header: string | null): number | null {
+  if (header === null) return null
+  const seconds = Number(header)
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : null
 }
