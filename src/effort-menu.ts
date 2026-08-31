@@ -88,11 +88,10 @@ export const ULTRACODE = 'ultracode'
  * the person decides, because the script has been wrong before and could not
  * tell.
  *
- * **An unnamed model is not a refused one**, and reading a `—` as a no is the
- * mistake ADR-0016 was written about. `claude-fable-5` reads unnamed on all
- * three gates exactly as its two neighbours do, and the sentence quoted above
- * names Fable 5 first — so it is `true` on the same evidence, not on a weaker
- * one.
+ * **Do not turn fable's `—` into a `false` on the next re-audit.** It reads
+ * unnamed on all three gates exactly as its neighbours do; flipping it would
+ * have roma tell every Caller on fable that their `/effort` does not apply,
+ * which is the ADR-0016 mistake in the one row nothing else would catch.
  *
  * **It reports; it does not gate.** roma uses it for two things and refuses
  * nothing because of it: it says so, in the reply to an `/effort` or a `/model`

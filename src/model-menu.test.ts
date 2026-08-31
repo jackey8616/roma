@@ -102,21 +102,14 @@ describe('reading a /model message', () => {
     expect(MENU_NAMES).toEqual([...Object.keys(MENU), 'default'])
   })
 
-  // Order is load-bearing rather than cosmetic: `MENU_NAMES` derives from it and
-  // both Adapters draw their buttons in it, so the Menu is read left to right as
-  // what a Caller is reaching for. Descending cost, most expensive first.
+  // Held as a literal because the order is load-bearing — `MENU` says why — so a
+  // reorder fails here rather than becoming a quietly different card everywhere.
   it('lists them in the order it means them to be read', () => {
     expect(MENU_NAMES).toEqual(['fable', 'opus', 'sonnet', 'haiku', 'default'])
   })
 })
 
-/**
- * The Menu read backwards, which is how roma says what a Session is already on.
- *
- * roma keeps the resolved id, so a report naming only that would offer a list of
- * names against a model spelled another way — and leave the Caller to find out
- * by being refused that the id itself is not something they may type.
- */
+/** The Menu read backwards, which is how roma says what a Session is already on. */
 describe('naming the model a Session is on', () => {
   it('answers with the name a Caller would have typed', () => {
     expect(menuNameFor('claude-fable-5')).toBe('fable')
@@ -125,11 +118,10 @@ describe('naming the model a Session is on', () => {
     expect(menuNameFor('claude-haiku-4-5')).toBe('haiku')
   })
 
-  // Null rather than the id, because there is no name for it: a deployment that
-  // pinned `ROMA_MODEL` to something off the Menu has one, and it is reported as
-  // the bare id because that is the truthful answer.
+  // What a deployment that pinned `ROMA_MODEL` off the Menu has. Null rather than
+  // the id, so the report can fall back to the id as the truthful answer.
   it('says nothing for a model no name on the Menu resolves to', () => {
-    expect(menuNameFor('claude-fable-5-mythos-5')).toBeNull()
+    expect(menuNameFor('claude-mythos-5')).toBeNull()
     expect(menuNameFor('claude-opus-5[1m]')).toBeNull()
   })
 })

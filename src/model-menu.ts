@@ -48,13 +48,10 @@
  * is priced at twice Opus 5 per token on the first-party API — $10/$50 per MTok
  * against $5/$25 — and roma draws on a subscription rather than metered billing,
  * so that ratio is how fast the shared quota drains rather than a bill roma
- * pays. roma is willing to put the Shared Window behind it at that rate. It is
- * recorded here rather than in an ADR because willingness is per-entry and this
- * is the comment the `[1m]` refusal below is already written in: the same
- * question, decided the other way. ADR-0014 decides that a Session runs on the
- * model somebody chose, and this executes under it. What would revisit it is
- * evidence, and `/usage` answers out of the Audit Records, which is where that
- * evidence comes from.
+ * pays. roma is willing to put the Shared Window behind it at that rate. Written
+ * here rather than in an ADR because willingness is per-entry, as the `[1m]`
+ * refusal below is: the same question, decided the other way (ADR-0014). What
+ * would revisit it is evidence, and `/usage` answers out of the Audit Records.
  *
  * Deliberately not here: the `[1m]` variants, which Claude Code declares as
  * `opus[1m]`, `sonnet[1m]` and `fable[1m]` at `5x more context`. That multiplier
