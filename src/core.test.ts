@@ -1488,7 +1488,7 @@ describe('the model a Conversation runs on', () => {
       conversationKey: KEY,
       text: expect.stringContaining('gpt-5'),
       chooses: 'model',
-      options: ['opus', 'sonnet', 'haiku', 'default'],
+      options: ['fable', 'opus', 'sonnet', 'haiku', 'default'],
       refused: 'gpt-5',
     })
     expect(claude.lastSpawn.args).toContain(PINNED_MODEL)
@@ -1514,14 +1514,14 @@ describe('the model a Conversation runs on', () => {
         conversationKey: KEY,
         text: expect.stringContaining(PINNED_MODEL),
         chooses: 'model',
-        options: ['opus', 'sonnet', 'haiku', 'default'],
+        options: ['fable', 'opus', 'sonnet', 'haiku', 'default'],
         // Nothing was refused: this one answers "what is on offer", and that is
         // the only thing telling the two cards apart.
         refused: null,
       },
     ])
     const [reported] = posted(adapter.instructions)
-    for (const name of ['opus', 'sonnet', 'haiku', 'default']) {
+    for (const name of ['fable', 'opus', 'sonnet', 'haiku', 'default']) {
       expect(reported).toMatchObject({ text: expect.stringContaining(name) })
     }
   })

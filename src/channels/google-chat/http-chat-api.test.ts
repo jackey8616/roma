@@ -178,7 +178,7 @@ describe('the buttons that choose off a Menu', () => {
       space: SPACE,
       thread: null,
       text: 'This conversation is on sonnet (claude-sonnet-5).',
-      actions: ['opus', 'sonnet', 'haiku', 'default'].map((option) => ({
+      actions: ['fable', 'opus', 'sonnet', 'haiku', 'default'].map((option) => ({
         label: option,
         action: 'choose',
         parameters: { chooses: 'model', option },
@@ -187,6 +187,7 @@ describe('the buttons that choose off a Menu', () => {
 
     const [widget] = buttonWidgetsOf(last()?.body)
     expect(widget?.buttonList.buttons.map((button) => button.text)).toEqual([
+      'fable',
       'opus',
       'sonnet',
       'haiku',
@@ -198,7 +199,7 @@ describe('the buttons that choose off a Menu', () => {
       function: 'choose',
       parameters: [
         { key: 'chooses', value: 'model' },
-        { key: 'option', value: 'opus' },
+        { key: 'option', value: 'fable' },
       ],
     })
   })

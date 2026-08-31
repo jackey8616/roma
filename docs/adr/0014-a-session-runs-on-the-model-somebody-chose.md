@@ -13,6 +13,12 @@ inline the way ADR-0002, ADR-0003 and ADR-0007 mark theirs. `yn()` was recorded
 here as not readable statically; it is readable, and knowing so retires one of the
 two jobs the seam 2 Menu check was given. Nothing that was built changes.
 
+**Amended 2026-08-31**, to the Menu rather than to the decision, and marked
+inline the same way. `fable` is on the Menu, resolving to `claude-fable-5` and
+drawn first (#196). Nothing here is overturned: this ADR decides that a Session
+runs on the model somebody chose, and which names the Menu carries was always the
+Menu's own per-entry judgement rather than this document's.
+
 Builds on ADR-0013, which decides which string puts a Conversation back on the
 Pinned Model by clearing it.
 
@@ -118,7 +124,9 @@ argument upstream, and there is no list roma could hold that would make validati
 complete — which is why the decision below is about what roma *offers* rather than
 about what it can check. It also names three the Menu does not carry — `fable`,
 `best` and `opusplan` — which is the Menu behaving as an offer rather than as a
-filter, and is worth re-reading when the pin moves.
+filter, and is worth re-reading when the pin moves. **Amended 2026-08-31 — two,
+now.** `fable` went onto the Menu with #196. The reading is unchanged and so is
+the point it makes; what moved is roma's willingness, not the build.
 
 **Read — the 1M variants.** `{alias:"opus[1m]", name:"Opus 1M", multiplier:5}`
 and the same for `sonnet`, with the tip text `` `You have access to ${t.name}
@@ -228,11 +236,19 @@ it owns the answer.
 ### The Model Menu is roma's whitelist, not Claude Code's vocabulary
 
 ```
-opus    sonnet    haiku    default
+fable    opus    sonnet    haiku    default
 ```
 
 `default` means the Pinned Model, so a Conversation can put the model back
 without clearing what it has said.
+
+**Amended 2026-08-31 — `fable` was added, and first** (#196). The order is
+descending cost, which is the order both Channels draw and the order a Caller
+reads to see what they are reaching for. The pinned build already served
+`claude-fable-5`, so the question was never capability but whether roma is
+willing to put the Shared Window behind it at twice Opus 5's per-token rate. It
+is, and that judgement is recorded above `MENU` in `src/model-menu.ts` — beside
+the `[1m]` exclusion's, which is the same question decided the other way.
 
 Not on it: the `[1m]` variants, and arbitrary full model ids. Upstream accepts
 both.

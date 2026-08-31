@@ -16,6 +16,10 @@ allowing branch included.
 decision stands and the Matrix's list of uses was incomplete. It had two; there
 are three. Marked inline below.
 
+**Amended 2026-08-31** by #196, the same way: the decision stands and the Matrix
+gained a row. `fable` went onto the Model Menu, so `claude-fable-5` is now a model
+a Session can run on and the Matrix owes it an answer. Marked inline below.
+
 Repeats ADR-0014's shape for a second per-Session setting, and the repetition is
 the point: `/effort` fails as a relay for the same reason `/model` does, and the
 machinery that solved it is already here. What is **not** repeated is how roma
@@ -266,9 +270,18 @@ build. Against 2.1.220 it yields, for roma's Menu:
 
 | model | takes effort | xhigh | max |
 | --- | --- | --- | --- |
+| `claude-fable-5` | yes | yes | yes |
 | `claude-opus-5` | yes | yes | yes |
 | `claude-sonnet-5` | yes | yes | yes |
 | `claude-haiku-4-5` | **no** | no | no |
+
+**Amended 2026-08-31 — the `claude-fable-5` row arrived with #196**, when `fable`
+went onto the Model Menu. It is the same reading as its two neighbours rather
+than a weaker one: the extractor reports it *unnamed* on all three gates, and the
+`yes` is a person's inference off what the build says elsewhere — `xhigh`
+describes itself as `Deeper reasoning than high, just below maximum (Fable 5,
+Opus 4.7+, Sonnet 5)`, which names Fable 5 first. Reading that silence as a
+refusal is the mistake the paragraph below was written about.
 
 **It reports; it does not gate.** Nothing fails a build on it, nothing in CI
 watches it, and roma refuses nothing because of it. This is `claude-code-drift.ts`'s

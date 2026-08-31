@@ -76,17 +76,22 @@ export const ULTRACODE = 'ultracode'
  * what reads it out of the binary, and its output is reviewed by a person before
  * it becomes this constant. Against 2.1.220 exactly one row says no.
  *
- * **Two of these three rows are a person's inference and not the extractor's
+ * **Three of these four rows are a person's inference and not the extractor's
  * reading, and the difference is worth knowing before editing them.** The gate
- * refuses by name and allows by name, and roma's other two models are on neither
- * list: what decides them is `M$(r,"effort")`, a server-side entitlement the
- * bundle does not contain. So the extractor reports `claude-haiku-4-5` as a
- * refusal and the other two as *unnamed*, and `true` here is read off what the
+ * refuses by name and allows by name, and roma's other three models are on
+ * neither list: what decides them is `M$(r,"effort")`, a server-side entitlement
+ * the bundle does not contain. So the extractor reports `claude-haiku-4-5` as a
+ * refusal and the other three as *unnamed*, and `true` here is read off what the
  * build says about itself elsewhere — `xhigh` describes itself as
  * `Deeper reasoning than high, just below maximum (Fable 5, Opus 4.7+,
  * Sonnet 5)`. That is the relationship ADR-0016 designed: the script prints and
  * the person decides, because the script has been wrong before and could not
  * tell.
+ *
+ * **Do not turn fable's `—` into a `false` on the next re-audit.** It reads
+ * unnamed on all three gates exactly as its neighbours do; flipping it would
+ * have roma tell every Caller on fable that their `/effort` does not apply,
+ * which is the ADR-0016 mistake in the one row nothing else would catch.
  *
  * **It reports; it does not gate.** roma uses it for two things and refuses
  * nothing because of it: it says so, in the reply to an `/effort` or a `/model`
@@ -102,6 +107,7 @@ export const ULTRACODE = 'ultracode'
  * Menu arrives here as an id and no name at all.
  */
 export const EFFORT_MATRIX: Readonly<Record<string, boolean>> = {
+  'claude-fable-5': true,
   'claude-opus-5': true,
   'claude-sonnet-5': true,
   'claude-haiku-4-5': false,

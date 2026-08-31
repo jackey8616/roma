@@ -1066,9 +1066,9 @@ describe('choosing a model, an effort or a Caveman by pressing', () => {
 
   const MODEL_MENU = {
     kind: 'choice',
-    text: 'This conversation is on sonnet (claude-sonnet-5). You can choose: opus, sonnet, haiku, default.',
+    text: 'This conversation is on sonnet (claude-sonnet-5). You can choose: fable, opus, sonnet, haiku, default.',
     chooses: 'model',
-    options: ['opus', 'sonnet', 'haiku', 'default'],
+    options: ['fable', 'opus', 'sonnet', 'haiku', 'default'],
     refused: null,
   } as const
 
@@ -1081,6 +1081,7 @@ describe('choosing a model, an effort or a Caveman by pressing', () => {
     // label has to carry what pressing it costs. It is also the string a Caller
     // would type, so the card teaches the typed form rather than replacing it.
     expect(api.messages[0]?.posted.actions).toEqual([
+      { label: 'fable', action: 'choose', parameters: { chooses: 'model', option: 'fable' } },
       { label: 'opus', action: 'choose', parameters: { chooses: 'model', option: 'opus' } },
       { label: 'sonnet', action: 'choose', parameters: { chooses: 'model', option: 'sonnet' } },
       { label: 'haiku', action: 'choose', parameters: { chooses: 'model', option: 'haiku' } },
@@ -1300,7 +1301,7 @@ describe('choosing a model, an effort or a Caveman by pressing', () => {
     await adapter.deliver(to(THREAD, { ...MODEL_MENU, text: 'word '.repeat(2000) }))
 
     expect(api.messages.length).toBeGreaterThan(1)
-    expect(api.messages.at(-1)?.posted.actions).toHaveLength(4)
+    expect(api.messages.at(-1)?.posted.actions).toHaveLength(MODEL_MENU.options.length)
     for (const message of api.messages.slice(0, -1)) {
       expect(message.posted.actions).toBeUndefined()
     }

@@ -322,7 +322,7 @@ describe('a Menu, out on a card and back on a press', () => {
 
     // The Menu, as buttons on the message that reports it.
     const card = roma.requests.findLast(({ body }) => body['cardsV2'] !== undefined)
-    expect(labelsOf(card)).toEqual(['opus', 'sonnet', 'haiku', 'default'])
+    expect(labelsOf(card)).toEqual(['fable', 'opus', 'sonnet', 'haiku', 'default'])
     expect(roma.claude.processes).toHaveLength(atBoot)
 
     // The press, in the shape Chat's current interaction event uses. Nothing of

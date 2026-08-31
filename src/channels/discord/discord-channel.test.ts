@@ -163,7 +163,7 @@ function card(overrides: Record<string, unknown> = {}): DiscordMessage {
     channel_id: MESSAGE,
     guild_id: GUILD,
     author: { id: ROMA, username: 'roma', bot: true },
-    content: 'You can choose: opus, sonnet, haiku, default.',
+    content: 'You can choose: fable, opus, sonnet, haiku, default.',
     ...overrides,
   }
 }
@@ -1383,15 +1383,15 @@ describe('what a Conversation is told', () => {
     await channel.adapter.deliver(
       to(DM, {
         kind: 'choice',
-        text: 'This conversation is on sonnet (claude-sonnet-5). You can choose: opus, sonnet, haiku, default.',
+        text: 'This conversation is on sonnet (claude-sonnet-5). You can choose: fable, opus, sonnet, haiku, default.',
         chooses: 'model',
-        options: ['opus', 'sonnet', 'haiku', 'default'],
+        options: ['fable', 'opus', 'sonnet', 'haiku', 'default'],
         refused: null,
       }),
     )
 
     expect(channel.api.texts).toEqual([
-      'This conversation is on sonnet (claude-sonnet-5). You can choose: opus, sonnet, haiku, default.',
+      'This conversation is on sonnet (claude-sonnet-5). You can choose: fable, opus, sonnet, haiku, default.',
     ])
   })
 
@@ -1457,7 +1457,7 @@ describe('a Menu, out as buttons and back as a press', () => {
     await channel.adapter.deliver(to(DM, choice('model', MENU_NAMES)))
 
     expect(channel.buttons.map(({ label }) => label)).toEqual(MENU_NAMES)
-    expect(MENU_NAMES).toEqual(['opus', 'sonnet', 'haiku', 'default'])
+    expect(MENU_NAMES).toEqual(['fable', 'opus', 'sonnet', 'haiku', 'default'])
   })
 
   // Six, which is one more than an action row holds — so this is the case that
