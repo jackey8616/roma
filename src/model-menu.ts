@@ -38,12 +38,31 @@
  * because `sonnet` is Claude Code's name for one model and not roma's name for
  * whichever model it happens to be pinned to.
  *
+ * **Ordered most expensive first**, which is not presentation. `MENU_NAMES`
+ * derives from `Object.keys` here and both Adapters draw their buttons in that
+ * order, so this is the order every Channel shows — and the Menu is the spending
+ * boundary, so reading it downwards is how a Caller sees what they are reaching
+ * for before they reach.
+ *
+ * **`fable` is on the Menu on a judgement, and this is the judgement.** Fable 5
+ * is priced at twice Opus 5 per token on the first-party API — $10/$50 per MTok
+ * against $5/$25 — and roma draws on a subscription rather than metered billing,
+ * so that ratio is how fast the shared quota drains rather than a bill roma
+ * pays. roma is willing to put the Shared Window behind it at that rate. It is
+ * recorded here rather than in an ADR because willingness is per-entry and this
+ * is the comment the `[1m]` refusal below is already written in: the same
+ * question, decided the other way. ADR-0014 decides that a Session runs on the
+ * model somebody chose, and this executes under it. What would revisit it is
+ * evidence, and `/usage` answers out of the Audit Records, which is where that
+ * evidence comes from.
+ *
  * Deliberately not here: the `[1m]` variants, which Claude Code declares as
- * `opus[1m]` and `sonnet[1m]` at `5x more context`. That multiplier is context
- * rather than price, and it is off the Menu because more context per Turn is
- * still more of a window everybody shares.
+ * `opus[1m]`, `sonnet[1m]` and `fable[1m]` at `5x more context`. That multiplier
+ * is context rather than price, and it is off the Menu because more context per
+ * Turn is still more of a window everybody shares.
  */
 export const MENU: Readonly<Record<string, string>> = {
+  fable: 'claude-fable-5',
   opus: 'claude-opus-5',
   sonnet: 'claude-sonnet-5',
   haiku: 'claude-haiku-4-5',

@@ -412,7 +412,7 @@ describe('a Menu, out as buttons and back as a press', () => {
     const atBoot = roma.claude.processes.length
 
     await roma.take(mentioned('/model'))
-    expect(labelsOf(roma.requests)).toEqual(['opus', 'sonnet', 'haiku', 'default'])
+    expect(labelsOf(roma.requests)).toEqual(['fable', 'opus', 'sonnet', 'haiku', 'default'])
     expect(roma.claude.processes).toHaveLength(atBoot)
 
     // The press, built out of the card roma posted. Nothing of roma's is

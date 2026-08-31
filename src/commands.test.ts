@@ -305,7 +305,7 @@ describe('a Menu name a Caller may press instead of type', () => {
   // dropped a name is exactly how that happens. Named here so losing one is a
   // failure rather than a silently shorter card.
   it('has all three Menus say what they hold, so none can empty unnoticed', () => {
-    expect(MENU_NAMES).toEqual(['opus', 'sonnet', 'haiku', 'default'])
+    expect(MENU_NAMES).toEqual(['fable', 'opus', 'sonnet', 'haiku', 'default'])
     expect(EFFORT_NAMES).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'default'])
     expect(CAVEMAN_NAMES).toEqual(['off', 'lite', 'full', 'ultra', 'wenyan-full', 'default'])
   })

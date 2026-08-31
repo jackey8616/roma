@@ -76,17 +76,23 @@ export const ULTRACODE = 'ultracode'
  * what reads it out of the binary, and its output is reviewed by a person before
  * it becomes this constant. Against 2.1.220 exactly one row says no.
  *
- * **Two of these three rows are a person's inference and not the extractor's
+ * **Three of these four rows are a person's inference and not the extractor's
  * reading, and the difference is worth knowing before editing them.** The gate
- * refuses by name and allows by name, and roma's other two models are on neither
- * list: what decides them is `M$(r,"effort")`, a server-side entitlement the
- * bundle does not contain. So the extractor reports `claude-haiku-4-5` as a
- * refusal and the other two as *unnamed*, and `true` here is read off what the
+ * refuses by name and allows by name, and roma's other three models are on
+ * neither list: what decides them is `M$(r,"effort")`, a server-side entitlement
+ * the bundle does not contain. So the extractor reports `claude-haiku-4-5` as a
+ * refusal and the other three as *unnamed*, and `true` here is read off what the
  * build says about itself elsewhere — `xhigh` describes itself as
  * `Deeper reasoning than high, just below maximum (Fable 5, Opus 4.7+,
  * Sonnet 5)`. That is the relationship ADR-0016 designed: the script prints and
  * the person decides, because the script has been wrong before and could not
  * tell.
+ *
+ * **An unnamed model is not a refused one**, and reading a `—` as a no is the
+ * mistake ADR-0016 was written about. `claude-fable-5` reads unnamed on all
+ * three gates exactly as its two neighbours do, and the sentence quoted above
+ * names Fable 5 first — so it is `true` on the same evidence, not on a weaker
+ * one.
  *
  * **It reports; it does not gate.** roma uses it for two things and refuses
  * nothing because of it: it says so, in the reply to an `/effort` or a `/model`
@@ -102,6 +108,7 @@ export const ULTRACODE = 'ultracode'
  * Menu arrives here as an id and no name at all.
  */
 export const EFFORT_MATRIX: Readonly<Record<string, boolean>> = {
+  'claude-fable-5': true,
   'claude-opus-5': true,
   'claude-sonnet-5': true,
   'claude-haiku-4-5': false,

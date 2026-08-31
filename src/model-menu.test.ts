@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { readCommand } from './commands.js'
-import { MENU, MENU_NAMES, readModelRequest, type ModelRequest } from './model-menu.js'
+import { MENU, MENU_NAMES, menuNameFor, readModelRequest, type ModelRequest } from './model-menu.js'
 
 /**
  * What a message asks roma to do about the model, or null if it is not asking.
@@ -18,6 +18,7 @@ function read(text: string): ModelRequest | null {
 
 describe('reading a /model message', () => {
   it('recognises every name on the Menu', () => {
+    expect(read('/model fable')).toEqual({ kind: 'chosen', name: 'fable', model: 'claude-fable-5' })
     expect(read('/model opus')).toEqual({ kind: 'chosen', name: 'opus', model: 'claude-opus-5' })
     expect(read('/model sonnet')).toEqual({
       kind: 'chosen',
@@ -55,6 +56,11 @@ describe('reading a /model message', () => {
     expect(read('/model claude-opus-5')).toEqual({ kind: 'unknown', name: 'claude-opus-5' })
     expect(read('/model opus[1m]')).toEqual({ kind: 'unknown', name: 'opus[1m]' })
     expect(read('/model sonnet[1m]')).toEqual({ kind: 'unknown', name: 'sonnet[1m]' })
+    // Named alongside them now that `fable` itself is on the Menu, which is what
+    // makes this the `[1m]` a Caller is most likely to reach for. The reason it
+    // is refused is the one above `MENU` and is unchanged: more context per Turn
+    // is still more of a window everybody shares.
+    expect(read('/model fable[1m]')).toEqual({ kind: 'unknown', name: 'fable[1m]' })
   })
 
   // Claude Code's own no-argument `/model` is an interactive picker, which a
@@ -94,5 +100,36 @@ describe('reading a /model message', () => {
   // rebuilt at each of them, so the two can never name different Menus.
   it('lists every name a Caller may type, the one for the Pinned Model included', () => {
     expect(MENU_NAMES).toEqual([...Object.keys(MENU), 'default'])
+  })
+
+  // Order is load-bearing rather than cosmetic: `MENU_NAMES` derives from it and
+  // both Adapters draw their buttons in it, so the Menu is read left to right as
+  // what a Caller is reaching for. Descending cost, most expensive first.
+  it('lists them in the order it means them to be read', () => {
+    expect(MENU_NAMES).toEqual(['fable', 'opus', 'sonnet', 'haiku', 'default'])
+  })
+})
+
+/**
+ * The Menu read backwards, which is how roma says what a Session is already on.
+ *
+ * roma keeps the resolved id, so a report naming only that would offer a list of
+ * names against a model spelled another way — and leave the Caller to find out
+ * by being refused that the id itself is not something they may type.
+ */
+describe('naming the model a Session is on', () => {
+  it('answers with the name a Caller would have typed', () => {
+    expect(menuNameFor('claude-fable-5')).toBe('fable')
+    expect(menuNameFor('claude-opus-5')).toBe('opus')
+    expect(menuNameFor('claude-sonnet-5')).toBe('sonnet')
+    expect(menuNameFor('claude-haiku-4-5')).toBe('haiku')
+  })
+
+  // Null rather than the id, because there is no name for it: a deployment that
+  // pinned `ROMA_MODEL` to something off the Menu has one, and it is reported as
+  // the bare id because that is the truthful answer.
+  it('says nothing for a model no name on the Menu resolves to', () => {
+    expect(menuNameFor('claude-fable-5-mythos-5')).toBeNull()
+    expect(menuNameFor('claude-opus-5[1m]')).toBeNull()
   })
 })

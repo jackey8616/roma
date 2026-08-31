@@ -113,16 +113,17 @@ describe('finding a gate in the bundle', () => {
 })
 
 describe('the matrix it reports', () => {
-  // What the pinned build actually says about roma's own three models, and the
+  // What the pinned build actually says about roma's own four models, and the
   // distinction the whole three-valued design exists for: one is refused by
-  // name, and the other two are named on neither branch — so what decides them
+  // name, and the other three are named on neither branch — so what decides them
   // is a server-side entitlement this cannot see. `EFFORT_MATRIX` says `true`
-  // for those two on a person's reading of other evidence, which is the
+  // for those three on a person's reading of other evidence, which is the
   // relationship ADR-0016 designed rather than a disagreement.
   it('reports the Menu’s models as the gates name them, and unnamed where they do not', () => {
     const { rows } = effortMatrix(BUNDLE, Object.values(MENU))
 
     expect(rows).toEqual([
+      { model: 'claude-fable-5', takes: { effort: null, xhigh_effort: null, max_effort: null } },
       { model: 'claude-opus-5', takes: { effort: null, xhigh_effort: null, max_effort: null } },
       { model: 'claude-sonnet-5', takes: { effort: null, xhigh_effort: null, max_effort: null } },
       {
