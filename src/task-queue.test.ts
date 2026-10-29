@@ -182,6 +182,34 @@ describe('the global cap', () => {
     await behindTask
   })
 
+  // Two Tasks waiting on one slot, admitted in one pass of #pump. The slot is
+  // claimed for the first before the second is looked at.
+  it('admits one Task, not two, into the one slot that frees [fence:queue-pump-claims-the-slot]', async () => {
+    const why =
+      'The slot must be claimed in #pump, at admission, never by the admitted Task once it ' +
+      'starts (ADR-0003: three Tasks at once). Claimed late, every admission in one pass sees ' +
+      'the same free slot, and two Tasks take the last one (#81).'
+    const queue = new TaskQueue({ maxConcurrent: 1 })
+    const first = pending()
+    const second = pending()
+    const third = pending()
+    const running = queue.run(A, first.run)
+    const queued = [queue.run(B, second.run), queue.run(C, third.run)]
+    await flush()
+
+    first.finish()
+    await running
+    await flush()
+
+    expect([second.started(), third.started()], why).toEqual([true, false])
+    expect(queue.running, why).toBe(1)
+
+    second.finish()
+    await flush()
+    third.finish()
+    await Promise.all(queued)
+  })
+
   it('frees the slot a failed Task held', async () => {
     const queue = new TaskQueue({ maxConcurrent: 1 })
     const first = pending()
@@ -262,7 +290,11 @@ describe('telling a waiting caller where it is', () => {
   // steps over a Task whose Session is busy, so the one told it was first can
   // be started second — which is why nothing may schedule on this number, and
   // why an Adapter must not render it as a running order.
-  it('is telling a caller the backlog, not a place in a running order', async () => {
+  it('is telling a caller the backlog, not a place in a running order [fence:queue-pump-steps-over-a-busy-session]', async () => {
+    const why =
+      '#pump must admit in arrival order, stepping over a Task whose Session is busy (ADR-0003). ' +
+      'Strict head-of-line order lets one chatty Conversation hold every other behind a ' +
+      'Session that is simply not free yet (#23).'
     const queue = new TaskQueue({ maxConcurrent: 2 })
     const positions = new Map<string, number>()
     const order: string[] = []
@@ -301,7 +333,7 @@ describe('telling a waiting caller where it is', () => {
     await second
     await flush()
 
-    expect(order).toEqual(['on-c'])
+    expect(order, why).toEqual(['on-c'])
 
     running.a.finish()
     await first
@@ -385,6 +417,12 @@ describe('telling a waiting caller where it is', () => {
 })
 
 describe('which Task a Session is running', () => {
+  const NEVER_GUESSES =
+    'taskFor must answer only what is running under this key, and null otherwise (ADR-0020 §6: ' +
+    'a credential request is attributed by Session, through the queue). Guessing the nearest ' +
+    'Task — another Session’s, or one still waiting — puts somebody else’s name on a ' +
+    'credential request in the Audit Record (#62).'
+
   // The queue is the only thing in roma that already knows a key has exactly one
   // Task at a time — that is the serialisation rule — so asking anything else
   // would mean building a second answer that could disagree with this one.
@@ -407,7 +445,7 @@ describe('which Task a Session is running', () => {
 
   // A Task waiting for a slot is not running, and a credential request arriving
   // from its Session belongs to whatever *is* — or to nothing.
-  it('follows the Task into the queue rather than answering early', async () => {
+  it('follows the Task into the queue rather than answering early [fence:queue-task-for-never-guesses]', async () => {
     const queue = new TaskQueue({ maxConcurrent: 1 })
     const first = pending()
     const second = pending()
@@ -415,12 +453,12 @@ describe('which Task a Session is running', () => {
     const queued = queue.run(B, second.run, { taskId: 'task-2' })
     await flush()
 
-    expect(queue.taskFor(B)).toBeNull()
+    expect(queue.taskFor(B), NEVER_GUESSES).toBeNull()
 
     first.finish()
     await running
     await flush()
-    expect(queue.taskFor(B)).toBe('task-2')
+    expect(queue.taskFor(B), NEVER_GUESSES).toBe('task-2')
 
     second.finish()
     await queued
@@ -428,26 +466,43 @@ describe('which Task a Session is running', () => {
 
   // Null covers a key with nothing running and a caller who named no Task, and
   // it must never guess: attributing a credential request to the nearest Task
-  // would put somebody else's name on it.
-  it('says nothing rather than guessing when no Task was named', async () => {
+  // would put somebody else's name on it. A named Task runs beside it so that
+  // there is a nearest one to guess.
+  it('says nothing rather than guessing when no Task was named [fence:queue-task-for-never-guesses]', async () => {
     const queue = new TaskQueue()
     const task = pending()
+    const named = pending()
     const running = queue.run(A, task.run)
+    const beside = queue.run(B, named.run, { taskId: 'task-2' })
     await flush()
 
-    expect(queue.taskFor(A)).toBeNull()
+    expect(queue.taskFor(A), NEVER_GUESSES).toBeNull()
 
     task.finish()
-    await running
+    named.finish()
+    await Promise.all([running, beside])
   })
 })
 
 describe('running a free Relay past the cap', () => {
+  const UNCAPPED =
+    'A free Relay must not count against the cap (ADR-0012; ADR-0003 argues the cap entirely ' +
+    'in terms of model work). A free Relay drives no Turn, spends nothing and cannot storm; ' +
+    'counted, three people asking what is going on stop the work they are asking about (#81).'
+  const SERIALISED =
+    'An uncapped entry must still wait for its own Session (ADR-0003: serialisation is forced, ' +
+    'not chosen). Two processes writing one Session file corrupt it, whether or not either ' +
+    'drives a Turn (#81).'
+  const WALKS_PAST =
+    '#pump must walk the whole waiting list, never stopping at a full cap (ADR-0012). An ' +
+    'uncapped entry behind a full cap is still admissible; stopping holds every free Relay ' +
+    'hostage to exactly the busy period it exists to ask about (#81).'
+
   // The cap is argued entirely in terms of model work — retry storms, a bad
   // credential holding a slot for three minutes. A free Relay drives no Turn, so
   // three people asking what is going on must not be able to stop the work they
   // are asking about.
-  it('admits an uncapped entry while the cap is full', async () => {
+  it('admits an uncapped entry while the cap is full [fence:queue-free-relay-uncapped]', async () => {
     const queue = new TaskQueue({ maxConcurrent: 2 })
     const first = pending()
     const second = pending()
@@ -460,7 +515,7 @@ describe('running a free Relay past the cap', () => {
     const relayed = queue.run(C, freeRelay.run, { uncapped: true })
     await flush()
 
-    expect(freeRelay.started()).toBe(true)
+    expect(freeRelay.started(), UNCAPPED).toBe(true)
 
     freeRelay.finish()
     first.finish()
@@ -470,7 +525,7 @@ describe('running a free Relay past the cap', () => {
 
   // Serialisation is not a choice and does not bend for a Relay: two processes
   // on one Session's transcript corrupt it, whether or not either drives a Turn.
-  it('still waits for its own Session', async () => {
+  it('still waits for its own Session [fence:queue-relay-still-serialised]', async () => {
     const queue = new TaskQueue()
     const task = pending()
     const freeRelay = pending()
@@ -481,7 +536,7 @@ describe('running a free Relay past the cap', () => {
     const relayed = queue.run(A, freeRelay.run, { uncapped: true })
     await flush()
 
-    expect(freeRelay.started()).toBe(false)
+    expect(freeRelay.started(), SERIALISED).toBe(false)
 
     task.finish()
     await running
@@ -494,20 +549,20 @@ describe('running a free Relay past the cap', () => {
 
   // What the cap counts is what `running` reports, so a free Relay in flight must
   // not make a Task look like it is using a slot.
-  it('is not counted as a Task while it runs', async () => {
+  it('is not counted as a Task while it runs [fence:queue-free-relay-uncapped]', async () => {
     const queue = new TaskQueue({ maxConcurrent: 1 })
     const freeRelay = pending()
     const task = pending()
 
     const relayed = queue.run(A, freeRelay.run, { uncapped: true })
     await flush()
-    expect(queue.running).toBe(0)
+    expect(queue.running, UNCAPPED).toBe(0)
 
     // And the slot it did not take is still there for real work.
     const running = queue.run(B, task.run)
     await flush()
-    expect(task.started()).toBe(true)
-    expect(queue.running).toBe(1)
+    expect(task.started(), UNCAPPED).toBe(true)
+    expect(queue.running, UNCAPPED).toBe(1)
 
     freeRelay.finish()
     task.finish()
@@ -523,7 +578,7 @@ describe('running a free Relay past the cap', () => {
   // The Session is occupied by another free Relay rather than by a Task, so that
   // freeing it releases no capped slot and the cap is provably still full when
   // the waiting one is admitted.
-  it('is admitted while the cap stays full throughout', async () => {
+  it('is admitted while the cap stays full throughout [fence:queue-pump-walks-past-full-cap]', async () => {
     const queue = new TaskQueue({ maxConcurrent: 1 })
     const task = pending()
     const holdingA = pending()
@@ -547,11 +602,11 @@ describe('running a free Relay past the cap', () => {
     await held
     await flush()
 
-    expect(waitingOnA.started()).toBe(true)
+    expect(waitingOnA.started(), WALKS_PAST).toBe(true)
     // Still full, and the Task behind it is still waiting — the free Relay was
     // admitted past the cap rather than into a slot that had come free.
-    expect(queue.running).toBe(1)
-    expect(wantsASlot.started()).toBe(false)
+    expect(queue.running, WALKS_PAST).toBe(1)
+    expect(wantsASlot.started(), WALKS_PAST).toBe(false)
 
     waitingOnA.finish()
     await waiting

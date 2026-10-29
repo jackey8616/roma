@@ -115,20 +115,7 @@ export type CoreLogRecord =
        * spending money and returning the model's opinion instead of the
        * command's output.
        *
-       * **Keyed on output tokens rather than on `num_turns`, and ADR-0018 is
-       * where that key was measured wrong.** A manual `/compact` moves
-       * `total_cost_usd` by five cents and reports `num_turns: 0`, so an entry
-       * that stays a local command and starts doing model work was invisible to
-       * the old check — the shape `/compact` itself has. `modelUsage` is what
-       * moves, and it moves for model work rather than for money, which is what
-       * the membership rule is actually about.
-       *
-       * **One direction only.** A Relay the list declares paid is not checked
-       * against an expectation of work: a `/compact` that fails with too little
-       * conversation to summarise does none, at a delta of zero, and a
-       * two-directional check would report that as drift every time somebody
-       * typed `/compact` into a short thread. Structurally so, rather than by a
-       * condition — only the free path reaches this.
+       * Enforced by `fence:core-free-relay-drift-is-one-way` and by `fence:core-manual-compaction-is-the-callers`.
        *
        * An anomaly rather than traffic, which is why a Relay that behaves is
        * not logged here at all. The Operator Log is what roma decided and what
@@ -208,65 +195,43 @@ export interface CoreOptions {
    * neither caused that nor fixes it — it is named here only so a reader does
    * not go looking for the guard in the wrong module.
    *
-   * **The same one the pool has.** Given different Work Roots the two agree
-   * about nothing, and roma reports none of it — see
-   * `startup.test.ts`'s "writes an Enclosure into the directory it spawns the
-   * Session in", which is where that agreement is made and the only place it can
-   * be broken. Free until now, because the Core asked the pool and could not
-   * disagree with it; something the composition root keeps true from here on,
-   * exactly as it already does for `models` and `efforts`.
+   * **The same one the pool has.** Enforced by
+   * `fence:startup-core-and-pool-share-the-work-root`.
    */
   readonly workRoot: WorkRoot
   /**
-   * Shared with every other Core, exactly as the pool is.
-   *
-   * Required rather than defaulted, because a queue each Core made for itself
-   * would still work and would still be wrong: the cap is three Tasks across
-   * the whole of roma, and one queue per Channel silently makes it three per
-   * Channel.
+   * Shared with every other Core, exactly as the pool is. Enforced by
+   * `fence:startup-one-queue-for-every-channel`.
    */
   readonly queue: TaskQueue
   /**
    * Which Session each Conversation is on — only a question because `/clear` can
    * move one.
    *
-   * Shared with every other Core over the same working directories, for the
-   * reason the pool and the queue are: a Conversation two Cores each kept their
-   * own answer for would be two Conversations, one of which never heard about
-   * the `/clear`.
+   * Shared with every other Core over the same working directories. Enforced by
+   * `fence:startup-one-session-record-for-every-channel`.
    */
   readonly sessions: SessionGenerations
   /**
    * Which model each Session runs on, and what the deployment pinned.
    *
-   * Given to the Session Pool as well, which is what makes `/model` mean
-   * anything: the Core writes what somebody chose and the pool reads it at the
-   * next spawn. What the two have to agree on is the work root rather than the
-   * object — nothing here is held between calls — and handing one instance to
-   * both is how that agreement is made rather than assumed. A pool built without
-   * it is the failure with no symptom: `/model` answers, the record is written,
-   * and every Turn runs on the Pinned Model.
+   * Given to the Session Pool as well: the Core writes what somebody chose and
+   * the pool reads it at the next spawn. Enforced by
+   * `fence:startup-pool-reads-the-chosen-records`.
    */
   readonly models: ChosenRecord<'model'>
   /**
    * What effort each Session runs at, and what the deployment pinned.
    *
-   * Given to the Session Pool as well, for exactly the reason `models` is: the
-   * Core writes what somebody chose and the pool reads it at the next spawn, and
-   * a pool built without it is the failure with no symptom — `/effort` answers,
-   * the record is written, and every Turn runs at the Pinned Effort. Sharper here
-   * than for the model, because nothing in the stream would ever contradict it.
+   * Given to the Session Pool as well, for the reason `models` is. Enforced by
+   * `fence:startup-pool-reads-the-chosen-records`.
    */
   readonly efforts: ChosenRecord<'effort'>
   /**
    * How short each Session is asked to be, and what the deployment pinned.
    *
-   * Given to the Session Pool as well, for the reason the two above are, and the
-   * symptomless failure it forecloses is the quietest of the three: a pool built
-   * without this answers `/caveman`, writes the record, and appends the Pinned
-   * Caveman's ruleset to every Session — where the model has `system/init` to
-   * contradict it and the effort has nothing, this has *the prose itself*, which
-   * nobody reads as evidence.
+   * Given to the Session Pool as well, for the reason the two above are.
+   * Enforced by `fence:startup-pool-reads-the-chosen-records`.
    */
   readonly cavemen: ChosenRecord<'caveman'>
   /**
@@ -278,14 +243,9 @@ export interface CoreOptions {
    * is the one place they may not be one string — `CAVEMAN_NOT_PINNED` is where
    * that difference is argued.
    *
-   * **What it deliberately does not narrow is the Session.** A Caller who types
-   * `/caveman off` on a deployment that named none chose something, and their
-   * Tasks are recorded as `CAVEMAN_NOT_PINNED` all the same. Answering that
-   * exactly means asking the Chosen Record a second question while the record is
-   * being written, and that call throws for a record naming a level roma no
-   * longer offers — which would take a Task's ending down with it, on the one
-   * path that must not fail. Both spellings mean no ruleset was appended, so
-   * what is lost is which of them said so.
+   * A Caller who types `/caveman off` on a deployment that named none chose
+   * something, and their Tasks are recorded as `CAVEMAN_NOT_PINNED` all the same.
+   * Enforced by `fence:core-record-survives-a-withheld-caveman`.
    *
    * Omitted means no, which is what a deployment that named nothing has and what
    * every Core built for a test about something else has.
@@ -371,55 +331,15 @@ interface RunningTask extends TaskAddress {
    * is that Relay's own answer rather than something roma classifies.
    */
   readonly relay: RelayRequest | null
-  /**
-   * The model this Task ran on, for its Audit Record.
-   *
-   * Read when the Task arrives so that a Task which never reaches a Turn still
-   * names one, and read again immediately before each Attempt is sent — a Task
-   * that waited behind three others is one somebody may have moved the model
-   * under, and the ledger has to say what was actually spent rather than what was
-   * true when it arrived. The pool reads the same record microseconds later to
-   * decide what to spawn, which is as close as these two can be brought without
-   * the Core being told how the pool works.
-   */
+  /** Enforced by `fence:core-ledger-names-what-ran`. */
   model: string
-  /**
-   * What effort this Task ran at, for its Audit Record.
-   *
-   * Read and re-read exactly where the model is, for the same reason: a Task
-   * that waited behind three others is one somebody may have moved the effort
-   * under, and the ledger has to say what was actually sent rather than what was
-   * true when it arrived.
-   */
+  /** Enforced by `fence:core-ledger-names-what-ran`. */
   effort: string
-  /**
-   * How short this Task was asked to be, for its Audit Record.
-   *
-   * Read off the *process* rather than the Chosen Record beside the two above,
-   * and that is the one place these three differ. What reaches the argv is
-   * several thousand characters of ruleset rendered at the moment of spawning,
-   * so the level it was rendered from is a fact about the process — and asking
-   * the record again would be a second resolution of something a `/caveman` can
-   * have moved since (ADR-0030).
-   *
-   * Null until a process has been given the message, which is every Task that
-   * was stopped in the queue or never got as far as a Session.
-   */
+  /** Enforced by `fence:core-ledger-names-what-ran`. */
   caveman: string | null
   /** Set by `/stop`, and read at each point the Task can still be stopped. */
   stopped: boolean
-  /**
-   * Whether this Task has already told its Caller the Session cannot be reduced.
-   *
-   * Once per Task and not once per failure, because ADR-0010's bar is about how
-   * many messages land in a Conversation rather than about how many times Claude
-   * Code said the same thing. A Session that cannot be reduced fails every
-   * Attempt for the same reason, so a Task that parked and reran on Overflow
-   * would otherwise say it twice and a Turn that retried compaction three times.
-   *
-   * Deliberately not applied to the Operator Log line beside it: that is a
-   * running commentary, and each occurrence really did occur.
-   */
+  /** Enforced by `fence:core-context-full-once-per-task`. */
   toldContextFull: boolean
   /**
    * Every try this Task has made, and what may be tried next.
@@ -570,13 +490,7 @@ export class Core {
    * means the same thing on every Channel and a Channel cannot invent a fourth
    * kind of message. Everything that is none of them is work.
    *
-   * Order matters, and only in one direction: a Command is checked first so
-   * that roma's own six can never be shadowed by something added to the Relay
-   * list. Nothing is on both lists and `relays.test.ts` is what keeps that true —
-   * Claude Code has a `/stop` of its own, and roma's is the one that must win.
-   * Since ADR-0013 the same is true of `/clear`, where it is a safety property
-   * rather than a preference — see `COMMANDS` — and since ADR-0014 of `/model`,
-   * which must never reach a process at all.
+   * A Command is checked before a Relay. Enforced by `fence:relays-no-command-overlap`.
    *
    * **A paid Relay goes down the Task path, and that is ADR-0018's whole
    * decision.** What tells a Relay from a Task is the shape the message takes on
@@ -593,17 +507,8 @@ export class Core {
    * roma never answers one question twice here: `/config` reports exactly the two
    * facts an Opening carries, and it cannot reach this line.
    *
-   * **Started here and waited for downstream, never waited for here.** The
-   * Opening has to reach the Channel before the acknowledgement, and the obvious
-   * way to arrange that — awaiting it on this line — breaks two behaviours this
-   * Core is measured on, because everything that makes a message stoppable and
-   * ordered happens *after* this point. Awaited here, a message that opens
-   * reaches `#running` and the Task Queue later than one that does not: a `/stop`
-   * sent straight after a Conversation's first message answers "nothing to stop"
-   * and the Task runs anyway, and two messages sent together come back in the
-   * wrong order. Both were measured on the first version of this, and both are in
-   * `core.test.ts`. So the Opening travels *with* the message and is waited for
-   * where it actually matters — at the first thing the Channel is told.
+   * Started here and waited for where the Channel is first told.
+   * Enforced by `fence:core-opening-travels-with-the-message`.
    *
    * Resolves when the Conversation has been told how it went. It rejects only
    * if the Channel could not be told at all — a failed Task is an outcome, not
@@ -844,18 +749,7 @@ export class Core {
       instruction = { kind: 'failure', ...address, reason: reasonFor(error) }
     }
 
-    // The drift check. Nothing the list declares free may do model work, and one
-    // that did means the pin has moved under roma — so it is said out loud,
-    // once, where an operator looks. Not said to the Caller: they asked a
-    // question and got an answer, and what is wrong is roma's list rather than
-    // anything they did.
-    //
-    // On the output-token delta rather than on `num_turns`, which ADR-0018
-    // measured cannot see this: a paid Relay reports zero Turns while spending
-    // five cents, so the shape being watched for is one the old key was blind to.
-    // One direction, and structurally — nothing checks a paid entry for the work
-    // it is expected to do, because a `/compact` with too little to summarise
-    // legitimately does none.
+    // Enforced by `fence:core-free-relay-drift-is-one-way`.
     if (turn !== null && turn.outputTokens !== null && turn.outputTokens > 0) {
       this.#log({
         event: 'free-relay-did-model-work',
@@ -931,14 +825,7 @@ export class Core {
 
     let instruction: OutboundInstruction
     try {
-      // The five that answer with prose and the two that answer with an
-      // outcome, told apart here rather than inside `#carryOut` — "it was
-      // carried out" is not what any of the first five say. Never define
-      // `#carryOut`'s parameter by subtracting these five: naming the two it
-      // handles is what made the sixth Command a compile error here until this
-      // said which of the two it is, and the seventh the same. Subtracted,
-      // either would have landed inside that type and been answered as a second
-      // `/stop`.
+      // Enforced by `fence:core-carry-out-names-its-two`.
       instruction =
         request.command === 'model'
           ? this.#answerModel(readModelRequest(request.argument), conversationKey, address)
@@ -968,17 +855,7 @@ export class Core {
     await this.#channel.deliver(instruction)
   }
 
-  /**
-   * Say which model this Conversation is on, or move it, and say so.
-   *
-   * Never relayed to the process instead (ADR-0014): a process ends at an
-   * Eviction, a Reaping or a deploy, so a Caller would get a setting that
-   * reverts at a moment they cannot see, on a bill nobody can attribute.
-   *
-   * Nothing is torn down — this writes the record, and the Session Pool is what
-   * makes the *next* Turn run on it. The reply has to say so out loud: a bare
-   * acknowledgement while a Task is running reads as having changed that Task.
-   */
+  /** Enforced by `fence:core-model-never-relayed`. */
   #answerModel(
     request: ModelRequest,
     conversationKey: string,
@@ -1027,17 +904,7 @@ export class Core {
     }
   }
 
-  /**
-   * The sentence a `/model` owes when it has just made a Chosen Effort inert, or
-   * nothing.
-   *
-   * `!== false` rather than a falsy check: `takesEffort` answers null for a model
-   * the Matrix has never been read about, and roma says nothing rather than
-   * asserting a model takes no effort when nobody measured it.
-   *
-   * Nothing is prevented and nothing is rewritten — the Chosen Effort survives
-   * inert and applies again on the next model that takes one.
-   */
+  /** Enforced by `fence:core-unmeasured-model-keeps-effort`. */
   #effortStranded(sessionId: string, model: string): string {
     if (takesEffort(model) !== false) return ''
     const chosen = this.#efforts.chosenFor(sessionId)
@@ -1066,12 +933,7 @@ export class Core {
     const sessionId = this.#sessions.sessionFor(conversationKey)
 
     switch (request.kind) {
-      // Both of these carry the Menu only where it would mean something. Never
-      // unconditionally: on a model the Effort Matrix says takes none, the reply
-      // already says so, and buttons beside that sentence would undo it — an
-      // invitation to do the thing roma has just called inert. The typed Command
-      // is untouched either way, which is why this is not the refusal ADR-0016
-      // forbids (ADR-0023).
+      // Enforced by `fence:core-effort-menu-only-where-it-applies`.
       case 'unknown': {
         // Nothing is written, so a typo — or `ultracode`, which is the
         // operator's — cannot move a Session somebody shares with other people.
@@ -1122,18 +984,7 @@ export class Core {
     )
   }
 
-  /**
-   * This Session's effort as a person would say it back.
-   *
-   * `chosenFor`, never `effortFor`: the two answer the same string for a Session
-   * that follows the Pinned Effort and one moved to that same level, and naming
-   * the second "default" would tell somebody who typed `/effort high` that an
-   * operator moving `ROMA_EFFORT` takes them along — the one thing their record
-   * guarantees will not happen.
-   *
-   * Its own method because `/effort` and `/config` both say it, and two readings
-   * of one record can disagree.
-   */
+  /** Enforced by `fence:core-named-as-typed`. */
   #effortNamed(sessionId: string): string {
     const chosen = this.#efforts.chosenFor(sessionId)
     return chosen ?? `${PINNED_EFFORT_NAME} (${this.#efforts.pinned})`
@@ -1152,42 +1003,12 @@ export class Core {
     return ` ${takesNoEffort(this.#models.inForce(sessionId))}`
   }
 
-  /**
-   * Never a falsy check: the Effort Matrix answers null for a model it has never
-   * been read about, and a null must keep both the sentence's silence and the
-   * Menu's buttons — roma may not withhold an offer on the strength of a reading
-   * it never made (ADR-0023).
-   *
-   * The sentence and the buttons ask through here rather than each reading the
-   * Matrix, so a model the Matrix has never seen cannot get one and not the
-   * other.
-   */
+  /** Enforced by `fence:core-unmeasured-model-keeps-effort`. */
   #effortApplies(sessionId: string): boolean {
     return takesEffort(this.#models.inForce(sessionId)) !== false
   }
 
-  /**
-   * Say how short this Conversation is asked to be, or move it, and say so.
-   *
-   * The third of these, and the one where "never relayed" is not a decision roma
-   * took: a Relay carries one of Claude Code's own commands and the pinned build
-   * has never heard of this one, so there is nothing to hand it to. What is
-   * claimed is the *spelling*, because somebody who met caveman elsewhere types
-   * it here on their first day and would otherwise be billed for a Turn about
-   * their own message (ADR-0030).
-   *
-   * Nothing anywhere echoes a Caveman back. `--model` returns in `system/init`
-   * and `--effort` returns nowhere; this does not even reach the argv as itself —
-   * what reaches it is the ruleset the level renders to. So this reply is the
-   * only account there is, on either side of the wire, of what a Session was
-   * asked for.
-   *
-   * **Never give this an `#effortApplies` of its own.** The same two arms carry
-   * the Menu as on the other two, and unconditionally: `/effort` withholds its
-   * card only where the Effort Matrix says the model takes none, and there is no
-   * Matrix here and no model that declines a ruleset — so a condition would be
-   * roma withholding an offer on the strength of nothing (ADR-0023).
-   */
+  /** Enforced by `fence:core-caveman-menu-unconditional`. */
   #answerCaveman(
     request: CavemanRequest,
     conversationKey: string,
@@ -1240,32 +1061,13 @@ export class Core {
     )
   }
 
-  /**
-   * This Session's Caveman as a person would say it back.
-   *
-   * `chosenFor`, never `inForce`, for `#effortNamed`'s reason — and with a second
-   * one this Menu has and the others do not: `off` is a level a Caller may choose
-   * and `default` is the absence of a record, so on a deployment pinned to `off`
-   * the two answer the same string and mean opposite things. Naming a chosen
-   * `off` as "default" would tell somebody who asked to be left alone that an
-   * operator turning this on takes them along.
-   */
+  /** Enforced by `fence:core-named-as-typed`. */
   #cavemanNamed(sessionId: string): string {
     const chosen = this.#cavemen.chosenFor(sessionId)
     return chosen ?? `${PINNED_CAVEMAN_NAME} (${this.#cavemen.pinned})`
   }
 
-  /**
-   * Say what this Session is set to, and refuse to set anything else.
-   *
-   * Claimed and answered rather than left to fall through (ADR-0017).
-   *
-   * An argument is refused — never honoured, never passed on. roma hands one
-   * `CLAUDE_CONFIG_DIR` to every spawn, so a settings write from one thread
-   * persists for everybody across restarts; and the keys are not cosmetic, since
-   * `model=…|sonnet[1m]|opusplan` is a second door onto what the Model Menu
-   * bounds and `workflows` is the switch that keeps `ultracode` from Callers.
-   */
+  /** Enforced by `fence:core-config-sets-nothing`. */
   #answerConfig(
     argument: string | null,
     conversationKey: string,
@@ -1281,15 +1083,7 @@ export class Core {
     }
   }
 
-  /**
-   * Say what the deployment has spent this calendar month.
-   *
-   * **Never narrow it to the Conversation that asked.** It is the one Command
-   * that ignores the Conversation Key, and seven Commands tidied into a single
-   * shape is how that would go: the figures are the deployment's, so a `/usage`
-   * that answered differently by thread would be answering a different question
-   * rather than a narrower one (ADR-0027).
-   */
+  /** Enforced by `fence:core-usage-is-the-deployments`. */
   #answerUsage(address: TaskAddress): OutboundInstruction {
     return {
       kind: 'result',
@@ -1298,27 +1092,7 @@ export class Core {
     }
   }
 
-  /**
-   * All of what this Session is set to, in one sentence.
-   *
-   * Built from the same methods `/model`, `/effort` and `/caveman` report with,
-   * rather than from the records again. Five spellings over three roma-owned
-   * facts, not five sources of truth — and a second reading here is exactly how
-   * five spellings would come to answer differently.
-   *
-   * Its own method because an Opening says it too, and says it *unprompted*
-   * (ADR-0024) — which is what makes a second copy of this sentence worse than a
-   * second copy of the others. Nobody compares the top of a thread against
-   * `/config` a week later, so two versions would drift with nothing to notice.
-   *
-   * **Never make the third fact unconditional to match the other two.** A
-   * deployment that never turned this on has nothing to say, and the sentence
-   * would then lengthen the first message of every Conversation it serves — a
-   * feature whose whole purpose is fewer tokens, spending words on the
-   * deployments that declined it. The conditional tail is not a new shape here,
-   * because `#modelTakesNone` is already one; the conjunction moving with it is,
-   * and it moves because *either* was only ever true of two (ADR-0030).
-   */
+  /** Enforced by `fence:core-opening-says-what-config-says`. */
   #settingsReport(sessionId: string): string {
     const caveman = this.#cavemanWorthSaying(sessionId)
     return (
@@ -1333,12 +1107,7 @@ export class Core {
     )
   }
 
-  /**
-   * **Not `chosenFor`, which is what `#cavemanNamed` above insists on.** Read
-   * that way, a Session nobody moved answers null, null is not `off`, and a
-   * deployment that pinned nothing carries `at caveman default (off)` in the
-   * first message of every Conversation it serves.
-   */
+  /** Enforced by `fence:core-opening-says-what-config-says`. */
   #cavemanWorthSaying(sessionId: string): string | null {
     if (this.#cavemen.inForce(sessionId) === CAVEMAN_OFF) return null
     return this.#cavemanNamed(sessionId)
@@ -1355,13 +1124,7 @@ export class Core {
     return `This conversation is on ${this.#modelNamed(sessionId)}. You can choose: ${MENU_LIST}.`
   }
 
-  /**
-   * This Session's model in both spellings, or the id alone where the Menu has
-   * no name for it.
-   *
-   * `chosenFor`, never `modelFor`, and its own method — `#effortNamed`'s two
-   * reasons exactly, for `/model` and `/config`.
-   */
+  /** Enforced by `fence:core-named-as-typed`. */
   #modelNamed(sessionId: string): string {
     const chosen = this.#models.chosenFor(sessionId)
     return named(chosen === null ? PINNED_NAME : menuNameFor(chosen), chosen ?? this.#models.pinned)
@@ -1369,8 +1132,7 @@ export class Core {
 
   /** Do what the Command asks, and say whether there was anything to do. */
   #carryOut(command: Extract<Command, 'stop' | 'clear'>, conversationKey: string): boolean {
-    // Not an `if` whose else is `/stop`: a third Command added to the parameter
-    // above stops this compiling instead of being answered as `/stop`.
+    // Enforced by `fence:core-carry-out-names-its-two`.
     switch (command) {
       case 'clear':
         // Nothing is torn down. `/clear` is aimed at what the *next* message
@@ -1387,25 +1149,12 @@ export class Core {
     }
   }
 
-  /**
-   * End this Conversation's work, and say whether there was any.
-   *
-   * Reads `#running`, never the generation: a `/clear` in between moves the
-   * Conversation while its Task carries on where it started, so the generation
-   * would answer about an empty Session and leave the Task running with the
-   * person told there was nothing to stop.
-   *
-   * Marked whether or not the Task has reached Claude Code. It can sit queued
-   * behind three others and then on a cold start — minutes in which it is
-   * visibly running and there is no Turn to interrupt.
-   */
+  /** Enforced by `fence:core-stop-reads-running`. */
   #stop(conversationKey: string): boolean {
     const mine = [...this.#running].filter((task) => task.conversationKey === conversationKey)
     for (const task of mine) {
       task.stopped = true
-      // A Task waiting out a spent window has no Turn to interrupt and no slot
-      // to give back; what it has is a wait that would otherwise run for hours
-      // after somebody said to stop.
+      // Enforced by `fence:core-stop-wakes-a-parked-task`.
       this.#wake(task, 'stopped')
       this.#pool.interrupt(task.sessionId)
     }
@@ -1471,14 +1220,7 @@ export class Core {
     // there is one — and that failure is still audited.
     const attempts = new Attempts(this.#credential)
     try {
-      // No lookup and nothing to have gone stale: the Conversation Key is the
-      // Session id, one hash apart. The one thing read is which generation of it
-      // `/clear` has left the Conversation on, and a Conversation that has never
-      // used `/clear` is on the first. Read on arrival rather than on admission,
-      // so that a message already waiting in the queue when a `/clear` lands still
-      // goes to the Session it was sent to — and read inside the try, because a
-      // Conversation roma cannot work out the Session for is one that would
-      // otherwise be answered with silence.
+      // Enforced by `fence:core-session-read-in-the-try`.
       const sessionId = this.#sessions.sessionFor(conversationKey)
       // Known from here on rather than from the first token, so that `/stop`
       // reaches a Task that is queued or still starting its process.
@@ -1497,22 +1239,7 @@ export class Core {
       running = task
       this.#running.add(task)
 
-      // Redeemed here and nowhere earlier, which is the whole of ADR-0011's
-      // argument: the bytes are sized by whoever sent the message, and this is
-      // the first moment roma knows they are wanted and knows the Working
-      // Directory to put them in. A Task that was stopped, or parked until the
-      // window came back, never reaches this line and never pays for them.
-      // Guarded rather than left to `writeEnclosures` to no-op, so that a
-      // message with nothing attached — nearly all of them — reaches the Turn
-      // exactly as it did before Enclosures existed, touching no filesystem and
-      // waiting on nothing.
-      //
-      // A Relay redeems none, and never did: `relayed` writes a command and has
-      // nowhere to name a file, so bytes fetched here would be paid for and then
-      // not mentioned to anybody. That is the free path's behaviour since
-      // ADR-0012 — `/context` with a screenshot attached has always ignored the
-      // screenshot — and it is kept here rather than quietly changed for the one
-      // entry that now comes down this path.
+      // Enforced by `fence:core-enclosures-redeemed-late` and by `fence:core-relay-redeems-nothing`.
       const enclosures =
         relay !== null || message.enclosures.length === 0
           ? []
@@ -1561,7 +1288,7 @@ export class Core {
     const answeredOn = attempts.answeredOn() ?? this.#credential
     const durationMs = Date.now() - startedAt
     const outcome = outcomeOf(instruction)
-    // Never move these inside the loop: the answer is read-and-forget.
+    // Enforced by `fence:core-reach-asked-once`.
     const cloudReach = this.#usedCloudReach(taskId)
     const documentReach = this.#usedDocumentReach(taskId)
     for (const credential of [
@@ -1646,14 +1373,7 @@ export class Core {
     await this.#deliverAfter(opened, instruction)
   }
 
-  /**
-   * What the Audit Record says a Task was asked to be: the level the process
-   * served it at, or what the deployment would have given it where there was no
-   * process to ask.
-   *
-   * **Never let `off` stand for a deployment that named nothing** — see
-   * `CAVEMAN_NOT_PINNED`, which is the fact this line exists to keep.
-   */
+  /** Enforced by `fence:core-caveman-not-pinned-on-record`. */
   #cavemanOnRecord(ranAt: string | null): string {
     const level = ranAt ?? this.#cavemen.pinned
     return !this.#cavemanPinned && level === CAVEMAN_OFF ? CAVEMAN_NOT_PINNED : level
@@ -1720,9 +1440,7 @@ export class Core {
       // then refuse other people's work over, and a figure the reply would show
       // as having been spent on a card.
       attempts.ended(turn)
-      // Back to the Shared Window for whatever comes next. Overflow applies to
-      // one Attempt: left set, a Task that took it and failed would go on
-      // spending metered money with nobody asked and no cap consulted.
+      // Enforced by `fence:core-overflow-is-for-one-attempt`.
       attempts.payWith(this.#credential)
 
       if (error === null && turn !== null) {
@@ -1752,27 +1470,7 @@ export class Core {
     }
   }
 
-  /**
-   * Hold a Task the Shared Window has blocked, and say whether to run it again.
-   *
-   * False where the Attempt failed for any other reason — the reading is that
-   * Attempt's own, cleared before it started, so a failure carrying none is a
-   * failure the window had nothing to do with. False too where the event will
-   * not say when the window comes back: a Task parked against a moment that
-   * never arrives waits for ever, and nothing else in roma would come and look
-   * at it.
-   *
-   * And false once a Task has waited twice. A parked Task holds no slot, so this
-   * is not the halted-bot risk ADR-0003 lists — it is that a third "still
-   * blocked" message is noise on a Conversation nobody is watching any more, and
-   * that a Task which never ends is one nobody can be told about. Answered and
-   * re-sendable beats held indefinitely.
-   *
-   * The Conversation is told before the waiting starts, and told best-effort —
-   * the same judgement the acknowledgement gets. A Channel that cannot take this
-   * message leaves somebody waiting without an explanation, which is worse than
-   * silence for a moment and much better than losing the work.
-   */
+  /** Enforced by `fence:core-park-only-on-a-known-reset`. */
   async #park(task: RunningTask): Promise<boolean> {
     // Whether a wait is owed at all, and on what terms.
     const park = task.attempts.takePark()
@@ -1877,34 +1575,7 @@ export class Core {
     task.parked = null
   }
 
-  /**
-   * A Compaction inside this Task failed, and roma decides what that is worth.
-   *
-   * Three severities rather than the one #98 specified: measurement said a failed
-   * Compaction is *usually* fine, and as specified roma would have told a Caller
-   * their thread was full in the middle of a Turn that cost two cents and worked.
-   *
-   * The Caller hears only `unreducible`, once per Task, because the remedy is a
-   * Command they can type; the operator also hears every `unexplained`.
-   *
-   * roma never `/clear`s it — that is discarding a person's context unbidden,
-   * where ADR-0002 has Overflow *offered* at the moment of blocking.
-   *
-   * Never awaited: this arrives on a stream listener in the middle of the Turn
-   * everything else is waiting for, and `#tell` absorbs its own failures.
-   *
-   * The `task.relay` guard is load-bearing. `severityOf` reads a *code*, which
-   * only the auto path sends; the manual path sends a sentence, so without the
-   * guard every failed `/compact` lands in `unexplained` and writes an operator
-   * line about a Turn that was fine — every time somebody `/compact`s a short
-   * thread. Asked as *whose Compaction is this*, because enumerating sentences
-   * is the `shared-window.ts` mistake in a new hat.
-   *
-   * What it gives up: an `exhausted` here reaches the Caller in Claude Code's
-   * words without roma's remedy beside it, and is deferred rather than lost —
-   * the next ordinary message in that Conversation fails on the auto path, where
-   * ADR-0019's machinery reads the code properly.
-   */
+  /** Enforced by `fence:core-manual-compaction-is-the-callers`. */
   #compactionFailed(task: RunningTask, code: string | null): void {
     if (task.relay !== null) return
 
@@ -1923,14 +1594,7 @@ export class Core {
     void this.#tell(task, { kind: 'context-full', ...addressOf(task) })
   }
 
-  /**
-   * Tell the Channel something the Task's ending does not depend on.
-   *
-   * Absorbed rather than propagated, the same as progress: these are messages
-   * about a Task that is still going, and a Channel that cannot take one is not
-   * a reason to throw away work that will still produce an answer. The result
-   * and the failure are the two that are never absorbed.
-   */
+  /** Enforced by `fence:core-tell-absorbs-failures`. */
   async #tell(task: RunningTask, instruction: OutboundInstruction): Promise<void> {
     try {
       // Behind the Opening like everything else a Task produces. Looked up
@@ -1962,15 +1626,11 @@ export class Core {
     text: string,
     reporter: ProgressReporter,
   ): Promise<Turn> {
-    // Stopped while it waited its turn. Starting it now would spend a Turn on
-    // work somebody has already said they do not want, and then interrupt it.
+    // Enforced by `fence:core-stopped-before-its-turn`.
     if (task.stopped) throw new TaskStopped()
 
     const { sessionId, attempts } = task
-    // Read here rather than only on arrival: this Attempt is about to be sent,
-    // and what it runs on is whatever the Session is on now — which is not what
-    // it was on if this Task queued behind another one and somebody chose in
-    // between.
+    // Enforced by `fence:core-ledger-names-what-ran`.
     task.model = this.#models.inForce(sessionId)
     task.effort = this.#efforts.inForce(sessionId)
     reporter.update({ phase: 'working' })
@@ -2036,14 +1696,7 @@ export class Core {
  */
 const EVERY_SESSION_RUNS_ON: Runtime = 'claude-code'
 
-/**
- * What roma says about a Task that failed on roma's side rather than in the Turn.
- *
- * Fixed, never the error's own message: those are written for whoever reads the
- * code — "claude exited mid-Turn (code=1, signal=null)", or a Session uuid the
- * Conversation has never seen and cannot act on. The detail is an operator's,
- * and the pool already writes it as an `exit` record.
- */
+/** Enforced by `fence:core-failure-in-romas-words`. */
 const ROMA_FAILED = 'roma could not run this Task.'
 
 /**
@@ -2052,20 +1705,7 @@ const ROMA_FAILED = 'roma could not run this Task.'
  */
 const ROMA_FAILED_COMMAND = 'roma could not carry out that command.'
 
-/**
- * What a Caller is told about a Relay that ran, from the Compaction it produced
- * and whatever Claude Code itself said.
- *
- * Split on whether a Compaction happened, never on a string. `compact_error` is
- * a code on one path and a sentence on the other, and matching either is the
- * `shared-window.ts` mistake ADR-0018 named.
- *
- * On failure roma relays Claude Code's own sentence, which measurement puts in
- * the terminal event's `result` at no cost. On success roma has to speak,
- * because a successful `/compact` returns `result: ""` — measured — and silence
- * after half a minute and five cents produces a resend. The figures are the
- * boundary's own, so nothing parallel is computed.
- */
+/** Enforced by `fence:core-relay-reply-never-silent`. */
 function relayReply(compaction: Compaction | null, text: string): string {
   const { preTokens = null, postTokens = null } = compaction ?? {}
   if (preTokens !== null && postTokens !== null) {
@@ -2078,13 +1718,7 @@ function relayReply(compaction: Compaction | null, text: string): string {
   return 'That command finished, and Claude Code said nothing about it.'
 }
 
-/**
- * A token count as somebody in a Conversation reads it, which is in thousands.
- *
- * Not `toLocaleString`: its grouping and separator follow whatever locale the
- * process runs under, and this sentence is a Conversation's rather than a
- * machine's.
- */
+/** Enforced by `fence:core-token-counts-ignore-locale`. */
 function readableTokens(tokens: number): string {
   return String(tokens).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
@@ -2128,14 +1762,7 @@ function cavemanChoice(
   return { kind: 'choice', ...address, text, chooses: 'caveman', options: CAVEMAN_NAMES, refused }
 }
 
-/**
- * What roma says when a Conversation has been put on a model.
- *
- * Must not leave out *when*: `/model` is aimed at what the next message reaches,
- * and a bare acknowledgement sent while a Task is running reads as having
- * changed that Task. Said in the Core rather than an Adapter so that every
- * Channel reads the same and no Adapter grows its own copy of the Menu.
- */
+/** Enforced by `fence:core-model-reply-says-when`. */
 function fromNextMessage(name: string, model: string): string {
   return (
     `This conversation runs on ${named(name, model)} from your next message. ` +
@@ -2239,14 +1866,7 @@ const CONFIG_SETS_NOTHING =
   'What you can set for this conversation is “/model”, “/effort” and “/caveman”. ' +
   'Nothing has changed.'
 
-/**
- * What the deployment drew and what it was billed, for one calendar month.
- *
- * **Never one figure.** What the subscription drew is priced work nobody is
- * billed for, so a sum across the two registers prints it as money, and a sum
- * across Runtimes adds two separate subscriptions' quotas — the arithmetic
- * roma's own Overflow cap is built to avoid (ADR-0027).
- */
+/** Enforced by `fence:core-usage-never-one-figure`. */
 function monthReport({ month, spend, unreadable }: AuditBreakdown): string {
   const named = monthNamed(month)
   // A refusal rather than a figure with a footnote under it. Either count above
@@ -2270,10 +1890,7 @@ function spendLine({ runtime, credential, costUsd, unpriced }: CredentialSpend):
   // count itself stays off the line: a column that reads zero for ever is a
   // column nobody reads (ADR-0027).
   const figure = `${unpriced === 0 ? '' : 'at least '}$${money(costUsd)}`
-  // Never leave the Runtime off because there is only one: a sentence about a
-  // Shared Window has to say whose (`CONTEXT.md`), and a line worded for the
-  // deployment goes on reading right at the moment a second Runtime makes it
-  // wrong.
+  // Enforced by `fence:core-usage-never-one-figure`.
   const named = RUNTIME_NAMES[runtime]
   switch (credential) {
     case 'shared-window':
@@ -2361,15 +1978,7 @@ function addressOf({ taskId, conversationKey, caller, callerName }: TaskAddress)
   return { taskId, conversationKey, caller, callerName }
 }
 
-/**
- * What the Audit Record says a Turn was asked to think at.
- *
- * Only a positive `false` changes the answer — a model the Matrix has never been
- * read about keeps the level, since roma has no ground to claim otherwise.
- *
- * What lands here is what roma *sent*, never an observation (ADR-0016), and
- * nothing in roma can make it one.
- */
+/** Enforced by `fence:core-unmeasured-model-keeps-effort`. */
 function effortOn(model: string, effort: string): string {
   return takesEffort(model) === false ? EFFORT_NOT_APPLIED : effort
 }
@@ -2475,18 +2084,7 @@ function chosenCavemanGoneReason({ caveman }: ChosenCavemanNotOffered): string {
   )
 }
 
-/**
- * What to say to a Conversation whose Session could not be opened at all.
- *
- * Reached only after the pool's own respawn was refused too, so it must not
- * promise that sending again will work. Total until somebody acts: the Session
- * id derives from the Conversation Key and `/clear` is the one thing that moves
- * it.
- *
- * Claude Code's sentence must not be quoted here — "No conversation found with
- * session ID: 64b3f99a…" names an id the Caller has never seen. It is on the
- * `resume-lost` record for the operator who wants it.
- */
+/** Enforced by `fence:core-session-lost-reason`. */
 function transcriptLostReason(): string {
   return (
     'roma could not open this conversation’s session, and starting a fresh one ' +

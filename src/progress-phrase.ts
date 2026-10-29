@@ -55,9 +55,7 @@ export function progressPhrase(progress: TaskProgress): string {
       // differently with it, and this is read at a glance.
       return `Running ${progress.tool.slice(0, MAX_TOOL_CHARS)}…`
     case 'writing':
-      // Never the prose: shown here it says what the Result is about to say,
-      // seconds later and one message down (ADR-0010). The number is what is
-      // left, and it is what keeps a writing Turn from reading as a dead one.
+      // Enforced by `fence:progress-writing-carries-no-prose`.
       return `Writing… (${progress.characters} chars)`
   }
 }

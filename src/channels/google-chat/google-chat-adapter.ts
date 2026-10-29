@@ -82,17 +82,7 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
   }
 
   readonly #api: ChatApi
-  /**
-   * Each Task's acknowledgement, as the promise of the message that carries it.
-   *
-   * The promise rather than the name, so that the entry exists from the instant
-   * the first update is sent rather than from when Chat answers. In between,
-   * a second update would otherwise find nothing and post a second
-   * acknowledgement — and the Task would have two messages mutating at once.
-   *
-   * Dropped when the Task ends. A create still in flight then resolves into
-   * nothing, which is what should happen: the acknowledgement is finished with.
-   */
+  /** Enforced by `fence:gchat-acknowledgement-held-from-the-post`. */
   readonly #acknowledgements = new Map<string, Promise<string>>()
 
   readonly #log: OperatorLog<ChatEventLogRecord> | undefined
@@ -146,8 +136,8 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
    * message, which is the rule ADR-0003 makes unconditional for a result and
    * this Adapter has no reason to bend for the rest.
    *
-   * Rejecting means the Conversation was not told, and the Core treats that as
-   * the one failure it cannot absorb — so nothing here swallows an API error.
+   * Rejecting means the Conversation was not told.
+   * Enforced by `fence:gchat-deliver-rejects-what-chat-refused`.
    */
   async deliver(instruction: OutboundInstruction): Promise<void> {
     const { taskId, conversationKey } = instruction
@@ -182,9 +172,7 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
           ? this.#choices(instruction.chooses, instruction.options)
           : undefined
 
-    // On the last message rather than on every one. An answer long enough to
-    // split would otherwise repeat the whole Menu under each piece, and buttons
-    // belong under the text that explains them.
+    // Enforced by `fence:gchat-buttons-under-the-last-piece`.
     const messages = outcomeMessages(instruction)
     for (const [at, text] of messages.entries()) {
       const last = at === messages.length - 1
@@ -195,16 +183,7 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
     }
   }
 
-  /**
-   * The button that takes Overflow for one Task.
-   *
-   * Named by the Task, never by the Conversation: a Conversation can have a
-   * second Task blocked behind this one, and "the blocked Task here" would spend
-   * money on whichever roma looked at first.
-   *
-   * Anyone in the Conversation may press it — ADR-0002's decision, not an
-   * oversight.
-   */
+  /** Enforced by `fence:gchat-overflow-names-the-task`. */
   #offer(taskId: string): ChatAction {
     return {
       label: OVERFLOW_BUTTON,
@@ -246,9 +225,7 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
     try {
       await posting
     } catch (error) {
-      // A post that failed left no message to edit. Forgetting it is what lets
-      // the next update try again — kept, every later update for this Task would
-      // edit a name that never existed and fail with an error from minutes ago.
+      // Enforced by `fence:gchat-acknowledgement-forgets-a-failed-post`.
       if (this.#acknowledgements.get(taskId) === posting) this.#acknowledgements.delete(taskId)
       throw error
     }

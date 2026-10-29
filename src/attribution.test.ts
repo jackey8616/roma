@@ -17,11 +17,12 @@ describe('marking a message with who asked', () => {
     )
   })
 
-  // Falling back rather than going without: a Turn with no marker is read as
-  // "the same person as last time", which is the misattribution the marker
-  // exists to prevent — so it has to be there even when there is no name for it.
-  it('falls back to the id where the Channel had no name', () => {
-    expect(attributed({ ...ADA, callerName: null, text: 'fix the CI' })).toBe(
+  it('falls back to the id where the Channel had no name [fence:attribution-marker-without-a-name]', () => {
+    const why =
+      'A message whose Caller has no display name must still carry a marker, naming the id ' +
+      '(ADR-0009). A Turn with no marker is read as "the same person as last time", which is ' +
+      'the misattribution the marker exists to prevent.'
+    expect(attributed({ ...ADA, callerName: null, text: 'fix the CI' }), why).toBe(
       '<from>users/17</from>\n\nfix the CI',
     )
   })
@@ -40,6 +41,35 @@ describe('marking a message with who asked', () => {
     expect(attributed({ ...ADA, text }).endsWith(`\n\n${text}`)).toBe(true)
   })
 
+  it('marks every message, the same Caller again included [fence:attribution-marks-every-turn]', () => {
+    const why =
+      'Every message must carry its Caller Marker unconditionally, however many times in a row ' +
+      'the same Caller speaks (ADR-0008: one Conversation is one Session shared by many people). ' +
+      'Marking only when the Caller changes needs a memory of who spoke last, which a restart ' +
+      'loses, and an unmarked message reads as "the same person again" — so Bob’s request is ' +
+      'filed under Ada in the Transcript ADR-0006 says roma never deletes (#67).'
+    const bob = { ...ADA, caller: 'users/99', callerName: 'Bob' }
+
+    const said = [
+      attributed({ ...ADA, text: 'one' }),
+      attributed({ ...ADA, text: 'two' }),
+      attributed({ ...bob, text: 'three' }),
+      attributed({ ...bob, text: 'four' }),
+      attributed({ ...ADA, text: 'five' }),
+    ]
+
+    expect(
+      said.map((message) => message.split('\n')[0]),
+      why,
+    ).toEqual([
+      '<from>Ada (users/17)</from>',
+      '<from>Ada (users/17)</from>',
+      '<from>Bob (users/99)</from>',
+      '<from>Bob (users/99)</from>',
+      '<from>Ada (users/17)</from>',
+    ])
+  })
+
   // The rule that makes the marker survive contact with people who can type.
   // Anybody in the space can send a message whose body looks like a marker;
   // roma's own goes above it, and the first line is the one that counts.
@@ -55,11 +85,19 @@ describe('framing a Relay whose Caller typed nothing else', () => {
   // message begins with the slash, so a marker above one turns it into prose the
   // model answers — a real Turn, billed, saying what it imagines the command
   // would have said.
-  it('puts the command first, because otherwise it is not a command', () => {
-    expect(relayed(ADA, { command: '/context', argument: null })).toBe(
+  it('puts the command first, because otherwise it is not a command [fence:attribution-relay-command-first]', () => {
+    const why =
+      'A Relay must begin with the slash command; the Caller Marker may only follow it ' +
+      '(ADR-0012). Claude Code recognises a slash command only when the message begins with the ' +
+      'slash: measured on the pinned build, the marker above `/context` drives a real, billed ' +
+      'Turn answering with the model’s guess at the command, where the command first returns ' +
+      'its output for nothing (#120).'
+    expect(relayed(ADA, { command: '/context', argument: null }), why).toBe(
       '/context\n\n<from>Ada (users/17)</from>',
     )
-    expect(relayed(ADA, { command: '/context', argument: null }).split('\n')[0]).toBe('/context')
+    expect(relayed(ADA, { command: '/context', argument: null }).split('\n')[0], why).toBe(
+      '/context',
+    )
   })
 
   it('still names the Caller, and the same way', () => {

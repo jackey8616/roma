@@ -21,9 +21,7 @@ import { OVERFLOW_BUTTON, outcomeMessages, progressText, threadName } from './re
 /**
  * How many times roma makes one Discord call before it gives up on it.
  *
- * **Never take the bound off.** A loop that kept trying turns one unreachable
- * Conversation into an outage of every Conversation, roma's Gateway included —
- * what a refused call spends is `DiscordRefusal`'s.
+ * Enforced by `fence:discord-attempts-bounded`.
  *
  * Three, because the failure this exists to repair is a blip: a 503 while
  * Discord moves something, or a bucket roma shares with itself during a split
@@ -42,11 +40,10 @@ export const ATTEMPTS = 3
  * limits are dynamic and its reference says *"rate limits should not be hard
  * coded into your app"*.
  *
- * The ceiling is a limit on roma's patience rather than on Discord's: a wait
- * longer than this is a block on the whole API rather than a bucket refilling,
- * and sleeping through one inside `deliver` holds the Task, the Session's
- * Opening and everything queued behind them for as long as it lasts. roma gives
- * up and says so instead.
+ * The ceiling is a limit on roma's patience rather than on Discord's: past it,
+ * roma gives up and says so.
+ *
+ * Enforced by `fence:discord-no-sleeping-through-a-ban`.
  */
 export const RETRY_FLOOR_MS = 500
 export const RETRY_CEILING_MS = 30_000
@@ -54,11 +51,9 @@ export const RETRY_CEILING_MS = 30_000
 /**
  * How many Conversations roma keeps the answering address of.
  *
- * **Never take the bound off.** roma runs for weeks and every top-level mention
- * makes a Conversation, so one entry per Conversation ever seen is a leak with
- * no ceiling. What eviction costs is `#answering`'s.
+ * Enforced by `fence:discord-answering-is-bounded`.
  */
-const REMEMBERED = 1_000
+export const REMEMBERED = 1_000
 
 /**
  * The instructions after which a Task has no acknowledgement left to keep.
@@ -133,10 +128,9 @@ export interface DiscordAdapterOptions {
    * where its key names.
    *
    * Optional the way every other log in this repo is, and defaulted to stderr
-   * rather than to silence — which is the one way this differs from Chat's, and
-   * it follows from what the record is: see `DiscordAdapterLogRecord`. A
-   * deployment that drops it would get back exactly the failure the record
-   * exists to end.
+   * rather than to silence — which is the one way this differs from Chat's.
+   *
+   * Enforced by `fence:discord-adapter-log-defaults-to-stderr`.
    */
   readonly log?: OperatorLog<DiscordAdapterLogRecord>
   /**
@@ -189,36 +183,10 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
   readonly #log: OperatorLog<DiscordAdapterLogRecord>
   readonly #wait: (ms: number) => Promise<void>
 
-  /**
-   * The message roma is answering in each Conversation, by Conversation and
-   * Caller.
-   *
-   * **Keyed by the Caller as well.** A thread is many people sharing one
-   * Conversation and two Tasks can be in flight in it at once, so keyed on the
-   * Conversation alone Ada's answer replies to Bob's question (ADR-0009). A
-   * top-level key names one message and therefore one Caller, so the thread on
-   * it is one entry's whichever way this is keyed.
-   *
-   * **Never persist it, and never leave it unbounded.** An entry that is gone
-   * costs the answer its reply and asks Discord a second time for a thread it
-   * has already made — which is a success, because a message can only have one.
-   * So both a restart and an eviction repair themselves, and the one thing that
-   * does not is a Conversation whose thread was never opened at all, where the
-   * Task is gone too.
-   */
+  /** Enforced by `fence:discord-answering-by-caller`. Enforced by `fence:discord-answering-is-bounded`. */
   readonly #answering = new Map<string, Answered>()
 
-  /**
-   * Each Task's acknowledgement, as the promise of the message that carries it.
-   *
-   * The promise rather than the id, so that the entry exists from the instant
-   * the first update is sent rather than from when Discord answers. In between,
-   * a second update would otherwise find nothing and post a second
-   * acknowledgement — and the Task would have two messages mutating at once.
-   *
-   * Dropped when the Task ends. A post still in flight then resolves into
-   * nothing, which is what should happen: the acknowledgement is finished with.
-   */
+  /** Enforced by `fence:discord-acknowledgement-is-a-promise`. */
   readonly #acknowledgements = new Map<string, Promise<string>>()
 
   constructor({ api, log, wait }: DiscordAdapterOptions) {
@@ -281,9 +249,9 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
    * answers 503 is the ordinary shape of a Discord outage, and re-reading a
    * socket repairs no POST.
    *
-   * Rejecting means the Conversation was not told, and the Core treats that as
-   * the one failure it cannot absorb — so nothing here swallows a refusal it has
-   * run out of attempts on.
+   * Rejects where the Conversation was not told.
+   *
+   * Enforced by `fence:discord-refusal-not-swallowed`.
    */
   async deliver(instruction: OutboundInstruction): Promise<void> {
     const { taskId, conversationKey } = instruction
@@ -317,15 +285,9 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
 
     const messages = outcomeMessages(instruction)
     for (const [at, text] of messages.entries()) {
-      // The reply on the first piece and nothing on the rest. It is what
-      // addresses the Caller here — Discord's own form, where Chat has only a
-      // mention — and an answer long enough to split would otherwise notify
-      // somebody once per 2000 characters of it (ADR-0029).
+      // Enforced by `fence:discord-reply-on-first-piece-only`.
       const replyTo = at === 0 ? answering.replyTo : null
-      // On the last piece rather than on every one, for the same reason the
-      // reply is on the first: buttons belong under the text that explains them,
-      // and a split answer would otherwise repeat the whole Menu under each
-      // piece.
+      // Enforced by `fence:discord-buttons-on-last-piece-only`.
       const last = at === messages.length - 1
       await this.#retrying(() =>
         this.#api.post({
@@ -347,20 +309,7 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     }
   }
 
-  /**
-   * Keep what an answer to this message will need and no instruction carries.
-   *
-   * **Never look for it later.** The Task id is minted in the Core after
-   * `toIngress` has returned, so nothing downstream links the event roma read to
-   * the instruction it is handed (`TaskAddress`) — here is the only place the
-   * two are the same thing.
-   *
-   * **Never skip a press.** The message on one is roma's own card, and answering
-   * a press by replying to it reads as it should — but what is really being kept
-   * is the *channel the card is in*, which is the only thing that repairs a
-   * Conversation whose thread was refused: without it, the answer to a press
-   * goes to the id of a thread that was never opened (ADR-0029).
-   */
+  /** Enforced by `fence:discord-press-survives-thread-fallback`. */
   #remember(event: DiscordEvent, message: IngressMessage): void {
     const channel = asString(event.message['channel_id'])
     const id = asString(event.message['id'])
@@ -400,18 +349,7 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     })
   }
 
-  /**
-   * Open the thread a top-level Conversation Key names, or answer with somewhere
-   * roma may actually speak.
-   *
-   * **Never let a refusal here end the delivery.** roma may hold no permission
-   * to open threads, the channel may be a forum or media channel where the route
-   * does not work at all, or a thread may have been read as top level — and in
-   * every one of them the reply belongs in the channel the message arrived in.
-   * Thrown instead, an answer somebody paid for reaches nobody; fallen back,
-   * only the Session is in the wrong place (ADR-0029). What being in the wrong
-   * place costs, and why it is worth a line, is `DiscordAdapterLogRecord`'s.
-   */
+  /** Enforced by `fence:discord-thread-refusal-falls-back`. */
   async #openThread(conversationKey: string, answered: Answered): Promise<string> {
     try {
       return await this.#retrying(() =>
@@ -443,9 +381,7 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     try {
       await posting
     } catch (error) {
-      // A post that failed left no message to edit. Forgetting it is what lets
-      // the next update try again — kept, every later update for this Task would
-      // edit an id that never existed and fail with an error from minutes ago.
+      // Enforced by `fence:discord-failed-acknowledgement-forgotten`.
       if (this.#acknowledgements.get(taskId) === posting) this.#acknowledgements.delete(taskId)
       throw error
     }
@@ -465,38 +401,17 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
   }
 }
 
-/**
- * One Conversation as one Caller is answered in it. See `#answering`.
- *
- * **Never join them with something a snowflake can hold.** Both halves are
- * decimal, so a space cannot occur inside either; one that could would make two
- * of these one entry, and the reply to Ada's question would go to Bob's.
- */
+/** Enforced by `fence:discord-answering-by-caller`. */
 function addressOf(conversationKey: string, caller: string): string {
   return `${conversationKey} ${caller}`
 }
 
-/**
- * The button that takes Overflow for one Task.
- *
- * **Never name it by the Conversation.** A Conversation can have a second Task
- * blocked behind this one, so "the blocked Task here" would spend money on
- * whichever roma looked at first. Anyone in the Conversation may press it, which
- * is ADR-0002's decision rather than an oversight.
- */
+/** Enforced by `fence:discord-overflow-named-by-task`. */
 function offerButton(taskId: string): DiscordButton {
   return { label: OVERFLOW_BUTTON, customId: overflowId(taskId) }
 }
 
-/**
- * One button per name on a Menu, or none at all where the Menu is wider than one
- * message will hold.
- *
- * **Never draw a Menu in part.** A card carrying the first `MAX_BUTTONS` of a
- * longer one says those are the names there are, and the rest cannot be reached
- * by pressing anything; drawn as nothing it is *correct* rather than degraded,
- * because the text names every name whether or not anything drew it (ADR-0023).
- */
+/** Enforced by `fence:discord-menu-whole-or-not-at-all`. */
 function choiceButtons(
   chooses: Extract<Command, 'model' | 'effort' | 'caveman'>,
   conversationKey: string,
@@ -514,20 +429,7 @@ function refused(error: unknown): error is DiscordRefusal {
   return error instanceof DiscordRefusal && error.status !== 429 && error.status < 500
 }
 
-/**
- * How long to wait before trying this again, or null for a call not worth trying
- * again at all.
- *
- * **Never retry what `refused` answers true for.** A 403 will be a 403 next
- * time, and every attempt at one spends roma's way toward the block
- * `DiscordRefusal` describes.
- *
- * **Never narrow this to a `DiscordRefusal` either.** Anything else never
- * reached Discord to be refused — a socket that failed, a name that did not
- * resolve — and left unretried, an answer somebody has already paid for reaches
- * nobody over a blip. The cost is a duplicate message where the request in fact
- * arrived, and a Conversation told twice beats one told nothing.
- */
+/** Enforced by `fence:discord-retry-only-what-can-work`. */
 function waitBefore(error: unknown, attempt: number): number | null {
   if (refused(error)) return null
   const asked = error instanceof DiscordRefusal ? error.retryAfterMs : null

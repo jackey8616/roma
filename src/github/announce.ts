@@ -9,17 +9,7 @@ import type { Installation } from './installation.js'
  * both is a file with two reasons to change.
  */
 
-/**
- * The most repositories the announcement will name one by one.
- *
- * A cap, never the whole list: this text is prepended to every Turn of every
- * Session, and an Installation on a thousand repositories would spend more of
- * the context window on a directory than on the work.
- *
- * What is capped is the advertisement, not the access, and the text has to keep
- * saying so — the failure this whole announcement prevents is an agent that
- * refuses work it can do.
- */
+/** Enforced by `fence:github-announcement-caps-the-advertisement`. */
 const NAMED_AT_MOST = 100
 
 /**

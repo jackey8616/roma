@@ -14,14 +14,7 @@ import type { Compaction, SharedWindow } from './stream-events.js'
  */
 const MAX_PARKS = 2
 
-/**
- * The shortest a park can be.
- *
- * A backstop against a reset time that has already passed — a provider reporting
- * a stale one, a clock that disagrees with theirs. Without it such a Task reruns
- * instantly, fails, parks again, and spins as fast as Claude Code can start,
- * announcing itself on every Attempt.
- */
+/** Enforced by `fence:attempts-park-floor`. */
 const MIN_PARK_MS = 60_000
 
 /**
@@ -73,16 +66,7 @@ const NOTHING_SPENT: Spend = {
   compaction: null,
 }
 
-/**
- * One Attempt's figure folded into the running one, for a Turn that may report
- * neither of the two this is used for.
- *
- * **Never `reported ?? 0`.** A Turn that began and reported nothing spent
- * whatever it spent, and a zero there reports real money and real tokens as
- * none. The zero this does return is reached only where no message ever went,
- * which is the one case where free is certain — so the `sent` argument is not
- * optional either.
- */
+/** Enforced by `fence:attempts-unpriced-is-not-free`. */
 function withAttempt(
   soFar: number | null,
   reported: number | null | undefined,
@@ -113,10 +97,7 @@ export interface Park {
  * and a Channel that took a while to accept that message would otherwise push
  * the Task's wake-up out by however long it took.
  *
- * Never sooner than a minute. A reset time already in the past — a provider
- * reporting a stale one, a clock that disagrees with theirs — would otherwise
- * rerun the Task instantly and, on failing again, park it again: a Task spinning
- * as fast as Claude Code can start, announcing itself on every Attempt.
+ * Never sooner than a minute. Enforced by `fence:attempts-park-floor`.
  */
 export function waitMsUntil(resetsAt: number, now: number): number {
   return Math.max(MIN_PARK_MS, resetsAt * 1000 - now)
@@ -161,14 +142,8 @@ export class Attempts {
   /**
    * Start an Attempt, and say which credential is paying for it.
    *
-   * Starting one is what clears the last one's reading of the Shared Window, and
-   * that is not tidiness: a reading left behind has a `resetsAt` that has already
-   * passed, so a later failure carrying no reading of its own — a process that
-   * died, a Retry Storm — would park against a moment in the past and rerun
-   * instantly, for ever, reporting each Attempt as the window being spent.
-   *
-   * One call rather than a field to read and a field to clear, so that the rule
-   * cannot be half-applied.
+   * Starting one clears the last one's reading of the Shared Window. Enforced by
+   * `fence:attempts-reading-cleared-at-start`.
    */
   begins(): CredentialKind {
     this.#window = null
@@ -243,10 +218,10 @@ export class Attempts {
   /**
    * Pay for the next Attempt with this credential.
    *
-   * The next one, not the one in flight: Overflow is taken on a Task that is
-   * already parked, and it applies to one Attempt. Where it is not moved back
-   * afterwards a Task that took it and failed would go on spending metered money
-   * with nobody asked and no cap consulted.
+   * The next one, not the one in flight. Enforced by `fence:attempts-pay-for-the-next`.
+   *
+   * Overflow applies to one Attempt, so the caller moves it back afterwards.
+   * Enforced by `fence:core-overflow-is-for-one-attempt`.
    */
   payWith(credential: CredentialKind): void {
     this.#credential = credential
@@ -272,28 +247,15 @@ export class Attempts {
   }
 
   /**
-   * What one credential paid for.
+   * What one credential paid for, apart from what any other paid for. Enforced
+   * by `fence:attempts-bills-kept-apart`.
    *
-   * Kept apart from the others rather than summed, because the two are different
-   * money and only one of them is capped. A Task blocked on the Shared Window and
-   * rerun on Overflow made two Attempts on two bills; added together and filed
-   * under the credential it ended on, the subscription's share would be charged
-   * to the metered cap — which would refuse other people's work over money nobody
-   * spent on a card, and would be shown to the person who asked as what their
-   * Overflow decision cost them.
-   *
-   * Zero is a claim rather than a default, and it is only made where it is
-   * certain: an Attempt that never reached Claude Code sent no message and spent
-   * nothing. A Turn that began and produced no terminal event — a process that
-   * died, a Retry Storm roma stopped waiting for — spent real tokens that nothing
-   * will ever name, and recording those as zero would report money as free.
+   * Zero only where no message had gone by that point in the Task; a Turn that
+   * began and reported nothing is null. Enforced by
+   * `fence:attempts-unpriced-is-not-free`.
    */
   spentOn(credential: CredentialKind): Spend {
-    // Whether a message has gone *by this point in the Task*, which is not a
-    // question about this credential. Once one has, nothing after it can claim
-    // to be free with certainty — and because `null ?? 0` is `0`, an Attempt
-    // that never sent one would otherwise overwrite an earlier unpriced Attempt
-    // and report real tokens as free.
+    // Enforced by `fence:attempts-unpriced-is-not-free`.
     let sent = false
     // The figures alone, because the Compaction is accumulated differently and
     // folding it in would put one in every literal below that neither reads nor
@@ -324,9 +286,8 @@ export class Attempts {
    * Null where the last Attempt failed for any other reason — the reading is that
    * Attempt's own, cleared when it started, so a failure carrying none is a
    * failure the window had nothing to do with. Null too where the event will not
-   * say when the window comes back: a Task parked against a moment that never
-   * arrives waits for ever, and nothing else in roma would come and look at it.
-   * And null once a Task has waited `MAX_PARKS` times.
+   * say when the window comes back, and once a Task has waited `MAX_PARKS` times.
+   * Enforced by `fence:attempts-park-is-bounded`.
    *
    * Says when the window comes back rather than how long to wait for it, and
    * touches no clock at all — `waitMsUntil` is the other half, called when the

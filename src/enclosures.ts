@@ -3,13 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { PendingEnclosure } from './channel-adapter.js'
 
-/**
- * Where Enclosures live inside a Working Directory.
- *
- * A subdirectory, never the root, which is the agent's to clone into (ADR-0008).
- * Dot-prefixed so it cannot collide with a repository of the same name;
- * discovery is not the point, since every Enclosure's path is named explicitly.
- */
+/** Enforced by `fence:enclosures-out-of-the-agents-way`. */
 const DIRECTORY = '.enclosures'
 
 /**
@@ -96,19 +90,7 @@ export class EnclosureUnreadable extends Error {
   }
 }
 
-/**
- * A filename roma chose, carrying nothing of the sender's but the extension.
- *
- * Minted, never taken: `contentName` is the sender's, and as a path it is a
- * traversal, a collision between two people sending `screenshot.png`, and
- * whatever a filesystem makes of 200 characters of Unicode. What they called it
- * rides beside the path as a string (see `WrittenEnclosure`).
- *
- * The extension carries across under a **whitelist, never a sanitiser**: a
- * bounded charset and length cannot express a separator, a parent or a leading
- * dot, so there is nothing left to strip. No match means no extension, which is
- * a worse read for the agent and never a worse file for roma.
- */
+/** Enforced by `fence:enclosures-name-is-minted`. */
 function mintedName(declared: string): string {
   const dot = declared.lastIndexOf('.')
   const suffix = dot === -1 ? '' : declared.slice(dot + 1)

@@ -115,6 +115,7 @@ directory on the chain and no repository root to stop at, and runs to `/`. On
 the way it stats `.claude/skills` under `/var/lib/roma/work`, `/var/lib/roma`,
 `/var/lib`, `/var` and `/`. The first of those may be a mounted volume. **The
 other four are the image's own filesystem, and a `COPY` can write any of them.**
+Enforced by `fence:image-adds-no-skills-or-volumes`.
 
 **So the sentence this section used to end on is wrong, and the decision it
 supported is not.** It read: *there is no path an image can bake a skill into
@@ -352,7 +353,7 @@ of `jackey8616/caveman`, with three lines rewritten:
 
 **All four describe the tracker hook**, which is the piece the section above
 declines to install. Removing them is not editorial taste; it is deleting the
-manual for a part that is not in the box.
+manual for a part that is not in the box. Enforced by `fence:caveman-tracker-lines-removed`.
 
 The fourth row is here because the first three were written from a reading of
 caveman's `## Persistence` section and the fourth line is in `## Boundaries`,
@@ -378,7 +379,8 @@ upstream turns the run red, and somebody decides.
 
 `src/` holds no file that is not `.ts`, `build` is `rm -rf dist && tsc`, and the
 runtime stage copies `dist/` — so a `.md` under `src/` would silently not ship,
-and a `.md` anywhere else needs a `COPY` this image does not otherwise want. The
+and a `.md` anywhere else needs a `COPY` this image does not otherwise want.
+Enforced by `fence:src-ships-only-typescript`. The
 derived ruleset is therefore a constant in `src/`, one template plus roma's own
 copy of caveman's fifteen-line level filter. One template rather than six
 finished strings for the reason `ChosenRecord` is one class: the same idea
@@ -412,7 +414,7 @@ neither. It appears in both, **and only where the Session's Caveman is not
 `off`**: ADR-0024 gives the Opening its job as telling somebody what they are on
 when the answer is not obvious, and a deployment that never turns this on has
 nothing to tell. The conditional tail is not a new shape on that sentence —
-`#modelTakesNone` is already one.
+`#modelTakesNone` is already one. Enforced by `fence:core-opening-says-what-config-says`.
 
 The sentence's `Change either with` becomes `Change any with` when the third fact
 is present, because *either* was only ever true of two.

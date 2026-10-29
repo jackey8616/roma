@@ -146,7 +146,7 @@ fourth caller: *three spellings over two roma-owned facts, not three sources of
 truth — and a second reading here is exactly how three spellings would come to
 answer differently.* The sentence naming a model the Effort Matrix says takes no
 effort rides along for the same reason, because `#modelTakesNone` is inside those
-methods' orbit rather than beside them.
+methods' orbit rather than beside them. Enforced by `fence:core-opening-says-what-config-says`.
 
 Writing a second, friendlier sentence was considered and dropped. Two sentences
 saying one thing is two things to keep true, and the failure is invisible: nobody
@@ -219,7 +219,7 @@ Opening's promise, so a rejection would reject the Task's own delivery, hand the
 Delivery back to the Transport, and redeliver a Turn that has already been paid
 for. The write is therefore absorbed like the delivery — and unlike the delivery it
 stays claimed, because by then the Opening has been said and only the note of it
-was lost.
+was lost. Enforced by `fence:core-opening-never-fails-outwards`.
 
 ## Consequences
 

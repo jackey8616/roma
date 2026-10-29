@@ -161,7 +161,8 @@ Quotation.
 `forwardedMetadata.spaceDisplayName` is deliberately **not** carried. For a
 forwarded DM it holds the other participant's name rather than a space's, so
 `<quoted from="Bob" space="Alice">` would read as Alice being a place. A fact that
-misleads in a knowable fraction of cases is worse than no fact.
+misleads in a knowable fraction of cases is worse than no fact. Enforced by
+`fence:gchat-forward-names-no-space`.
 
 ### 5. A quoted message's attachments are ordinary Enclosures, marked with whose
 
@@ -218,7 +219,8 @@ repairs, and the keys are what tell them apart.
 - `IngressMessage` gains `quotation`, and `PendingEnclosure`/`WrittenEnclosure`
   gain `from`. All three are required and nullable, on the argument `callerName`
   already makes: a Channel that had one and forgot to hand it over is
-  indistinguishable from a Channel that never has any.
+  indistinguishable from a Channel that never has any. Enforced by
+  `fence:adapter-ingress-says-everything`.
 - A message whose only content is a Quotation is a request, on ADR-0011's
   argument for a screenshot with no words. Somebody who quotes a message and
   @-mentions roma without typing spends a Turn.

@@ -7,13 +7,7 @@ import {
   type Environment,
 } from '../../env-config.js'
 
-/**
- * Which Discord roma speaks.
- *
- * **Never give the two URLs below versions of their own.** A Gateway on one and
- * a REST call on another is roma reading one shape and asking for a different
- * one, which fails inside a payload rather than at boot.
- */
+/** Enforced by `fence:discord-one-api-version`. */
 const API_VERSION = 10
 
 /**

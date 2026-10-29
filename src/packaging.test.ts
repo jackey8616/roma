@@ -172,19 +172,18 @@ describe('the image defaults the one path whose loss is by design', () => {
     expect(shimDir.startsWith(workRoot)).toBe(false)
   })
 
-  it('sets no audit root and no Claude config dir — losing either is data loss', () => {
-    // `readRomaEnv` refuses to start without either, deliberately. An image that
-    // helpfully defaulted one would put that data in the container's writable
-    // layer, where it vanishes with the container — the Audit Records, which
-    // ADR-0002 says are the only place per-user attribution ever exists, or the
-    // Transcript, which ADR-0005 says is the only account there is of what an
-    // agent did and ADR-0006 says roma deletes nothing from.
-    //
-    // This looks for the assignment rather than the name — and for both
-    // spellings of one, because `ENV NAME value` without the `=` is legacy
-    // Dockerfile syntax that still works and would otherwise slip past.
-    expect(dockerfile()).not.toMatch(/ROMA_AUDIT_ROOT[\s=]/)
-    expect(dockerfile()).not.toMatch(/ROMA_CLAUDE_CONFIG_DIR[\s=]/)
+  // This looks for the assignment rather than the name — and for both
+  // spellings of one, because `ENV NAME value` without the `=` is legacy
+  // Dockerfile syntax that still works and would otherwise slip past.
+  it('sets no audit root and no Claude config dir — losing either is data loss [fence:image-no-default-for-data]', () => {
+    const why =
+      'The image must default neither ROMA_AUDIT_ROOT nor ROMA_CLAUDE_CONFIG_DIR (ADR-0006, ' +
+      'ADR-0007; #54). readRomaEnv refuses to start without either on purpose; a default puts ' +
+      'that data in the container’s writable layer, where it vanishes with every container ' +
+      'replacement — the Audit Records, the only place per-user attribution exists (ADR-0002), ' +
+      'or the Transcript, the only account of what an agent did (ADR-0005).'
+    expect(dockerfile(), why).not.toMatch(/ROMA_AUDIT_ROOT[\s=]/)
+    expect(dockerfile(), why).not.toMatch(/ROMA_CLAUDE_CONFIG_DIR[\s=]/)
   })
 
   it.each(['/var/lib/roma/audit', '/var/lib/roma/claude'])(
@@ -207,6 +206,49 @@ describe('the image defaults the one path whose loss is by design', () => {
       ).toBe(true)
     },
   )
+})
+
+describe('the image keeps out of what Claude Code reads [fence:image-adds-no-skills-or-volumes]', () => {
+  it('declares no VOLUME', () => {
+    const why =
+      'The image must not declare a VOLUME (ADR-0007, "VOLUME /var/lib/roma/claude instead ' +
+      'of the refusal", rejected). It makes an anonymous volume, which `docker run --rm` ' +
+      'removes on exit: the Transcript is lost while the Dockerfile reads as protecting it.'
+
+    expect(
+      instructions().filter((line) => /^VOLUME\b/i.test(line)),
+      why,
+    ).toEqual([])
+  })
+
+  it('writes nothing under a .claude directory', () => {
+    const why =
+      'No instruction may write a .claude path (ADR-0030). Claude Code resolves project ' +
+      'skills under every ancestor of the Working Directory up to /, and roma never git ' +
+      'inits one, so a skill the image puts in /var/lib/roma/work, /var/lib/roma, /var/lib, ' +
+      '/var or / is read into every Session.'
+
+    expect(
+      instructions().filter(
+        (line) => /^(COPY|ADD|RUN|WORKDIR)\b/i.test(line) && /\.claude\b/.test(line),
+      ),
+      why,
+    ).toEqual([])
+  })
+})
+
+describe('src/ is TypeScript and nothing else [fence:src-ships-only-typescript]', () => {
+  it('holds no file tsc would not compile into dist/', () => {
+    const why =
+      'Every file under src/ must be .ts (ADR-0030, "The ruleset is a TypeScript constant"). ' +
+      '`build` is `rm -rf dist && tsc` and the image copies dist/ alone, so a .md or .json ' +
+      'under src/ is silently missing from the image while every test that reads it passes.'
+
+    expect(
+      filesIn('src', (file) => !file.endsWith('.ts')).map(({ file }) => file),
+      why,
+    ).toEqual([])
+  })
 })
 
 /** The Dockerfile's instructions, one per entry, with line continuations joined. */
@@ -244,12 +286,17 @@ function words(run: string, command: string): string[] {
  * enforcement, which is what ADR-0012 recorded as open and ADR-0014 closed this
  * much of.
  */
-describe('the lists that rest on the pin say so', () => {
+describe('the lists that rest on the pin say so [fence:pin-lists-name-the-version]', () => {
   it.each([
     ['src/relays.ts', 'the Claude Code commands roma relays as themselves'],
     ['src/model-menu.ts', 'the models roma offers a Caller'],
-  ])('%s names the version it was judged against', (file) => {
-    expect(fromRepo(file)).toContain(CLAUDE_CODE_VERSION)
+  ])('%s names the version it was judged against', (file, what) => {
+    const why =
+      `${file} holds ${what}, a judgement about one Claude Code build, and must name the pinned ` +
+      'version (ADR-0012, ADR-0014). The drift check lists every file naming the pin when it ' +
+      'moves; a list that does not name it is left out of that report, and nobody is told to ' +
+      're-audit it before it starts relaying something that disturbs a belief roma holds.'
+    expect(fromRepo(file), why).toContain(CLAUDE_CODE_VERSION)
   })
 })
 

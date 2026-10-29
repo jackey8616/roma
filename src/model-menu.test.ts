@@ -16,6 +16,12 @@ function read(text: string): ModelRequest | null {
   return command?.command === 'model' ? readModelRequest(command.argument) : null
 }
 
+const UNKNOWN_IS_REFUSED =
+  'A /model argument that is not a name on the Menu must be read as unknown and refused, ' +
+  'never passed on as work (ADR-0014). The Caller Marker goes above the message, so Claude ' +
+  'Code never sees a command and somebody is billed for a Turn that answers a plausible ' +
+  'sentence about their typo.'
+
 describe('reading a /model message', () => {
   it('recognises every name on the Menu', () => {
     expect(read('/model fable')).toEqual({ kind: 'chosen', name: 'fable', model: 'claude-fable-5' })
@@ -44,16 +50,16 @@ describe('reading a /model message', () => {
   // the next message. Falling through is the fault this whole feature exists to
   // fix: the Caller Marker goes above the message, so Claude Code never sees a
   // command and somebody is billed for a sentence about their typo.
-  it('refuses a name roma does not offer, and says which', () => {
-    expect(read('/model gpt-5')).toEqual({ kind: 'unknown', name: 'gpt-5' })
+  it('refuses a name roma does not offer, and says which [fence:menu-model-unknown-is-refused]', () => {
+    expect(read('/model gpt-5'), UNKNOWN_IS_REFUSED).toEqual({ kind: 'unknown', name: 'gpt-5' })
   })
 
   // `MENU` is an object literal, so a bare lookup answers these with whatever
   // `Object.prototype` holds, and `/model constructor` was "chosen" as a model
   // that is a function.
-  it('refuses a name only Object.prototype carries', () => {
+  it('refuses a name only Object.prototype carries [fence:menu-model-unknown-is-refused]', () => {
     for (const name of ['constructor', 'tostring', 'hasownproperty']) {
-      expect(read(`/model ${name}`)).toEqual({ kind: 'unknown', name })
+      expect(read(`/model ${name}`), UNKNOWN_IS_REFUSED).toEqual({ kind: 'unknown', name })
     }
   })
 

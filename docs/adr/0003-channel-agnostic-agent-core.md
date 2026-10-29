@@ -148,7 +148,8 @@ spawns, in `src/claude-session.live.test.ts`, *"a Session over a real `claude -p
 Resuming an existing Session replaces the last line with `--resume <session-id>`,
 and that is the only thing that varies between a first spawn and a resume. Two
 parts of the block are load-bearing in a way they do not look — `--verbose`, and
-that last line — and each has its own bullet below.
+that last line — and each has its own bullet below. Enforced by
+`fence:session-invocation-pinned`. Enforced by `fence:session-one-flag-never-both`.
 
 - `--input-format stream-json` accepts realtime input, so one process serves a
   whole conversation. **Verified:** two messages into one process retained
@@ -168,14 +169,16 @@ that last line — and each has its own bullet below.
   Earlier revisions of the block above omitted the flag and therefore printed an
   invocation that does not start. Pinned by seam 2 —
   `src/claude-session.live.test.ts`, *"`--output-format stream-json` under
-  `--print` › refuses to start without `--verbose`"*.
+  `--print` › refuses to start without `--verbose`"*. Enforced by
+  `fence:session-invocation-pinned`.
 - **`--include-partial-messages` is required, not optional.** Without it the
   stream goes completely silent during pure token generation. **Verified, with
   the same prompt run both ways back to back:** flag on, **209 events** in the
   turn, worst gap between them **2641ms**, and **0 of 207** mid-stream gaps over
   3s; flag off, **6 events**, the whole 17093-character answer arriving in a
   single `assistant` event after **66747ms** of dead stream. Tool-using turns
-  emit events steadily; generating turns emit nothing at all.
+  emit events steadily; generating turns emit nothing at all. Enforced by
+  `fence:session-invocation-pinned`.
   - This bullet, and `docs/headless-session-verification.md` Q2, previously
     quoted **10368ms** as that silence. It is a floor, not a maximum: that gap
     was ended by the prototype's own interrupt on a 15-second timer, not by the
@@ -200,6 +203,7 @@ that last line — and each has its own bullet below.
   Upstream documents `--bare` as the recommended mode for scripted calls and
   states it will become the default for `-p` in a future release, which is one of
   the two silent-degradation modes the startup self-check exists to catch.
+  Enforced by `fence:session-invocation-pinned`.
 - **`--session-id` and `--resume` never appear together in an invocation roma
   makes.** The CLI's own reason is narrower than a flat exclusion — **verified**
   against Claude Code **v2.1.220**:
@@ -221,7 +225,8 @@ that last line — and each has its own bullet below.
   — `src/claude-session.live.test.ts`, *"`--session-id` and `--resume` › are
   refused together, and refused for that reason rather than a missing Session"*,
   which runs `--resume` alone as a control so the refusal cannot be a
-  missing-Session error wearing a disguise.
+  missing-Session error wearing a disguise. Enforced by
+  `fence:session-one-flag-never-both`.
 - Idle processes are reaped after 15 minutes; the session then resumes cold via
   `--resume`. At most 10 resident processes, evicted LRU. **Verified:** SIGTERM
   mid-turn exits **143** as documented, and a subsequent `--resume` recovered the
@@ -231,19 +236,21 @@ that last line — and each has its own bullet below.
     go before letting the next session take its slot, so a process that ignored
     SIGTERM would stall every later message rather than only its own session.
     That is the "bot halted" state under accepted risks, reached without a single
-    task hanging.
+    task hanging. Enforced by `fence:pool-eviction-kills-what-ignores-sigterm`.
   - **Which credential a turn is paid for by is a property of the process, so
     the pool owns it.** Overflow (ADR-0002) reruns one blocked task on the
     metered key, and the environment map is fixed at spawn — so the session's
     resident process is ended and resumed on the other map, and ends up back on
     the subscription for the conversation's next message. The pool takes one
-    environment per credential and picks per turn.
+    environment per credential and picks per turn. Enforced by
+    `fence:pool-every-term-is-compared`.
     - It has to be the pool rather than a second pool with the other map: a
       session's transcript is one file, and two live processes on it is the
       corruption the whole serialisation rule exists to prevent. Two pools would
       make "at most one of you holds this session" an invariant neither of them
       owned. Eviction-and-resume is already routine here and already verified, so
-      this is the existing mechanism with one more reason to fire.
+      this is the existing mechanism with one more reason to fire. *Not enforced
+      (ADR-0031).*
   - **A resume that finds no transcript re-creates the session.** The pool reads
     the existence of the session's working directory as the record that the
     session exists, which is what makes the `--session-id`-then-`--resume` rule
@@ -251,7 +258,8 @@ that last line — and each has its own bullet below.
     so a session whose first process died before Claude Code wrote a transcript
     would otherwise be resumed forever at something that is not there — the CLI
     answers `No conversation found with session ID: …` and exits. On that, and
-    only that, the pool spawns again with `--session-id`.
+    only that, the pool spawns again with `--session-id`. Enforced by
+    `fence:pool-wrong-flag-recovers`.
 
 ### Reading the event stream
 
@@ -263,7 +271,8 @@ and none anticipated by ADR-0001:
   `stop_reason`, `terminal_reason`, and `is_error`.
 - **Key completion on `is_error`, never on `subtype`.** `is_error: true`
   co-occurs with `subtype: "success"` on every auth failure observed. A wrapper
-  keying on `subtype` alone reports failures as successes.
+  keying on `subtype` alone reports failures as successes. Enforced by
+  `fence:session-failure-is-a-rejection`.
 - **`system/init` is re-emitted at the start of every turn**, not once per
   process. The process is genuinely persistent; a wrapper that reads `system/init`
   as "a new process started" will be wrong.
@@ -463,7 +472,8 @@ wrapper.
   is a calendar-month sum and nothing else — and under a root of its own rather
   than under the session pool's work root, which is walked by a reclaim that
   deletes whatever has gone seven days untouched. An audit log surviving a quiet
-  week is the whole point of it.
+  week is the whole point of it. Enforced by
+  `fence:env-audit-root-outside-the-work-root`.
   - **Both credentials are recorded — the one roma ran the task on and the
     `apiKeySource` Claude Code reported while running it.** They agree by
     construction: the environment is built per invocation and the self-check
@@ -494,7 +504,8 @@ wrapper.
   resident multi-turn process, the fifth task in a session is recorded at the sum
   of tasks one through five. Take the difference between consecutive
   `total_cost_usd` values within one process, or compute from per-turn `usage`.
-  ADR-0002's monthly overflow cap is built on this number.
+  ADR-0002's monthly overflow cap is built on this number. Enforced by
+  `fence:session-cost-is-a-delta`.
   - **The total belongs to the process, not to the session**, which matters
     because eviction makes resume routine. This bullet, and
     `docs/headless-session-verification.md` Q4, previously called it a session
@@ -525,7 +536,7 @@ the command. Claude Code has slash commands of its own and every one of them is
 passed through as work — a prefix match would swallow commands that are not
 roma's, and would swallow more of them with every Claude Code release. Neither of
 roma's two takes an argument, so nothing meant for roma is turned away by that
-rule.
+rule. Enforced by `fence:commands-no-prefix-match`.
 
 **Amended — the decision stands; "passed through as work" was never true.** roma
 passes the *text* of a Claude Code slash command, not the command. The Caller
@@ -554,7 +565,8 @@ execution says. Reported as a failure it reads as roma breaking, and the text it
 would carry as its reason is the half-written answer the interrupt cut off.
 `/stop` with nothing in flight says so rather than saying nothing: told a task was
 stopped when none was running, a person stops watching a task that is in fact
-still going.
+still going. Enforced by `fence:core-stop-reported-as-stopped`. Enforced by
+`fence:session-interrupted-read-off-terminal-reason`.
 
 **`/stop` follows the task, not the session the conversation is on**, and the
 core keeps its own record of the tasks it has taken on to do it. Two windows make
@@ -566,6 +578,7 @@ process is coming up is interrupted the moment its turn begins. And a `/new`
 between the message and the `/stop` moves the conversation to a new session while
 the work carries on in the old one, so asking which session the conversation is
 on would interrupt an empty session and report that nothing was running.
+Enforced by `fence:core-stop-reads-running`.
 
 ### Where a fresh session comes from
 

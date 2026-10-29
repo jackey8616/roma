@@ -22,10 +22,8 @@ export interface ProgressReporterOptions {
   /**
    * Where an update goes.
    *
-   * Best-effort by contract: a rejection is swallowed, because progress is the
-   * one thing roma will go without. A Channel too broken to carry an update is
-   * not a reason to abandon work that is running fine, and the result is still
-   * owed to whoever asked for it.
+   * Best-effort by contract: a rejection is swallowed.
+   * Enforced by `fence:progress-deliver-is-best-effort`.
    */
   readonly deliver: (progress: TaskProgress) => void | Promise<void>
   /**
@@ -122,18 +120,8 @@ export class ProgressReporter {
   /**
    * The Task is over: nothing more is scheduled, and nothing more is sent.
    *
-   * Deliberately waits on nothing. An update the Channel has not finished
-   * taking would otherwise hold the result back, and a `deliver` that never
-   * settles would hold it back forever — which would turn the one instruction
-   * roma will go without into the one that can silence a Task.
-   *
-   * But not waiting is not the same as letting go. An update already queued
-   * behind one the Channel is still taking is dropped here rather than handed
-   * over late: the acknowledgement is finished with the moment the result is
-   * posted, and an Adapter is entitled to act on that — the one roma has drops
-   * the message it was editing, so a late update has nothing to edit and posts
-   * a new one. A stale "Working…" underneath the answer, on the Channel that is
-   * slow enough to have caused it.
+   * Waits on nothing, and drops an update still queued behind one the Channel
+   * is taking. Enforced by `fence:progress-stop-waits-on-nothing`.
    *
    * This is where that has to be decided. Left to the Adapters it is a rule
    * every Channel has to be told, and the first one was written without knowing
@@ -168,9 +156,7 @@ export class ProgressReporter {
     // the boundary — 28,517ms in the longest capture — so without it a `/compact`
     // posts "Working…" and then says nothing at all for half a minute.
     if (readCompacting(event)) return { phase: 'compacting' }
-    // Only where a tool is what is being shown. A background task finishing
-    // while the answer is being written closes no window the acknowledgement is
-    // showing, and would otherwise throw the prose away for a whole interval.
+    // Enforced by `fence:progress-tool-finish-only-closes-a-tool`.
     if (readToolFinished(event)) {
       return this.#current?.phase === 'tool' ? { phase: 'working' } : null
     }

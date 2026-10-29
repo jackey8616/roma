@@ -9,8 +9,32 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkRoot } from './work-root.js'
+
+/**
+ * A write the power cuts halfway through: half the bytes land, then nothing.
+ *
+ * Off unless a test turns it on, so every other write here is the real one.
+ */
+const powerFails = vi.hoisted(() => ({ mid: false }))
+vi.mock('node:fs', async (importOriginal) => {
+  const fs = await importOriginal<typeof import('node:fs')>()
+  const writeFileSync: typeof fs.writeFileSync = (file, data, options) => {
+    if (!powerFails.mid) return fs.writeFileSync(file, data, options)
+    fs.writeFileSync(file, String(data).slice(0, 3), options)
+    throw new Error('the power went')
+  }
+  return { ...fs, writeFileSync }
+})
+
+const SURVIVES =
+  'Every record roma keeps about a Conversation — generation, Chosen Model, Effort, Caveman, ' +
+  'Opening, and a `.pending` — must be a file beside the Working Directories, and the sweep ' +
+  'must step over files (#105). The sweep deletes directories idle for seven days: a record ' +
+  'that was a directory, or a sweep that took files, would send a quiet Conversation back to ' +
+  'the Session `/clear` moved it off, or onto the Pinned Model, Effort or Caveman, or open it ' +
+  'again, with nobody told.'
 
 const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
@@ -62,12 +86,16 @@ describe('where a Session works', () => {
   // Turn that reads it (ADR-0011). Creating the directory here is what #105 was:
   // for as long as its existence was the record that a Session had run, asking
   // where a Session works made it look like one that already had.
-  it('makes no directory', () => {
+  it('makes no directory [fence:workroot-session-dir-makes-nothing]', () => {
+    const why =
+      'sessionDir must be a pure derivation that creates nothing (#105, #107). For as long as ' +
+      'a Working Directory’s existence was the record that a Session had run, an Enclosure ' +
+      'written before the first Turn made roma --resume a Session it never created.'
     const { root, work } = newRoot()
 
     work.sessionDir(A)
 
-    expect(readdirSync(root)).toEqual([])
+    expect(readdirSync(root), why).toEqual([])
   })
 })
 
@@ -110,12 +138,19 @@ describe('reclaiming what nothing has used', () => {
   // A resident process holds its directory open and a Turn in flight is writing
   // into it. The mtime cannot see either — a Session can be mid-Turn for an hour
   // without anything touching the directory again.
-  it('keeps a Session that is resident, however old its directory looks', () => {
+  it('keeps a Session that is resident, however old its directory looks [fence:workroot-in-use-is-required]', () => {
+    const why =
+      'reclaimIdle must be told which Sessions are in use, and the type must require it (#105): ' +
+      'a forgotten argument read as an empty set deletes the directory out from under every ' +
+      'running Turn, whose mtime cannot show that a process holds it open.'
     const { work } = newRoot()
     const cwd = sessionUsed(work, A, 30 * DAY)
+    // @ts-expect-error -- fence:workroot-in-use-is-required: forgetting inUse must not compile.
+    const forgot: () => unknown = () => work.reclaimIdle()
 
-    expect(work.reclaimIdle(new Set([A]))).toEqual([])
-    expect(existsSync(cwd)).toBe(true)
+    expect(typeof forgot, why).toBe('function')
+    expect(work.reclaimIdle(new Set([A])), why).toEqual([])
+    expect(existsSync(cwd), why).toBe(true)
   })
 
   /**
@@ -132,7 +167,7 @@ describe('reclaiming what nothing has used', () => {
    * `session-generation.ts`, in modules that do not import each other. This is
    * the assertion that holds it now.
    */
-  it('steps over every file, however old', () => {
+  it('steps over every file, however old [fence:workroot-records-survive-the-sweep]', () => {
     const { root, work } = newRoot()
     const records = [
       `${A}.generation`,
@@ -147,8 +182,28 @@ describe('reclaiming what nothing has used', () => {
       age(path, 400 * DAY)
     }
 
-    expect(work.reclaimIdle(new Set())).toEqual([])
-    expect(readdirSync(root).sort()).toEqual([...records].sort())
+    expect(work.reclaimIdle(new Set()), SURVIVES).toEqual([])
+    expect(readdirSync(root).sort(), SURVIVES).toEqual([...records].sort())
+  })
+
+  it('keeps every record roma writes, written its own way [fence:workroot-records-survive-the-sweep]', () => {
+    const { root, work } = newRoot()
+    const records = [
+      work.generationRecord(A),
+      work.modelRecord(A),
+      work.effortRecord(A),
+      work.cavemanRecord(A),
+      work.openedRecord(A),
+    ]
+    for (const record of records) work.writeRecord(record, 'kept')
+    for (const entry of readdirSync(root)) age(join(root, entry), 400 * DAY)
+
+    work.reclaimIdle(new Set())
+
+    expect(
+      records.map((record) => work.readRecord(record)),
+      SURVIVES,
+    ).toEqual(records.map(() => 'kept'))
   })
 
   it('reclaims only what is idle, leaving the rest', () => {
@@ -234,11 +289,15 @@ describe('reading a record', () => {
    * told — the Conversation quietly returns to the Pinned Model, and the only
    * evidence is a bill.
    */
-  it('throws where a record exists and cannot be read', () => {
+  it('throws where a record exists and cannot be read [fence:workroot-unreadable-is-not-missing]', () => {
+    const why =
+      'readRecord may answer null only for a record that is not there (ENOENT); every other ' +
+      'failure must throw. A record that may exist and cannot be read is not one nobody wrote, ' +
+      'and answering "none" to both is how a Chosen Model silently disappears.'
     const { work } = newRoot()
     mkdirSync(work.modelRecord(A), { recursive: true })
 
-    expect(() => work.readRecord(work.modelRecord(A))).toThrow()
+    expect(() => work.readRecord(work.modelRecord(A)), why).toThrow()
   })
 })
 
@@ -260,6 +319,24 @@ describe('writing a record', () => {
     work.writeRecord(work.modelRecord(A), 'claude-sonnet-5')
 
     expect(readdirSync(root)).toEqual([`${A}.model`])
+  })
+
+  it('leaves the record whole when the power goes mid-write [fence:workroot-record-write-is-atomic]', () => {
+    const why =
+      'writeRecord must write a temporary name and rename it over the record, never write the ' +
+      'live name: a machine that loses power mid-write leaves a torn record, which every reader ' +
+      'rightly refuses, and the Conversation’s thread stops working for a write nobody got wrong.'
+    const { work } = newRoot()
+    work.writeRecord(work.modelRecord(A), 'claude-sonnet-5')
+
+    powerFails.mid = true
+    try {
+      expect(() => work.writeRecord(work.modelRecord(A), 'claude-opus-5')).toThrow('power')
+    } finally {
+      powerFails.mid = false
+    }
+
+    expect(work.readRecord(work.modelRecord(A)), why).toBe('claude-sonnet-5')
   })
 
   it('replaces a record rather than appending to it', () => {
@@ -297,10 +374,15 @@ describe('forgetting a record', () => {
    * cannot read. Removing it quietly would have the Command answer that it moved
    * a Session it did not.
    */
-  it('refuses to remove a directory standing where a record should be', () => {
+  it('refuses to remove a directory standing where a record should be [fence:workroot-forget-is-not-recursive]', () => {
+    const why =
+      'forgetRecord must not be recursive: a directory where a record should be is something ' +
+      'roma did not put there, and removing it quietly would have the Command answer that it ' +
+      'moved a Session it did not.'
     const { work } = newRoot()
     mkdirSync(work.modelRecord(A), { recursive: true })
 
-    expect(() => work.forgetRecord(work.modelRecord(A))).toThrow()
+    expect(() => work.forgetRecord(work.modelRecord(A)), why).toThrow()
+    expect(existsSync(work.modelRecord(A)), why).toBe(true)
   })
 })

@@ -164,7 +164,7 @@ under ADR-0002 the deployment pays a subscription instead. An Overflow Task's
 So `/usage` reports them as two lines in two registers — a quantity of quota
 drawn, and an amount billed — and never as a sum. roma's own code already refuses
 to add them; the report it gives people should not do what the cap is forbidden
-to do.
+to do. Enforced by `fence:core-usage-never-one-figure`.
 
 The figure is qualified where it is knowably short. `AuditTotal.unpriced` counts
 Turns that began and were never priced — abandoned mid-Retry-Storm, or cut short

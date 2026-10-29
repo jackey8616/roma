@@ -59,30 +59,48 @@ describe('a deployment with a Cloud Reach', () => {
 
   // The key names where it is exchanged, so roma uses what it was given rather
   // than a constant that would be wrong for anybody Google ever moves.
-  it('exchanges where the key says, and has an answer where it does not', () => {
+  it('exchanges where the key says, and has an answer where it does not [fence:cloud-exchanges-where-the-key-says]', () => {
+    const why =
+      "The token endpoint is the key file's own `token_uri`, defaulted only where the key " +
+      'omits it (ADR-0015 §3). A hardcoded constant silently ignores a key that says ' +
+      'otherwise, and the mint fails for any deployment Google moves or any non-public ' +
+      'endpoint. It is no widening: whoever can write the file can replace the whole key (#99).'
     const named = keyFile(JSON.stringify({ ...A_KEY, token_uri: 'https://elsewhere.test/token' }))
     const { token_uri, ...silent } = A_KEY
 
-    expect(readCloudEnv({ [CLOUD_KEY_FILE_VAR]: named })?.tokenEndpoint).toBe(
+    expect(readCloudEnv({ [CLOUD_KEY_FILE_VAR]: named })?.tokenEndpoint, why).toBe(
       'https://elsewhere.test/token',
     )
     expect(
       readCloudEnv({ [CLOUD_KEY_FILE_VAR]: keyFile(JSON.stringify(silent)) })?.tokenEndpoint,
+      why,
     ).toBe('https://oauth2.googleapis.com/token')
   })
 })
 
 describe('a deployment with none', () => {
   // Story 17: a deployment with no Google Cloud pays nothing for the feature.
-  it('is not a problem, and is not one when the variable is empty either', () => {
-    expect(readCloudEnv({})).toBeNull()
+  it('is not a problem, and is not one when the variable is empty either [fence:cloud-refuses-only-a-named-path]', () => {
+    const why =
+      'No path, or an empty one, is no Cloud Reach and boots (ADR-0015 §9). The empty string ' +
+      "is what a shell leaves for `ROMA_CLOUD_KEY_FILE=${UNSET}`, and `envValue`'s rule for " +
+      'every optional variable; refusing it refuses to boot a deployment that blanked the ' +
+      'variable to turn the feature off. The Operator Log says at every boot whether there ' +
+      'is a Cloud Reach (#99).'
+    expect(readCloudEnv({}), why).toBeNull()
     // What a shell leaves behind when a variable was set from something that
     // turned out to be empty.
-    expect(readCloudEnv({ [CLOUD_KEY_FILE_VAR]: '' })).toBeNull()
+    expect(readCloudEnv({ [CLOUD_KEY_FILE_VAR]: '' }), why).toBeNull()
   })
 })
 
-describe('a Cloud Reach that was meant and does not work', () => {
+describe('a Cloud Reach that was meant and does not work [fence:cloud-refuses-only-a-named-path]', () => {
+  const WHY =
+    'A path that was named and does not work refuses the boot, and never reads as no Cloud ' +
+    'Reach (ADR-0015 §9). A mistyped path that fell through would present as the ' +
+    'capability being absent, a diagnosis nobody can act on — and on a Google host it is one ' +
+    "step from resolving roma's own identity (ADR-0015 §4) (#99)."
+
   // Every one of these must refuse rather than resolve to null. Falling through
   // to "no Cloud Reach" would mean a mistyped path presents as the capability
   // being absent, which is a diagnosis nobody can act on — and on a Google host
@@ -104,8 +122,8 @@ describe('a Cloud Reach that was meant and does not work', () => {
   ])('refuses %s', (_what, named, complaint) => {
     const path = named()
 
-    expect(() => readCloudEnv({ [CLOUD_KEY_FILE_VAR]: path })).toThrow(ConfigurationMissing)
-    expect(() => readCloudEnv({ [CLOUD_KEY_FILE_VAR]: path })).toThrow(complaint)
+    expect(() => readCloudEnv({ [CLOUD_KEY_FILE_VAR]: path }), WHY).toThrow(ConfigurationMissing)
+    expect(() => readCloudEnv({ [CLOUD_KEY_FILE_VAR]: path }), WHY).toThrow(complaint)
   })
 
   // Named in every refusal, because the commonest of these is a path that is

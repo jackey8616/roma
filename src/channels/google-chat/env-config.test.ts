@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { defaultConfig } from '../../config.js'
 import { ConfigurationMissing } from '../../env-config.js'
 import { DEFAULT_MAX_LEASE_MINUTES, DEFAULT_MAX_MESSAGES, readChatEnv } from './env-config.js'
 
@@ -64,6 +65,17 @@ describe('reading the Chat channel out of the environment', () => {
         maxMessages: DEFAULT_MAX_MESSAGES,
         maxLeaseMinutes: DEFAULT_MAX_LEASE_MINUTES,
       })
+    })
+
+    it('leaves a /stop room to arrive past every Task that can be in flight [fence:gchat-flow-control-above-the-cap]', () => {
+      const why =
+        'Pub/Sub flow control must sit well above the concurrency cap (ADR-0003). A Command ' +
+        'is answered outside the Task Queue so that `/stop` never waits behind the Task it ' +
+        'stops, but a message Pub/Sub holds back has not reached the Core to be read as a ' +
+        'Command at all. With every slot running and as many again queued, each holding a ' +
+        'lease, a limit near the cap reinstates exactly that wait (#31).'
+
+      expect(DEFAULT_MAX_MESSAGES, why).toBeGreaterThan(2 * defaultConfig.maxConcurrentTasks)
     })
 
     it('lets a deployment set both', () => {

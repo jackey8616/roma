@@ -66,10 +66,7 @@ export const INTENTS = GUILDS | GUILD_MESSAGES | DIRECT_MESSAGES
 /**
  * How long roma waits before reconnecting, and the ceiling it doubles up to.
  *
- * **Never reconnect without backing off.** A loop that does not spends its way
- * into the invalid-request limit `discord-api.ts`'s `DiscordRefusal` describes,
- * whose block is not scoped to the connection that earned it — so the socket
- * roma cannot get back on takes the REST API with it.
+ * Enforced by `fence:discord-reconnect-backs-off`.
  */
 export const RECONNECT_FLOOR_MS = 1_000
 export const RECONNECT_CEILING_MS = 60_000
@@ -114,12 +111,10 @@ export type GatewayLogRecord =
       /**
        * Discord closed the connection with a code that says not to come back.
        *
-       * A bad token, or an intent roma is not approved for. roma stops
-       * reconnecting: the alternative is a loop that cannot succeed, spending
-       * its way toward a ban on every attempt. Nothing else says this — the
-       * process stays up serving whatever other Channels it has, so without this
-       * line a Discord that never connects looks exactly like a Discord nobody
-       * is talking to.
+       * A bad token, or an intent roma is not approved for, and roma has
+       * stopped reconnecting.
+       *
+       * Enforced by `fence:discord-refused-for-good-stops`.
        */
       readonly event: 'gateway-refused'
       readonly code: number
@@ -220,14 +215,7 @@ const OP = {
 const CLOSED_FOR_GOOD = 1000
 const CLOSED_TO_RESUME = 4000
 
-/**
- * A bad token, a shard roma does not have, an API version that is gone, an
- * intent roma is not approved for.
- *
- * **Never reconnect on one.** Each is a deployment fact rather than a network
- * one, so the next attempt fails identically — and attempts that cannot succeed
- * are what spend roma's way into the ban ADR-0029 warns about.
- */
+/** Enforced by `fence:discord-refused-for-good-stops`. */
 const REFUSED_FOR_GOOD = new Set([4004, 4010, 4011, 4012, 4013, 4014])
 
 /** The close codes that mean the session is gone, but the connection may return. */
@@ -289,26 +277,12 @@ export class GatewayTransport implements Transport<DiscordEvent> {
 
   #beating: ReturnType<typeof setTimeout> | null = null
   #reconnecting: ReturnType<typeof setTimeout> | null = null
-  /**
-   * Whether the last heartbeat was answered.
-   *
-   * **Never stop checking it.** It is the only thing that tells a quiet socket
-   * from a dead one, and a socket nobody notices is dead stays open, delivers
-   * nothing, and leaves roma looking healthy while it answers nobody.
-   */
+  /** Enforced by `fence:discord-dead-socket-noticed`. */
   #acknowledged = true
   /** How many times roma has reconnected without getting back on. */
   #attempts = 0
 
-  /**
-   * Which channels each guild has, which is what a Conversation Key is derived
-   * from and nothing else.
-   *
-   * **Channels, never threads.** The guild's channel list is complete and its
-   * thread list holds only the active ones, so a thread archived for a day is in
-   * neither — read against the thread list it would be taken for one of the
-   * guild's channels, and its Session would split (ADR-0029).
-   */
+  /** Enforced by `fence:discord-key-against-channel-list`. */
   readonly #channels = new Map<string, Set<string>>()
   /** What is waiting for the state that makes it readable. See `gateway-held`. */
   #held: Pending[] = []
@@ -356,9 +330,7 @@ export class GatewayTransport implements Transport<DiscordEvent> {
       this.#read(frame)
     })
     socket.on('error', (error) => {
-      // Never thrown on, for `PubSubTransport`'s reason: an error listener that
-      // threw would take the process down over a network blip that is about to
-      // arrive as an ordinary close.
+      // Enforced by `fence:discord-socket-fault-not-thrown`.
       this.#log({ event: 'gateway-error', reason: reasonOf(error) })
     })
     socket.on('close', (code) => {
@@ -525,16 +497,7 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     this.#take({ id, message, press: null })
   }
 
-  /**
-   * One press: acknowledged first, then handed on like anything else.
-   *
-   * **Never hand it on first.** Discord invalidates the token after three
-   * seconds and roma's Core takes minutes, so the acknowledgement cannot wait on
-   * the work — it is what buys the time the work needs (ADR-0029). An
-   * acknowledgement that failed is written down and the press goes on anyway:
-   * the person has already chosen, and the only thing worse than a press Discord
-   * marks failed is one nothing answers.
-   */
+  /** Enforced by `fence:discord-press-acknowledged-first`. */
   async #pressed({ id, token, message, press }: Interaction): Promise<void> {
     try {
       await this.#api.acknowledgePress(id, token)
@@ -567,35 +530,20 @@ export class GatewayTransport implements Transport<DiscordEvent> {
   /** Whether roma holds the state this has to be read against. */
   #readable({ message, press }: Pending): boolean {
     if (this.#self === null) return false
-    // A press carries its own Conversation Key on the button, so the guild state
-    // a key is otherwise derived from is nothing it has to wait for. Held for
-    // state it does not need, the person has already been told their press
-    // arrived and would then wait for an answer to it (ADR-0029).
+    // Enforced by `fence:discord-press-not-held`.
     if (press !== null) return true
     const guildId = asString(message['guild_id'])
     return guildId === null || this.#channels.has(guildId)
   }
 
-  /**
-   * One message or one press, completed and handed over.
-   *
-   * **Never await this from the frame handler.** A Task takes minutes, and this
-   * resolves when one is finished with — so awaiting it stops roma reading the
-   * socket, heartbeats included, which is a connection Discord drops.
-   *
-   * **Never read the guild's channels below the fetch** either: the key would
-   * then be derived from the guild as it stands a round trip later rather than
-   * as it stood when the message arrived.
-   */
+  /** Enforced by `fence:discord-deliver-is-detached`. */
   async #deliver({ id, message, press }: Pending): Promise<void> {
     const receiver = this.#receiver
     const self = this.#self
     if (receiver === null || self === null) return
 
     const guildChannel = this.#guildChannel(message)
-    // Never for a press. The card is roma's own message and roma replies to the
-    // Caller on it, so completing its `message_reference` would spend a round
-    // trip quoting the very question the press is answering.
+    // Enforced by `fence:discord-press-quotes-nothing`.
     const quotation =
       press !== null
         ? null
@@ -605,9 +553,7 @@ export class GatewayTransport implements Transport<DiscordEvent> {
           })
 
     const delivery: Delivery<DiscordEvent> = {
-      // The event's own snowflake, never anything minted here: a resumed session
-      // replays what roma missed, and this is what tells that replay from a
-      // second message saying the same words (ADR-0028).
+      // Enforced by `fence:discord-delivery-named-by-snowflake`.
       id,
       event: { message, self, guildChannel, quotation, press },
       // **Never make either of these do anything.** A socket has nowhere to hand
@@ -670,22 +616,11 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     const socket = this.#socket
     this.#stopBeating()
     socket?.close(code)
-    // A socket that does not answer its own close — which is every real one,
-    // since the close is a handshake — would otherwise leave roma disconnected
-    // and waiting for an event that has not arrived yet. Reaching here twice is
-    // what the two guards below are for.
+    // Enforced by `fence:discord-reopen-does-not-wait-for-close`.
     this.#closed(socket, code)
   }
 
-  /**
-   * The connection ended: come back, unless there is a reason not to.
-   *
-   * **Never drop the `socket` argument.** A close arrives from the connection it
-   * happened to, which is not always the one roma is on — a socket abandoned a
-   * second ago can answer its own close after the reconnection has already
-   * opened another, and roma would end up holding two Gateways delivering
-   * everything twice.
-   */
+  /** Enforced by `fence:discord-stale-close-ignored`. */
   #closed(socket: GatewaySocket | null, code: number): void {
     if (socket !== null && socket !== this.#socket) return
     this.#socket = null

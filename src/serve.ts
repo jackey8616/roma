@@ -19,13 +19,9 @@ import type { Delivery, Settle, Transport } from './transport.js'
 export type IngressLogRecord =
   | {
       /**
-       * An event the Channel Adapter could not read.
-       *
-       * The Channel's shape has changed, or something else is publishing to the
-       * subscription. Worth an operator's attention because roma will keep
-       * dropping these silently otherwise — there is no Conversation to tell,
-       * since working out which Conversation it was is the very thing that
-       * failed.
+       * An event the Channel Adapter could not read: the Channel's shape has
+       * changed, or something else is publishing to the subscription. Enforced
+       * by `fence:serve-unreadable-is-finished-and-logged`.
        */
       readonly event: 'ingress-unreadable'
       readonly deliveryId: string
@@ -288,21 +284,7 @@ class Ingress<Event> {
    * be told about and not a reason to lose what they asked for.
    */
   #stopping = false
-  /**
-   * The deliveries roma is in the middle of.
-   *
-   * Held only while the work runs. A queue that delivers at least once will hand
-   * the same event over again — after a lease expires, after a settlement is
-   * lost — and roma holds a Delivery for as long as its Task takes, which is
-   * minutes. Two attempts at one message would spend the Turn twice and post two
-   * answers into one Conversation.
-   *
-   * Deliberately not a record of everything roma has ever seen. That would be a
-   * database, which roma does not have and which a restart would empty anyway —
-   * and a redelivery arriving after the answer was posted is a message roma
-   * genuinely has no memory of, which is the trade at-least-once delivery asks
-   * for in exchange for never losing one.
-   */
+  /** Enforced by `fence:serve-redelivery-dropped-while-in-flight`. */
   readonly #inFlight = new Set<string>()
 
   constructor({ core, channel, log }: IngressOptions<Event>) {
@@ -316,14 +298,7 @@ class Ingress<Event> {
     this.#stopping = true
   }
 
-  /**
-   * Take one delivery as far as being settled.
-   *
-   * Never rejects, on any path. A subscriber that fell over on a bad event would
-   * make one malformed message the end of roma's ability to answer anybody —
-   * which is the whole of why "rejected without stopping the subscriber" is a
-   * criterion of its own.
-   */
+  /** Enforced by `fence:serve-take-never-rejects`. */
   async take(delivery: Delivery<Event>): Promise<void> {
     const { id } = delivery
     if (this.#inFlight.has(id)) {
@@ -375,20 +350,7 @@ class Ingress<Event> {
     return null
   }
 
-  /**
-   * Settle one Delivery, and survive the queue refusing to hear it.
-   *
-   * A settlement that failed is not a failed Task: the work happened and the
-   * Conversation was answered. All that follows is a redelivery, which the
-   * in-flight check above will not catch because by then roma is no longer doing
-   * it — so it is written down here, since a Conversation answered twice is
-   * otherwise a mystery with no trace of its cause.
-   *
-   * Once roma is stopping, every settlement becomes a hand-back regardless of
-   * what the work did. What ended those Tasks was roma being killed rather than
-   * anything about them, and finishing with their Deliveries would throw away
-   * work the queue is otherwise holding for whatever starts next.
-   */
+  /** Enforced by `fence:serve-take-never-rejects` and `fence:serve-shutdown-hands-back`. */
   async #settle(delivery: Delivery<Event>, settle: Settle): Promise<void> {
     const settling = this.#stopping ? 'nack' : settle
     try {

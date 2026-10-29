@@ -50,8 +50,9 @@ export interface DiscordPost {
    * How a Caller is addressed on this Channel. Chat prefixes every piece of an
    * answer with an @-mention because a mention is what Chat has; Discord's reply
    * is the idiomatic form, costs nothing out of the 2000 characters, and is on
-   * the **first** message only — nine replies to one question are nine
-   * notifications of it (ADR-0029).
+   * the **first** message only.
+   *
+   * Enforced by `fence:discord-reply-on-first-piece-only`.
    */
   readonly replyTo: string | null
   /**
@@ -67,19 +68,16 @@ export interface DiscordPost {
    * same message.
    *
    * **At most `MAX_BUTTONS`, and whoever fills this decides what a wider Menu
-   * does.** Nothing below here trims the list: a card quietly missing its tail
-   * says those are all the names there are, and it is the caller that knows the
-   * answer is complete without them (ADR-0023).
+   * does.** Nothing below here trims the list.
+   *
+   * Enforced by `fence:discord-menu-whole-or-not-at-all`.
+   * Enforced by `fence:discord-http-trims-no-menu`.
    */
   readonly buttons: readonly DiscordButton[]
 }
 
 /**
  * How many buttons one message may carry, which is five rows of five.
- *
- * Discord refuses the **whole message** past it, so a Menu one button too wide
- * is not a shorter Menu but no message at all — and on the blocked path, an
- * Overflow offer that never reaches the person waiting on it.
  *
  * Here rather than beside the payload it is laid out in, because it bounds what
  * a caller may ask for rather than how a request is built. roma's own Menus are
@@ -88,10 +86,9 @@ export interface DiscordPost {
  *
  * **Twenty-five rather than the forty #181 names**, which is the count a message
  * carries under Discord's newer component set — a set roma neither asks for nor
- * sends. What bounds the action rows roma does post is five of five. Neither
- * number is verified here and they fail in opposite directions, so this is the
- * low one: too low costs a Menu its buttons and leaves the answer standing,
- * where too high costs the whole message. `MAX_TEXT` is read the same way.
+ * sends. `MAX_TEXT` is read the same way.
+ *
+ * Enforced by `fence:discord-buttons-fit-one-message`.
  */
 export const MAX_BUTTONS = 25
 
@@ -103,13 +100,7 @@ export const MAX_BUTTONS = 25
  * spends roma's way toward the ban below — and `retryAfterMs` is how long
  * Discord asked roma to wait.
  *
- * **`retryAfterMs` is read off the response and never inferred.** Discord's
- * per-route limits are dynamic and its reference says so in as many words:
- * *"rate limits should not be hard coded into your app"*. A retry that ignores
- * a 429 is worse than a slow one, because 429s count toward the *"10,000 per 10
- * minutes"* invalid-request limit whose penalty is a temporary block on the
- * whole API rather than on the channel that earned it — so a naive loop in one
- * Conversation is an outage of every Conversation (ADR-0029).
+ * Enforced by `fence:discord-retry-after-is-read`.
  *
  * A class rather than a shaped message, because the one caller that acts on this
  * has to tell it from a socket that never answered at all, and a network fault
@@ -176,12 +167,11 @@ export interface DiscordApi {
    * id"*, which is the fact the whole Conversation Key table rests on: the key
    * minted before the thread exists is the id the thread will have.
    *
-   * **A message that already has a thread is a success, not a failure.** *"A
-   * message can only have a single thread created from it"* — so an
-   * implementation that reported the second attempt as an error would make every
-   * retry permanent, and roma would answer in a channel it had already opened a
-   * thread in. Resolving means the thread exists; how it came to is nobody's
-   * business up here.
+   * **A message that already has a thread is a success, not a failure.**
+   * Resolving means the thread exists; how it came to is nobody's business up
+   * here.
+   *
+   * Enforced by `fence:discord-thread-already-created-is-success`.
    *
    * Rejects where Discord refuses for any other reason — no permission, or a
    * forum or media channel, where the route *"does not work"* at all. The one
@@ -200,11 +190,9 @@ export interface DiscordApi {
    * answer it, which is why it is the Transport's rather than the Adapter's
    * (ADR-0029).
    *
-   * **The card must not change.** Pressing is typing, and typing does not
-   * rewrite the message you typed into — so what is sent is
-   * `DEFERRED_UPDATE_MESSAGE`, which is *"ACK an interaction and edit the
-   * original message later; the user does not see a loading state"*. roma never
-   * takes the second half of that offer.
+   * **The card must not change**, so what is sent is `DEFERRED_UPDATE_MESSAGE`.
+   *
+   * Enforced by `fence:discord-press-ack-leaves-card`.
    *
    * Rejects like any other call. The one caller writes it down and hands the
    * press on anyway: a press roma failed to acknowledge is one Discord will mark

@@ -29,10 +29,8 @@ export interface ShimEnvironment {
 /**
  * Where roma is, and which Session this is, out of the process environment.
  *
- * Throws rather than defaulting. A Shim that quietly carried on with no socket
- * to ask would answer every request with no credential, which presents as
- * authentication failing — a diagnosis that sends somebody to look at the App
- * rather than at the two variables that are missing.
+ * Throws rather than defaulting, naming the variable that is missing. Enforced
+ * by `fence:shim-a-missing-variable-is-said`.
  */
 export function shimEnvironment(env: NodeJS.ProcessEnv = process.env): ShimEnvironment {
   const socketPath = env[MINTER_SOCKET_VAR]
@@ -49,10 +47,9 @@ export function shimEnvironment(env: NodeJS.ProcessEnv = process.env): ShimEnvir
 /**
  * Ask roma one question and wait for its answer.
  *
- * Rejects only where the socket itself could not be used. A roma that answered
- * "no credential, and here is why" is a successful exchange — the reason is what
- * the Shim has to pass on, and losing it to an exception would leave the tool
- * saying "authentication failed" with nothing behind it.
+ * Rejects only where the socket itself could not be used: a roma that answered
+ * "no credential, and here is why" resolves. Enforced by
+ * `fence:shim-no-credential-is-an-answer`.
  */
 export async function askMinter(socketPath: string, request: ShimRequest): Promise<ShimResponse> {
   return await new Promise<ShimResponse>((answered, failed) => {
@@ -97,9 +94,7 @@ export interface ShimAnswer {
  * three failures — no socket named, socket unreachable, roma has nothing — in
  * two places, and the first change to any of them would drift.
  *
- * Never rejects. A Shim that threw would make `git` or `gh` fail with a Node
- * stack trace instead of with its own account of the command that was actually
- * run, which is the thing the agent needs to relay.
+ * Never rejects. Enforced by `fence:shim-credential-for-never-rejects`.
  *
  * The wording names no forge, deliberately: this is the Core, and what roma
  * mints against is not something it is allowed to know. The tool's own message

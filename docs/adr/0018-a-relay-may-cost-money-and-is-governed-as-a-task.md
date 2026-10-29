@@ -53,7 +53,7 @@ This ADR specifies one sentence — "Compacted: 31,953 → 1,764 tokens" — and
 implementation carries two fallbacks behind it, because the figures it quotes are
 nullable everywhere else in roma and a Relay that neither compacted nor spoke
 would otherwise end in silence. Neither has been seen on any capture; both exist
-so that no ending of a paid Relay is unanswered.
+so that no ending of a paid Relay is unanswered. Enforced by `fence:core-relay-reply-never-silent`.
 
 **The drift check's new key needed a floor, and a capture is why.** This ADR
 specifies "the `modelUsage` output-token delta, summed across models". The
@@ -512,7 +512,8 @@ either direction". Both halves were wrong, and the measurement is what shows it.
 `duration_api_ms` was `0` and the top-level `usage` was all zeros. So ADR-0012's
 check would not fire on a legitimate `/compact` — it would **never** fire — and a
 per-entry expectation keyed on the same field has nothing to compare, because
-reality says zero for a free Relay and a paid one alike.
+reality says zero for a free Relay and a paid one alike. Enforced by
+`fence:core-free-relay-drift-is-one-way`.
 
 The two paths differ because an auto Compaction rides *inside* somebody's Turn
 and bumps its count to 2 (#100), while a manual one is a `type:"local"` command
@@ -543,7 +544,8 @@ reads this object — ADR-0012's rejected alternative measured
 **One direction only.** A paid entry's expectation is that it *may* do model
 work, not that it must: a `/compact` that fails with too little conversation to
 summarise does none, at a delta of zero, and a two-directional check would report
-that as drift every time somebody typed `/compact` into a short thread.
+that as drift every time somebody typed `/compact` into a short thread. Enforced by
+`fence:core-manual-compaction-is-the-callers`.
 
 **And a check that fires before the money moves, not after.** One seam 2 case per
 Relay entry, asserting its cost class against the pinned build — the shape

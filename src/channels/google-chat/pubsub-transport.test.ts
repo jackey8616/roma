@@ -39,14 +39,19 @@ const EVENT = {
 }
 
 describe('taking events off the subscription', () => {
-  it('hands the decoded event over, named by the message id', async () => {
+  it('hands the decoded event over, named by the message id [fence:gchat-delivery-is-named-by-pubsub]', async () => {
+    const why =
+      "A Delivery's id is Pub/Sub's own message id, the same on every redelivery (ADR-0003: " +
+      'ingress is a queue that redelivers, and the in-flight check keys on this id). An id minted on ' +
+      'arrival differs every time, the check catches nothing, and a redelivered event runs ' +
+      'twice (#31).'
     const sub = subscribing()
     await sub.receive()
 
     sub.subscription.publishJson(EVENT, 'msg-1')
 
     expect(sub.taken).toHaveLength(1)
-    expect(sub.taken[0]).toMatchObject({ id: 'msg-1', event: EVENT })
+    expect(sub.taken[0], why).toMatchObject({ id: 'msg-1', event: EVENT })
   })
 
   // The id is Pub/Sub's own, which is what makes it the same across
@@ -131,12 +136,16 @@ describe('surviving the things a subscription does', () => {
   // reconnects — and roma's business only to write down. Thrown from a listener
   // it would be an unhandled error taking the process with it, which is a
   // network blip ending roma.
-  it('writes down a subscription error rather than throwing it', async () => {
+  it('writes down a subscription error rather than throwing it [fence:gchat-subscription-error-is-written-down]', async () => {
+    const why =
+      'A subscription error is written to the Operator Log and never thrown (ADR-0005). The ' +
+      'client library is already reconnecting; a listener that throws is an unhandled error ' +
+      'taking the process down over a network blip (#31).'
     const sub = subscribing()
     await sub.receive()
 
-    expect(() => sub.subscription.fail(new Error('stream reset'))).not.toThrow()
-    expect(sub.log).toEqual([{ event: 'pubsub-error', reason: 'stream reset' }])
+    expect(() => sub.subscription.fail(new Error('stream reset')), why).not.toThrow()
+    expect(sub.log, why).toEqual([{ event: 'pubsub-error', reason: 'stream reset' }])
   })
 
   // The receiver is not supposed to reject — settling is its job, and it has

@@ -23,9 +23,14 @@ describe('a Session id derived from a Conversation Key', () => {
   // that can break here is the namespace changing. Recomputing agrees with itself
   // however the namespace moves; these values do not. A change to them orphans
   // every transcript on disk and every live Conversation at once.
-  it('is these ids, for as long as roma keeps the Sessions it already has', () => {
-    expect(sessionIdFor('conversation-one')).toBe('4a03e16d-42d9-58c9-9eae-8468b8b6efae')
-    expect(sessionIdFor('conversation-two')).toBe('9cec7e33-0a30-556c-bbf4-39cd9a77bc92')
+  it('is these ids, for as long as roma keeps the Sessions it already has [fence:session-id-namespace-is-frozen]', () => {
+    const why =
+      "roma's uuidv5 namespace, and the derivation under it, must never change (ADR-0003, " +
+      'Session identity). Every Session id is derived rather than stored, so a new namespace ' +
+      'renames every Session at once: every Transcript Claude Code holds is orphaned and every ' +
+      'live Conversation loses its context, with no record to migrate from.'
+    expect(sessionIdFor('conversation-one'), why).toBe('4a03e16d-42d9-58c9-9eae-8468b8b6efae')
+    expect(sessionIdFor('conversation-two'), why).toBe('9cec7e33-0a30-556c-bbf4-39cd9a77bc92')
   })
 
   it('is a uuid, which is the only kind of id Claude Code accepts', () => {
@@ -62,15 +67,24 @@ describe('a Session generation', () => {
   // could mint names another Conversation's later generation. A key and a
   // generation joined with a printable separator would have let one do exactly
   // that.
-  it('cannot be spelled out in a Conversation Key', () => {
-    expect(sessionIdFor('conversation-one#1')).not.toBe(sessionIdFor('conversation-one', 1))
-    expect(sessionIdFor('conversation-one 1')).not.toBe(sessionIdFor('conversation-one', 1))
+  it('cannot be spelled out in a Conversation Key [fence:session-id-separator-is-unspellable]', () => {
+    const why =
+      'A Conversation Key and a generation must be joined by a byte no Channel identifier can ' +
+      'carry, never a printable separator (ADR-0003, Where a fresh session comes from). With `#`, a Channel that minted the key ' +
+      '`a#1` derives the same id as generation 1 of `a`: one Conversation reading and writing ' +
+      "another's Session, with nothing saying so."
+    for (let code = 0x20; code < 0x7f; code++) {
+      const spelled = `conversation-one${String.fromCharCode(code)}1`
+      expect(sessionIdFor(spelled), `${why} (${JSON.stringify(spelled)})`).not.toBe(
+        sessionIdFor('conversation-one', 1),
+      )
+    }
   })
 
   // Generation zero is where every Conversation starts and where all of them are
   // today, so its ids are the ones already on disk. Rotating a Session must not
   // rename the Sessions that never rotated.
-  it('leaves the first generation at the id it already had', () => {
+  it('leaves the first generation at the id it already had [fence:session-id-namespace-is-frozen]', () => {
     expect(sessionIdFor('conversation-one', 0)).toBe('4a03e16d-42d9-58c9-9eae-8468b8b6efae')
   })
 

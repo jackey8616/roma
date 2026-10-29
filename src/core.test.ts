@@ -3,6 +3,7 @@ import { join, sep } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuditLog, monthOf } from './audit-log.js'
+import { commandSpellings, readCommand } from './commands.js'
 import { Core, type CoreLogRecord, type CoreOptions } from './core.js'
 import type {
   ChannelAdapter,
@@ -578,7 +579,11 @@ describe('what the Channel is asked to post', () => {
   // Those are written for whoever is reading the code; a person in a
   // Conversation cannot act on either, and neither is theirs to see. What they
   // need is to know the Task is dead so they stop waiting for it.
-  it("says so when the Session could not run at all, in roma's own words", async () => {
+  it("says so when the Session could not run at all, in roma's own words [fence:core-failure-in-romas-words]", async () => {
+    const why =
+      "A failure on roma's side is told in roma's words, never the error's own message " +
+      '(ADR-0010): those carry exit codes and Session uuids a Caller has never seen and ' +
+      "cannot act on; the detail is the operator's."
     const { adapter, claude, core } = newCore()
 
     const task = core.handle(ingress('hello'))
@@ -586,7 +591,7 @@ describe('what the Channel is asked to post', () => {
     claude.process.emitExit({ code: 1, signal: null })
     await task
 
-    expect(posted(adapter.instructions)).toEqual([
+    expect(posted(adapter.instructions), why).toEqual([
       opening(),
       { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
       { kind: 'failure', conversationKey: KEY, reason: 'roma could not run this Task.' },
@@ -599,7 +604,12 @@ describe('what the Channel is asked to post', () => {
   // derived from the Conversation Key and never moves. The pool has already
   // tried the other flag by the time this is said, so the sentence cannot say
   // "send it again" — it says the one thing a person can do themselves.
-  it('tells a Conversation whose Session cannot be opened what to do about it', async () => {
+  it('tells a Conversation whose Session cannot be opened what to do about it [fence:core-session-lost-reason]', async () => {
+    const why =
+      'A Session that cannot be opened is answered with /clear, never a promise that ' +
+      "resending works and never Claude Code's own sentence (#107): the pool has " +
+      'already retried, and No conversation found with session ID names an id the ' +
+      'Caller has never seen.'
     const { adapter, claude, core, pool, procFor, say } = newCore()
     // A Session that really exists, so the next message goes out as a resume.
     await say('first')
@@ -617,14 +627,18 @@ describe('what the Channel is asked to post', () => {
     // The recovery was tried and used up: the first message, the resume, and the
     // fresh Session the pool reached for. Without this the test would pass on a
     // roma that never recovered at all.
-    expect(claude.spawns).toHaveLength(3)
-    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+    expect(claude.spawns, why).toHaveLength(3)
+    expect(posted(adapter.instructions).at(-1), why).toMatchObject({
       kind: 'failure',
       reason: expect.stringContaining('/clear'),
     })
-    expect(posted(adapter.instructions).at(-1)).not.toMatchObject({
+    expect(posted(adapter.instructions).at(-1), why).not.toMatchObject({
       reason: 'roma could not run this Task.',
     })
+    const [told] = posted(adapter.instructions).slice(-1)
+    const reason = told?.kind === 'failure' ? told.reason : ''
+    expect(reason, why).not.toMatch(/again|no conversation found/i)
+    expect(reason, why).not.toContain(sessionIdFor(KEY))
   })
 
   // Reporting the failure is the Core's answer to it — a Conversation that has
@@ -941,6 +955,30 @@ describe('telling a Conversation its Task is alive', () => {
     })
   })
 
+  it('moves the acknowledgement on as the answer grows [fence:core-writing-progress-moves]', async () => {
+    const why =
+      'The writing phase carries how much has been written, and an update that says more ' +
+      'is sent (ADR-0010): compared on the phase alone, every moment of a generating Turn ' +
+      'says the same as the last and the Acknowledgement freezes, which is what a dead ' +
+      'Task looks like.'
+    const { adapter, start } = newCore()
+    const { task, proc } = await start('hello')
+    const half = Math.floor(GENERATING.length / 2)
+
+    feed(proc, GENERATING.slice(0, half))
+    await vi.advanceTimersByTimeAsync(THROTTLE)
+    feed(proc, GENERATING.slice(half, -1))
+    await vi.advanceTimersByTimeAsync(THROTTLE)
+    const written = progressOf(adapter).flatMap(({ progress }) =>
+      progress.phase === 'writing' ? [progress.characters] : [],
+    )
+    feed(proc, GENERATING.slice(-1))
+    await task
+
+    expect(written, why).toHaveLength(2)
+    expect(written[1]! > written[0]!, why).toBe(true)
+  })
+
   // 194 `text_delta` events in one Turn. A renderer that edited a message per
   // event would make 194 Channel calls, and nobody can read that fast anyway.
   it('does not turn a burst of stream events into a burst of updates', async () => {
@@ -965,7 +1003,12 @@ describe('telling a Conversation its Task is alive', () => {
   // an update roma queued behind one still in flight is handed over after the
   // Turn has ended, and the throttle is 5s against a Turn that can end 85ms after
   // its last token.
-  it('sends no update after the answer, however slow the Channel is', async () => {
+  it('sends no update after the answer, however slow the Channel is [fence:core-no-update-after-the-answer]', async () => {
+    const why =
+      "No progress follows a Task's last instruction (ADR-0010): ProgressReporter.stop " +
+      'drops updates still queued behind a slow Channel, because an Adapter drops its ' +
+      'acknowledgement with the result and a late update posts a stale Working… under ' +
+      'the answer. A guarantee the Core keeps, not a rule every Adapter must be told.'
     const { adapter, start } = newCore()
     const release = adapter.hold('progress')
 
@@ -983,7 +1026,7 @@ describe('telling a Conversation its Task is alive', () => {
     // `lastIndexOf`, because the Opening is a `result` too and it is the first
     // thing in here. What this is about is the answer being the last word.
     const kinds = adapter.instructions.map((instruction) => instruction.kind)
-    expect(kinds.slice(kinds.lastIndexOf('result'))).toEqual(['result'])
+    expect(kinds.slice(kinds.lastIndexOf('result')), why).toEqual(['result'])
   })
 
   // The stream marks a tool starting and then says nothing until it finishes.
@@ -1109,7 +1152,12 @@ describe('the Commands roma answers itself', () => {
   // the half-written answer the interrupt cut off. Not a silent completion
   // either — a Task that ends with nothing said leaves someone waiting for a
   // result that is never coming.
-  it('reports a stopped Task as stopped', async () => {
+  it('reports a stopped Task as stopped [fence:core-stop-reported-as-stopped]', async () => {
+    const why =
+      'A Task ended by /stop must be reported as stopped, neither a failure nor a silent ' +
+      'completion (ADR-0003). As a failure it reads as roma breaking and carries the ' +
+      'half-written answer the interrupt cut off as its reason; with nothing said, somebody ' +
+      'waits for a result that is never coming.'
     const { adapter, core, start } = newCore()
     const { task, proc } = await start('write me an essay')
 
@@ -1117,7 +1165,7 @@ describe('the Commands roma answers itself', () => {
     feed(proc, INTERRUPTED.turn(1))
     await task
 
-    expect(posted(adapter.instructions)).toEqual([
+    expect(posted(adapter.instructions), why).toEqual([
       opening(),
       { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
       { kind: 'command-outcome', conversationKey: KEY, command: 'stop', carriedOut: true },
@@ -1176,14 +1224,19 @@ describe('the Commands roma answers itself', () => {
   // asked to stop carries on where it started. Asking which Session the
   // Conversation is on now would interrupt an empty one and report that nothing
   // was running, while the Task nobody wants keeps going.
-  it('stops the Task it was sent to stop, even after a /clear moved the Conversation', async () => {
+  it('stops the Task it was sent to stop, even after a /clear moved the Conversation [fence:core-stop-reads-running]', async () => {
+    const why =
+      "/stop finds a Conversation's Tasks in #running, never through the Session " +
+      'generation (ADR-0013): a /clear in between moves the Conversation while the Task ' +
+      'carries on, so the generation answers nothing to stop and the Task keeps ' +
+      'running.'
     const { adapter, core, start } = newCore()
     const { task, proc } = await start('write me an essay')
 
     await core.handle(ingress('/clear'))
     await core.handle(ingress('/stop'))
 
-    expect(proc.sent.at(-1)).toMatchObject({
+    expect(proc.sent.at(-1), why).toMatchObject({
       type: 'control_request',
       request: { subtype: 'interrupt' },
     })
@@ -1191,14 +1244,21 @@ describe('the Commands roma answers itself', () => {
     feed(proc, INTERRUPTED.turn(1))
     await task
 
-    expect(posted(adapter.instructions).at(-1)).toEqual({ kind: 'stopped', conversationKey: KEY })
+    expect(posted(adapter.instructions).at(-1), why).toEqual({
+      kind: 'stopped',
+      conversationKey: KEY,
+    })
   })
 
   // Between arriving and its first token a Task can be queued behind three
   // others — minutes in which it is visibly running, `/stop` is exactly what a
   // person would send, and there is no Turn to interrupt. A Task stopped there
   // must not quietly run later.
-  it('stops a Task that has not started yet, rather than letting it run later', async () => {
+  it('stops a Task that has not started yet, rather than letting it run later [fence:core-stopped-before-its-turn]', async () => {
+    const why =
+      'A Task stopped while queued never starts its Attempt (ADR-0003, ADR-0013): ' +
+      'started anyway, it spends a Turn on work somebody said they did not want and is ' +
+      'then interrupted.'
     const { adapter, claude, core, procFor } = newCore()
     const busy = ['one', 'two', 'three'].map((key) => core.handle(ingress('hello', key)))
     await flush()
@@ -1214,7 +1274,7 @@ describe('the Commands roma answers itself', () => {
     await waiting
 
     // Never spawned: the fourth Session has no process at all.
-    expect(claude.processes).toHaveLength(3)
+    expect(claude.processes, why).toHaveLength(3)
     expect(
       posted(adapter.instructions).filter(({ conversationKey }) => conversationKey === 'four'),
     ).toEqual([
@@ -1225,11 +1285,62 @@ describe('the Commands roma answers itself', () => {
     ])
   })
 
+  it('answers with an outcome only to /stop and /clear [fence:core-carry-out-names-its-two]', async () => {
+    const why =
+      'Only /stop and /clear are carried out as an outcome; every other Command answers in ' +
+      'words of its own (ADR-0003). #carryOut names the two it handles rather than taking ' +
+      'whatever is left over, so a new Command cannot land in it and be answered as a ' +
+      'second /stop.'
+    for (const spelling of commandSpellings()) {
+      const { adapter, core } = newCore()
+
+      await core.handle(ingress(spelling))
+
+      const command = readCommand(spelling)?.command
+      const [answer] = adapter.instructions
+      if (command === 'stop' || command === 'clear') {
+        expect(answer, `${spelling}: ${why}`).toMatchObject({ kind: 'command-outcome', command })
+      } else {
+        expect(answer?.kind, `${spelling}: ${why}`).not.toBe('command-outcome')
+      }
+    }
+  })
+
+  it('sends a message already waiting when a /clear lands to the Session it was sent to [fence:core-session-read-in-the-try]', async () => {
+    const why =
+      'The Session a message goes to is read when it arrives, not when the queue admits it ' +
+      '(ADR-0013): read on admission, a message already waiting when a /clear lands goes to ' +
+      'the new Session instead of the one it was sent to.'
+    const { adapter, claude, core, start } = newCore()
+    const { task: running, proc } = await start('first')
+    const queued = core.handle(ingress('second'))
+    await flush()
+
+    await core.handle(ingress('/clear'))
+    feed(proc, OK)
+    await running
+    await flush()
+    feed(proc, THREE_TURNS.turn(3))
+    await queued
+
+    expect(claude.processes, why).toHaveLength(1)
+    expect(posted(adapter.instructions).at(-1), why).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: '47',
+    })
+  })
+
   // The same window at the other end: admitted, and waiting on a cold start.
   // There is nothing to interrupt yet, so the request is sent the moment the
   // Turn begins instead — the alternative is a Task that was stopped answering
   // as though it never had been.
-  it('stops a Task whose process has not finished starting', async () => {
+  it('stops a Task whose process has not finished starting [fence:core-opening-travels-with-the-message]', async () => {
+    const why =
+      "The Opening is started in handle() and awaited only before the Task's first " +
+      'instruction (ADR-0024): awaited inline, a message that opens reaches #running ' +
+      "late, so a /stop sent straight after a Conversation's first message answers " +
+      'nothing to stop and the Task runs on.'
     const { adapter, core, procFor } = newCore()
     const task = core.handle(ingress('write me an essay'))
     task.catch(() => {})
@@ -1238,12 +1349,18 @@ describe('the Commands roma answers itself', () => {
     await flush()
 
     const proc = procFor(KEY)
-    expect(proc.sent.map((frame) => frame['type'])).toEqual(['user', 'control_request'])
+    expect(
+      proc.sent.map((frame) => frame['type']),
+      why,
+    ).toEqual(['user', 'control_request'])
 
     feed(proc, INTERRUPTED.turn(1))
     await task
 
-    expect(posted(adapter.instructions).at(-1)).toEqual({ kind: 'stopped', conversationKey: KEY })
+    expect(posted(adapter.instructions).at(-1), why).toEqual({
+      kind: 'stopped',
+      conversationKey: KEY,
+    })
   })
 
   // Everything this Conversation has in flight, not just the one at the front.
@@ -1388,7 +1505,10 @@ describe('the Commands roma answers itself', () => {
   // Silence is not an outcome the Core has, and that does not stop at Tasks. A
   // Conversation whose record of which Session it is on cannot be read is
   // answered, badly, rather than not at all.
-  it('says so when it cannot work out which Session a Conversation is on', async () => {
+  it('says so when it cannot work out which Session a Conversation is on [fence:core-session-read-in-the-try]', async () => {
+    const why =
+      'The Session a message goes to is read inside the try (ADR-0013): read outside ' +
+      'it, a Conversation roma cannot resolve is answered with silence.'
     const { adapter, core, workRoot } = newCore()
     // Reaching for `SessionGenerations`' own file, because a half-written record
     // is a state nothing else can produce — a machine that lost power mid-write
@@ -1398,7 +1518,7 @@ describe('the Commands roma answers itself', () => {
     await core.handle(ingress('hello'))
     await core.handle(ingress('/clear'))
 
-    expect(posted(adapter.instructions)).toEqual([
+    expect(posted(adapter.instructions), why).toEqual([
       { kind: 'failure', conversationKey: KEY, reason: 'roma could not run this Task.' },
       { kind: 'failure', conversationKey: KEY, reason: 'roma could not carry out that command.' },
     ])
@@ -1436,19 +1556,24 @@ describe('the model a Conversation runs on', () => {
   // once — no Turn is driven, so nobody is billed for asking — and the answer has
   // to say *when* it applies, because a bare acknowledgement sent while a Task is
   // running would be read as having changed that Task.
-  it('runs the next Task on the model somebody chose, and says so from that message on', async () => {
+  it('runs the next Task on the model somebody chose, and says so from that message on [fence:core-model-reply-says-when]', async () => {
+    const why =
+      'The /model reply says it applies from the next message (ADR-0014): a bare ' +
+      'acknowledgement sent while a Task runs reads as having changed that Task.'
     const { adapter, claude, core, say } = newCore()
 
     await core.handle(ingress('/model opus'))
     await say('hello')
 
-    expect(claude.lastSpawn.args).toContain(OPUS)
-    expect(posted(adapter.instructions)[0]).toEqual({
+    expect(claude.lastSpawn.args, why).toContain(OPUS)
+    expect(posted(adapter.instructions)[0], why).toEqual({
       kind: 'result',
       conversationKey: KEY,
       text: expect.stringContaining('from your next message'),
     })
-    expect(posted(adapter.instructions)[0]).toMatchObject({ text: expect.stringContaining(OPUS) })
+    expect(posted(adapter.instructions)[0], why).toMatchObject({
+      text: expect.stringContaining(OPUS),
+    })
   })
 
   // Aimed at what the next message reaches, never backwards into work somebody
@@ -1502,13 +1627,17 @@ describe('the model a Conversation runs on', () => {
   // render as pressable (ADR-0023). Either way roma owns the answer, so there is
   // no process, no Turn and no money, and asking never interrupts what the
   // Conversation is waiting on.
-  it('reports the current model and the Menu, without a process or a Turn', async () => {
+  it('reports the current model and the Menu, without a process or a Turn [fence:core-model-never-relayed]', async () => {
+    const why =
+      '/model is answered by roma and never reaches a process (ADR-0014): relayed, the ' +
+      'choice lives in a process that ends at Eviction, Reaping or a deploy, and ' +
+      'reverts at a moment nobody can see.'
     const { adapter, claude, core } = newCore()
 
     await core.handle(ingress('/model'))
 
-    expect(claude.processes).toHaveLength(0)
-    expect(posted(adapter.instructions)).toEqual([
+    expect(claude.processes, why).toHaveLength(0)
+    expect(posted(adapter.instructions), why).toEqual([
       {
         kind: 'choice',
         conversationKey: KEY,
@@ -1522,7 +1651,7 @@ describe('the model a Conversation runs on', () => {
     ])
     const [reported] = posted(adapter.instructions)
     for (const name of ['fable', 'opus', 'sonnet', 'haiku', 'default']) {
-      expect(reported).toMatchObject({ text: expect.stringContaining(name) })
+      expect(reported, why).toMatchObject({ text: expect.stringContaining(name) })
     }
   })
 
@@ -1563,7 +1692,11 @@ describe('the model a Conversation runs on', () => {
   // it matters. It matters the day an operator moves `ROMA_MODEL`: a Session
   // with no record follows them and this one does not, so reporting it as
   // "default" would promise the opposite of what its record guarantees.
-  it('reports a Session moved to the Pinned Model by the name that was typed', async () => {
+  it('reports a Session moved to the Pinned Model by the name that was typed [fence:core-named-as-typed]', async () => {
+    const why =
+      "A Session's model is named with chosenFor, never modelFor (ADR-0014): the two " +
+      'agree on the id for a Session that chose the pinned model, and naming it default ' +
+      'tells the Caller an operator moving the pin takes them along.'
     const { adapter, core } = newCore()
 
     // `sonnet` is what `PINNED_MODEL` resolves to, which is what makes this the
@@ -1571,10 +1704,10 @@ describe('the model a Conversation runs on', () => {
     await core.handle(ingress('/model sonnet'))
     await core.handle(ingress('/model'))
 
-    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+    expect(posted(adapter.instructions).at(-1), why).toMatchObject({
       text: expect.stringContaining(`sonnet (${PINNED_MODEL})`),
     })
-    expect(posted(adapter.instructions).at(-1)).not.toMatchObject({
+    expect(posted(adapter.instructions).at(-1), why).not.toMatchObject({
       text: expect.stringContaining('default ('),
     })
   })
@@ -1583,25 +1716,38 @@ describe('the model a Conversation runs on', () => {
   // The Core reads the model again immediately before each Attempt is sent, and
   // this is the case that separates the two: the Task in flight finishes where
   // it began, and the one behind it in the queue does not.
-  it('moves a Task that was still queued when somebody chose', async () => {
+  it('moves a Task that was still queued when somebody chose [fence:core-ledger-names-what-ran]', async () => {
+    const why =
+      'The Audit Record names the model and effort a Task ran at, re-read before each ' +
+      'Attempt (ADR-0014, ADR-0016): read only on arrival, a Task queued behind another ' +
+      'when somebody chose is filed under what was true when it arrived, not what was ' +
+      'spent.'
     const { audit, claude, core, procFor, start } = newCore()
     const { task: running, proc } = await start('a long job')
     const queued = core.handle(ingress('and this one after it'))
     await flush()
 
     await core.handle(ingress('/model opus'))
+    await core.handle(ingress('/effort max'))
     feed(proc, OK)
     await running
     await flush()
     feed(procFor(KEY), OK)
     await queued
 
-    expect(claude.lastSpawn.args).toContain(OPUS)
+    expect(claude.lastSpawn.args, why).toContain(OPUS)
     // The half the pool would not have got right on its own. The pool reads the
     // record at every spawn, so the process above would be on Opus whatever the
     // Core believed; what says the Core kept up is the ledger, which is written
     // from what the Core read and is the only place the two can disagree.
-    expect(recordsIn(audit).map((record) => record.model)).toEqual([PINNED_MODEL, OPUS])
+    expect(
+      recordsIn(audit).map((record) => record.model),
+      why,
+    ).toEqual([PINNED_MODEL, OPUS])
+    expect(
+      recordsIn(audit).map((record) => record.effort),
+      why,
+    ).toEqual([PINNED_EFFORT, 'max'])
   })
 
   // Back to whatever `ROMA_MODEL` resolved to rather than to a name written down
@@ -1868,13 +2014,17 @@ describe('the effort a Conversation runs at', () => {
   // Choosing the level the deployment already pins is not the same as never
   // having chosen, and this is the only place the difference is visible before
   // it matters — the day an operator moves `ROMA_EFFORT`.
-  it('reports a Session moved to the Pinned Effort by the name that was typed', async () => {
+  it('reports a Session moved to the Pinned Effort by the name that was typed [fence:core-named-as-typed]', async () => {
+    const why =
+      "A Session's effort is named with chosenFor, never effortFor (ADR-0016): the two " +
+      'agree on the string for a Session that chose the pinned level, and naming it ' +
+      'default tells the Caller an operator moving ROMA_EFFORT takes them along.'
     const { adapter, core } = newCore()
 
     await core.handle(ingress(`/effort ${PINNED_EFFORT}`))
     await core.handle(ingress('/effort'))
 
-    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+    expect(posted(adapter.instructions).at(-1), why).toMatchObject({
       text: expect.stringContaining(`runs at ${PINNED_EFFORT}.`),
     })
   })
@@ -2001,23 +2151,58 @@ describe('an effort the model will not use', () => {
   // Still not the refusal ADR-0016 forbids. `/effort max` above is accepted,
   // recorded and answered exactly as before; what roma declines is to *invite* an
   // action it has just called inert, and the typed Command is untouched.
-  it('offers no Menu to choose from, on a model that will not use one', async () => {
+  it('offers no Menu to choose from, on a model that will not use one [fence:core-effort-menu-only-where-it-applies]', async () => {
+    const why =
+      'The Effort Menu is withheld where the Matrix says the model takes no effort ' +
+      '(ADR-0023): buttons beside a sentence calling the effort inert invite the very ' +
+      'thing the reply just declined.'
     const { adapter, core } = newCore()
     await core.handle(ingress('/model haiku'))
 
     await core.handle(ingress('/effort'))
 
-    expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'result' })
-    expect(posted(adapter.instructions).at(-1)).not.toMatchObject({ kind: 'choice' })
+    expect(posted(adapter.instructions).at(-1), why).toMatchObject({ kind: 'result' })
+    expect(posted(adapter.instructions).at(-1), why).not.toMatchObject({ kind: 'choice' })
   })
 
-  it('offers none on a refusal either, and still says what it refused', async () => {
+  it('says nothing is inert after a /model onto a model the Matrix has never been read about [fence:core-unmeasured-model-keeps-effort]', async () => {
+    const why =
+      'Only a Matrix answer of false says a model takes no effort (ADR-0016): null means ' +
+      'never read about, and a falsy check tells somebody their chosen effort stopped ' +
+      'applying on the strength of a reading roma never made.'
+    const { adapter, core } = newCore({ pinnedModel: 'claude-something-nobody-measured' })
+    await core.handle(ingress('/effort max'))
+
+    await core.handle(ingress('/model default'))
+
+    expect(posted(adapter.instructions).at(-1), why).toMatchObject({ kind: 'result' })
+    expect(posted(adapter.instructions).at(-1), why).not.toMatchObject({
+      text: expect.stringContaining('takes none'),
+    })
+  })
+
+  it('records the level a Task on a model nobody measured was sent at [fence:core-unmeasured-model-keeps-effort]', async () => {
+    const why =
+      'Only a Matrix answer of false puts EFFORT_NOT_APPLIED on the Audit Record (ADR-0016): ' +
+      'for a model never read about, the record would otherwise claim the effort did not ' +
+      'apply where nobody measured it.'
+    const { audit, say } = newCore({ pinnedModel: 'claude-something-nobody-measured' })
+
+    await say('hello')
+
+    expect(recordsIn(audit).at(-1), why).toMatchObject({ effort: PINNED_EFFORT })
+  })
+
+  it('offers none on a refusal either, and still says what it refused [fence:core-effort-menu-only-where-it-applies]', async () => {
+    const why =
+      'The Effort Menu is withheld on a refusal too where the model takes no effort ' +
+      '(ADR-0023).'
     const { adapter, core } = newCore()
     await core.handle(ingress('/model haiku'))
 
     await core.handle(ingress('/effort ludicrous'))
 
-    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+    expect(posted(adapter.instructions).at(-1), why).toMatchObject({
       kind: 'failure',
       reason: expect.stringContaining('ludicrous'),
     })
@@ -2029,19 +2214,24 @@ describe('an effort the model will not use', () => {
   // strength of a reading it never made — the Matrix's own rows for opus and
   // sonnet are a person's inference rather than the extractor's, and the
   // extractor has been wrong once.
-  it('offers the Menu on a model the Matrix has never been read about', async () => {
+  it('offers the Menu on a model the Matrix has never been read about [fence:core-unmeasured-model-keeps-effort]', async () => {
+    const why =
+      'Only a Matrix answer of false says a model takes no effort (ADR-0016, ADR-0023): ' +
+      'null means never read about, and a falsy check withholds the Menu, adds the ' +
+      'takes-none sentence and records no level on the strength of a reading roma never ' +
+      'made.'
     const { adapter, core } = newCore({ pinnedModel: 'claude-something-nobody-measured' })
 
     await core.handle(ingress('/effort'))
 
-    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+    expect(posted(adapter.instructions).at(-1), why).toMatchObject({
       kind: 'choice',
       chooses: 'effort',
       refused: null,
     })
     // And says nothing about applying, for the same reason it offers the Menu:
     // roma has established nothing either way.
-    expect(posted(adapter.instructions).at(-1)).not.toMatchObject({
+    expect(posted(adapter.instructions).at(-1), why).not.toMatchObject({
       text: expect.stringContaining('takes none'),
     })
   })
@@ -2196,14 +2386,41 @@ describe('the Caveman a Conversation runs at', () => {
   // Choosing the level the deployment already pins is not the same as never
   // having chosen, and this is the only place the difference is visible before
   // it matters — the day an operator moves `ROMA_CAVEMAN`.
-  it('reports a Session moved to the Pinned Caveman by the name that was typed', async () => {
+  it('reports a Session moved to the Pinned Caveman by the name that was typed [fence:core-named-as-typed]', async () => {
+    const why =
+      "A Session's Caveman is named with chosenFor, never inForce (ADR-0030): a chosen " +
+      'level equal to the pin is a choice, and naming it default tells the Caller an ' +
+      'operator moving it takes them along.'
     const { adapter, core } = newCore({ pinnedCaveman: 'full' })
 
     await core.handle(ingress('/caveman full'))
     await core.handle(ingress('/caveman'))
 
-    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+    expect(posted(adapter.instructions).at(-1), why).toMatchObject({
       text: expect.stringContaining('runs at caveman full.'),
+    })
+  })
+
+  it('offers its Menu on a model that takes no effort [fence:core-caveman-menu-unconditional]', async () => {
+    const why =
+      'The Caveman Menu is carried unconditionally, never withheld on an #effortApplies of its ' +
+      'own (ADR-0023, ADR-0030): there is no Matrix for a ruleset and no model that declines ' +
+      'one, so a condition withholds an offer on the strength of nothing.'
+    const { adapter, core } = newCore()
+    await core.handle(ingress('/model haiku'))
+
+    await core.handle(ingress('/caveman'))
+    expect(posted(adapter.instructions).at(-1), why).toMatchObject({
+      kind: 'choice',
+      chooses: 'caveman',
+      refused: null,
+    })
+
+    await core.handle(ingress('/caveman grunt'))
+    expect(posted(adapter.instructions).at(-1), why).toMatchObject({
+      kind: 'choice',
+      chooses: 'caveman',
+      refused: 'grunt',
     })
   })
 
@@ -2368,6 +2585,20 @@ describe('a Chosen Caveman roma no longer offers', () => {
     })
   })
 
+  it('still writes the Task down, asking the record nothing more [fence:core-record-survives-a-withheld-caveman]', async () => {
+    const why =
+      'Writing a Task down must not ask the Chosen Caveman record anything (ADR-0030): ' +
+      'that read throws for a level roma no longer offers, and asked while the Audit ' +
+      'Record is written it takes the Task’s ending down with it, on the one path that ' +
+      'must not fail.'
+    const { adapter, audit, core } = withWithheldCaveman()
+
+    await expect(core.handle(ingress('hello')), why).resolves.toBeUndefined()
+
+    expect(recordsIn(audit), why).toMatchObject([{ outcome: 'failure' }])
+    expect(posted(adapter.instructions).at(-1), why).toMatchObject({ kind: 'failure' })
+  })
+
   // The Command path has its own catch and its own generic sentence, so it would
   // otherwise answer "roma could not carry out that command" to the person
   // asking the one question this state makes urgent.
@@ -2471,24 +2702,29 @@ describe('what this Conversation is set to', () => {
    * onto exactly what the Model Menu bounds, and `workflows` is the switch the
    * Effort Menu keeps `ultracode` away from Callers for.
    */
-  it('refuses to set anything, and names what it does let you set', async () => {
+  it('refuses to set anything, and names what it does let you set [fence:core-config-sets-nothing]', async () => {
+    const why =
+      '/config refuses every argument, never honouring or passing it on (ADR-0017): ' +
+      'every Session shares one CLAUDE_CONFIG_DIR, so a settings write persists for ' +
+      'everybody, and keys like model= and workflows bypass the Model Menu and the ' +
+      'ultracode lock.'
     const { adapter, claude, core } = newCore()
 
     await core.handle(ingress('/config model=opusplan'))
 
-    expect(claude.processes).toHaveLength(0)
-    expect(posted(adapter.instructions)[0]).toEqual({
+    expect(claude.processes, why).toHaveLength(0)
+    expect(posted(adapter.instructions)[0], why).toEqual({
       kind: 'failure',
       conversationKey: KEY,
       reason: expect.stringContaining('/model'),
     })
-    expect(posted(adapter.instructions)[0]).toMatchObject({
+    expect(posted(adapter.instructions)[0], why).toMatchObject({
       reason: expect.stringContaining('/effort'),
     })
     // All three, on every deployment. This sentence says what a Caller may type
     // rather than what this Session is, so unlike the report beside it there is
     // no deployment where the third one is left out.
-    expect(posted(adapter.instructions)[0]).toMatchObject({
+    expect(posted(adapter.instructions)[0], why).toMatchObject({
       reason: expect.stringContaining('/caveman'),
     })
   })
@@ -2496,12 +2732,16 @@ describe('what this Conversation is set to', () => {
   // Refused as a Command rather than left to fall through, which is the fault
   // ADR-0017 exists to fix: the Caller is billed for a sentence about their
   // settings change, and the settings change does not happen.
-  it('drives no Turn for a settings change it will not make', async () => {
+  it('drives no Turn for a settings change it will not make [fence:core-config-sets-nothing]', async () => {
+    const why =
+      '/config with an argument is refused by roma and never handed to Claude Code ' +
+      '(ADR-0017): passed on, it writes the settings file every Session in the ' +
+      'deployment shares.'
     const { claude, core } = newCore()
 
     await core.handle(ingress('/config theme=dark'))
 
-    expect(claude.processes).toHaveLength(0)
+    expect(claude.processes, why).toHaveLength(0)
   })
 
   // `readCommand` treats two words after the head as a sentence, so this is the
@@ -2579,15 +2819,19 @@ describe('what the deployment has spent this month', () => {
   // called "this month", the subscription's draw worded as work drawn, metered
   // billing worded as money, every figure saying which Runtime it is about, and
   // nothing anywhere that adds any two of them together.
-  it('names the month and reports both figures, without a process or a Turn', async () => {
+  it('names the month and reports both figures, without a process or a Turn [fence:core-usage-never-one-figure]', async () => {
+    const why =
+      '/usage prints what the subscription drew and what metered billing charged as ' +
+      'separate figures, each naming its Runtime (ADR-0027): a sum prints quota as ' +
+      "money, or adds two subscriptions' quotas."
     const { adapter, audit, claude, core } = newCore()
     spent(audit, { costUsd: 0.21 })
     spent(audit, { costUsd: 1.34, credential: 'overflow' })
 
     await core.handle(ingress('/usage'))
 
-    expect(claude.processes).toHaveLength(0)
-    expect(posted(adapter.instructions)).toEqual([
+    expect(claude.processes, why).toHaveLength(0)
+    expect(posted(adapter.instructions), why).toEqual([
       {
         kind: 'result',
         conversationKey: KEY,
@@ -2604,7 +2848,11 @@ describe('what the deployment has spent this month', () => {
   // figures are read off the real list rather than counted, so the day a second
   // Runtime is named this asserts the report grew with it instead of needing to
   // be told.
-  it('reports the two figures once per Runtime, which is one line each today', async () => {
+  it('reports the two figures once per Runtime, which is one line each today [fence:core-usage-never-one-figure]', async () => {
+    const why =
+      'Every /usage line names its Runtime, though there is one today (ADR-0025, ' +
+      'ADR-0027): a line worded for the deployment goes on reading right at the moment ' +
+      'a second Runtime makes it wrong.'
     const { adapter, audit, core } = newCore()
     spent(audit, { costUsd: 0.21 })
     spent(audit, { costUsd: 1.34, credential: 'overflow' })
@@ -2612,10 +2860,13 @@ describe('what the deployment has spent this month', () => {
     await core.handle(ingress('/usage'))
 
     const [named, ...figures] = textIn(adapter).split('\n')
-    expect(named).toBe('July 2026 (UTC).')
-    expect(figures).toHaveLength(RUNTIMES.length * 2)
+    expect(named, why).toBe('July 2026 (UTC).')
+    expect(figures, why).toHaveLength(RUNTIMES.length * 2)
     for (const runtime of RUNTIMES) {
-      expect(figures.filter((line) => line.includes(RUNTIME_NAMES[runtime]))).toHaveLength(2)
+      expect(
+        figures.filter((line) => line.includes(RUNTIME_NAMES[runtime])),
+        why,
+      ).toHaveLength(2)
     }
   })
 
@@ -2659,7 +2910,11 @@ describe('what the deployment has spent this month', () => {
   // The asymmetry ADR-0027 writes down rather than smooths away: five Commands
   // answer about the Conversation that sent them and this one answers about the
   // deployment, so the same message in another thread is the same question.
-  it('answers the same wherever it was sent', async () => {
+  it('answers the same wherever it was sent [fence:core-usage-is-the-deployments]', async () => {
+    const why =
+      '/usage answers about the deployment, never the Conversation that asked ' +
+      '(ADR-0027): narrowed to a thread it answers a different question rather than a ' +
+      'narrower one.'
     const { adapter, audit, core } = newCore()
     spent(audit, { costUsd: 0.21 })
 
@@ -2667,11 +2922,11 @@ describe('what the deployment has spent this month', () => {
     const mine = textIn(adapter)
     await core.handle(ingress('/usage', OTHER_KEY))
 
-    expect(textIn(adapter)).toBe(mine)
-    expect(posted(adapter.instructions).map(({ conversationKey }) => conversationKey)).toEqual([
-      KEY,
-      OTHER_KEY,
-    ])
+    expect(textIn(adapter), why).toBe(mine)
+    expect(
+      posted(adapter.instructions).map(({ conversationKey }) => conversationKey),
+      why,
+    ).toEqual([KEY, OTHER_KEY])
   })
 
   // A Turn that began and was never priced spent tokens nothing will ever name,
@@ -2859,20 +3114,24 @@ describe('the first thing roma says in a Session', () => {
   // equality rather than as a string of its own, so that rewording one without
   // the other fails here — which is the whole of what keeps four spellings of two
   // facts from becoming four answers to them.
-  it('says exactly what /config says, out of the same reading', async () => {
+  it('says exactly what /config says, out of the same reading [fence:core-opening-says-what-config-says]', async () => {
+    const why =
+      'The Opening and /config are one sentence built from one reading (ADR-0024): a ' +
+      'second copy that reads the records again drifts from the first, and nobody ' +
+      'compares the top of a thread with /config a week later.'
     const { adapter, core, say } = newCore()
 
     await say('hello')
     await core.handle(ingress('/config'))
 
     const said = posted(adapter.instructions)
-    expect(said.at(0)).toEqual(said.at(-1))
-    expect(said.at(0)).toMatchObject({
+    expect(said.at(0), why).toEqual(said.at(-1))
+    expect(said.at(0), why).toMatchObject({
       kind: 'result',
       conversationKey: KEY,
       text: expect.stringContaining(PINNED_MODEL),
     })
-    expect(said.at(0)).toMatchObject({ text: expect.stringContaining(PINNED_EFFORT) })
+    expect(said.at(0), why).toMatchObject({ text: expect.stringContaining(PINNED_EFFORT) })
   })
 
   // The same equality one deployment along, where the sentence carries a third
@@ -2897,12 +3156,17 @@ describe('the first thing roma says in a Session', () => {
   // The promise to every deployment that declined this, and the irony worth
   // stating: a feature whose purpose is fewer tokens must not spend words on the
   // first message of every Conversation on a roma that never turned it on.
-  it('is the Opening it has always been where this Session is off', async () => {
+  it('is the Opening it has always been where this Session is off [fence:core-opening-says-what-config-says]', async () => {
+    const why =
+      'The Caveman fact is in the Opening only where the level in force is not off ' +
+      '(ADR-0024, ADR-0030): made unconditional, or decided with chosenFor, every first ' +
+      'message on a deployment that never turned caveman on says at caveman default ' +
+      '(off).'
     const { adapter, say } = newCore()
 
     await say('hello')
 
-    expect(posted(openingsIn(adapter.instructions))).toEqual([
+    expect(posted(openingsIn(adapter.instructions)), why).toEqual([
       { kind: 'result', conversationKey: KEY, text: SETTINGS_WITHOUT_A_CAVEMAN },
     ])
   })
@@ -2951,12 +3215,19 @@ describe('the first thing roma says in a Session', () => {
   // What "first" means, and it is not a figure of speech: the acknowledgement is
   // what roma said first for every message before this existed, and an Opening
   // that arrived after it would be a receipt.
-  it('goes out ahead of the acknowledgement', async () => {
+  it('goes out ahead of the acknowledgement [fence:core-opening-travels-with-the-message]', async () => {
+    const why =
+      'The Opening reaches the Channel before anything the Task produces (ADR-0024): ' +
+      'every instruction waits on it, so an Opening after the acknowledgement would be ' +
+      'a receipt.'
     const { adapter, start } = newCore()
 
     const { task, proc } = await start('hello')
 
-    expect(adapter.instructions.map(({ kind }) => kind)).toEqual(['result', 'progress'])
+    expect(
+      adapter.instructions.map(({ kind }) => kind),
+      why,
+    ).toEqual(['result', 'progress'])
 
     feed(proc, OK)
     await task
@@ -3036,7 +3307,11 @@ describe('the first thing roma says in a Session', () => {
   // One Session, one Opening, even where the two messages that could each earn
   // one arrive together. Reading the record would not be enough on its own —
   // neither message has written it yet at the moment the other one looks.
-  it('opens once when two messages arrive together', async () => {
+  it('opens once when two messages arrive together [fence:core-opening-travels-with-the-message]', async () => {
+    const why =
+      'One Session, one Opening (ADR-0024): the Opening is registered before it is ' +
+      'awaited, so a second message that arrives while it is going out waits for it ' +
+      'rather than opening again.'
     const { adapter, core, procFor } = newCore()
 
     const first = core.handle(ingress('first'))
@@ -3049,22 +3324,48 @@ describe('the first thing roma says in a Session', () => {
     feed(proc, THREE_TURNS.turn(3))
     await second
 
-    expect(openingsIn(adapter.instructions)).toHaveLength(1)
+    expect(openingsIn(adapter.instructions), why).toHaveLength(1)
   })
 
   // A Channel that refused the Opening refused a notice, and the work it was in
   // front of is still owed to whoever asked. Refused by position rather than by
   // kind, because the Opening and the answer are both `result` — which is the
   // point of it having no kind of its own.
-  it('runs the Task anyway when the Channel refuses the Opening', async () => {
+  const NEVER_OUTWARDS =
+    'An Opening may never fail outwards (ADR-0024): everything the message goes on to ' +
+    'produce waits on its promise, so a rejection rejects the Task’s own delivery, hands ' +
+    'the Delivery back to the Transport, and redelivers a Turn that has already been paid ' +
+    'for. A Channel refusing it, or the record of it failing to write, is absorbed.'
+
+  it('runs the Task anyway when the Channel refuses the Opening [fence:core-opening-never-fails-outwards]', async () => {
     const { core, delivered } = refusingTheOpening(newCore())
 
     await core.say('hello')
 
-    expect(posted(delivered)).toEqual([
+    expect(posted(delivered), NEVER_OUTWARDS).toEqual([
       { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
       { kind: 'result', conversationKey: KEY, text: 'ok' },
     ])
+  })
+
+  // The other way an Opening can fail, and the one that is never retried: the
+  // Opening was said, and only the note of it was lost.
+  it('runs the Task anyway when the Opening was said and its record could not be written [fence:core-opening-never-fails-outwards]', async () => {
+    const shared = newCore()
+    const opened = shared.work.openedRecord(sessionIdFor(KEY))
+    const write = shared.work.writeRecord.bind(shared.work)
+    vi.spyOn(shared.work, 'writeRecord').mockImplementation((path, contents) => {
+      if (path === opened) throw new Error('EACCES: the Work Root cannot be written to')
+      write(path, contents)
+    })
+
+    await expect(shared.say('hello'), NEVER_OUTWARDS).resolves.toBeUndefined()
+
+    expect(posted(shared.adapter.instructions).at(-1), NEVER_OUTWARDS).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: 'ok',
+    })
   })
 
   // Delayed rather than lost. The record is written once the Channel has taken
@@ -3446,7 +3747,11 @@ describe('the record every Task leaves behind', () => {
   // resolved a second time — a `/caveman` that lands while the Turn is running
   // moves the next spawn, and a record that read the Chosen Record again would
   // name a level nothing was asked for.
-  it('records the Caveman the Task ran at, not the one chosen while it ran', async () => {
+  it('records the Caveman the Task ran at, not the one chosen while it ran [fence:core-ledger-names-what-ran]', async () => {
+    const why =
+      'The Audit Record names the Caveman the process was rendered at, read off the ' +
+      'process (ADR-0030): read from the Chosen Record at record time, a /caveman that ' +
+      'landed mid-Turn is recorded as what the Task ran at.'
     const { audit, core, say, start } = newCore({ pinnedCaveman: 'lite' })
     const { task, proc } = await start('a long job')
 
@@ -3455,7 +3760,10 @@ describe('the record every Task leaves behind', () => {
     await task
     await say('and now')
 
-    expect(recordsIn(audit).map((record) => record.caveman)).toEqual(['lite', 'ultra'])
+    expect(
+      recordsIn(audit).map((record) => record.caveman),
+      why,
+    ).toEqual(['lite', 'ultra'])
   })
 
   // A deployment that pinned `off` chose to append nothing; one that named no
@@ -3463,16 +3771,26 @@ describe('the record every Task leaves behind', () => {
   // record is where the two stop being one string, because a month of Tasks
   // filed under a level nobody set answers ADR-0030's first question with a
   // setting the deployment never made.
-  it('says a deployment named no Caveman rather than naming a level nobody chose', async () => {
+  it('says a deployment named no Caveman rather than naming a level nobody chose [fence:core-caveman-not-pinned-on-record]', async () => {
+    const why =
+      'A deployment that named no Caveman is recorded as CAVEMAN_NOT_PINNED, never as ' +
+      'off (ADR-0030): the two run identically, and the Audit Record is the one place ' +
+      'pinning off and pinning nothing may not be one string.'
     const { audit: named, say: sayPinned } = newCore({ pinnedCaveman: CAVEMAN_OFF })
     const { audit: unnamed, say } = newCore()
 
     await sayPinned('hello')
     await say('hello')
 
-    expect(recordsIn(named).map((record) => record.caveman)).toEqual([CAVEMAN_OFF])
-    expect(recordsIn(unnamed).map((record) => record.caveman)).toEqual([CAVEMAN_NOT_PINNED])
-    expect(CAVEMAN_NAMES).not.toContain(CAVEMAN_NOT_PINNED)
+    expect(
+      recordsIn(named).map((record) => record.caveman),
+      why,
+    ).toEqual([CAVEMAN_OFF])
+    expect(
+      recordsIn(unnamed).map((record) => record.caveman),
+      why,
+    ).toEqual([CAVEMAN_NOT_PINNED])
+    expect(CAVEMAN_NAMES, why).not.toContain(CAVEMAN_NOT_PINNED)
   })
 
   // Two numbers because they answer different questions. The Task's own wall
@@ -3774,7 +4092,11 @@ describe('a Compaction that failed', () => {
   // reduced fails every Attempt for the same reason, so without this a Task that
   // parked and reran would say it twice — and the operator still gets both lines,
   // because each occurrence really did occur.
-  it('tells the Caller once however many times the Compaction fails', async () => {
+  it('tells the Caller once however many times the Compaction fails [fence:core-context-full-once-per-task]', async () => {
+    const why =
+      'A Task tells its Caller once that the Session cannot be reduced, not once per ' +
+      'failed Compaction (ADR-0010, ADR-0019): every Attempt of an unreducible Session ' +
+      'fails the same way, and a message per failure floods the Conversation.'
     const { adapter, log, say } = newCore()
     const failing = withCompactionError(COMPACTION_FAILED, 'exhausted')
 
@@ -3784,10 +4106,11 @@ describe('a Compaction that failed', () => {
       ),
     })
 
-    expect(posted(adapter.instructions).filter(({ kind }) => kind === 'context-full')).toHaveLength(
-      1,
-    )
-    expect(log).toHaveLength(2)
+    expect(
+      posted(adapter.instructions).filter(({ kind }) => kind === 'context-full'),
+      why,
+    ).toHaveLength(1)
+    expect(log, why).toHaveLength(2)
   })
 
   // The `shared-window.ts` lesson applied on both axes at once. A code roma has
@@ -3912,7 +4235,10 @@ describe('when the Shared Window is spent', () => {
 
   // A person watching a Task that has been told to wait three hours is exactly
   // the person who will stop it, and there is no Turn to interrupt.
-  it('lets a parked Task be stopped rather than waiting out the window', async () => {
+  it('lets a parked Task be stopped rather than waiting out the window [fence:core-stop-wakes-a-parked-task]', async () => {
+    const why =
+      '/stop wakes a parked Task (ADR-0002): it has no Turn to interrupt, and left ' +
+      'asleep it waits out the Shared Window for hours after somebody said to stop.'
     const { adapter, core, start } = newCore()
 
     const { task, proc } = await start('hello')
@@ -3921,19 +4247,56 @@ describe('when the Shared Window is spent', () => {
     await core.handle(ingress('/stop'))
     await task
 
-    expect(posted(adapter.instructions).at(-1)).toEqual({ kind: 'stopped', conversationKey: KEY })
+    expect(posted(adapter.instructions).at(-1), why).toEqual({
+      kind: 'stopped',
+      conversationKey: KEY,
+    })
+  })
+
+  it('still runs a Task whose Channel would not take the notice that it was blocked [fence:core-tell-absorbs-failures]', async () => {
+    const why =
+      'A notice about a Task that is still going is absorbed when the Channel refuses it ' +
+      '(ADR-0002, ADR-0010): propagated, a Channel hiccup on the blocked notice throws away ' +
+      'a Task that would still have answered.'
+    const shared = newCore()
+    const delivered: OutboundInstruction[] = []
+    const core = coreOver(
+      shared,
+      channelThat((instruction) => {
+        if (instruction.kind === 'blocked') throw new Error('the Channel is down')
+        delivered.push(instruction)
+      }),
+    )
+
+    const task = core.handle(ingress('hello'))
+    await flush()
+    feed(shared.procFor(KEY), BLOCKED)
+    await flush()
+    await vi.advanceTimersByTimeAsync(UNTIL_RESET)
+    await flush()
+    feed(shared.procFor(KEY), OK)
+    await task
+
+    expect(posted(delivered).at(-1), why).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: 'ok',
+    })
   })
 
   // A window roma is told is spent and not told when it comes back is one it
   // cannot park against: the Task would wait for a moment that never arrives.
-  it('fails the Task rather than parking it against a reset it was not told', async () => {
+  it('fails the Task rather than parking it against a reset it was not told [fence:core-park-only-on-a-known-reset]', async () => {
+    const why =
+      'A Task parks only against a reset time the event gave (ADR-0002): parked without ' +
+      'one it waits for ever, and nothing else in roma comes to look at it.'
     const { adapter, start } = newCore()
 
     const { task, proc } = await start('hello')
     feed(proc, [quotaEvent({ status: 'rejected', resetsAt: null }), ...FAILED_OUTRIGHT])
     await task
 
-    expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'failure' })
+    expect(posted(adapter.instructions).at(-1), why).toMatchObject({ kind: 'failure' })
   })
 })
 
@@ -4066,7 +4429,10 @@ describe('a Task that is blocked more than once', () => {
   // a third "still blocked" message lands on a Conversation that stopped
   // watching hours ago, and that a Task which never ends is one nobody can be
   // told anything about.
-  it('answers the Task rather than holding it through a third window', async () => {
+  it('answers the Task rather than holding it through a third window [fence:core-park-only-on-a-known-reset]', async () => {
+    const why =
+      'A Task parks at most twice (ADR-0002): a Task that never ends is one nobody can ' +
+      'be told about, and answered and re-sendable beats held indefinitely.'
     const { adapter, start, procFor } = newCore()
 
     const { task, proc } = await start('hello')
@@ -4081,8 +4447,11 @@ describe('a Task that is blocked more than once', () => {
     feed(procFor(KEY), BLOCKED)
     await task
 
-    expect(adapter.instructions.filter(({ kind }) => kind === 'blocked')).toHaveLength(2)
-    expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'failure' })
+    expect(
+      adapter.instructions.filter(({ kind }) => kind === 'blocked'),
+      why,
+    ).toHaveLength(2)
+    expect(posted(adapter.instructions).at(-1), why).toMatchObject({ kind: 'failure' })
   })
 })
 
@@ -4090,10 +4459,12 @@ describe('what Overflow is taken for', () => {
   /** The blocked attempt, priced — a window that ran out with work already done. */
   const BLOCKED_HAVING_SPENT = withTotalCostUsd(BLOCKED_WITH_OVERAGE, 0.02)
 
-  // The attempt, not the Task. Left on the metered credential, a Task that took
-  // Overflow and then failed would go on spending metered money with nobody
-  // asked and no cap consulted.
-  it('goes back to the Shared Window for the next attempt of the same Task', async () => {
+  it('goes back to the Shared Window for the next attempt of the same Task [fence:core-overflow-is-for-one-attempt]', async () => {
+    const why =
+      'Overflow pays for one Attempt, not the Task: after every Attempt the Core moves the ' +
+      'Task back to the credential it was started with (ADR-0002). Left on the metered ' +
+      'credential, a Task that took Overflow and was blocked again would go on spending ' +
+      'metered money with nobody asked and no cap consulted.'
     const { adapter, claude, core, start, procFor } = newCore()
 
     const { task, proc } = await start('hello')
@@ -4113,7 +4484,7 @@ describe('what Overflow is taken for', () => {
     feed(procFor(KEY), OK)
     await task
 
-    expect(claude.lastSpawn.env).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' })
+    expect(claude.lastSpawn.env, why).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' })
   })
 
   // Which credential answered is the order the attempts happened in, not the
@@ -4177,7 +4548,11 @@ describe('what Overflow is taken for', () => {
   // Both Reaches, which is what makes every `cloudReach: false` and
   // `documentReach: false` elsewhere in this file an answer rather than a
   // vacancy: a fixture that cannot say yes cannot be caught saying no wrongly.
-  it('asks each Reach once, so both of a Task’s records carry the same answer', async () => {
+  it('asks each Reach once, so both of a Task’s records carry the same answer [fence:core-reach-asked-once]', async () => {
+    const why =
+      'Each Reach is asked once per Task, outside the loop that writes its records ' +
+      '(ADR-0022): the answer is read-and-forget, so asked per record the second record ' +
+      'of the same Task says no.'
     let cloud = 0
     let documents = 0
     const { adapter, audit, core, start, procFor } = newCore({
@@ -4193,8 +4568,8 @@ describe('what Overflow is taken for', () => {
     feed(procFor(KEY), OK)
     await task
 
-    expect([cloud, documents]).toEqual([1, 1])
-    expect(recordsIn(audit)).toMatchObject([
+    expect([cloud, documents], why).toEqual([1, 1])
+    expect(recordsIn(audit), why).toMatchObject([
       { cloudReach: true, documentReach: true },
       { cloudReach: true, documentReach: true },
     ])
@@ -4571,12 +4946,16 @@ describe('relaying a free Relay', () => {
   // would sit silent through it. That is the point: `/compact` is a live example
   // of an entry that costs real money and reports no Turns, and the key had to
   // move to something that can see one.
-  it('tells an operator when a free Relay did model work', async () => {
+  it('tells an operator when a free Relay did model work [fence:core-free-relay-drift-is-one-way]', async () => {
+    const why =
+      'The free-Relay drift check is keyed on output tokens, not num_turns (ADR-0012, ' +
+      'ADR-0018): a /compact spends five cents at num_turns 0, so a check keyed on ' +
+      'Turns cannot see a free entry start doing model work after the pin moves.'
     const { adapter, log, say } = newCore()
 
     await say('/context', { events: FREE_RELAY_DRIFTED })
 
-    expect(log).toEqual([
+    expect(log, why).toEqual([
       {
         event: 'free-relay-did-model-work',
         taskId: expect.any(String),
@@ -4586,7 +4965,7 @@ describe('relaying a free Relay', () => {
       },
     ])
     // Still answered. The Caller is not made to care about roma's bookkeeping.
-    expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'result' })
+    expect(posted(adapter.instructions).at(-1), why).toMatchObject({ kind: 'result' })
   })
 
   it('says nothing to an operator about a free Relay that behaved', async () => {
@@ -4685,16 +5064,20 @@ describe('relaying a `/compact`, which costs money', () => {
   // have fired on it, which is why it now reads `modelUsage` instead. Asserted
   // from this side because the free path is where it fires, and this is the
   // entry that proves the old key was blind.
-  it('reports no Turns at all, which is what re-keyed the drift check', async () => {
+  it('reports no Turns at all, which is what re-keyed the drift check [fence:core-free-relay-drift-is-one-way]', async () => {
+    const why =
+      'The drift check runs on the free path only (ADR-0018): a paid Relay doing model ' +
+      'work is what it is for, and checking it in either direction reports drift on ' +
+      'every /compact.'
     const { audit, log, say } = newCore()
 
     await say('/compact', { events: COMPACTED_MANUALLY })
 
-    expect(COMPACTED_MANUALLY.at(-1)).toMatchObject({ num_turns: 0 })
+    expect(COMPACTED_MANUALLY.at(-1), why).toMatchObject({ num_turns: 0 })
     // And no operator line: the entry is declared paid, so doing model work is
     // what it is for. The check is one-directional by construction.
-    expect(log).toEqual([])
-    expect(recordsIn(audit).at(0)?.costUsd).toBeGreaterThan(0)
+    expect(log, why).toEqual([])
+    expect(recordsIn(audit).at(0)?.costUsd, why).toBeGreaterThan(0)
   })
 
   // Claude Code returns `result: ""` on a successful `/compact`, so roma has to
@@ -4713,16 +5096,43 @@ describe('relaying a `/compact`, which costs money', () => {
     })
   })
 
+  it('groups its figures the same whatever locale roma runs under [fence:core-token-counts-ignore-locale]', async () => {
+    const why =
+      'Token counts are grouped by roma, never by toLocaleString (ADR-0018): its grouping ' +
+      'and separator follow the locale the process happens to run under, and this sentence ' +
+      'is a Conversation’s rather than a machine’s.'
+    const { adapter, say } = newCore()
+    const german = new Intl.NumberFormat('de-DE')
+    const localised = vi.spyOn(Number.prototype, 'toLocaleString').mockImplementation(function (
+      this: number,
+    ) {
+      return german.format(this)
+    })
+
+    try {
+      await say('/compact', { events: COMPACTED_MANUALLY })
+    } finally {
+      localised.mockRestore()
+    }
+
+    expect(posted(adapter.instructions).at(-1), why).toMatchObject({
+      text: 'Compacted: 31,953 → 1,764 tokens.',
+    })
+  })
+
   // A boundary that arrived without its figures — the fields are read as
   // nullable everywhere else in roma for the reason `Compaction` gives, and this
   // is the one place that nullability reaches a person. It still happened, and
   // saying so without numbers beats inventing them or saying nothing.
-  it('still says it compacted when the boundary carried no figures', async () => {
+  it('still says it compacted when the boundary carried no figures [fence:core-relay-reply-never-silent]', async () => {
+    const why =
+      'A Compaction that happened is said even without its figures (ADR-0018): a ' +
+      'successful /compact returns an empty result, so roma has to speak.'
     const { adapter, say } = newCore()
 
     await say('/compact', { events: withoutCompactionTokens(COMPACTED_MANUALLY) })
 
-    expect(posted(adapter.instructions).at(-1)).toEqual({
+    expect(posted(adapter.instructions).at(-1), why).toEqual({
       kind: 'result',
       conversationKey: KEY,
       text: 'Compacted.',
@@ -4733,12 +5143,17 @@ describe('relaying a `/compact`, which costs money', () => {
   // answered anyway, because the alternative is a Task that ends with silence
   // after somebody waited for it — the failure ADR-0003 named as what makes
   // people resend.
-  it('says something even when Claude Code says nothing at all', async () => {
+  it('says something even when Claude Code says nothing at all [fence:core-relay-reply-never-silent]', async () => {
+    const why =
+      "A Relay's reply is split on whether a Compaction happened, never on matching " +
+      'compact_error, and is never empty (ADR-0018): compact_error is a code on one ' +
+      'path and a sentence on the other, and silence after half a minute and five cents ' +
+      'produces a resend.'
     const { adapter, say } = newCore()
 
     await say('/compact', { events: withResultText(MANUAL_COMPACTION_REFUSED, '') })
 
-    expect(posted(adapter.instructions).at(-1)).toEqual({
+    expect(posted(adapter.instructions).at(-1), why).toEqual({
       kind: 'result',
       conversationKey: KEY,
       text: 'That command finished, and Claude Code said nothing about it.',
@@ -4850,12 +5265,18 @@ describe('a `/compact` that did not compact', () => {
   //
   // Closed by asking whose Compaction this is rather than by enumerating
   // sentences, which would be the `shared-window.ts` mistake in a new hat.
-  it('writes no operator line, because roma is not the one classifying it', async () => {
+  it('writes no operator line, because roma is not the one classifying it [fence:core-manual-compaction-is-the-callers]', async () => {
+    const why =
+      "A Compaction that fails inside a /compact is the Relay's own answer, never " +
+      'classified by roma and never checked for work it did not do (ADR-0018, ' +
+      'ADR-0019): the manual path sends a sentence where the auto path sends a code, so ' +
+      'classifying it, or a two-directional drift check, writes an operator line every ' +
+      'time somebody /compacts a short thread.'
     const { log, say } = newCore()
 
     await say('/compact', { events: MANUAL_COMPACTION_REFUSED })
 
-    expect(log).toEqual([])
+    expect(log, why).toEqual([])
   })
 
   // roma relays what Claude Code already wrote, so the field's spelling stops
@@ -4879,7 +5300,11 @@ describe('a `/compact` that did not compact', () => {
   // roma's "and `/clear` is the way out", and the repair is deferred rather than
   // lost, because a Session that truly cannot be reduced fails the next ordinary
   // message on the auto path, where the code is a code.
-  it('says nothing of its own about one that sounds serious', async () => {
+  it('says nothing of its own about one that sounds serious [fence:core-manual-compaction-is-the-callers]', async () => {
+    const why =
+      "A Compaction that fails inside a /compact is the Relay's own answer (ADR-0018): " +
+      'roma cannot tell a serious code from the benign sentence without reading ' +
+      'sentences, so it classifies neither.'
     const { adapter, log, say } = newCore()
     const exhausted = withCompactionError(
       MANUAL_COMPACTION_REFUSED,
@@ -4888,8 +5313,8 @@ describe('a `/compact` that did not compact', () => {
 
     await say('/compact', { events: exhausted })
 
-    expect(log).toEqual([])
-    expect(posted(adapter.instructions)).not.toContainEqual(
+    expect(log, why).toEqual([])
+    expect(posted(adapter.instructions), why).not.toContainEqual(
       expect.objectContaining({ kind: 'context-full' }),
     )
   })
@@ -4954,7 +5379,11 @@ describe('what somebody sent along with a message', () => {
     return message?.content?.[0]?.text ?? ''
   }
 
-  it('writes it into the Session’s Working Directory and names it to the agent', async () => {
+  it('writes it into the Session’s Working Directory and names it to the agent [fence:core-enclosure-path-is-minted]', async () => {
+    const why =
+      "An Enclosure's file is named by roma, never by the sender's contentName " +
+      '(ADR-0011): a name chosen by whoever sent the message is a path traversal and a ' +
+      'collision between two screenshot.png.'
     const { core, procFor, workRoot } = newCore()
 
     const task = core.handle(withEnclosures('what is this?', [sent('screenshot.png', 'PNG')]))
@@ -4964,11 +5393,11 @@ describe('what somebody sent along with a message', () => {
 
     const cwd = join(workRoot, sessionIdFor(KEY))
     const [file] = readdirSync(join(cwd, '.enclosures'))
-    expect(readFileSync(join(cwd, '.enclosures', file!), 'utf8')).toBe('PNG')
+    expect(readFileSync(join(cwd, '.enclosures', file!), 'utf8'), why).toBe('PNG')
     // Named to the agent by the path roma minted, with what the sender called it
     // beside it — and what the sender called it is not what the file is called.
-    expect(file).not.toContain('screenshot')
-    expect(textOf(proc.sent.at(0))).toContain(
+    expect(file, why).not.toContain('screenshot')
+    expect(textOf(proc.sent.at(0)), why).toContain(
       `<enclosure path="./.enclosures/${file}" name="screenshot.png" />`,
     )
   })
@@ -4996,6 +5425,54 @@ describe('what somebody sent along with a message', () => {
     await task
 
     expect(redemptions).toBe(1)
+  })
+
+  it('fetches nothing for a message whose Session cannot be worked out [fence:core-enclosures-redeemed-late]', async () => {
+    const why =
+      'An Enclosure is redeemed only once the Session is known, immediately before it is ' +
+      'written (ADR-0011): fetched on arrival, bytes sized by whoever sent them are paid ' +
+      'for, and held, by a message that never reaches a Turn.'
+    const { core, workRoot } = newCore()
+    writeFileSync(join(workRoot, `${sessionIdFor(KEY)}.generation`), 'half a wr')
+    let redemptions = 0
+    const counted: PendingEnclosure = {
+      name: 'a.png',
+      from: null,
+      redeem: () => {
+        redemptions += 1
+        return Promise.resolve(new Uint8Array([1]))
+      },
+    }
+
+    await core.handle(withEnclosures('look', [counted]))
+
+    expect(redemptions, why).toBe(0)
+  })
+
+  it('fetches none for a Relay, which has nowhere to name it [fence:core-relay-redeems-nothing]', async () => {
+    const why =
+      'A Relay redeems no Enclosure (ADR-0012, ADR-0018): it goes on the wire as a command ' +
+      'with nowhere to name a file, so bytes fetched for it are paid for and mentioned to ' +
+      'nobody.'
+    const { claude, core, procFor } = newCore()
+    let redemptions = 0
+    const counted: PendingEnclosure = {
+      name: 'a.png',
+      from: null,
+      redeem: () => {
+        redemptions += 1
+        return Promise.resolve(new Uint8Array([1]))
+      },
+    }
+
+    const task = core.handle(withEnclosures('/compact', [counted]))
+    feed(await spawned(procFor), COMPACTED_MANUALLY)
+    await task
+
+    expect(redemptions, why).toBe(0)
+    expect(claude.process.sent.at(-1), why).toMatchObject({
+      message: { content: [{ text: '/compact\n\n<from>Ada (users/17)</from>' }] },
+    })
   })
 
   // No new instruction kind: `failure` already means "no result, and here is
@@ -5105,27 +5582,31 @@ describe('the message a message quotes', () => {
   // case that matters — somebody quoting the message they are worried about and
   // typing `/stop` is in a hurry, and a `/stop` that had become prose would
   // spend a Turn instead of ending one.
-  it('leaves a Command a Command', async () => {
+  it('leaves a Command a Command [fence:core-command-ignores-the-quotation]', async () => {
+    const why =
+      'A quotation travels beside the text and is never spliced into it (ADR-0021): ' +
+      'readCommand matches the whole message, so quoting something and typing /stop ' +
+      'would stop meaning /stop.'
     const { core, adapter, claude, start } = newCore()
     const { task, proc } = await start('take a while')
 
     await core.handle(withQuotation('/stop', BOB_SAID))
 
-    expect(proc.sent.at(-1)).toMatchObject({
+    expect(proc.sent.at(-1), why).toMatchObject({
       type: 'control_request',
       request: { subtype: 'interrupt' },
     })
     feed(proc, recordedStream('interrupted-turn').turn(1))
     await task
 
-    expect(posted(adapter.instructions)).toContainEqual({
+    expect(posted(adapter.instructions), why).toContainEqual({
       kind: 'command-outcome',
       conversationKey: KEY,
       command: 'stop',
       carriedOut: true,
     })
     // One spawn: the Task that was stopped. The `/stop` drove no Turn of its own.
-    expect(claude.spawns).toHaveLength(1)
+    expect(claude.spawns, why).toHaveLength(1)
   })
 
   // Dropped for a reason that is *not* ADR-0018's. An Enclosure is dropped on a

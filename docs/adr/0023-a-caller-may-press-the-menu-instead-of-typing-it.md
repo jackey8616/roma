@@ -185,7 +185,8 @@ deployment that pinned something off the Model Menu has, and a `null` draws the
 buttons: roma has no ground to withhold an offer on the strength of a reading it
 never made. `Core.#effortStranded` already states this rule as a guardrail for
 the sentence; this is the same rule at a second site, and the two must agree or
-roma will say a level applies while declining to offer it.
+roma will say a level applies while declining to offer it. Enforced by
+`fence:core-unmeasured-model-keeps-effort`.
 
 The narrower risk is named and accepted: two of the Matrix's three rows are, by
 `src/effort-menu.ts`'s own admission, a person's inference rather than the
@@ -208,7 +209,8 @@ so the bot guard would swallow it — and relaxing that guard to let it through
 would re-open the fault it exists to close and attribute the choice to roma
 rather than to whoever pressed. The person who pressed is elsewhere on the event,
 and reading them from the message's sender is the specific mistake this
-arrangement forecloses.
+arrangement forecloses. Enforced by `fence:gchat-press-is-read-off-the-presser`.
+Enforced by `fence:gchat-never-answers-an-app`.
 
 Three readers, each answering about one kind of event, no existing logic
 modified. The Conversation Key derivation moves into one function the message

@@ -59,12 +59,9 @@ function addressedTo(caller: string): string {
  * One message per string, in the order they should be posted. More than one when
  * what has to be said is longer than Chat will take.
  *
- * The Caller is mentioned on the **first** message only, and inside the text
- * rather than added to it afterwards: `split` cuts at Chat's 4096-character
- * limit, so a mention bolted on after the split would push the first message
- * over it and Chat would refuse the whole answer. Only the first, because each
- * of these is a separate post and a long answer should not notify somebody once
- * per 4096 characters of it.
+ * The Caller is mentioned on the **first** message only, inside the limit.
+ * Enforced by `fence:gchat-split-under-the-limit`.
+ * Enforced by `fence:gchat-mention-once-per-answer`.
  */
 export function outcomeMessages(instruction: TaskOutcome): string[] {
   const to = addressedTo(instruction.caller)
@@ -129,13 +126,7 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
   }
 }
 
-/**
- * What a blocked Task's message says.
- *
- * The time comes from the event's own `resetsAt`, never an estimate. That the
- * Task is kept is said too: told only that quota is spent, people send the
- * message again — the resend the acknowledgement design exists to prevent.
- */
+/** Enforced by `fence:gchat-blocked-says-the-task-is-kept`. */
 function blockedText(resetsAt: number): string {
   const at = new Date(resetsAt * 1000).toISOString().replace('T', ' ').slice(0, 16)
   return `The shared Claude quota is spent. It comes back at ${at} UTC — I have kept your task and will run it then.`
@@ -143,8 +134,7 @@ function blockedText(resetsAt: number): string {
 
 /** What an Overflow Turn spent, to the cent it was billed in. */
 function overflowSpentText(costUsd: number | null): string {
-  // Null is a Turn nothing priced, and saying "$0.00" would report money as free
-  // — the same claim the Audit Record refuses to make.
+  // Enforced by `fence:gchat-unpriced-is-not-free`.
   if (costUsd === null) return 'Ran on metered billing. What it cost was never reported.'
   return `Ran on metered billing: $${money(costUsd)}.`
 }
@@ -169,33 +159,12 @@ export function progressText(caller: string, progress: TaskProgress): string {
 /**
  * One acknowledgement phrase, inside what the mention leaves of Chat's limit.
  *
- * **Nothing reaches this any more.** Every phase is bounded where it is written
- * — four of them are a fixed sentence around a small number, and the fifth is
- * cut by `progressPhrase`'s own tool bound — so the longest phrase this can be
- * handed is around 129 characters against a budget of roughly 4077. It is kept
- * anyway, and the reason is the sixth phase rather than any of the five: `tool`
- * was added without anybody thinking about its length, and this file went a
- * release carrying a phrase Chat could refuse outright (#75). A guard that sits
- * on the finished string is the one the next phase cannot forget to ask for.
+ * The **end** is what goes, for the reason `progressPhrase` gives about the tool
+ * it quotes. The budget is what the mention leaves of `MAX_TEXT`.
  *
- * Which is why it is exported and tested directly. Reached through
- * `progressText` it cannot be made to fire, so a test that drives a long tool
- * through the Adapter is testing `progressPhrase`'s bound and would stay green
- * if this function were deleted.
- *
- * Over the limit is not a longer message but no message: Chat refuses the whole
- * thing rather than trimming it. The **end** is what goes, for the reason
- * `progressPhrase` gives about the tool it quotes.
- *
- * The budget is passed in rather than read off `MAX_TEXT` for the reason `split`
- * gives below — the mention is already spent out of the limit.
- *
- * What it promises is exactly `result.length <= budget`, for every budget. Which
- * is worth stating because the obvious implementation does not: an ellipsis
- * costs a character, so a budget of nothing answered with `…` is one character
- * over the one thing this function is for. It cannot make the *message* fit
- * when the mention alone has spent the limit — nothing here can, and that is the
- * mention's problem — but it can decline to add to it.
+ * What it promises is exactly `result.length <= budget`, for every budget. It
+ * cannot make the *message* fit when the mention alone has spent the limit, but
+ * it can decline to add to it. Enforced by `fence:gchat-fitted-holds-the-budget`.
  */
 export function fitted(text: string, budget: number): string {
   if (text.length <= budget) return text
@@ -215,15 +184,7 @@ function commandText(command: Command, carriedOut: boolean): string {
   return carriedOut ? 'Stopping…' : 'Nothing to stop.'
 }
 
-/**
- * One answer as the messages Chat will accept.
- *
- * Broken at a blank line, then a line ending, then a space: cutting mid-word
- * makes a long answer read as corrupted rather than as continued.
- *
- * The prefix is counted against the limit, never added after it, so mentioning
- * the Caller cannot be what makes Chat refuse an answer that would have fitted.
- */
+/** Enforced by `fence:gchat-split-under-the-limit`. */
 function split(prefix: string, text: string): string[] {
   // A Turn can finish having written nothing. Posting nothing at all would make
   // it indistinguishable from a Task that died — and it is still somebody's
@@ -246,8 +207,7 @@ function split(prefix: string, text: string): string[] {
 function breakPoint(window: string): number {
   for (const boundary of ['\n\n', '\n', ' ']) {
     const at = window.lastIndexOf(boundary)
-    // Not right at the start: a boundary in the first few characters would make
-    // messages of two words each out of text that simply has no break in it.
+    // Enforced by `fence:gchat-split-at-a-late-boundary`.
     if (at > MAX_TEXT / 2) return at + boundary.length
   }
   return MAX_TEXT

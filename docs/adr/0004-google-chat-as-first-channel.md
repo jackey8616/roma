@@ -44,7 +44,7 @@ own adapter.
   deprecated `space.type == "DM"` — never by the absence of a thread, because
   Chat puts a thread on every message including a DM's, and that one names the
   single message. Read as the key it would make every message in a DM its own
-  session.
+  session. Enforced by `fence:gchat-conversation-key-from-the-space`.
 
 #### Corrected 2026-07-29, against the API reference
 
@@ -54,13 +54,15 @@ and never run. Both are corrected in place, per the same rule ADR-0003 follows.
 - **A thread's resource name is `spaces/{space}/threads/{thread}`,** not
   `spaces/{space}/messages/{message}` — that is a *message's* name. An adapter
   built on the old text would parse a real thread key as malformed and never
-  reply in a space at all.
+  reply in a space at all. Enforced by
+  `fence:gchat-reply-into-a-thread-name`.
 - **`spaceThreadingState` is not the DM test.** It is documented **output only**
   on the Space resource, so an event payload need not carry it; and
   `GROUPED_MESSAGES` spaces have threads too, so "not `THREADED_MESSAGES`" does
   not mean "no threads". Keying on it sends every message in a space down the DM
   path: one session for a whole space, with everybody's context in everybody
-  else's replies.
+  else's replies. Enforced by
+  `fence:gchat-conversation-key-from-the-space`.
 
 Sources, both read on 2026-07-29:
 [spaces.messages](https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces.messages)
@@ -124,7 +126,8 @@ they would be decoration with a schema attached.
 an edge** — the recorded generating turn in `test/fixtures/claude-stream/` is
 17706. A result longer than that is therefore posted as several messages, broken
 at a paragraph boundary where there is one. The alternative is that the longest
-answers, which are the ones worth having, are the ones that never arrive.
+answers, which are the ones worth having, are the ones that never arrive. Enforced by
+`fence:gchat-split-under-the-limit`.
 
 Two consequences worth naming, because neither is obvious from the core side:
 

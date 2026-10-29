@@ -32,14 +32,7 @@ function isFigure(value: unknown): boolean {
   return value === null || (typeof value === 'number' && Number.isFinite(value))
 }
 
-/**
- * Whether a written Compaction is one this can be read back.
- *
- * Checks the *shape*, never the fields: every one is nullable on the way in,
- * because the stream is not roma's. The shape is what a torn line loses, and a
- * record saying only that a Compaction happened still answers why this Task cost
- * five times its neighbours.
- */
+/** Enforced by `fence:audit-compaction-shape-not-fields`. */
 function isCompaction(value: unknown): boolean {
   if (typeof value !== 'object' || value === null) return false
   const { trigger, preTokens, postTokens } = value as Record<string, unknown>
@@ -72,11 +65,7 @@ export interface AuditRecord {
   /**
    * Whether this was a Task or a Relay (ADR-0012, ADR-0018).
    *
-   * Optional, and **absent means `task`**. Every record roma wrote before Relays
-   * existed lacks it, and `readRecord` drops a line it cannot read — so requiring
-   * this would make all of them unreadable at once, silently emptying the month
-   * the Overflow cap is enforced against. That is the reasoning `callerName`
-   * already carries, and it is the same failure.
+   * Optional, and **absent means `task`**. Enforced by `fence:audit-old-records-stay-readable`.
    *
    * A free Relay is recorded at all because the list it comes from is maintained
    * by a person and can be wrong. "Ought to be free" is an assumption, and
@@ -111,12 +100,7 @@ export interface AuditRecord {
    *   carried no `displayName`;
    * - **absent**, where the record was written before ADR-0009 added the field.
    *
-   * Optional for that last one, and it is not a formality. `readRecord` drops a
-   * line it cannot read, and a dropped line drops out of the month's total —
-   * which is the figure the Overflow cap is enforced against. Requiring this
-   * would make every record roma wrote before the change unreadable at once,
-   * silently resetting the month and letting the cap through. `caller` stays a
-   * bare string for the same reason: it is what the old records have.
+   * Optional for that last one. Enforced by `fence:audit-old-records-stay-readable`.
    */
   readonly callerName?: string | null
   /** Null for a Task that failed before roma could work out which Session it was for. */
@@ -125,9 +109,7 @@ export interface AuditRecord {
   /**
    * What this Task cost, as the per-Turn delta.
    *
-   * Never `total_cost_usd` raw: that is cumulative for the process, so a fifth
-   * Task logged raw is recorded at the sum of Tasks one through five, and the
-   * monthly Overflow cap built on it would refuse spending that never happened.
+   * Never `total_cost_usd` raw. Enforced by `fence:session-cost-is-a-delta`.
    *
    * Three values rather than two, because "free" and "unpriced" are different
    * facts and only one of them can be added up:
@@ -172,11 +154,7 @@ export interface AuditRecord {
    * one distinction it exists to make (ADR-0027).
    *
    * Optional, and **absent means `claude-code`**, which is what every record
-   * written while there was one Runtime ran on. That is `model`'s reasoning
-   * exactly: `readRecord` drops a line it cannot read, a dropped line leaves the
-   * month's total, and the month's total is what the Overflow cap is enforced
-   * against — so a required field would silently reset the month across the
-   * deploy that added it.
+   * written while there was one Runtime ran on. Enforced by `fence:audit-old-records-stay-readable`.
    */
   readonly runtime?: Runtime
   /**
@@ -190,12 +168,8 @@ export interface AuditRecord {
    *
    * Optional, and **absent means the Pinned Model** — which is what every record
    * roma wrote before ADR-0014 ran on, since nothing else was reachable. roma
-   * writes it on every record all the same, so the ledger has no blank rows going
-   * forward; the optionality is for reading the past. That is `callerName`'s
-   * reasoning exactly: `readRecord` drops a line it cannot read, a dropped line
-   * leaves the month's total, and the month's total is what the Overflow cap is
-   * enforced against — so a required field would silently reset the month across
-   * the deploy that added it.
+   * writes it on every record all the same; the optionality is for reading the
+   * past. Enforced by `fence:audit-old-records-stay-readable`.
    */
   readonly model?: string
   /**
@@ -217,15 +191,7 @@ export interface AuditRecord {
    * asserting something roma has read the opposite of.
    *
    * Optional, and **absent reads as unknown rather than as the Pinned Effort** —
-   * which is the one place this differs from `model`. A record written before
-   * this field ran on whatever the shared settings file happened to say, and roma
-   * genuinely does not know what that was; labelling those retroactively would be
-   * inventing a fact, which is the discipline `costUsd` already keeps by
-   * distinguishing free from unpriced.
-   *
-   * Optional for the reason `callerName` and `kind` are, too: `readRecord` drops
-   * a line it cannot parse, a dropped line leaves the month's total, and the
-   * month's total is what the Overflow cap is enforced against.
+   * which is the one place this differs from `model`. Enforced by `fence:audit-old-records-stay-readable`.
    */
   readonly effort?: string
   /**
@@ -247,12 +213,7 @@ export interface AuditRecord {
    * constant is where the difference is argued.
    *
    * Optional, and **absent reads as unknown rather than as `off`** — the effort's
-   * rule rather than the model's. A record written before this field ran on
-   * whatever the deployment's spawn arguments happened to carry, and labelling
-   * those retroactively would be inventing a fact. Optional for the reason every
-   * field above it is, too: `readRecord` drops a line it cannot parse, a dropped
-   * line leaves the month's total, and the month's total is what the Overflow cap
-   * is enforced against.
+   * rule rather than the model's. Enforced by `fence:audit-old-records-stay-readable`.
    */
   readonly caveman?: string
   /**
@@ -266,11 +227,9 @@ export interface AuditRecord {
    * months of them. Already computed for ADR-0018's drift check before this
    * field existed; a reading nothing records is one nobody can compare.
    *
-   * Never a running total, which is `costUsd`'s rule for `costUsd`'s reason:
-   * `modelUsage` accumulates for the process, so a fifth Task logged raw would
-   * be recorded at the sum of Tasks one through five and every Task after the
-   * first would look more expensive than it was. `Turn.outputTokens` is where
-   * the differencing is done, once, and this carries what it says.
+   * Never a running total: `Turn.outputTokens` is where the differencing is
+   * done, once, and this carries what it says. Enforced by
+   * `fence:session-output-tokens-never-negative`.
    *
    * Three values rather than two, exactly as `costUsd` has three:
    *
@@ -280,13 +239,9 @@ export interface AuditRecord {
    *   fact rather than an absence;
    * - **null**, where a Turn began and nothing measured it. A Turn abandoned
    *   mid-retry-storm or cut short by a process that died produced tokens that
-   *   are real and unrecorded, and calling that zero would report work as
-   *   nothing — which would put a month's comparison the wrong way round, in
-   *   the direction that flatters the setting under test.
+   *   are real and unrecorded. Enforced by `fence:audit-unmeasured-is-not-zero`.
    *
-   * Optional for the reason `caveman` above it is: `readRecord` drops a line it
-   * cannot parse, and requiring this would make every record written before it
-   * unreadable at once.
+   * Optional, and absent where a record was written before it. Enforced by `fence:audit-old-records-stay-readable`.
    */
   readonly outputTokens?: number | null
   /**
@@ -308,10 +263,7 @@ export interface AuditRecord {
    *
    * Optional, and **absent means no** — which is what every record roma wrote
    * before there were Cloud Reaches means, since there was no way to obtain one.
-   * roma writes it on every record going forward. That is `model`'s reasoning
-   * exactly: `readRecord` drops a line it cannot read, a dropped line leaves the
-   * month's total, and the month's total is what the Overflow cap is enforced
-   * against.
+   * roma writes it on every record going forward. Enforced by `fence:audit-old-records-stay-readable`.
    */
   readonly cloudReach?: boolean
   /**
@@ -336,11 +288,7 @@ export interface AuditRecord {
    *
    * Optional, and **absent means no** — which is what every record roma wrote
    * before there were Document Reaches means, since there was no way to obtain
-   * one. That is `cloudReach`'s reasoning exactly, and it is not a formality:
-   * `readRecord` drops a line it cannot read, a dropped line leaves the month's
-   * total, and the month's total is what the Overflow cap is enforced against, so
-   * a required field would silently reset the month across the deploy that added
-   * it.
+   * one. Enforced by `fence:audit-old-records-stay-readable`.
    */
   readonly documentReach?: boolean
   /**
@@ -372,10 +320,7 @@ export interface AuditRecord {
    *
    * Optional, and **absent means no Compaction happened** — which is what every
    * record roma wrote before it could see one says, since nothing could have
-   * written it. That is `cloudReach`'s reasoning exactly: `readRecord` drops a
-   * line it cannot read, a dropped line leaves the month's total, and the month's
-   * total is what the Overflow cap is enforced against — so a required field
-   * would silently reset the month across the deploy that added it.
+   * written it. Enforced by `fence:audit-old-records-stay-readable`.
    *
    * The stream's own reduction rather than a shape of the ledger's own, because
    * there is nothing here the ledger knows that the reader does not, and two
@@ -415,16 +360,11 @@ export type UnstampedRecord = Omit<AuditRecord, 'at'>
 export interface AuditTotal {
   readonly month: string
   /**
-   * Tasks in the month. Relays are **not** counted here.
-   *
-   * Kept apart because this number is read as "how much work did this month
-   * ask for", and folding Relays in would quietly turn it into "how many
-   * messages were sent" — a Conversation where somebody checked `/context`
-   * forty times would read as forty Tasks. Their cost is another matter and is
-   * in `costUsd` below.
+   * Tasks in the month. Relays are **not** counted here; their cost is in
+   * `costUsd` below. Enforced by `fence:audit-relays-counted-apart`.
    */
   readonly tasks: number
-  /** Relays in the month, counted separately for the reason above. */
+  /** Relays in the month, counted separately. */
   readonly relays: number
   /**
    * What the month spent, Relays included.
@@ -448,19 +388,10 @@ export interface AuditTotal {
    */
   readonly unpriced: number
   /**
-   * Records in this month that could not be read.
-   *
-   * Reported rather than thrown or ignored, because both of those answer the
-   * Overflow cap's question wrongly: a total that refuses to be computed leaves
-   * the cap unenforceable, and one that quietly skips a line under-reports spend
-   * and lets the cap through. A caller that cares can refuse to spend while this
-   * is above zero.
-   *
-   * Counted whatever credential was asked for, because a line that cannot be
-   * read cannot be said to belong to one credential rather than the other. That
-   * makes an Overflow-only total look tainted by a torn Shared Window record,
-   * which is the conservative way round: the alternative is a cap that quietly
-   * assumes the line it could not read was not spending.
+   * Records in this month that could not be read, reported rather than thrown
+   * or skipped, and counted whatever credential was asked for. A caller that
+   * cares can refuse to spend while this is above zero. Enforced by
+   * `fence:audit-unreadable-counted-once`.
    */
   readonly unreadable: number
   /**
@@ -487,11 +418,8 @@ const CREDENTIALS: readonly CredentialKind[] = ['shared-window', 'overflow']
  * `unreadable`: a line that cannot be read cannot be said to belong to one
  * credential rather than the other, so it belongs to the month.
  *
- * Kept apart from every other bucket and **never added to one**. A Shared Window
- * Task carries a `costUsd` because Claude Code prices every Turn and nobody is
- * billed it, so a sum across credentials reports subscription draw as money and
- * a sum across Runtimes reports two subscriptions as one — the arithmetic the
- * Overflow cap already refuses (ADR-0027).
+ * Kept apart from every other bucket and **never added to one** (ADR-0027).
+ * Enforced by `fence:audit-buckets-never-summed`.
  */
 export interface CredentialSpend {
   readonly runtime: Runtime
@@ -517,9 +445,8 @@ export interface CredentialSpend {
  * can belong to neither.
  *
  * **The only walk of a month's file there is.** `totalFor` folds this down, so a
- * caller that wants both figures asks once — where two filtered totals would
- * read the month from disk twice and count every unreadable line in each of
- * them, reporting one torn record as two.
+ * caller that wants both figures asks once. Enforced by
+ * `fence:audit-unreadable-counted-once`.
  */
 export interface AuditBreakdown {
   readonly month: string
@@ -585,11 +512,8 @@ export function monthOf(at: Date): string {
 
 export interface AuditLogOptions {
   /**
-   * Where the records go.
-   *
-   * Deliberately not under the Work Root: that tree is
-   * walked by a reclaim that deletes anything nothing has touched for seven
-   * days, and these records are exactly what has to survive a quiet week.
+   * Where the records go. Never under the Work Root. Enforced by
+   * `fence:env-audit-root-outside-the-work-root`.
    */
   readonly auditRoot: string
   /**
@@ -639,13 +563,9 @@ export class AuditLog {
   /**
    * Write one Task down.
    *
-   * **Never throws**, and that is the design rather than an oversight. It is
-   * called on the way to telling somebody how their Task went, and a Task that
-   * ran, spent money and then answered nobody because the disk was full would be
-   * the worse of the two failures. A record that cannot be written is handed to
-   * `onWriteFailed` instead, which by default puts it on stderr — the container's
-   * log stream is not the audit log, but it is somewhere, and somewhere beats the
-   * only copy being dropped on the floor.
+   * **Never throws.** A record that cannot be written is handed to
+   * `onWriteFailed` instead, which by default puts it on stderr. Enforced by
+   * `fence:audit-record-never-throws`.
    */
   record(task: UnstampedRecord): void {
     // Stamped here so that the time on the record and the month it is filed
@@ -793,16 +713,7 @@ function endsWhole(file: string): boolean {
   }
 }
 
-/**
- * Read one line back, or null if it is not a record.
- *
- * Checked against what a record is *for*, never against what a total needs: a
- * line that lost `caller` adds up perfectly and answers nothing, and a missing
- * cost would be summed as a Task that was free.
- *
- * The case it is really for is a half-written last line, which must cost the
- * month one record rather than all of them.
- */
+/** Enforced by `fence:audit-record-is-what-it-is-for` and `fence:audit-unreadable-counted-once`. */
 function readRecord(line: string): AuditRecord | null {
   let parsed: unknown
   try {

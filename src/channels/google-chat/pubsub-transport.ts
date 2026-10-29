@@ -13,10 +13,7 @@ import type { ChatEvent } from './chat-events.js'
 export interface PubSubMessage {
   /**
    * Pub/Sub's own id for the message, which is the same on every redelivery of
-   * it.
-   *
-   * The property the subscriber's in-flight check rests on. An id minted on
-   * arrival would be different every time and would catch nothing.
+   * it. Enforced by `fence:gchat-delivery-is-named-by-pubsub`.
    */
   readonly id: string
   /** The event as it was published: JSON, UTF-8. */
@@ -118,9 +115,7 @@ export class PubSubTransport implements Transport<ChatEvent> {
       void this.#take(message, receiver)
     })
     this.#subscription.on('error', (error) => {
-      // Never thrown on. A listener that threw would be an unhandled error
-      // taking the process down over a network blip the library is already
-      // reconnecting from.
+      // Enforced by `fence:gchat-subscription-error-is-written-down`.
       this.#log({ event: 'pubsub-error', reason: reasonOf(error) })
     })
     return Promise.resolve()

@@ -154,13 +154,17 @@ describe('what an update says the Task is doing', () => {
   // How much, never what. The prose itself is deliberately not carried — an
   // Acknowledgement showing it would say what the Result is about to say, which
   // is the duplicate ADR-0010 is about.
-  it('carries how much has been written, summed across the deltas', async () => {
+  it('carries how much has been written, summed across the deltas [fence:progress-writing-carries-no-prose]', async () => {
+    const why =
+      'A writing update must carry how much has been written and never the prose (ADR-0010). ' +
+      'An Acknowledgement showing the prose says what the Result is about to say, seconds ' +
+      'later and one message down, and the answer reads as sent twice (#72).'
     const { reporter, sent } = newReporter()
 
     await acknowledgeAnd(reporter, TEXT_DELTAS.slice(0, 3))
     await vi.advanceTimersByTimeAsync(INTERVAL)
 
-    expect(sent.at(-1)).toEqual({
+    expect(sent.at(-1), why).toEqual({
       phase: 'writing',
       characters: TEXT_DELTAS.slice(0, 3).map(textOf).join('').length,
     })
@@ -215,7 +219,12 @@ describe('what an update says the Task is doing', () => {
   // A background task can finish while the answer is being written, and that
   // closes no window the acknowledgement is showing. Throwing the prose away
   // for a whole interval over it would be a step backwards.
-  it('keeps showing the prose when a tool finishes that it was not showing', async () => {
+  it('keeps showing the prose when a tool finishes that it was not showing [fence:progress-tool-finish-only-closes-a-tool]', async () => {
+    const why =
+      'A finished tool may put the Acknowledgement back to "working" only where a tool is what ' +
+      'it was showing (ADR-0003, progress reporting). A background task finishing while the ' +
+      'answer is being written closes no window on screen, and resetting on it throws the ' +
+      'writing progress away for a whole interval.'
     const { reporter, sent } = newReporter()
 
     await acknowledgeAnd(reporter, TEXT_DELTAS.slice(0, 2))
@@ -223,7 +232,7 @@ describe('what an update says the Task is doing', () => {
     reporter.observe(TOOL_FINISHED)
     await vi.advanceTimersByTimeAsync(INTERVAL)
 
-    expect(sent.at(-1)).toEqual({
+    expect(sent.at(-1), why).toEqual({
       phase: 'writing',
       characters: TEXT_DELTAS.slice(0, 2).map(textOf).join('').length,
     })
@@ -247,13 +256,17 @@ describe('what an update says the Task is doing', () => {
   // with `status: null`. An announcement that work is over is not an
   // announcement that work is starting, so the reading is on `status` rather
   // than on the subtype.
-  it('does not read a finished Compaction as one still running', async () => {
+  it('does not read a finished Compaction as one still running [fence:stream-compacting-read-off-status]', async () => {
+    const why =
+      'readCompacting must read `status: "compacting"`, not the `system/status` subtype ' +
+      '(ADR-0018). The same subtype carries `compact_result` with `status: null` when a ' +
+      'Compaction has finished, and read off the subtype that is announced as one starting.'
     const { reporter, sent } = newReporter()
 
     await acknowledgeAnd(reporter, [COMPACTION_OVER])
     await vi.advanceTimersByTimeAsync(INTERVAL)
 
-    expect(sent.at(-1)).toEqual({ phase: 'working' })
+    expect(sent.at(-1), why).toEqual({ phase: 'working' })
   })
 
   // The complete answer arrives once more as its own `assistant` event, 85ms
@@ -299,7 +312,7 @@ describe('a Task that is over', () => {
   // acknowledgement is finished with once the result is posted, so an update
   // that reaches the Channel afterwards has nothing left to edit — the Adapter
   // roma has posts a new message, underneath the answer.
-  it('drops an update that was queued behind one the Channel was still taking', async () => {
+  it('drops an update that was queued behind one the Channel was still taking [fence:progress-stop-waits-on-nothing]', async () => {
     const taking: (() => void)[] = []
     // What the Channel was handed, recorded on the way in. Whether the delivery
     // then completes is the Channel's business; being handed a late update at all
@@ -323,29 +336,39 @@ describe('a Task that is over', () => {
     for (const release of taking.splice(0)) release()
     await flush()
 
-    expect(handedOver).toEqual([{ phase: 'working' }])
+    expect(handedOver, STOP_WAITS_ON_NOTHING).toEqual([{ phase: 'working' }])
   })
 
   // Stopping waits on nothing: a Channel that has not finished taking an update
   // must not be able to hold back the result, which is the one message roma
   // owes unconditionally.
-  it('leaves nothing armed that could fire after the Task', async () => {
+  it('leaves nothing armed that could fire after the Task [fence:progress-stop-waits-on-nothing]', async () => {
     const { reporter } = newReporter({ deliver: () => new Promise<void>(() => {}) })
 
     await acknowledgeAnd(reporter, TEXT_DELTAS.slice(0, 1))
     expect(vi.getTimerCount()).toBe(1)
 
-    reporter.stop()
+    expect(reporter.stop(), STOP_WAITS_ON_NOTHING).toBeUndefined()
 
-    expect(vi.getTimerCount()).toBe(0)
+    expect(vi.getTimerCount(), STOP_WAITS_ON_NOTHING).toBe(0)
   })
 })
+
+const STOP_WAITS_ON_NOTHING =
+  'stop() must return at once, waiting on no delivery, and must drop any update still queued ' +
+  'behind one the Channel is taking (ADR-0003, Progress reporting; #58). Waiting lets a deliver that never ' +
+  'settles hold the Result back forever; handing a queued update over late posts a stale ' +
+  '"Working…" underneath the answer, because the Acknowledgement it would edit is gone.'
 
 describe('a Channel that will not take an update', () => {
   // Progress is the one thing roma will go without. A Channel too broken to
   // carry an update is not a reason to abandon work that is running fine, and
   // the result is still owed to whoever asked for it.
-  it('keeps reporting rather than failing the Task', async () => {
+  it('keeps reporting rather than failing the Task [fence:progress-deliver-is-best-effort]', async () => {
+    const why =
+      'A rejected or throwing deliver must be swallowed (ADR-0003, Progress reporting: progress ' +
+      'is the one thing roma will go without). A Channel too broken to carry an update is not a reason to ' +
+      'abandon work that is running fine, and the Result is still owed to whoever asked.'
     const attempts: TaskProgress[] = []
     const { reporter } = newReporter({
       deliver: (progress) => {
@@ -358,7 +381,7 @@ describe('a Channel that will not take an update', () => {
     await vi.advanceTimersByTimeAsync(INTERVAL)
 
     // Every one was attempted, and none of them threw at the Task.
-    expect(attempts).toHaveLength(2)
+    expect(attempts, why).toHaveLength(2)
   })
 
   it('keeps updates in the order they were made, however slow it is', async () => {

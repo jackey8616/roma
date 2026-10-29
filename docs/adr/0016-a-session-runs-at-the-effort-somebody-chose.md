@@ -99,13 +99,14 @@ consequences, both load-bearing:
 
 - **Passing `--effort` on every spawn closes the settings file.** The config dir
   is one per deployment (`ROMA_CLAUDE_CONFIG_DIR`), so an `effortLevel` left in it
-  would otherwise set the effort for every Session in roma, invisibly.
+  would otherwise set the effort for every Session in roma, invisibly. Enforced by
+  `fence:session-effort-always-passed`.
 - **`buildEnv`'s allowlist closes the environment variable.** `PASSTHROUGH` is
   `PATH, HOME, USER, SHELL, LANG, TMPDIR` and nothing else, so a host
   `CLAUDE_CODE_EFFORT_LEVEL` cannot reach a Session. That allowlist was written
   for credentials. It turns out to be the only thing standing between the host
   environment and roma's effort, and it should not be narrowed without reading
-  this line.
+  this line. Enforced by `fence:buildenv-no-host-effort`.
 
 **Measured — none of it needs a credential.** With the environment stripped to
 exactly `buildEnv`'s `PASSTHROUGH` plus a fresh config dir — no `ANTHROPIC_*`, no
@@ -249,7 +250,7 @@ already name a model off the Model Menu, and `menuNameFor()` returning `null` is
 that case already handled. Whether a Caller may reach it is deferred to its own
 ticket, and deliberately deferred to **after** the Audit Record has effort on it —
 which is ADR-0014's own reason for deferring the per-model gate: *record the model
-first, then look.*
+first, then look.* Enforced by `fence:menu-effort-holds-back-ultracode`.
 
 **`auto` is not on the Menu because it cannot be.** `--effort auto` is rejected by
 the CLI parser (`uJn` → `uHt` → `AWr`, and `auto` is in neither table), so it
@@ -357,7 +358,7 @@ record says **that** rather than naming a level. Optional, and absent read as
 this field existed ran on whatever that shared settings file happened to say, and
 roma genuinely does not know what that was. Labelling those retroactively would
 be inventing a fact, which is the discipline `costUsd` already keeps by
-distinguishing free from unpriced.
+distinguishing free from unpriced. Enforced by `fence:audit-old-records-stay-readable`.
 
 Optional rather than required for the reason `callerName` and `kind` are:
 `readRecord` drops a line it cannot parse, a dropped line leaves the month's
@@ -394,7 +395,8 @@ stopped being the mechanism.
   on the re-audit list, and unlike those two it produces its own output for
   review rather than requiring somebody to go and read a binary.
 - `buildEnv`'s `PASSTHROUGH` allowlist quietly became load-bearing for something
-  other than credentials. Narrowing it is now a decision about effort as well.
+  other than credentials. Narrowing it is now a decision about effort as well. Enforced by
+  `fence:buildenv-no-host-effort`.
 - Nothing here gives a Caller a way to know an effort was applied. The reply says
   what roma set and, where the Matrix knows better, that it will not apply. It
   never says the model thought harder, because roma cannot see that.

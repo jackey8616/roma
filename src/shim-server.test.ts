@@ -1,11 +1,13 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { connect } from 'node:net'
 import { join } from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import { askMinter } from './shim-client.js'
 import { socketPathIn, type CredentialWanted } from './shim-protocol.js'
 import { NO_CLOUD_REACH } from './cloud/reach.js'
-import { ShimServer, type ShimLogRecord } from './shim-server.js'
+import { ShimServer, type ServedReaches, type ShimLogRecord } from './shim-server.js'
 import { FakeCloudMinter, FakeMinter, fakeServedReaches } from '../test/support/fake-minter.js'
 
 /**
@@ -93,15 +95,21 @@ describe('answering a Credential Shim', () => {
   // Outbound Instruction named after a product would mean the Core knows about
   // GitHub, and a circuit breaker would turn a forge outage into a roma outage
   // for the majority of Tasks that touch no repository.
-  it('answers with no credential and the reason when minting fails', async () => {
+  it('answers with no credential and the reason when minting fails [fence:shim-no-credential-is-an-answer]', async () => {
+    const why =
+      'roma answering "no credential, and here is why" is a successful exchange, and askMinter ' +
+      'must resolve with it rather than reject (#62). The reason is what the Shim has to pass ' +
+      'on; lost to an exception, the tool says "authentication failed" with nothing behind it.'
     const minter = new FakeMinter()
     minter.failsWith = new Error('the App private key was rejected')
     const { server } = await listening({ minter })
 
-    const answer = await askMinter(server.socketPath, { session: SESSION, operation: 'get' })
+    const answer = await askMinter(server.socketPath, { session: SESSION, operation: 'get' }).catch(
+      (error: unknown) => ({ token: 'rejected', reason: String(error) }),
+    )
 
-    expect(answer.token).toBeNull()
-    expect(answer.reason).toContain('private key')
+    expect(answer.token, why).toBeNull()
+    expect(answer.reason, why).toContain('private key')
   })
 
   // Anything in the agent's userland can write to this socket, including
@@ -260,7 +268,11 @@ describe('answering the Cloud Shortcut', () => {
   // Defaulting an unrecognised name to `code` would answer a request for a
   // credential roma does not have with one it does — which for the Cloud
   // Shortcut means printing an Installation Token as if it were a Cloud Token.
-  it('refuses a credential it does not recognise rather than defaulting', async () => {
+  it('refuses a credential it does not recognise rather than defaulting [fence:shim-unknown-credential-refused]', async () => {
+    const why =
+      'A request naming a credential roma does not know must be refused, never defaulted to ' +
+      '`code` (#99): defaulting answers a request for a credential roma lacks with one it has — ' +
+      'for the Cloud Shortcut, an Installation Token printed as though it were a Cloud Token.'
     const { server, log } = await listening({ cloudMinter: new FakeCloudMinter() })
 
     const answer = await askMinter(server.socketPath, {
@@ -270,8 +282,50 @@ describe('answering the Cloud Shortcut', () => {
       credential: 'aws' as 'cloud',
     })
 
-    expect(answer.token).toBeNull()
-    expect(log).toContainEqual(expect.objectContaining({ event: 'shim-unreadable' }))
+    expect(answer.token, why).toBeNull()
+    expect(log, why).toContainEqual(expect.objectContaining({ event: 'shim-unreadable' }))
+  })
+
+  it('erases only from the Reach the request names [fence:shim-erase-routed-by-reach]', async () => {
+    const why =
+      'An erase must be routed by the Reach it names, never by the token alone (#99). Otherwise ' +
+      'an agent can hand back the Installation Token labelled `cloud` and force a re-mint of ' +
+      'the token every Session is using — the forge’s credential dropped by naming the wrong side. ' +
+      'It is answered ahead of the unavailable-Reach answer, so an erase for a Reach roma has none ' +
+      'of is still recorded as a rejection, never as a failure.'
+    const { server, minter, log } = await listening({ cloudMinter: new FakeCloudMinter() })
+    const code = await askMinter(server.socketPath, { session: SESSION, operation: 'get' })
+
+    for (const credential of ['cloud', 'documents'] as const) {
+      await askMinter(server.socketPath, {
+        session: SESSION,
+        operation: 'erase',
+        token: code.token,
+        credential,
+      })
+    }
+    const again = await askMinter(server.socketPath, { session: SESSION, operation: 'get' })
+
+    expect(again.token, why).toBe(code.token)
+    expect(minter.minted, why).toHaveLength(1)
+    expect(
+      log.filter(({ event }) => event !== 'credential').map((record) => record.event),
+      why,
+    ).toEqual(['credential-rejected', 'credential-rejected'])
+  })
+
+  it('names only the credentials roma has a Reach for [fence:shim-credential-wanted-is-closed]', () => {
+    const why =
+      'CredentialWanted is a closed union and ServedReaches is total over it, so a new member ' +
+      'is a compile error at the composition root until it is wired (ADR-0020 §8, #132). ' +
+      'Widened to string, or made partial, a credential member can exist that nothing serves.'
+    // @ts-expect-error -- fence:shim-credential-wanted-is-closed: a credential roma has no Reach for must not compile.
+    const unknown: CredentialWanted = 'drive'
+    // @ts-expect-error -- fence:shim-credential-wanted-is-closed: a ServedReaches missing a Reach must not compile.
+    const partial: ServedReaches = { code: { unavailable: 'x' }, cloud: { unavailable: 'x' } }
+
+    expect(Object.keys(fakeServedReaches()).sort(), why).toEqual(['cloud', 'code', 'documents'])
+    expect([unknown, Object.keys(partial).length], why).toEqual(['drive', 2])
   })
 })
 
@@ -318,7 +372,11 @@ describe('the socket itself', () => {
   // on an existing path fails with EADDRINUSE — which would present as roma
   // refusing to boot after every hard restart, for a file nothing is listening
   // on.
-  it('is taken over from a boot that did not clean up', async () => {
+  it('is taken over from a boot that did not clean up [fence:shim-stale-socket-taken-over]', async () => {
+    const why =
+      'listen must remove a stale socket file before taking the path (#62). A container killed ' +
+      'rather than stopped leaves the file behind, and listen on an existing path fails with ' +
+      'EADDRINUSE — roma refusing to boot after every hard restart, over a file nothing serves.'
     const dir = mkdtempSync(join(tmpdir(), 'roma-shim-server-'))
     dirs.push(dir)
     // What a killed container leaves behind: the file, with nothing listening.
@@ -329,12 +387,32 @@ describe('the socket itself', () => {
       reaches: fakeServedReaches(),
       taskFor: () => null,
       log: () => {},
-    })
+    }).catch((error: unknown) => expect.unreachable(`${why}\n${String(error)}`))
     servers.push(server)
 
-    expect((await askMinter(server.socketPath, { session: SESSION, operation: 'get' })).token).toBe(
-      'token-1',
-    )
+    expect(
+      (await askMinter(server.socketPath, { session: SESSION, operation: 'get' })).token,
+      why,
+    ).toBe('token-1')
+  })
+
+  it('stops even with a Shim that connected and never spoke [fence:shim-close-cuts-open-connections]', async () => {
+    const why =
+      'close must cut the connections still open rather than wait for them (#60, #62). ' +
+      'net.Server.close waits for every one and has no closeAllConnections, so a Shim that ' +
+      'connects and never speaks would otherwise be the reason roma does not shut down.'
+    const { server } = await listening()
+    const silent = connect(server.socketPath)
+    await new Promise((connected) => silent.once('connect', connected))
+    silent.on('error', () => {})
+
+    const closing = server.close().then(() => 'closed')
+    const outcome = await Promise.race([closing, sleep(1_000).then(() => 'still waiting')])
+    silent.destroy()
+    await closing
+    servers = servers.filter((other) => other !== server)
+
+    expect(outcome, why).toBe('closed')
   })
 
   it('is gone once roma has stopped answering on it', async () => {

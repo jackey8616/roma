@@ -69,13 +69,9 @@ export type Environment = Readonly<Record<string, string | undefined>>
  * One Channel's own reader: its settings, or null where this deployment does not
  * serve that Channel at all.
  *
- * Null and a refusal are different answers, and keeping them apart is the whole
- * of what makes a Channel optional. A deployment that named none of a Channel's
- * variables serves another Channel and is complete; a deployment that named some
- * of them meant to serve this one, and left alone would get a roma that
- * subscribes to nothing and answers nobody on it. So a reader returns null only
- * for the first, and refuses for the second — the same rule `readOverflow`
- * already applies to the two halves of metered billing (ADR-0028).
+ * Null and a refusal are different answers (ADR-0028): null only where the
+ * deployment named none of the Channel's variables, and a refusal where it named
+ * some of them. Enforced by `fence:env-a-channel-named-is-served-or-refused`.
  */
 export type ReadChannelEnv<ChannelEnv> = (env: Environment) => ChannelEnv | null
 
@@ -83,11 +79,8 @@ export type ReadChannelEnv<ChannelEnv> = (env: Environment) => ChannelEnv | null
  * Whether this deployment named nothing at all of one Channel's configuration —
  * the first of `ReadChannelEnv`'s two answers, asked in one place.
  *
- * **Never hand it only the variables that are required.** Every variable that
- * Channel reads goes in, optional ones included: narrowed to the required ones,
- * somebody who set a lease minute or pointed an address at a proxy and forgot
- * the credential gets a roma that starts, serves that Channel to nobody, and
- * ignores the variable they did set. Whole, the same deployment is refused.
+ * Every variable that Channel reads goes in, optional ones included. Enforced by
+ * `fence:env-a-channel-named-is-served-or-refused`.
  */
 export function unconfigured(env: Environment, names: readonly string[]): boolean {
   return names.every((name) => envValue(env, name) === null)
@@ -138,10 +131,7 @@ export function readConfiguration<
   const channels = Object.entries(readChannelEnvs).map(
     ([name, read]) => [name, attempted(() => read(env), problems)] as const,
   )
-  // Only where every Channel was silent rather than wrong. A reader that refused
-  // has already said what is missing from the Channel the deployment plainly
-  // meant to serve, and telling somebody they configured no Channel in the same
-  // breath would send them to a second one they never wanted.
+  // Enforced by `fence:env-a-refused-channel-is-not-sent-elsewhere`.
   if (problems.length === beforeChannels && channels.every(([, found]) => found === null)) {
     problems.push(
       `No Channel is configured — roma would start, subscribe to nothing and answer ` +
@@ -171,13 +161,10 @@ export function readConfiguration<
 }
 
 /**
- * A value that was only missing if the refusal above already fired.
+ * A value that was only missing if the refusal above already fired. Throwing
+ * here is a bug in the reader rather than a fact about the environment.
  *
- * A check rather than a cast, because the invariant it rests on — that
- * `problems` being empty means every `required` found something — is one the
- * types cannot see and a later edit could quietly break. Throwing here would be
- * a bug in this file rather than a fact about the environment, which is why it
- * says so.
+ * Enforced by `fence:env-certain-not-a-cast`.
  */
 export function certain<T>(value: T | null): T {
   if (value === null) throw new Error('configuration was read as complete while a part was missing')
@@ -194,9 +181,7 @@ function attempted<T>(read: () => T, problems: string[]): T | null {
   try {
     return read()
   } catch (error) {
-    // Only the incomplete-configuration case is collected. Anything else is a
-    // reader that is broken rather than an environment that is, and swallowing
-    // one would report a bug as a missing variable.
+    // Enforced by `fence:env-a-broken-reader-is-not-a-missing-variable`.
     if (!(error instanceof ConfigurationMissing)) throw error
     problems.push(...error.problems)
     return null
@@ -212,15 +197,7 @@ function attempted<T>(read: () => T, problems: string[]): T | null {
  * somewhere roma can see it.
  *
  * Nothing here provisions anything or has a fallback that would quietly change
- * what roma runs on. A missing token is refused rather than defaulted to the
- * host's own login; a missing audit root is refused rather than put somewhere
- * under the working directories, which a weekly reclaim would delete; a missing
- * config dir is refused rather than left to Claude Code's own default, which is
- * under the `HOME` roma passes through — so every Session's Transcript would
- * land in the host user's `~/.claude/projects/`, mixed in with whatever Claude
- * Code that person runs themselves and in a directory roma never reclaims.
- * ADR-0005 makes the Transcript the only account of what an agent did, which is
- * a claim that needs roma to have named where it lives.
+ * what roma runs on. Enforced by `fence:env-no-fallback-for-what-cannot-be-lost`.
  */
 export function readRomaEnv(env: Environment): RomaEnv {
   const problems: string[] = []
@@ -254,9 +231,7 @@ export function readRomaEnv(env: Environment): RomaEnv {
   if (problems.length > 0) throw new ConfigurationMissing(problems)
 
   const credential: Credential = { kind: 'shared-window', oauthToken: certain(oauthToken) }
-  // Spread rather than set to undefined: `exactOptionalPropertyTypes` aside, a
-  // property present and undefined is not the same as one a caller never
-  // mentioned, and `startRoma` has its own defaults for every one of these.
+  // Enforced by `fence:env-unset-settings-are-absent`.
   return {
     credential,
     workRoot: certain(workRoot),
@@ -271,25 +246,7 @@ export function readRomaEnv(env: Environment): RomaEnv {
   }
 }
 
-/**
- * The Pinned Effort, or null where the deployment did not name one.
- *
- * **Validated locally, with no process involved.** Claude Code will not do it:
- * an unrecognised `--effort` warns on stderr and the process runs on the build's
- * own default, so a mistyped `ROMA_EFFORT` would be wrong about every Session
- * and every Audit Record with nothing stopping (ADR-0016's `bananas` row).
- *
- * Optional, unlike `ROMA_OVERFLOW_MONTHLY_CAP_USD`, because effort is money
- * already being spent under another name where the Overflow cap opens a new way
- * to spend it (ADR-0002).
- *
- * `ultracode` is accepted here and only here — it is `xhigh` plus workflow
- * orchestration, which turns one Task into a fleet, so it stays off the Effort
- * Menu. The Menu bounds Callers and never the operator.
- *
- * Compared exactly, never folded or trimmed: the repair would be roma guessing
- * at a value whose whole purpose is to be the thing somebody decided.
- */
+/** Enforced by `fence:env-effort-compared-exactly`. */
 function readEffort(env: Environment, problems: string[]): string | null {
   const found = envValue(env, 'ROMA_EFFORT')
   if (found === null) return null
@@ -305,25 +262,7 @@ function readEffort(env: Environment, problems: string[]): string | null {
   return found
 }
 
-/**
- * The Pinned Caveman, or null where the deployment did not name one.
- *
- * **Validated locally because there is nowhere else it could be**, which is
- * `isPinnableCaveman`'s argument rather than a second one: `readEffort` above
- * declines an alternative, and this has none to decline. What it costs here is
- * specific — unrefused, `bananas` appends caveman's ruleset with an empty
- * intensity table in the middle of it, and every Session runs on that in silence.
- *
- * Optional, and unset is the deployment ADR-0030 changes nothing about: no level
- * means no ruleset, which is byte-for-byte what every spawn carried before this.
- *
- * The two wenyan levels are accepted here and only here — `OFF_MENU_WENYAN` says
- * why they are held back from the Menu and not from an operator's hand.
- *
- * Compared exactly, never folded or trimmed, for `readEffort`'s reason. That
- * includes refusing `wenyan`, which caveman's own hook would have folded into
- * `wenyan-full`; `CAVEMAN_MENU` is where that is argued.
- */
+/** Enforced by `fence:env-caveman-compared-exactly`. */
 function readCaveman(env: Environment, problems: string[]): string | null {
   const found = envValue(env, 'ROMA_CAVEMAN')
   if (found === null) return null
@@ -339,16 +278,7 @@ function readCaveman(env: Environment, problems: string[]): string | null {
   return found
 }
 
-/**
- * Metered billing, which exists only when both halves of it do.
- *
- * Both or neither, never one: a key with no cap spends unbounded, and a cap with
- * no key offers a valve with nothing behind it.
- *
- * Read from a name of roma's own, never `ANTHROPIC_API_KEY` — that is set on
- * developer machines and in CI images for unrelated reasons, and reading it
- * would turn metered billing on because a shell profile mentioned it.
- */
+/** Enforced by `fence:env-overflow-whole-and-roma-own`. */
 function readOverflow(
   env: Environment,
   problems: string[],

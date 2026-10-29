@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildEnv } from './build-env.js'
+import { buildEnv, type BuildEnvOptions, type Credential } from './build-env.js'
 
 // The host environment a test pretends to be running under. It deliberately
 // carries both credentials and an unrelated secret, because the point of
@@ -32,11 +32,13 @@ describe('buildEnv', () => {
       expect(env['CLAUDE_CODE_OAUTH_TOKEN']).toBe('oauth-token')
     })
 
-    // Absent, not empty. An empty string still occupies its slot in Claude Code's
-    // credential precedence, and a present ANTHROPIC_API_KEY silently moves the
-    // model from claude-sonnet-5 to claude-opus-5[1m] (ADR-0003).
-    it('leaves ANTHROPIC_API_KEY absent rather than empty', () => {
-      expect('ANTHROPIC_API_KEY' in env).toBe(false)
+    it('leaves ANTHROPIC_API_KEY absent rather than empty [fence:buildenv-no-stray-key]', () => {
+      const why =
+        'A Shared Window process must have no ANTHROPIC_API_KEY at all: not inherited from the ' +
+        'host, and not set to an empty string (ADR-0002). A key, when set, always overrides the ' +
+        'subscription in non-interactive mode, so a stray one silently routes every run to ' +
+        'metered billing; an empty one still occupies its slot in the precedence order.'
+      expect('ANTHROPIC_API_KEY' in env, why).toBe(false)
     })
   })
 
@@ -84,24 +86,63 @@ describe('buildEnv', () => {
    * narrowing that list is now a decision about effort as well as about
    * credentials, and this is where somebody finds that out.
    */
-  it('keeps a host CLAUDE_CODE_EFFORT_LEVEL out, which would otherwise beat --effort', () => {
+  it('keeps a host CLAUDE_CODE_EFFORT_LEVEL out, which would otherwise beat --effort [fence:buildenv-no-host-effort]', () => {
+    const why =
+      'A host CLAUDE_CODE_EFFORT_LEVEL must never reach a Claude Code process (ADR-0016). ' +
+      'Precedence was measured as CLAUDE_CODE_EFFORT_LEVEL > --effort > settings.effortLevel, ' +
+      'so it would beat every --effort roma passes while roma went on reporting and recording ' +
+      'the level it asked for. PASSTHROUGH is about effort now as well as credentials.'
     const env = buildEnv({
       credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
       inherit: HOST,
       configDir: CONFIG_DIR,
     })
 
-    expect('CLAUDE_CODE_EFFORT_LEVEL' in env).toBe(false)
+    expect('CLAUDE_CODE_EFFORT_LEVEL' in env, why).toBe(false)
   })
 
-  it('omits a passthrough variable the host does not define', () => {
+  it('omits a passthrough variable the host does not define [fence:buildenv-unset-stays-absent]', () => {
+    const why =
+      'A host variable that is not defined must be left absent from a Claude Code process, ' +
+      'never set to an empty string: an empty string still occupies its slot in credential ' +
+      'precedence, which is the difference between "resolve the next credential" and "fail with ' +
+      'this one" (ADR-0002, ADR-0003; #19).'
     const env = buildEnv({
       credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
       inherit: { PATH: '/usr/bin' },
       configDir: CONFIG_DIR,
     })
 
-    expect('TMPDIR' in env).toBe(false)
+    expect(Object.keys(env).sort(), why).toEqual([
+      'CLAUDE_CODE_OAUTH_TOKEN',
+      'CLAUDE_CONFIG_DIR',
+      'CLAUDE_SECURESTORAGE_CONFIG_DIR',
+      'PATH',
+    ])
+  })
+
+  it('cannot be handed both credentials at once [fence:buildenv-one-credential-at-a-time]', () => {
+    const why =
+      'A Credential is one of the Shared Window token or the Overflow key, never both: Claude ' +
+      'Code resolves credentials in precedence order, so a process handed both silently runs ' +
+      'on one and changes model (ADR-0003 measured claude-sonnet-5 under the OAuth token and ' +
+      'claude-opus-5[1m] once a stray ANTHROPIC_API_KEY appeared; #19). Credential is a ' +
+      'discriminated union so that the object below does not compile.'
+    const both = {
+      kind: 'shared-window',
+      oauthToken: 'oauth-token',
+      apiKey: 'api-key',
+    } as const
+    // @ts-expect-error -- fence:buildenv-one-credential-at-a-time: a Credential carrying both halves must not compile.
+    const credential: Credential = { kind: 'overflow', apiKey: 'k', oauthToken: 't' }
+
+    const env = buildEnv({ credential: both as Credential, inherit: HOST, configDir: CONFIG_DIR })
+
+    expect(credential.kind, why).toBe('overflow')
+    expect(
+      ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'].filter((name) => name in env),
+      why,
+    ).toEqual(['CLAUDE_CODE_OAUTH_TOKEN'])
   })
 
   // Both are needed to isolate a Session's credential resolution: without the
@@ -109,15 +150,23 @@ describe('buildEnv', () => {
   // The same directory is where Claude Code writes the Transcript, which
   // ADR-0005 makes the only record of what an agent did — so this one variable
   // decides both, and neither is conditional on a deployment naming it.
-  it('isolates credential resolution by setting both Claude config dirs', () => {
+  it('isolates credential resolution by setting both Claude config dirs [fence:buildenv-config-dir-is-required]', () => {
+    const why =
+      'buildEnv must always set CLAUDE_CONFIG_DIR and CLAUDE_SECURESTORAGE_CONFIG_DIR, and ' +
+      'configDir is required by its type. Without them a process resolves credentials against ' +
+      'whatever the host has, keychain included (ADR-0002), and writes its Transcript under the ' +
+      'passthrough HOME rather than somewhere roma named (ADR-0005; #37).'
     const env = buildEnv({
       credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
       inherit: HOST,
       configDir: CONFIG_DIR,
     })
+    // @ts-expect-error -- fence:buildenv-config-dir-is-required: configDir must stay required.
+    const unnamed: BuildEnvOptions = { credential: { kind: 'shared-window', oauthToken: 'x' } }
 
-    expect(env['CLAUDE_CONFIG_DIR']).toBe(CONFIG_DIR)
-    expect(env['CLAUDE_SECURESTORAGE_CONFIG_DIR']).toBe(CONFIG_DIR)
+    expect(unnamed.credential.kind, why).toBe('shared-window')
+    expect(env['CLAUDE_CONFIG_DIR'], why).toBe(CONFIG_DIR)
+    expect(env['CLAUDE_SECURESTORAGE_CONFIG_DIR'], why).toBe(CONFIG_DIR)
   })
 
   // Three variables, widening an allowlist that exists to admit almost nothing.

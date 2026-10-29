@@ -65,23 +65,7 @@ export interface CommandRequest {
 }
 
 /**
- * How each Command is written when it takes nothing. Nothing else is one.
- *
- * Every spelling Claude Code declares for one of these is claimed, aliases
- * included: one roma leaves unclaimed costs a Turn to answer nothing
- * (ADR-0013, ADR-0017).
- *
- * `/clear` must never become a Relay instead. Claude Code's own moves its
- * process onto a session roma is not tracking, so the next `--resume` resolves
- * to a session roma believes in and Claude Code has left; `readCommand`
- * answering before `readRelay` is what keeps it out of reach.
- *
- * The four argument-taking heads repeat in `TAKES_AN_ARGUMENT` on purpose —
- * dropping them from here would stop `/model` on its own being a Command.
- *
- * `/caveman` is the one entry that is not a spelling Claude Code declares, so
- * the rule above cannot be what put it here; `Command` is where its own reason
- * is written down.
+ * Enforced by `fence:relays-no-command-overlap` and by `fence:commands-bare-head-is-a-command`.
  */
 const COMMANDS: ReadonlyMap<string, Command> = new Map(
   Object.entries({
@@ -100,23 +84,7 @@ const COMMANDS: ReadonlyMap<string, Command> = new Map(
   }),
 )
 
-/**
- * The heads that may be followed by an argument, and nothing else may.
- *
- * Never a prefix match: ADR-0003 rejected "begins with a slash and looks like
- * ours" because such a rule inherits every command a later Claude Code release
- * adds. A named list fails closed instead.
- *
- * `/settings` is absent on purpose, so `/settings key=value` falls through to a
- * Task — a gap ADR-0017 records rather than fixes, and `commands.test.ts` pins.
- *
- * caveman's five sibling commands are absent from both tables, which is what
- * makes them the same shape of gap: `/caveman-stats`, `/caveman-compress`,
- * `/caveman-commit`, `/caveman-review` and `/caveman-help` each fall through as
- * prose and are billed. Recorded rather than closed, because closing it means
- * deciding what roma would answer about five skills it does not install
- * (ADR-0030).
- */
+/** Enforced by `fence:commands-no-prefix-match`. */
 const TAKES_AN_ARGUMENT: ReadonlyMap<string, Command> = new Map(
   Object.entries({
     '/model': 'model',
@@ -129,13 +97,7 @@ const TAKES_AN_ARGUMENT: ReadonlyMap<string, Command> = new Map(
 /**
  * Every spelling roma claims, in the order the table declares them.
  *
- * Exported for one check and it is a safety one: that no string here is also on
- * the Relay list. Four of the five beliefs a Relay may not disturb are broken by
- * a Command — the session id, the model, the effort, the shared settings file —
- * and what puts those out of reach of the whitelist is `readCommand` answering
- * first over a table with no overlap. `relays.test.ts` asserts it against this
- * rather than against a copy, which is #85: the copy it replaces held four of
- * these eight and would have gone on passing while covering half the table.
+ * Enforced by `fence:relays-no-command-overlap`.
  */
 export function commandSpellings(): readonly string[] {
   return [...COMMANDS.keys()]
@@ -145,12 +107,9 @@ export function commandSpellings(): readonly string[] {
  * The message that chooses one name off a Menu — what a Caller would have typed,
  * written out for a Channel that let them press it instead (ADR-0023).
  *
- * Here rather than in a Channel because a Command's spelling is this module's,
- * and this one has to survive `readCommand` reading it back: a name that does
- * not round-trip becomes a message that falls through as work, and somebody is
- * billed for a Turn. `commands.test.ts` drives it over all three Menus, which is
- * the only thing standing between a re-audited Menu and a button that costs
- * money.
+ * Here rather than in a Channel because a Command's spelling is this module's.
+ *
+ * Enforced by `fence:commands-menu-names-round-trip`.
  */
 export function commandFor(
   command: Extract<Command, 'model' | 'effort' | 'caveman'>,
@@ -163,27 +122,16 @@ export function commandFor(
  * Read a message as a Command, or null if it is work.
  *
  * The whole message has to be the Command, or a listed head and exactly one
- * argument. Claude Code has slash commands of its own and roma passes all but a
- * handful of them through — `/compact`, anything a later version adds — so a
- * prefix match would quietly capture commands that are not roma's, and would grow
- * more wrong with every Claude Code release.
- *
- * **One argument, or none.** `/model opus` is somebody choosing a model;
- * `/model the deploy as a state machine` is prose that happens to begin with a
- * word roma claims, and it is work. Claude Code's `/clear` takes a name and
- * roma's reset has nothing to name, so `/clear foo` still falls to a Task and is
- * billed as prose — left open deliberately (ADR-0013), because closing it means
- * deciding what a name would mean to roma. `/config foo bar` is the same opening
- * and is left open for the same reason (ADR-0017).
+ * argument. `/clear foo` and `/config foo bar` therefore fall to a Task and are
+ * billed as prose — left open deliberately (ADR-0013, ADR-0017).
  *
  * A `/model`, `/effort` or `/caveman` whose argument is not on its Menu is still
  * a Command, and is refused as one; so is any `/config` with an argument at all.
- * Falling through would reproduce the exact fault this exists to fix.
  *
- * Case is ignored because a phone keyboard capitalises the first letter of a
- * message on its own, and `/Stop` is nobody asking for something else. The
- * argument is lowercased with the head for the same reason and because every name
- * on the Menu is lower case, so `/Model Opus` is not a different message.
+ * Case is ignored on the head and on the argument, so `/Model Opus` is not a
+ * different message.
+ *
+ * Enforced by `fence:commands-no-prefix-match` and by `fence:commands-one-argument-or-none`.
  */
 export function readCommand(text: string): CommandRequest | null {
   const message = text.trim().toLowerCase()
@@ -192,9 +140,7 @@ export function readCommand(text: string): CommandRequest | null {
   if (whole !== undefined) return { command: whole, argument: null }
 
   const [head = '', argument, ...rest] = message.split(/\s+/)
-  // Two words after the head are not an argument, they are a sentence. Refusing
-  // them here is what keeps a message somebody meant for the agent from being
-  // swallowed by a Command that would answer it with a refusal.
+  // Enforced by `fence:commands-one-argument-or-none`.
   if (argument === undefined || rest.length > 0) return null
 
   const withArgument = TAKES_AN_ARGUMENT.get(head)

@@ -6,6 +6,9 @@ import {
   RetryStormError,
   SessionPool,
   type PoolLogRecord,
+  type SessionCavemen,
+  type SessionEfforts,
+  type SessionModels,
   type SessionPoolOptions,
 } from './session-pool.js'
 import type { CredentialKind } from './build-env.js'
@@ -47,6 +50,28 @@ const B = sessionId(2)
 function spawnedBefore(workRoot: string, id: string): void {
   mkdirSync(join(workRoot, id), { recursive: true })
   writeFileSync(join(workRoot, id, '.roma-session'), '')
+}
+
+const DETACHED =
+  'A termination nobody awaits — the retry-storm abandon, the reap timer — must carry its own ' +
+  '.catch (ADR-0003). Without it a rejecting termination is an unhandled rejection, and ' +
+  'Node 22 ends the process on one: every Session and every running Task with it (#21, #23).'
+
+/** Rejections nobody handled while `act` ran, collected rather than left to end the run. */
+async function unhandledDuring(act: () => Promise<void>): Promise<unknown[]> {
+  const unhandled: unknown[] = []
+  const collect = (reason: unknown): void => {
+    unhandled.push(reason)
+  }
+  process.on('unhandledRejection', collect)
+  try {
+    await act()
+    await flush()
+    await flush()
+  } finally {
+    process.off('unhandledRejection', collect)
+  }
+  return unhandled
 }
 
 let pools: SessionPool[] = []
@@ -124,17 +149,23 @@ afterEach(async () => {
 })
 
 describe('one working directory per Session', () => {
-  // A shared working directory would let concurrent Sessions corrupt each
-  // other's checkouts, with symptoms that are very hard to diagnose.
-  it('runs each Session in its own directory under the work root', async () => {
+  it('runs each Session in its own directory under the work root [fence:pool-a-session-works-in-its-own-directory]', async () => {
+    const why =
+      'Every Session must be spawned in a Working Directory of its own, named by its Session ' +
+      'id (CONTEXT.md, Working Directory). A directory two Sessions share is one their agents ' +
+      'clone into concurrently, so each corrupts the other’s checkouts with symptoms that are ' +
+      'very hard to diagnose, and one Session’s spawn file makes the other look already created.'
     const { claude, workRoot, send } = newPool()
 
     await send(A, 'hello', OK)
     await send(B, 'hello', OK)
 
-    expect(claude.spawns.map((spawn) => spawn.cwd)).toEqual([join(workRoot, A), join(workRoot, B)])
-    expect(existsSync(join(workRoot, A))).toBe(true)
-    expect(existsSync(join(workRoot, B))).toBe(true)
+    expect(
+      claude.spawns.map((spawn) => spawn.cwd),
+      why,
+    ).toEqual([join(workRoot, A), join(workRoot, B)])
+    expect(existsSync(join(workRoot, A)), why).toBe(true)
+    expect(existsSync(join(workRoot, B)), why).toBe(true)
   })
 
   it('gives every process the environment it was built with, and nothing else', async () => {
@@ -165,6 +196,30 @@ describe('one working directory per Session', () => {
 })
 
 describe('naming a Session versus reaching it again', () => {
+  const SPAWN_FILE =
+    'Whether a Session was spawned before is read off the file the pool writes inside its ' +
+    'Working Directory, never off the directory existing (ADR-0011, ADR-0003). An Enclosure ' +
+    'written before the first Turn makes the directory, and every later message then ' +
+    '--resumes a Transcript nobody wrote (#105); and kept outside the directory, the record ' +
+    'survives the seven-day reclaim that took the directory, so the next message resumes ' +
+    'instead of creating.'
+  const CARRIED =
+    'The reason a correction gives must be carried on it, never read off stderr when the ' +
+    'record is written (ADR-0005). In production the refusal settles the Turn from a terminal ' +
+    'event on stdout, and stderr arrives on another pipe with no guarantee of having landed, ' +
+    'so the operator record is blank in exactly the case it was added for (#107).'
+  const RECOVERS =
+    'A spawn whose flag was wrong about whether the Session exists must be retried once with ' +
+    'the other flag, decided from what the CLI said (ADR-0003, ADR-0006). Left alone, a ' +
+    'Session that died before its Transcript was written, or one whose directory was ' +
+    'reclaimed, poisons its Conversation for good: every later message repeats the refused ' +
+    'spawn (#51).'
+  const ONCE =
+    'The wrong-flag correction is bounded to once per Turn by a carried `corrected`, not ' +
+    'inferred (ADR-0003). Each correction flips the flag, so a CLI refusing both is otherwise ' +
+    'answered --session-id, --resume, --session-id for ever — and #spawn is serialised, so the ' +
+    'loop starves every other Session too (#51).'
+
   it('creates a Session with --session-id and reaches it again with --resume', async () => {
     const { claude, pool, send } = newPool()
 
@@ -196,7 +251,7 @@ describe('naming a Session versus reaching it again', () => {
   // roma writes it at the spawn, and a process that died before Claude Code
   // wrote its transcript leaves a Session that looks created and is not. Left
   // alone, that Conversation is poisoned for good.
-  it('starts a fresh Session when the transcript the resume wanted is gone', async () => {
+  it('starts a fresh Session when the transcript the resume wanted is gone [fence:pool-wrong-flag-recovers]', async () => {
     const { claude, pool, workRoot, processFor, log } = newPool()
     spawnedBefore(workRoot, A)
 
@@ -208,14 +263,14 @@ describe('naming a Session versus reaching it again', () => {
     await flush()
     feed(processFor(A), OK)
 
-    expect((await turn).text).toBe('ok')
-    expect(claude.spawns[0]?.args).toContain('--resume')
-    expect(claude.spawns[1]?.args).toContain('--session-id')
+    expect((await turn).text, RECOVERS).toBe('ok')
+    expect(claude.spawns[0]?.args, RECOVERS).toContain('--resume')
+    expect(claude.spawns[1]?.args, RECOVERS).toContain('--session-id')
     // The whole record, not just its name. An operator reading this needs the
     // flag roma retried with as well as what it found, and `retryWith` is the
     // only part that says what roma *did* — the rest of the trail is two spawn
     // records they would have to pair up themselves.
-    expect(log).toContainEqual({
+    expect(log, RECOVERS).toContainEqual({
       event: 'resume-lost',
       sessionId: A,
       refusal: expect.stringContaining('No conversation found'),
@@ -236,7 +291,7 @@ describe('naming a Session versus reaching it again', () => {
   // feeds a real 401 at a Session whose directory exists and requires one spawn.
   // What tells them apart is in the events — a lost resume carries `errors` and
   // no `result` text, a failed Turn carries the text and no `errors`.
-  it('starts a fresh Session when the refused resume arrives as a result event', async () => {
+  it('starts a fresh Session when the refused resume arrives as a result event [fence:pool-wrong-flag-recovers]', async () => {
     const { claude, pool, workRoot, processFor, log } = newPool()
     spawnedBefore(workRoot, A)
 
@@ -249,10 +304,10 @@ describe('naming a Session versus reaching it again', () => {
     await flush()
     feed(processFor(A), OK)
 
-    expect((await turn).text).toBe('ok')
-    expect(claude.spawns[0]?.args).toContain('--resume')
-    expect(claude.spawns[1]?.args).toContain('--session-id')
-    expect(log).toContainEqual({
+    expect((await turn).text, RECOVERS).toBe('ok')
+    expect(claude.spawns[0]?.args, RECOVERS).toContain('--resume')
+    expect(claude.spawns[1]?.args, RECOVERS).toContain('--session-id')
+    expect(log, RECOVERS).toContainEqual({
       event: 'resume-lost',
       sessionId: A,
       refusal: expect.stringContaining('No conversation found'),
@@ -266,7 +321,7 @@ describe('naming a Session versus reaching it again', () => {
   // they are separate pipes. So the one record an operator has to read is
   // written at a moment the buffer may still be empty — which is exactly the
   // case it was added for. It carries the ending's own reason instead.
-  it('says why it recovered even when no stderr was ever delivered', async () => {
+  it('says why it recovered even when no stderr was ever delivered [fence:pool-refusal-reason-is-carried]', async () => {
     const { pool, workRoot, processFor, log } = newPool()
     spawnedBefore(workRoot, A)
 
@@ -278,7 +333,7 @@ describe('naming a Session versus reaching it again', () => {
     feed(processFor(A), OK)
     await turn
 
-    expect(log).toContainEqual({
+    expect(log, CARRIED).toContainEqual({
       event: 'resume-lost',
       sessionId: A,
       refusal: expect.stringContaining('No conversation found'),
@@ -351,7 +406,7 @@ describe('naming a Session versus reaching it again', () => {
   // message with `--resume` at a Transcript nobody has written. Every message in
   // that Conversation then fails, for free, because the Session id is derived
   // from the Conversation Key and never moves.
-  it('creates the Session when something else made its working directory first', async () => {
+  it('creates the Session when something else made its working directory first [fence:pool-spawned-before-is-a-file]', async () => {
     const { claude, workRoot, send } = newPool()
     // What `writeEnclosures` leaves behind, and all of it: the directory, with
     // an Enclosure in it, and nothing the pool put there.
@@ -360,9 +415,9 @@ describe('naming a Session versus reaching it again', () => {
 
     await send(A, 'what is this?', OK)
 
-    expect(claude.spawns).toHaveLength(1)
-    expect(claude.lastSpawn.args).toContain('--session-id')
-    expect(claude.lastSpawn.args).not.toContain('--resume')
+    expect(claude.spawns, SPAWN_FILE).toHaveLength(1)
+    expect(claude.lastSpawn.args, SPAWN_FILE).toContain('--session-id')
+    expect(claude.lastSpawn.args, SPAWN_FILE).not.toContain('--resume')
   })
 
   // The mirror of the gap above, and the one ADR-0003 left unmeasured. Nothing
@@ -370,7 +425,7 @@ describe('naming a Session versus reaching it again', () => {
   // is spawned as new at an id Claude Code still has — and refused. Measured in
   // docs/transcript-collision-verification.md: left alone that Conversation is
   // poisoned for good, because every later message repeats the same spawn.
-  it('resumes a Session whose working directory was reclaimed', async () => {
+  it('resumes a Session whose working directory was reclaimed [fence:pool-wrong-flag-recovers]', async () => {
     const { claude, pool, processFor, log } = newPool()
     // No directory made: an empty work root is what the reclaim leaves behind.
 
@@ -382,13 +437,13 @@ describe('naming a Session versus reaching it again', () => {
     await flush()
     feed(processFor(A), OK)
 
-    expect((await turn).text).toBe('ok')
-    expect(claude.spawns[0]?.args).toContain('--session-id')
-    expect(claude.spawns[1]?.args).toContain('--resume')
+    expect((await turn).text, RECOVERS).toBe('ok')
+    expect(claude.spawns[0]?.args, RECOVERS).toContain('--session-id')
+    expect(claude.spawns[1]?.args, RECOVERS).toContain('--resume')
     // `retryWith` is the opposite of the sibling above, which is the point of
     // carrying it: the two recoveries are told apart by what roma did next, not
     // only by which refusal it saw.
-    expect(log).toContainEqual({
+    expect(log, RECOVERS).toContainEqual({
       event: 'transcript-survived',
       sessionId: A,
       refusal: expect.stringContaining('is already in use'),
@@ -399,7 +454,7 @@ describe('naming a Session versus reaching it again', () => {
   // The recovery is one attempt, not a loop. A retry that is refused in turn has
   // nowhere left to go — reaching for --resume was the other option — so it has
   // to surface rather than spawn forever at an id nothing will accept.
-  it('gives up rather than looping when the resume is refused too', async () => {
+  it('gives up rather than looping when the resume is refused too [fence:pool-correction-is-once]', async () => {
     const { claude, pool, processFor } = newPool()
 
     const turn = pool.send(A, 'back after a fortnight')
@@ -407,7 +462,7 @@ describe('naming a Session versus reaching it again', () => {
     // flushes from here, and a rejection with no handler attached *at the moment
     // it rejects* is reported as unhandled even though the test goes on to
     // assert it — noise that reads like a leak in the pool and is not.
-    const rejected = expect(turn).rejects.toThrow()
+    const rejected = expect(turn, ONCE).rejects.toThrow()
     await flush()
     for (const _ of [0, 1]) {
       const refused = processFor(A)
@@ -417,7 +472,7 @@ describe('naming a Session versus reaching it again', () => {
     }
 
     await rejected
-    expect(claude.spawns).toHaveLength(2)
+    expect(claude.spawns, ONCE).toHaveLength(2)
   })
 
   // The case that actually bites, and the one driving the same error twice
@@ -426,11 +481,11 @@ describe('naming a Session versus reaching it again', () => {
   // refusal in turn walks `--session-id`, `--resume`, `--session-id` for as long
   // as it is willing to. `#spawn` is serialised, so that loop starves every
   // other Session's spawn as well as this one's.
-  it('gives up when each flag is refused in turn, rather than alternating forever', async () => {
+  it('gives up when each flag is refused in turn, rather than alternating forever [fence:pool-correction-is-once]', async () => {
     const { claude, pool, processFor } = newPool()
 
     const turn = pool.send(A, 'back after a fortnight')
-    const rejected = expect(turn).rejects.toThrow()
+    const rejected = expect(turn, ONCE).rejects.toThrow()
     await flush()
 
     // Refused as new, then refused as existing: the contradiction the pool
@@ -447,9 +502,9 @@ describe('naming a Session versus reaching it again', () => {
     }
 
     await rejected
-    expect(claude.spawns).toHaveLength(2)
-    expect(claude.spawns[0]?.args).toContain('--session-id')
-    expect(claude.spawns[1]?.args).toContain('--resume')
+    expect(claude.spawns, ONCE).toHaveLength(2)
+    expect(claude.spawns[0]?.args, ONCE).toContain('--session-id')
+    expect(claude.spawns[1]?.args, ONCE).toContain('--resume')
   })
 
   // Both recoveries replace a resident mid-Turn, and the outer Turn's `finally`
@@ -495,6 +550,11 @@ describe('naming a Session versus reaching it again', () => {
 })
 
 describe('staying under the resident cap', () => {
+  const NEVER_BUSY =
+    'Eviction must never take a Session with a Turn in flight, and must refuse loudly when ' +
+    'every resident is busy (ADR-0003). A Task routinely runs for minutes with no wall-clock ' +
+    'timeout; evicting it kills a running Turn and fails a Task that did nothing wrong (#21).'
+
   it('keeps at most ten processes resident', async () => {
     const { pool, send } = newPool()
 
@@ -541,26 +601,31 @@ describe('staying under the resident cap', () => {
     expect(claude.processFor(join(workRoot, sessionId(1))).signals).toEqual(['SIGTERM'])
   })
 
-  // Eviction is awaited, so a process that never goes would stall every later
-  // message in the pool — one wedged Session halting roma without a single Task
-  // hanging. SIGTERM exiting 143 is measured; this is the guard for the day it
-  // stops holding.
-  it('escalates to SIGKILL when a process ignores SIGTERM', async () => {
+  // SIGTERM exiting 143 is measured; this is the guard for the day it stops
+  // holding.
+  it('escalates to SIGKILL when a process ignores SIGTERM [fence:pool-eviction-kills-what-ignores-sigterm]', async () => {
+    const why =
+      'Eviction must end a process with terminateOrKill, never a bare terminate (ADR-0003, ' +
+      'accepted risks). Eviction is awaited, so a process that ignores SIGTERM and is only ' +
+      'ever asked to go stalls every later message in the pool — one wedged Session halting ' +
+      'roma without a single Task hanging.'
     const { pool, processFor, log, send } = newPool()
     await send(A, 'hello', OK)
     processFor(A).ignore('SIGTERM')
 
     const evicted = pool.evict(A)
     await vi.advanceTimersByTimeAsync(5_000)
-    await evicted
 
-    expect(processFor(A).signals).toEqual(['SIGTERM', 'SIGKILL'])
-    expect(log).toContainEqual(expect.objectContaining({ event: 'kill', sessionId: A }))
+    // Asked before the eviction is awaited: a pool that never escalates never
+    // finishes evicting either.
+    expect(processFor(A).signals, why).toEqual(['SIGTERM', 'SIGKILL'])
+    await evicted
+    expect(log, why).toContainEqual(expect.objectContaining({ event: 'kill', sessionId: A }))
   })
 
   // A Task routinely runs for minutes and there is no wall-clock timeout, so the
   // one Session that must never be evicted is the one doing work.
-  it('leaves a Session with a Turn in flight alone', async () => {
+  it('leaves a Session with a Turn in flight alone [fence:pool-busy-session-is-never-evicted]', async () => {
     const { pool, workRoot, claude, processFor, send } = newPool()
     for (let n = 1; n <= 10; n++) await send(sessionId(n), 'hello', OK)
 
@@ -572,9 +637,40 @@ describe('staying under the resident cap', () => {
     for (let n = 2; n <= 10; n++) await send(sessionId(n), 'hello again', OK)
     await send(sessionId(11), 'and one more', OK)
 
-    expect(pool.residents).toContain(sessionId(1))
-    expect(processFor(sessionId(1)).signals).toEqual([])
-    expect(claude.processFor(join(workRoot, sessionId(2))).signals).toEqual(['SIGTERM'])
+    expect(pool.residents, NEVER_BUSY).toContain(sessionId(1))
+    expect(processFor(sessionId(1)).signals, NEVER_BUSY).toEqual([])
+    expect(claude.processFor(join(workRoot, sessionId(2))).signals, NEVER_BUSY).toEqual(['SIGTERM'])
+  })
+
+  // Reached only if the Task queue's cap is ever raised to the resident cap or
+  // above, since only a running Task makes a Session busy.
+  it('refuses rather than evicting when every resident Session is busy [fence:pool-busy-session-is-never-evicted]', async () => {
+    const { pool, processFor } = newPool({ maxResident: 1 })
+    const inFlight = pool.send(A, 'this one takes minutes')
+    inFlight.catch(() => {})
+    await flush()
+
+    await expect(pool.send(B, 'hello'), NEVER_BUSY).rejects.toThrow(/busy/)
+    expect(processFor(A).signals, NEVER_BUSY).toEqual([])
+    expect(pool.residents, NEVER_BUSY).toEqual([A])
+  })
+
+  // One spawn failing is that caller's problem. The spawns are serialised
+  // through one promise, and a rejection carried along it would fail every
+  // other Session's Task queued behind it.
+  it('starts the next Session after one failed to start [fence:pool-failed-spawn-does-not-block-the-next]', async () => {
+    const why =
+      'A spawn that failed must not reject the spawns serialised behind it (ADR-0003). The ' +
+      'queue of spawns is one promise; assigned without its catch, one Session that could ' +
+      'not start fails every later Session’s Task (#21).'
+    const { pool, send } = newPool({
+      envs: {
+        'shared-window': () => ({ PATH: '/usr/bin', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' }),
+      },
+    })
+
+    await expect(pool.send(A, 'hello', 'overflow'), why).rejects.toThrow(/overflow/i)
+    expect((await send(B, 'hello', OK)).text, why).toBe('ok')
   })
 })
 
@@ -620,6 +716,20 @@ describe('surviving eviction', () => {
 })
 
 describe('reaping idle processes', () => {
+  it('does not let a failed termination escape the reap timer [fence:pool-detached-termination-is-caught]', async () => {
+    const unhandled = await unhandledDuring(async () => {
+      const { processFor, send } = newPool()
+      await send(A, 'hello', OK)
+      processFor(A).kill = () => {
+        throw new Error('kill EPERM')
+      }
+
+      await vi.advanceTimersByTimeAsync(15 * MINUTE)
+    })
+
+    expect(unhandled, DETACHED).toEqual([])
+  })
+
   it('reaps a process that has been idle for fifteen minutes', async () => {
     const { pool, processFor, send } = newPool()
     await send(A, 'hello', OK)
@@ -716,9 +826,9 @@ describe('reclaiming working directories', () => {
     expect(existsSync(join(workRoot, A))).toBe(true)
   })
 
-  // The directory is the Session's record that it exists, so reclaiming it is
+  // The directory holds the Session's record that it exists, so reclaiming it is
   // also what makes the next message create the Session rather than resume it.
-  it('makes the next message create the Session again', async () => {
+  it('makes the next message create the Session again [fence:pool-spawned-before-is-a-file]', async () => {
     const { claude, pool, workRoot, send } = newPool()
     await send(A, 'hello', OK)
     await pool.evict(A)
@@ -727,7 +837,11 @@ describe('reclaiming working directories', () => {
 
     await send(A, 'much later', OK)
 
-    expect(claude.spawns[1]?.args).toContain('--session-id')
+    expect(
+      claude.spawns[1]?.args,
+      'The record that a Session was spawned must live inside its Working Directory, so the ' +
+        'reclaim takes it along and the next message creates the Session again (ADR-0003, #105).',
+    ).toContain('--session-id')
   })
 
   it('runs on its own rather than waiting to be asked', async () => {
@@ -743,6 +857,28 @@ describe('reclaiming working directories', () => {
 })
 
 describe('what an operator can see', () => {
+  // The moment an operator is looking for is the decision, not the ending; a
+  // process that will not go must not hold the record back.
+  it('records an eviction before the process has gone [fence:pool-eviction-logged-before-termination]', async () => {
+    const why =
+      'An eviction or reap must be logged before its termination is awaited (ADR-0005: the ' +
+      'Operator Log is what roma decided). A termination that hangs — a process ignoring ' +
+      'SIGTERM through its grace period — otherwise swallows the only record of why a Turn ' +
+      'took an extra cold start (#21).'
+    const { pool, processFor, log, send } = newPool({ maxResident: 1 })
+    await send(A, 'hello', OK)
+    processFor(A).ignore('SIGTERM')
+
+    const second = pool.send(B, 'hello')
+    await flush()
+
+    expect(log, why).toContainEqual(expect.objectContaining({ event: 'evict', sessionId: A }))
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    feed(processFor(B), OK)
+    await second
+  })
+
   it('records an eviction, so a slow Turn has an explanation', async () => {
     const { log, send } = newPool()
 
@@ -866,6 +1002,24 @@ describe('driving a resident Session', () => {
 describe('giving up on a retry storm', () => {
   const budget = { maxApiRetries: 3, windowMs: 60_000 }
 
+  // Signals and waiting cannot reject today; this is the day one does.
+  it('does not let a failed termination escape as an unhandled rejection [fence:pool-detached-termination-is-caught]', async () => {
+    const unhandled = await unhandledDuring(async () => {
+      const { pool, processFor } = newPool({ retryBudget: budget })
+      const turn = pool.send(A, 'hello')
+      turn.catch(() => {})
+      await flush()
+      const stormed = processFor(A)
+      stormed.kill = () => {
+        throw new Error('kill EPERM')
+      }
+
+      feed(stormed, RETRIES.slice(0, 3))
+    })
+
+    expect(unhandled, DETACHED).toEqual([])
+  })
+
   it('abandons a Turn that has retried more than its budget allows', async () => {
     const { pool, processFor } = newPool({ retryBudget: budget })
     const turn = pool.send(A, 'hello')
@@ -879,7 +1033,7 @@ describe('giving up on a retry storm', () => {
   // The whole point: the slot goes back, so a misconfigured credential cannot
   // hold one for the 182 seconds the prototype measured. Three of those halt
   // roma entirely, without a single Task hanging.
-  it('releases the Session, so roma can still take new work', async () => {
+  it('releases the Session, so roma can still take new work [fence:pool-storm-ends-the-process]', async () => {
     const { pool, processFor } = newPool({ retryBudget: budget })
     const turn = pool.send(A, 'hello')
     turn.catch(() => {})
@@ -889,9 +1043,24 @@ describe('giving up on a retry storm', () => {
     feed(stormed, RETRIES.slice(0, 3))
     await turn.catch(() => {})
 
-    expect(stormed.signals).toEqual(['SIGTERM'])
-    expect(pool.residents).toEqual([])
-    expect((await newTurnOn(pool, processFor, A)).text).toBe('ok')
+    expect(
+      stormed.signals,
+      'A retry-storming Turn is abandoned by ending its process, never by interrupting it ' +
+        '(ADR-0003). An interrupt does nothing to a process asleep in a ~35s backoff, which is ' +
+        'exactly the case the cap exists for, so the slot is never given back (#23).',
+    ).toEqual(['SIGTERM'])
+    expect(
+      pool.residents,
+      'A retry-storming Turn is abandoned by ending its process, never by interrupting it ' +
+        '(ADR-0003). An interrupt does nothing to a process asleep in a ~35s backoff, which is ' +
+        'exactly the case the cap exists for, so the slot is never given back (#23).',
+    ).toEqual([])
+    expect(
+      (await newTurnOn(pool, processFor, A)).text,
+      'A retry-storming Turn is abandoned by ending its process, never by interrupting it ' +
+        '(ADR-0003). An interrupt does nothing to a process asleep in a ~35s backoff, which is ' +
+        'exactly the case the cap exists for, so the slot is never given back (#23).',
+    ).toBe('ok')
   })
 
   // What the caller is eventually told rests on this. The 401 itself never
@@ -1079,6 +1248,14 @@ function ageWorkDir(path: string, ageMs: number): void {
 }
 
 describe('running a Turn on the other credential', () => {
+  const COMPARED =
+    'Every term a process is started for is compared before it is reused, through the one ' +
+    '`COMPARED` table typed over SpawnTerms (ADR-0002, ADR-0014, ADR-0016, ADR-0030). A term ' +
+    'checked at the spawn and forgotten in the comparison is the failure with no symptom: a ' +
+    'Session served by a process started for other terms. The append is compared rather than ' +
+    'the Caveman, because it is what the argv carries; the two cannot drift, because #acquire ' +
+    'renders one from the other (#110, #192).'
+
   // Overflow is not a mode the pool is put into: ADR-0002 makes it a different
   // environment map and nothing else, so it is a property of the process serving
   // one Turn rather than of the pool or of the Session.
@@ -1098,15 +1275,15 @@ describe('running a Turn on the other credential', () => {
   // could not simply be a second pool: the Session's transcript is one file, and
   // the process on the wrong credential has to be gone before the next one
   // starts rather than merely unused.
-  it('ends the process on the old credential before starting the new one', async () => {
+  it('ends the process on the old credential before starting the new one [fence:pool-every-term-is-compared]', async () => {
     const { claude, processFor, send } = newPool()
     await send(A, 'first', OK)
     const first = processFor(A)
 
     await send(A, 'and again', OK, 'overflow')
 
-    expect(first.signals).toContain('SIGTERM')
-    expect(claude.processes).toHaveLength(2)
+    expect(first.signals, COMPARED).toContain('SIGTERM')
+    expect(claude.processes, COMPARED).toHaveLength(2)
   })
 
   // The Session survives the swap, which is what makes Overflow worth taking at
@@ -1182,7 +1359,7 @@ describe('running a Turn on the other credential', () => {
   // so a Session whose Chosen Model has moved needs a different process to serve
   // its next Turn. Read at the spawn rather than handed over, which is what makes
   // the invariant survive a restart nobody told the pool about.
-  it('starts a new process when the Session has been moved to another model', async () => {
+  it('starts a new process when the Session has been moved to another model [fence:pool-every-term-is-compared]', async () => {
     const chosen = new Map<string, string>()
     const { log, send, claude } = newPool({
       models: { kind: 'model', inForce: (sessionId) => chosen.get(sessionId) ?? 'claude-sonnet-5' },
@@ -1192,8 +1369,8 @@ describe('running a Turn on the other credential', () => {
     chosen.set(A, 'claude-opus-5')
     await send(A, 'and again', OK)
 
-    expect(claude.lastSpawn.args).toContain('claude-opus-5')
-    expect(log).toContainEqual({
+    expect(claude.lastSpawn.args, COMPARED).toContain('claude-opus-5')
+    expect(log, COMPARED).toContainEqual({
       event: 'swap',
       sessionId: A,
       reason: 'model',
@@ -1213,7 +1390,7 @@ describe('running a Turn on the other credential', () => {
    * at, report the level that was asked for, and record it — with no evidence
    * anywhere (ADR-0016).
    */
-  it('starts a new process when the Session has been moved to another effort', async () => {
+  it('starts a new process when the Session has been moved to another effort [fence:pool-every-term-is-compared]', async () => {
     const chosen = new Map<string, string>()
     const { log, send, claude } = newPool({
       efforts: { kind: 'effort', inForce: (sessionId) => chosen.get(sessionId) ?? 'high' },
@@ -1224,8 +1401,8 @@ describe('running a Turn on the other credential', () => {
     await send(A, 'and again', OK)
 
     const args = claude.lastSpawn.args
-    expect(args[args.indexOf('--effort') + 1]).toBe('max')
-    expect(log).toContainEqual({
+    expect(args[args.indexOf('--effort') + 1], COMPARED).toBe('max')
+    expect(log, COMPARED).toContainEqual({
       event: 'swap',
       sessionId: A,
       reason: 'effort',
@@ -1300,7 +1477,7 @@ describe('running a Turn on the other credential', () => {
    * operator can read, and the text is several thousand characters of somebody
    * else's prose (ADR-0030).
    */
-  it('starts a new process when the Session has been moved to another Caveman', async () => {
+  it('starts a new process when the Session has been moved to another Caveman [fence:pool-every-term-is-compared]', async () => {
     const chosen = new Map<string, string>()
     const { log, send, claude } = newPool({
       cavemen: { kind: 'caveman', inForce: (sessionId) => chosen.get(sessionId) ?? 'off' },
@@ -1311,8 +1488,8 @@ describe('running a Turn on the other credential', () => {
     await send(A, 'and again', OK)
 
     const args = claude.lastSpawn.args
-    expect(args[args.indexOf('--append-system-prompt') + 1]).toBe(cavemanRuleset('ultra'))
-    expect(log).toContainEqual({
+    expect(args[args.indexOf('--append-system-prompt') + 1], COMPARED).toBe(cavemanRuleset('ultra'))
+    expect(log, COMPARED).toContainEqual({
       event: 'swap',
       sessionId: A,
       reason: 'caveman',
@@ -1411,7 +1588,12 @@ describe('what a Session is told about itself', () => {
     return at === -1 ? undefined : spawn.args[at + 1]
   }
 
-  it('joins the Reach announcements ahead of the ruleset, on a blank line', async () => {
+  it('joins the Reach announcements ahead of the ruleset, on a blank line [fence:pool-reaches-before-the-ruleset]', async () => {
+    const why =
+      'The append is every Reach announcement, then the Caveman ruleset, each part on its own ' +
+      'paragraph (ADR-0030). What roma can reach is what the Session may do and how short to ' +
+      'be is how it should answer; the second is only useful once the first is read, and an ' +
+      'agent skimming a system prompt reads a break as a change of subject (#192).'
     const { claude, send } = newPool({
       announcements: ['reaches a-team/roma', 'acts as agent@a-project'],
       cavemen: { kind: 'caveman', inForce: () => 'lite' },
@@ -1419,24 +1601,47 @@ describe('what a Session is told about itself', () => {
 
     await send(A, 'hello', OK)
 
-    expect(appendedTo(claude.lastSpawn)).toBe(
+    expect(appendedTo(claude.lastSpawn), why).toBe(
       `reaches a-team/roma\n\nacts as agent@a-project\n\n${cavemanRuleset('lite')}`,
     )
   })
 
   // A Reach with nothing to say and an `off` Caveman are the same case, and both
-  // are dropped before the join rather than trimmed after it — the flag is gated
-  // on the value being absent and never on its being empty, so a trailing blank
-  // line would reach the argv.
-  it('drops an empty part rather than joining it and tidying up after', async () => {
+  // are dropped before the join rather than trimmed after it. The empty part in
+  // the middle is the one a trim cannot reach.
+  it('drops an empty part rather than joining it and tidying up after [fence:pool-empty-parts-dropped-before-join]', async () => {
+    const why =
+      'Empty parts of the append are dropped before the join, never trimmed after it ' +
+      '(ADR-0030). An unavailable Reach between two available ones, or an `off` Caveman, ' +
+      'otherwise leaves extra blank lines on the argv of every Session in the deployment (#192).'
     const { claude, send } = newPool({
-      announcements: ['reaches a-team/roma', ''],
+      announcements: ['reaches a-team/roma', '', 'acts as agent@a-project'],
       cavemen: { kind: 'caveman', inForce: () => 'off' },
     })
 
     await send(A, 'hello', OK)
 
-    expect(appendedTo(claude.lastSpawn)).toBe('reaches a-team/roma')
+    expect(appendedTo(claude.lastSpawn), why).toBe('reaches a-team/roma\n\nacts as agent@a-project')
+  })
+
+  // A `/caveman` can land between two readings of the record. One reading is
+  // what keeps the argv's text and the level a swap names it by describing the
+  // same record.
+  it('renders the argv and names the level from one reading of the record [fence:pool-caveman-read-once]', async () => {
+    const why =
+      'The Caveman is resolved once per acquisition, and the append rendered from that one ' +
+      'reading (ADR-0030). Read twice, a /caveman landing between the reads makes the argv ' +
+      'text and the level the pool reports — to a swap and to the Audit Record — describe ' +
+      'different records (#192).'
+    const readings = ['lite', 'ultra']
+    const { claude, pool, send } = newPool({
+      cavemen: { kind: 'caveman', inForce: () => readings.shift() ?? 'off' },
+    })
+
+    await send(A, 'hello', OK)
+
+    expect(pool.cavemanOn(A), why).toBe('lite')
+    expect(appendedTo(claude.lastSpawn), why).toBe(cavemanRuleset('lite'))
   })
 
   // Two Sessions of one deployment, told two different things — which is the
@@ -1460,12 +1665,17 @@ describe('what a Session is told about itself', () => {
   // Read at the spawn rather than handed over, which is what makes a Chosen
   // Caveman written while roma was somewhere else in force without anybody
   // telling the pool.
-  it('passes the flag at all only where there is something to say', async () => {
+  it('passes the flag at all only where there is something to say [fence:pool-empty-append-is-absent]', async () => {
     const { claude, send } = newPool()
 
     await send(A, 'hello', OK)
 
-    expect(claude.lastSpawn.args).not.toContain('--append-system-prompt')
+    expect(
+      claude.lastSpawn.args,
+      'With nothing to append, the term is undefined and never an empty string: ' +
+        '--append-system-prompt is gated on undefined (ADR-0030). An empty value reaches the ' +
+        'argv of every Session in the deployment (#192).',
+    ).not.toContain('--append-system-prompt')
   })
 
   // The Pinned Caveman, for a pool built without a per-Session answer — `model`
@@ -1482,7 +1692,7 @@ describe('what a Session is told about itself', () => {
   // is the process's rather than the record's: a Chosen Caveman written while
   // the Turn was running moves the next spawn, and a ledger that resolved it a
   // second time would name a level nothing was asked for.
-  it('says what the process serving a Session was started at, not what is set now', async () => {
+  it('says what the process serving a Session was started at, not what is set now [fence:pool-caveman-is-what-the-process-ran-at]', async () => {
     const chosen = new Map([[A, 'lite']])
     const { pool, send } = newPool({
       cavemen: { kind: 'caveman', inForce: (sessionId) => chosen.get(sessionId) ?? 'off' },
@@ -1491,12 +1701,46 @@ describe('what a Session is told about itself', () => {
     await send(A, 'hello', OK)
     chosen.set(A, 'ultra')
 
-    expect(pool.cavemanOn(A)).toBe('lite')
+    expect(
+      pool.cavemanOn(A),
+      'cavemanOn answers what the serving process was started at, never a fresh reading of ' +
+        'the record (ADR-0030). A /caveman mid-Turn moves the next spawn; the Audit Record ' +
+        'must name the level the Turn ran at, and the pool is the only place that exists (#192).',
+    ).toBe('lite')
   })
 
   it('says nothing about a Session no process is serving', () => {
     const { pool } = newPool()
 
     expect(pool.cavemanOn(A)).toBeNull()
+  })
+})
+
+describe('the ports the pool asks at every spawn', () => {
+  // A type-level check: `npm run typecheck` fails here if the `kind` members
+  // are dropped, because the swaps below would then compile.
+  it('cannot be passed for one another [fence:pool-ports-are-distinct]', () => {
+    const why =
+      'SessionModels, SessionEfforts and SessionCavemen each carry a `kind` literal, so one ' +
+      'cannot be passed where another goes (ADR-0016). Without it the ports are one ' +
+      'structural type in adjacent options, and swapped, every process spawns with the ' +
+      'effort as its model and nothing says so (#136).'
+    const model: SessionModels = { kind: 'model', inForce: () => 'claude-opus-5' }
+    const effort: SessionEfforts = { kind: 'effort', inForce: () => 'high' }
+    const caveman: SessionCavemen = { kind: 'caveman', inForce: () => 'lite' }
+
+    // @ts-expect-error -- an effort port where the model port goes is the swap this forbids
+    const asModel: SessionModels = effort
+    // @ts-expect-error -- and the other way round
+    const asEffort: SessionEfforts = model
+    // @ts-expect-error -- and the third port in the row
+    const asCaveman: SessionCavemen = effort
+
+    expect([asModel.kind, asEffort.kind, asCaveman.kind, caveman.kind], why).toEqual([
+      'effort',
+      'model',
+      'effort',
+      'caveman',
+    ])
   })
 })

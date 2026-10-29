@@ -79,7 +79,8 @@ claude -p --input-format stream-json --output-format stream-json \
   `ANTHROPIC_API_KEY`, which would break subscription auth (see ADR-0002).
   Upstream documents `--bare` as the recommended mode for scripted calls and
   states it will become the default for `-p` in a future release, so the Claude
-  Code version is pinned and re-verified before any upgrade.
+  Code version is pinned and re-verified before any upgrade. Enforced by
+  `fence:session-invocation-pinned`.
 - Idle processes are reaped after 15 minutes; the session then resumes cold via
   `--resume`. At most 10 resident processes, evicted LRU.
 

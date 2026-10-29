@@ -17,11 +17,8 @@ const CLOSE = '</from>'
  * one voice saying everything — and an agent asked to do what somebody said an
  * hour ago has no way to tell whose "somebody" it is.
  *
- * On **every** Turn, unconditionally, DMs included. The alternative — marking
- * only when the Caller changes — needs the Core to remember who spoke last,
- * which is lost on a restart, and an unmarked message is read as "the same
- * person again": Bob's request would be quietly filed under Ada, in the one
- * record ADR-0006 says roma never deletes. A marker on a DM costs a line.
+ * On **every** Turn, unconditionally, DMs included. Enforced by
+ * `fence:attribution-marks-every-turn`.
  *
  * Every message *this* function writes, which is every message given to the
  * model as prose. A Relay carrying an argument is the one message roma sends
@@ -148,14 +145,8 @@ function attribute(value: string): string {
  * A Relay as Claude Code is given it: the command first, and the Caller named
  * below it — or not named at all.
  *
- * The one place the marker does not come first, and the exception is the whole
- * of why roma can relay one of Claude Code's own commands at all. Claude Code
- * recognises a slash command only when the message begins with the slash, so a
- * marker written above one turns it into prose: measured on the pinned build,
- * `<from>…</from>\n\n/context` drives a real Turn and answers with the model's
- * guess about the command, where the same message the other way round returns
- * the command's output for nothing. That is the fault ADR-0012 exists to fix,
- * and it is the reason `attributed` cannot be used here.
+ * The one place the marker does not come first (ADR-0012). Enforced by
+ * `fence:attribution-relay-command-first`.
  *
  * **Where the Caller supplied no text, the marker follows the command.** Safe
  * only because `readRelay` demands an exact whole-message match there: `command`

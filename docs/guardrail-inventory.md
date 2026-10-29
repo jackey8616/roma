@@ -9,6 +9,13 @@ since is one whose prose is gone.
 432 guardrails: 403 could fail, 29 are explain-only. Of the
 403, 344 already had a test that fails when the change is made.
 
+**Since converted.** The sweep recorded in ADR-0031 (*Amended — the sweep*)
+handled every row below. The table is left as the snapshot it was. The
+"Already enforced by" column is the inventory's claim, and about one in ten of
+those claims was wrong: the test passed with the bug re-planted. Which check
+holds a guardrail now is its `Enforced by` citation, in the code or the ADR. A
+citation resolves only to a fenced test that was shown red.
+
 ## Converted, with red-light evidence
 
 Each check was run against the bug re-planted into a copy of the tree (or the

@@ -270,7 +270,7 @@ is about.
 There is a second gain, and it is the larger one: `src/cloud/reach.ts` lands
 *inside* `containment('cloud')`, so `RESOLVES_A_CREDENTIAL` now binds the
 construction site itself — which it has never done, because the construction was in
-the one file that rule cannot bind.
+the one file that rule cannot bind. Enforced by `fence:cloud-never-resolves-a-credential`.
 
 So the guard moves from "the source says the right thing" to "the wrong thing
 cannot be said here". The deleted test is not coverage lost; it is coverage that
@@ -283,7 +283,8 @@ assembled out of — so the repo keeps no mechanism for asserting anything about
 one file where both identities are in scope. That is acceptable for §4, which no
 longer needs one. It is recorded here because rebuilding it later is a new helper
 rather than a new expectation, and because the next person to want a rule about the
-composition root should know the machinery was removed rather than never built.
+composition root should know the machinery was removed rather than never built. Re-planted, a
+`new GoogleAuth()` in `src/startup.ts` passes every test. *Not enforced (ADR-0031).*
 
 ### 8. What is deliberately not made uniform
 

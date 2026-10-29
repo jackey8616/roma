@@ -21,14 +21,7 @@ export interface HttpDiscordApiOptions {
   readonly fetch?: typeof globalThis.fetch
 }
 
-/**
- * Discord's own code for a message that already has a thread on it.
- *
- * **Never read this as a failure.** Why the second attempt at one message is a
- * success is `startThread`'s promise on the port. The number is off Discord's
- * JSON error code table rather than the route's own documentation — ADR-0029's
- * second tier — and being wrong about it costs a Session its thread and no more.
- */
+/** Enforced by `fence:discord-thread-already-created-is-success`. */
 const THREAD_ALREADY_CREATED = 160004
 
 /**
@@ -61,10 +54,7 @@ export class HttpDiscordApi implements DiscordApi {
   }
 
   async download(url: string): Promise<Uint8Array> {
-    // **Never put the token on this one.** An attachment URL is a signed link on
-    // a content host rather than a call to the API, so a credential added here
-    // is a credential handed to whatever is on the other end of a URL that
-    // arrived in a message.
+    // Enforced by `fence:discord-download-carries-no-token`.
     const response = await this.#fetch(url)
     refuseUnless(response, 'an attachment — its links expire, and a Task can wait hours')
     return new Uint8Array(await response.arrayBuffer())
@@ -76,11 +66,7 @@ export class HttpDiscordApi implements DiscordApi {
       ...(replyTo === null
         ? {}
         : {
-            // **Never let this default.** `fail_if_not_exists` is true unless it
-            // is said otherwise, so a reply to a message somebody deleted while
-            // the Task ran is not a plainer answer but no answer at all — the
-            // Conversation is told nothing about work that has already been paid
-            // for.
+            // Enforced by `fence:discord-reply-survives-deleted-message`.
             message_reference: { message_id: replyTo, fail_if_not_exists: false },
           }),
       ...(buttons.length === 0 ? {} : { components: componentRows(buttons) }),
@@ -124,10 +110,7 @@ export class HttpDiscordApi implements DiscordApi {
     return this.#fetch(`${this.#apiBase}${path}`, {
       method,
       headers: {
-        // **Never send the bare token.** Discord reads the scheme to decide what
-        // kind of credential this is, and a token with no `Bot ` in front of it
-        // is refused as unauthorized — which arrives here as a Quotation that
-        // silently never resolves, or as an answer nobody is ever told.
+        // Enforced by `fence:discord-bot-token-scheme`.
         authorization: `Bot ${this.#botToken}`,
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
       },
@@ -158,17 +141,7 @@ const ACTION_ROW = 1
 const BUTTON = 2
 const SECONDARY = 2
 
-/**
- * How many buttons fit in one row.
- *
- * **Never let a row go past five.** Discord refuses the whole message, so a row
- * one button too wide is a Menu nobody is shown. The Model Menu is four and the
- * Effort Menu six, so one row and two.
- *
- * How many rows there may be is `MAX_BUTTONS`, and it is kept where the buttons
- * are chosen rather than trimmed here: dropping a tail is a decision, and this
- * file makes none.
- */
+/** Enforced by `fence:discord-buttons-fit-one-message`. Enforced by `fence:discord-http-trims-no-menu`. */
 const PER_ROW = 5
 
 /** Buttons as Discord takes them: rows of five, in the order they were given. */
@@ -188,16 +161,7 @@ function componentRows(buttons: readonly DiscordButton[]): unknown[] {
   return rows
 }
 
-/**
- * What roma will let a message of its own mention.
- *
- * **Never let the text decide it.** A Result is written by a model that has read
- * whatever anybody put in front of it, so an `@everyone` in one is a
- * notification to a whole guild that nobody can take back — which is why an
- * empty `parse` is a decision ADR-0029 records rather than a precaution taken
- * here. `replied_user` is on because naming this field at all is what turns the
- * reply ping off, and the reply is how a Caller is addressed on this Channel.
- */
+/** Enforced by `fence:discord-text-mentions-nobody`. */
 const ALLOWED_MENTIONS = { allowed_mentions: { parse: [], replied_user: true } } as const
 
 /** Discord's own error code on a response, or null where it said none. */
@@ -209,15 +173,7 @@ async function codeOf(response: Response): Promise<number | null> {
   }
 }
 
-/**
- * Turn anything but a success into the refusal a retry can read.
- *
- * **Never let a wait be inferred instead of read.** This is the one place a
- * `Retry-After` comes off a response, and `DiscordRefusal` is where what a
- * guessed one costs is written down. `retry-after` is Discord's answer to a 429
- * and `x-ratelimit-reset-after` is the same figure on the bucket it belongs to;
- * both are seconds, and either may be fractional.
- */
+/** Enforced by `fence:discord-retry-after-is-read`. */
 function refuseUnless(response: Response, what: string): void {
   if (response.ok) return
   const seconds =

@@ -134,6 +134,16 @@ function to(
 }
 
 describe('which Conversation a Chat message belongs to', () => {
+  const KEY_WHY =
+    'The Conversation Key is the space in a DM and the thread in a space, read off ' +
+    '`spaceType` or the deprecated `type` and never off `spaceThreadingState` (ADR-0004: one ' +
+    'long-lived Session per person in a DM, one per thread in a space). Chat puts a thread on ' +
+    'every DM message, so keying a DM on it makes every message its own Conversation; ' +
+    '`spaceThreadingState` is output-only, so keying on it sends every space message down the ' +
+    'DM path; and falling back to the space for a threaded message with no thread puts one ' +
+    "Conversation's context into every other in that space. Unanswered is at least visible. " +
+    'A press and a message are keyed by one reading, so the two cannot drift (#26, #140).'
+
   it('is the thread, in a space', () => {
     const { adapter } = newAdapter()
 
@@ -144,14 +154,21 @@ describe('which Conversation a Chat message belongs to', () => {
   // Conversation per person. The message's own thread must not be read here —
   // it names that single message, so every message would be its own Conversation
   // and nothing would ever remember anything.
-  it('is the space, in a DM, for every message in it', () => {
+  it('is the space, in a DM, for every message in it [fence:gchat-conversation-key-from-the-space]', () => {
     const { adapter } = newAdapter()
 
     const first = adapter.toIngress(inDm('hello'))
     const second = adapter.toIngress(inDm('and another thing'))
 
-    expect(first?.conversationKey).toBe(DM)
-    expect(second?.conversationKey).toBe(DM)
+    expect(first?.conversationKey, KEY_WHY).toBe(DM)
+    expect(second?.conversationKey, KEY_WHY).toBe(DM)
+  })
+
+  it('is no Conversation at all, for a message in a space that names no thread [fence:gchat-conversation-key-from-the-space]', () => {
+    const { adapter } = newAdapter()
+    const { thread: _thread, ...threadless } = inSpace().message as Record<string, unknown>
+
+    expect(adapter.toIngress({ ...inSpace(), message: threadless }), KEY_WHY).toBeNull()
   })
 
   // `spaceThreadingState` is the field that looks like the answer and is not:
@@ -160,7 +177,7 @@ describe('which Conversation a Chat message belongs to', () => {
   // every message in a space down the DM path — one Session for the whole space,
   // with everybody's context in everybody else's replies. A space is recognised
   // by being a space.
-  it('is the thread even when the event says nothing about threading state', () => {
+  it('is the thread even when the event says nothing about threading state [fence:gchat-conversation-key-from-the-space]', () => {
     const { adapter } = newAdapter()
     const event = {
       type: 'MESSAGE',
@@ -172,12 +189,12 @@ describe('which Conversation a Chat message belongs to', () => {
       },
     }
 
-    expect(adapter.toIngress(event)?.conversationKey).toBe(THREAD)
+    expect(adapter.toIngress(event)?.conversationKey, KEY_WHY).toBe(THREAD)
   })
 
   // The deprecated field is what older event payloads carry, and being wrong
   // about which one is present costs a merged Conversation either way.
-  it('recognises a DM by either the current field or the deprecated one', () => {
+  it('recognises a DM by either the current field or the deprecated one [fence:gchat-conversation-key-from-the-space]', () => {
     const { adapter } = newAdapter()
     const bySpaceType = inDm('hello', {})
     const byType = {
@@ -186,8 +203,8 @@ describe('which Conversation a Chat message belongs to', () => {
       message: { sender: { name: SENDER, type: 'HUMAN' }, text: 'hello' },
     }
 
-    expect(adapter.toIngress(bySpaceType)?.conversationKey).toBe(DM)
-    expect(adapter.toIngress(byType)?.conversationKey).toBe(DM)
+    expect(adapter.toIngress(bySpaceType)?.conversationKey, KEY_WHY).toBe(DM)
+    expect(adapter.toIngress(byType)?.conversationKey, KEY_WHY).toBe(DM)
   })
 
   it('reaches the same Session every time, for the same Conversation', () => {
@@ -248,6 +265,16 @@ describe('which Conversation a Chat message belongs to', () => {
 })
 
 describe('what roma does not answer', () => {
+  const APP_WHY =
+    'roma must answer nothing an app said: Chat marks app messages `type: "BOT"`, and ' +
+    'answering them is how two apps in one space talk to each other until somebody notices ' +
+    'the quota (ADR-0002: the Shared Window is one subscription everybody shares) (#26).'
+  const CONTENT_WHY =
+    'roma answers a message with anything in it, and only that: a bare @-mention would spend a ' +
+    'Turn asking Claude Code what to make of nothing, while a pasted screenshot (ADR-0011) or ' +
+    'a quotation (ADR-0021) with no words is a request. Test for empty content, not empty ' +
+    'text (#26, #92).'
+
   it('ignores an event that is not a message', () => {
     const { adapter } = newAdapter()
 
@@ -257,33 +284,36 @@ describe('what roma does not answer', () => {
 
   // Two apps in one space answering each other is a loop that runs until
   // somebody notices the quota.
-  it('ignores anything another app said', () => {
+  it('ignores anything another app said [fence:gchat-never-answers-an-app]', () => {
     const { adapter } = newAdapter()
 
     const fromApp = inSpace('hello', {
       sender: { name: 'users/99', displayName: 'some bot', type: 'BOT' },
     })
 
-    expect(adapter.toIngress(fromApp)).toBeNull()
+    expect(adapter.toIngress(fromApp), APP_WHY).toBeNull()
   })
 
-  it('ignores an @-mention with nothing after it', () => {
+  it('ignores an @-mention with nothing after it [fence:gchat-answers-anything-with-content]', () => {
     const { adapter } = newAdapter()
 
-    expect(adapter.toIngress(inSpace('', { argumentText: '   ' }))).toBeNull()
+    expect(adapter.toIngress(inSpace('', { argumentText: '   ' })), CONTENT_WHY).toBeNull()
   })
 
   // The rule restated for Enclosures: what is not a request is a message with
   // nothing in it, and a pasted screenshot is not nothing (ADR-0011). Before
   // this, an image with no words got no answer and no acknowledgement — silence
   // that reads as roma being broken.
-  it('answers an @-mention whose only content is an image', () => {
+  it('answers an @-mention whose only content is an image [fence:gchat-answers-anything-with-content]', () => {
     const { adapter } = newAdapter()
 
     const message = adapter.toIngress(inSpace('', { argumentText: '  ', attachment: [UPLOADED] }))
 
-    expect(message?.text).toBe('')
-    expect(message?.enclosures.map(({ name }) => name)).toEqual(['screenshot.png'])
+    expect(message?.text, CONTENT_WHY).toBe('')
+    expect(
+      message?.enclosures.map(({ name }) => name),
+      CONTENT_WHY,
+    ).toEqual(['screenshot.png'])
   })
 })
 
@@ -412,6 +442,28 @@ describe('the message a message quotes', () => {
     }
   })
 
+  it('carries nothing of the space a forward came from [fence:gchat-forward-names-no-space]', () => {
+    const why =
+      'forwardedMetadata.spaceDisplayName must never be carried into the message (ADR-0021 §4). ' +
+      'For a forwarded DM it holds the other participant’s name rather than a space’s, so ' +
+      '<quoted from="Bob" space="Alice"> would read as Alice being a place: a fact that misleads ' +
+      'in a knowable fraction of cases is worse than no fact.'
+    const { adapter } = newAdapter()
+    const forwarded = quoting(SAID, {
+      quoteType: 'FORWARD',
+      forwardedMetadata: { space: 'spaces/ELSEWHERE', spaceDisplayName: 'Alice Liddell' },
+    })
+
+    const message = adapter.toIngress(inSpace('why?', forwarded))
+
+    expect(message?.quotation, why).toEqual({
+      text: 'the deploy failed at step 3',
+      author: 'users/99',
+    })
+    expect(JSON.stringify(message), why).not.toContain('Alice Liddell')
+    expect(JSON.stringify(message), why).not.toContain('spaces/ELSEWHERE')
+  })
+
   // A Channel is entitled to have no name for somebody. What roma must not do is
   // invent one — an unattributed passage in front of the model is read as the
   // Caller's own words, which is the misattribution the whole tag exists for.
@@ -432,13 +484,17 @@ describe('the message a message quotes', () => {
   // ADR-0011's rule, restated for a Quotation: what is not a request is a message
   // with *nothing* in it, and pointing at a message is the most ordinary thing
   // there is to do in a chat window.
-  it('answers an @-mention whose only content is a quotation', () => {
+  it('answers an @-mention whose only content is a quotation [fence:gchat-answers-anything-with-content]', () => {
+    const why =
+      'A quotation with no words typed is a request, on the argument that made a pasted ' +
+      'screenshot one: quoting an error at roma is the same act (ADR-0021). Test for empty ' +
+      'content, not empty text (#92).'
     const { adapter } = newAdapter()
 
     const message = adapter.toIngress(inSpace('', { argumentText: '  ', ...quoting(SAID) }))
 
-    expect(message?.text).toBe('')
-    expect(message?.quotation?.text).toBe('the deploy failed at step 3')
+    expect(message?.text, why).toBe('')
+    expect(message?.quotation?.text, why).toBe('the deploy failed at step 3')
   })
 
   // The bytes are fetched exactly as the Caller's own are, over the same
@@ -539,12 +595,17 @@ describe('replying in Chat', () => {
   // An app cannot create a thread of its own, so replying into the caller's
   // thread with this option is the only way a thread ever comes to exist. It is
   // also what makes the Conversation Key stable from the first reply onwards.
-  it('replies into the thread, with the option that establishes one', async () => {
+  it('replies into the thread, with the option that establishes one [fence:gchat-reply-into-a-thread-name]', async () => {
+    const why =
+      'A Conversation Key in a space is a thread resource name, spaces/{space}/threads/{thread}, ' +
+      'and a reply goes into it with REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD (ADR-0004). ' +
+      'spaces/{space}/messages/{message} is a message name: an adapter parsing for that reads ' +
+      'every real thread key as malformed and never replies in a space at all.'
     const { adapter, api } = newAdapter()
 
     await adapter.deliver(to(THREAD, { kind: 'result', text: 'the answer' }))
 
-    expect(api.messages[0]?.posted).toEqual({
+    expect(api.messages[0]?.posted, why).toEqual({
       space: SPACE,
       thread: THREAD,
       text: `${TO}the answer`,
@@ -593,11 +654,16 @@ describe('replying in Chat', () => {
 
   // The Core cannot absorb this one: an instruction that reached nobody looks,
   // from the Conversation, exactly like a message that was never received.
-  it('does not swallow a Chat API failure', async () => {
+  it('does not swallow a Chat API failure [fence:gchat-deliver-rejects-what-chat-refused]', async () => {
+    const why =
+      '`deliver` must reject when Chat refused the post (ADR-0003: a delivery that rejects is ' +
+      'the one failure the Core cannot absorb, and it acts on it). Swallowed, the Core believes ' +
+      'the Conversation was told, and from the Conversation an instruction that reached nobody ' +
+      'looks exactly like a message that was never received (#26).'
     const { adapter, api } = newAdapter()
     api.failNextPost(new Error('quota exceeded'))
 
-    await expect(adapter.deliver(to(THREAD, { kind: 'result', text: 'hi' }))).rejects.toThrow(
+    await expect(adapter.deliver(to(THREAD, { kind: 'result', text: 'hi' })), why).rejects.toThrow(
       'quota exceeded',
     )
   })
@@ -655,7 +721,30 @@ describe('the acknowledgement', () => {
   // update for that Task would try to edit a name that never existed and fail
   // with an error from minutes ago — so one Chat hiccup would silence the
   // acknowledgement for the rest of a Task that is running perfectly well.
-  it('tries again after a post that failed, rather than editing nothing', async () => {
+  it('is one message when the next update comes before Chat has answered the first [fence:gchat-acknowledgement-held-from-the-post]', async () => {
+    const why =
+      'An acknowledgement is held from the instant its post is sent, as the promise of the ' +
+      'message, not from when Chat answers with a name (ADR-0010: one acknowledgement per ' +
+      'Task, edited in place). Stored once the create resolves, an update sent in between ' +
+      'finds nothing and posts a second acknowledgement, and the Task has two messages ' +
+      'mutating at once (#26).'
+    const { adapter, api } = newAdapter()
+
+    await Promise.all([
+      adapter.deliver(to(THREAD, { kind: 'progress', progress: { phase: 'working' } })),
+      adapter.deliver(to(THREAD, { kind: 'progress', progress: { phase: 'tool', tool: 'awk' } })),
+    ])
+
+    expect(api.calls, why).toEqual(['post', 'edit'])
+    expect(api.texts, why).toEqual([`${TO}Running awk…`])
+  })
+
+  it('tries again after a post that failed, rather than editing nothing [fence:gchat-acknowledgement-forgets-a-failed-post]', async () => {
+    const why =
+      'A post that failed leaves no message to edit, so the acknowledgement forgets it ' +
+      '(ADR-0010). Kept, every later update for the Task edits a name that never existed and ' +
+      'fails with an error from minutes ago, and one Chat hiccup silences the acknowledgement ' +
+      'for the rest of a Task that is running perfectly well (#26).'
     const { adapter, api } = newAdapter()
     api.failNextPost(new Error('quota exceeded'))
 
@@ -666,8 +755,8 @@ describe('the acknowledgement', () => {
       to(THREAD, { kind: 'progress', progress: { phase: 'tool', tool: 'awk' } }),
     )
 
-    expect(api.calls).toEqual(['post', 'post'])
-    expect(api.texts).toEqual([`${TO}Running awk…`])
+    expect(api.calls, why).toEqual(['post', 'post'])
+    expect(api.texts, why).toEqual([`${TO}Running awk…`])
   })
 
   // The phase with nothing in it, and it has to be shown for exactly that
@@ -749,7 +838,13 @@ describe('what a Conversation is told', () => {
   // 17706 characters is what the recorded generating Turn produced, and Chat
   // rejects anything over 4096. Without this the longest answers — the ones
   // worth having — would be the ones that never arrive.
-  it('breaks an answer Chat would refuse into messages it will take', async () => {
+  it('breaks an answer Chat would refuse into messages it will take [fence:gchat-split-under-the-limit]', async () => {
+    const why =
+      'An answer is split at a paragraph, line or word boundary into messages of at most ' +
+      "Chat's 4096 characters, with the mention counted inside the limit (ADR-0009, " +
+      'ADR-0010). Chat refuses a longer message outright, so a mention added after the split ' +
+      'pushes the first message over and the whole answer never arrives; cutting mid-word ' +
+      'makes a long answer read as corrupted (#67).'
     const { adapter, api } = newAdapter()
     const long = Array.from({ length: 60 }, (_, n) => `Paragraph ${n}. ${'word '.repeat(60)}`).join(
       '\n\n',
@@ -758,12 +853,16 @@ describe('what a Conversation is told', () => {
     await adapter.deliver(to(THREAD, { kind: 'result', text: long }))
 
     expect(api.messages.length).toBeGreaterThan(1)
-    for (const message of api.messages) expect(message.text.length).toBeLessThanOrEqual(MAX_TEXT)
+    for (const message of api.messages) {
+      expect(message.text.length, why).toBeLessThanOrEqual(MAX_TEXT)
+    }
     // Nothing dropped and nothing duplicated: the words arrive in order, whole,
     // under the mention the first message carries. The mention is counted
     // against the limit rather than added after the split, which is what keeps
     // that first message inside what Chat will take.
-    expect(api.texts.join('\n\n').replace(/\s+/g, ' ')).toBe(`${TO}${long}`.replace(/\s+/g, ' '))
+    expect(api.texts.join('\n\n').replace(/\s+/g, ' '), why).toBe(
+      `${TO}${long}`.replace(/\s+/g, ' '),
+    )
   })
 
   // A failed Turn's reason is the Turn's own text, which has no more of a length
@@ -794,14 +893,19 @@ describe('a Task the Shared Window has blocked', () => {
   // Plainly that quota is spent, with the reset time the event gave — and that
   // the Task is kept, because told only that quota is spent people send the
   // message again, which is the behaviour the acknowledgement exists to prevent.
-  it('says quota is spent, when it comes back, and that the Task is kept', async () => {
+  it('says quota is spent, when it comes back, and that the Task is kept [fence:gchat-blocked-says-the-task-is-kept]', async () => {
+    const why =
+      "A blocked Task's message gives the reset time the event carried, never an estimate, " +
+      'and says the Task is kept (ADR-0002: a parked Task runs again when the window resets). ' +
+      'Told only that quota is spent, people send the message again — the duplicate the ' +
+      'acknowledgement exists to prevent (#29).'
     const { adapter, api } = newAdapter()
 
     await adapter.deliver(
       to(THREAD, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: false }),
     )
 
-    expect(api.texts).toEqual([
+    expect(api.texts, why).toEqual([
       `${TO}The shared Claude quota is spent. It comes back at 2026-07-28 20:40 UTC — I have kept your task and will run it then.`,
     ])
   })
@@ -809,14 +913,19 @@ describe('a Task the Shared Window has blocked', () => {
   // The offer is a button on that message, which is ADR-0002's "offered at the
   // moment of blocking" made literal — not a setting somebody turns on in
   // advance and then forgets is on.
-  it('carries the offer as a button naming the Task it is about', async () => {
+  it('carries the offer as a button naming the Task it is about [fence:gchat-overflow-names-the-task]', async () => {
+    const why =
+      'The Overflow button is named by the Task, never by the Conversation (ADR-0002: Overflow ' +
+      'is offered at the moment a Task blocks). A Conversation can have a second Task blocked ' +
+      'behind this one, and "the blocked Task here" would spend money on whichever roma looked ' +
+      'at first (#29).'
     const { adapter, api } = newAdapter()
 
     await adapter.deliver(
       to(THREAD, { kind: 'blocked', resetsAt: 1785271200, overflowOffered: true }, 'task-77'),
     )
 
-    expect(api.messages[0]?.posted.actions).toEqual([
+    expect(api.messages[0]?.posted.actions, why).toEqual([
       {
         label: 'Run it on metered billing',
         action: 'takeOverflow',
@@ -958,12 +1067,16 @@ describe('showing what an Overflow Task spent', () => {
 
   // "$0.00" would report money as free, which is the one claim the Audit Record
   // refuses to make about a Turn nothing priced.
-  it('does not price a Turn nothing priced', async () => {
+  it('does not price a Turn nothing priced [fence:gchat-unpriced-is-not-free]', async () => {
+    const why =
+      'An Overflow Turn nothing priced is said to be unpriced, never "$0.00" (ADR-0002: the ' +
+      'spend is shown in the reply). "$0.00" reports money as free, the one claim the Audit ' +
+      'Record refuses to make about a Turn nothing priced (#29).'
     const { adapter, api } = newAdapter()
 
     await adapter.deliver(to(THREAD, { kind: 'result', text: 'done', overflowCostUsd: null }))
 
-    expect(api.texts).toEqual([
+    expect(api.texts, why).toEqual([
       `${TO}done`,
       'Ran on metered billing. What it cost was never reported.',
     ])
@@ -1009,14 +1122,21 @@ describe('addressing the person who asked', () => {
 
   // One notification per Task, not one per 4096 characters of the answer. The
   // price of an Overflow Turn is a separate message for the same reason.
-  it('mentions on the first message of an answer and no other', async () => {
+  it('mentions on the first message of an answer and no other [fence:gchat-mention-once-per-answer]', async () => {
+    const why =
+      'A long answer mentions the Caller on its first message only (ADR-0009). Each piece is ' +
+      'a separate post, and Chat notifies on each: a mention on every one notifies somebody ' +
+      'once per 4096 characters of the answer (#67).'
     const { adapter, api } = newAdapter()
     const long = 'word '.repeat(2000)
 
     await adapter.deliver(to(THREAD, { kind: 'result', text: long, overflowCostUsd: 0.42 }))
 
     expect(api.texts.length).toBeGreaterThan(2)
-    expect(api.texts.filter((text) => text.includes(`<${SENDER}>`))).toHaveLength(1)
+    expect(
+      api.texts.filter((text) => text.includes(`<${SENDER}>`)),
+      why,
+    ).toHaveLength(1)
   })
 
   // A DM has one other person in it and the Adapter could tell from the
@@ -1040,6 +1160,20 @@ describe('addressing the person who asked', () => {
  * produce a real interaction event.
  */
 describe('choosing a model, an effort or a Caveman by pressing', () => {
+  const PRESSER_WHY =
+    'A Menu press is read by `readChosenOption`, off `event.user`, and never through ' +
+    "`readIngressMessage` (ADR-0023: pressing is typing). The message on a press is roma's " +
+    "own card, whose sender is an app: that reader's bot guard swallows the press, and " +
+    'relaxing the guard re-opens two apps answering each other and credits the choice to ' +
+    'roma (#140).'
+  const MENUS_WHY =
+    'The Chat reader reads back exactly the Menus `OutboundInstruction` offers, and no ' +
+    'other Command (ADR-0023). A Menu the Core offers and this cannot read back is a button ' +
+    'that does nothing under a Caller who goes on waiting; a Command it reads that no Menu ' +
+    'offers is `/stop` or `/clear` reachable through a door meant for a Menu. The reader keys ' +
+    'a `Record` over `choice.chooses`, so widening either side alone fails to compile ' +
+    '(#140, #192).'
+
   /** A press on one Menu button, as Chat documents an interaction event. */
   function press(
     chooses: string,
@@ -1143,10 +1277,10 @@ describe('choosing a model, an effort or a Caveman by pressing', () => {
    * this now* rather than carrying a decision forward — and why nothing has to be
    * remembered between posting a card and its being pressed.
    */
-  it('reads a press as the Command the Caller would have typed', () => {
+  it('reads a press as the Command the Caller would have typed [fence:gchat-press-is-read-off-the-presser]', () => {
     const { adapter } = newAdapter()
 
-    expect(adapter.toIngress(press('model', 'opus'))).toEqual({
+    expect(adapter.toIngress(press('model', 'opus')), PRESSER_WHY).toEqual({
       conversationKey: THREAD,
       caller: SENDER,
       callerName: 'Ada',
@@ -1192,7 +1326,7 @@ describe('choosing a model, an effort or a Caveman by pressing', () => {
    * the reason that check gives: the loop passes vacuously over a Menu nobody
    * named.
    */
-  it('reads every name on every Menu back as the Command a Caller would have typed', async () => {
+  it('reads every name on every Menu back as the Command a Caller would have typed [fence:gchat-reads-only-the-menus-it-draws]', async () => {
     const menus = [
       { chooses: 'model' as const, names: MENU_NAMES },
       { chooses: 'effort' as const, names: EFFORT_NAMES },
@@ -1214,7 +1348,7 @@ describe('choosing a model, an effort or a Caveman by pressing', () => {
           ...press('unread', 'unread'),
           common: { invokedFunction: action.action, parameters: action.parameters },
         })
-        expect(readCommand(pressed?.text ?? '')).toEqual({
+        expect(readCommand(pressed?.text ?? ''), MENUS_WHY).toEqual({
           command: chooses,
           argument: action.label,
         })
@@ -1230,23 +1364,28 @@ describe('choosing a model, an effort or a Caveman by pressing', () => {
    * through `readIngressMessage` at all would meet the bot guard that stops two
    * apps answering each other forever. Whoever pressed is on `event.user`.
    */
-  it('takes the Caller from whoever pressed, not from the card roma posted', () => {
+  it('takes the Caller from whoever pressed, not from the card roma posted [fence:gchat-press-is-read-off-the-presser]', () => {
     const { adapter } = newAdapter()
 
     const message = adapter.toIngress(press('model', 'opus'))
 
-    expect(message?.caller).toBe(SENDER)
-    expect(message?.caller).not.toBe('users/roma')
+    expect(message?.caller, PRESSER_WHY).toBe(SENDER)
+    expect(message?.caller, PRESSER_WHY).not.toBe('users/roma')
   })
 
   // The same key derivation a message gets, from one reading — two would be two
   // things that can drift, and a Conversation Key that drifts is a Session that
   // loses its context.
-  it('lands in the thread it was pressed in, and in the space in a DM', () => {
+  it('lands in the thread it was pressed in, and in the space in a DM [fence:gchat-conversation-key-from-the-space]', () => {
+    const why =
+      'A press is keyed by the reading a message is keyed by; two readings drift, and a ' +
+      'Conversation Key that drifts is a Session that loses its context (ADR-0004, #140).'
     const { adapter } = newAdapter()
 
-    expect(adapter.toIngress(press('model', 'opus'))?.conversationKey).toBe(THREAD)
-    expect(adapter.toIngress(press('model', 'opus', { direct: true }))?.conversationKey).toBe(SPACE)
+    expect(adapter.toIngress(press('model', 'opus'))?.conversationKey, why).toBe(THREAD)
+    expect(adapter.toIngress(press('model', 'opus', { direct: true }))?.conversationKey, why).toBe(
+      SPACE,
+    )
   })
 
   // Chat's older parameter shape, for the same reason the Overflow button reads
@@ -1274,11 +1413,13 @@ describe('choosing a model, an effort or a Caveman by pressing', () => {
   // is a press roma did not put out, and synthesising `/stop` or `/clear` from
   // one would let a crafted event reach a Command through a door meant for a
   // Menu.
-  it('reads a press naming any other Command as no message at all', () => {
+  it('reads a press naming any other Command as no message at all [fence:gchat-reads-only-the-menus-it-draws]', () => {
     const { adapter } = newAdapter()
 
-    expect(adapter.toIngress(press('clear', 'anything'))).toBeNull()
-    expect(adapter.toIngress(press('config', 'model=opus'))).toBeNull()
+    expect(adapter.toIngress(press('clear', 'anything')), MENUS_WHY).toBeNull()
+    expect(adapter.toIngress(press('stop', 'now')), MENUS_WHY).toBeNull()
+    expect(adapter.toIngress(press('config', 'model=opus')), MENUS_WHY).toBeNull()
+    expect(adapter.toIngress(press('constructor', 'opus')), MENUS_WHY).toBeNull()
   })
 
   it('reads an Overflow press as no choice, and a choice press as no Overflow', () => {
@@ -1295,15 +1436,19 @@ describe('choosing a model, an effort or a Caveman by pressing', () => {
 
   // On the last message rather than every one. An answer long enough to split
   // would otherwise repeat the whole Menu under each piece.
-  it('puts the buttons under the last message when the text has to split', async () => {
+  it('puts the buttons under the last message when the text has to split [fence:gchat-buttons-under-the-last-piece]', async () => {
+    const why =
+      'Buttons go on the last message of a split answer and no other (ADR-0023). On every ' +
+      'piece, an answer long enough to split repeats the whole Menu under each one, and ' +
+      'buttons belong under the text that explains them (#140).'
     const { adapter, api } = newAdapter()
 
     await adapter.deliver(to(THREAD, { ...MODEL_MENU, text: 'word '.repeat(2000) }))
 
     expect(api.messages.length).toBeGreaterThan(1)
-    expect(api.messages.at(-1)?.posted.actions).toHaveLength(MODEL_MENU.options.length)
+    expect(api.messages.at(-1)?.posted.actions, why).toHaveLength(MODEL_MENU.options.length)
     for (const message of api.messages.slice(0, -1)) {
-      expect(message.posted.actions).toBeUndefined()
+      expect(message.posted.actions, why).toBeUndefined()
     }
   })
 })

@@ -60,7 +60,7 @@ supply prose. The prose is no longer shown; the events still are the only thing
 arriving during generation, and the count is derived from them. Without the flag
 the Acknowledgement freezes for the whole of a generating Turn. A future reader
 who sees that roma no longer displays the deltas should not conclude the flag
-can go.
+can go. Enforced by `fence:session-invocation-pinned`.
 
 ## Alternatives, and why not
 

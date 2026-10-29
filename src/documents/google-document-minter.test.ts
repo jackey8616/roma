@@ -153,7 +153,13 @@ describe('exchanging the key for a Document Token', () => {
   // half the claim: a scope a deployment could widen would be a second boundary,
   // invisible from where the first one is administered, and nothing here takes a
   // scope so no caller can ask for a wider credential than was intended.
-  it('asks for both Drive scopes and neither more, every time', async () => {
+  it('asks for both Drive scopes and neither more, every time [fence:documents-both-drive-scopes]', async () => {
+    const why =
+      'A Document Token is scoped to exactly `drive.file` and `drive.readonly` (ADR-0022 §3). ' +
+      '`drive.readonly` looks unused and is not: the Depot was not created by this app, so ' +
+      '`drive.file` cannot read it, and without it the boot proof cannot see the Depot — found ' +
+      'at the next deployment rather than at the edit. Nothing wider, because a scope a ' +
+      'deployment could widen is a second boundary invisible from the first (#132).'
     const { minter, exchanges } = googleAnswering()
 
     await minter.mint()
@@ -161,7 +167,7 @@ describe('exchanging the key for a Document Token', () => {
 
     for (const exchange of exchanges) {
       const claims = claimsOf(exchange.form.get('assertion') ?? '')
-      expect(claims['scope']).toBe(SCOPES)
+      expect(claims['scope'], why).toBe(SCOPES)
     }
   })
 
@@ -192,14 +198,18 @@ describe('exchanging the key for a Document Token', () => {
   // A clock a few seconds fast issues an assertion "in the future", which is
   // rejected — and would present as roma failing to mint on a machine that is
   // otherwise working perfectly.
-  it('backdates the assertion rather than issuing it exactly now', async () => {
+  it('backdates the assertion rather than issuing it exactly now [fence:documents-assertion-is-backdated]', async () => {
+    const why =
+      'The assertion is issued a minute in the past (ADR-0022, as ADR-0015). A clock a few ' +
+      'seconds fast issues one "in the future", Google rejects it, and roma fails to mint on ' +
+      'a machine that is otherwise working perfectly (#132).'
     const { minter, exchanges } = googleAnswering()
 
     await minter.mint()
 
     const claims = claimsOf(exchanges[0]?.form.get('assertion') ?? '')
-    expect(claims['iat']).toBe(Math.floor(NOW / 1000) - 60)
-    expect(claims['exp']).toBe(Math.floor(NOW / 1000) - 60 + 3600)
+    expect(claims['iat'], why).toBe(Math.floor(NOW / 1000) - 60)
+    expect(claims['exp'], why).toBe(Math.floor(NOW / 1000) - 60 + 3600)
   })
 
   it('is signed with the private key, RS256', async () => {
@@ -237,12 +247,16 @@ describe('exchanging the key for a Document Token', () => {
   // Guessing an hour is the one direction that cannot be walked back: the whole
   // protection here is the credential's lifetime, and a token roma believes in
   // for longer than it is good for is what the caching must not produce.
-  it('treats a token with an unreadable lifetime as already spent', async () => {
+  it('treats a token with an unreadable lifetime as already spent [fence:documents-unreadable-lifetime-is-spent]', async () => {
+    const why =
+      'A Document Token whose lifetime cannot be read expires now: used once, never cached ' +
+      '(ADR-0022). Guessing it long is the one direction that cannot be walked back — a token ' +
+      'cached past its real life and served expired (#132).'
     const { minter } = googleAnswering({
       token: () => ({ body: { access_token: 'ya29.a-token', expires_in: 'about an hour' } }),
     })
 
-    expect((await minter.mint()).expiresAt).toBe(NOW)
+    expect((await minter.mint()).expiresAt, why).toBe(NOW)
   })
 
   it('refuses an answer with no token in it', async () => {
@@ -290,11 +304,16 @@ describe('proving the Depot is somewhere this identity can write', () => {
   // A key that cannot mint has nothing to reach Drive with, and the refusal
   // should be about the key. Asserted as "Drive was never asked" because that is
   // what stops an operator being sent to a share dialog for a revoked key.
-  it('does not ask Drive anything when the key cannot mint', async () => {
+  it('does not ask Drive anything when the key cannot mint [fence:documents-depot-mints-its-own-token]', async () => {
+    const why =
+      'depot() mints its own token and refuses on the key before asking Drive anything ' +
+      '(ADR-0022 §6). Handed a token instead, a revoked key is reported as a Depot or share ' +
+      'problem, and the operator is sent to a share dialog for a key that was never going ' +
+      'to work (#132).'
     const { minter, drive } = googleAnswering({ token: () => ({ status: 401, body: {} }) })
 
-    await expect(minter.depot()).rejects.toThrow(DocumentRefused)
-    expect(drive()).toEqual([])
+    await expect(minter.depot(), why).rejects.toThrow(DocumentRefused)
+    expect(drive(), why).toEqual([])
   })
 })
 

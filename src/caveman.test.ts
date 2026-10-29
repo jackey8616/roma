@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   CAVEMAN_MENU,
   CAVEMAN_NAMES,
+  CAVEMAN_NOT_PINNED,
   CAVEMAN_OFF,
   cavemanRuleset,
   isPinnableCaveman,
@@ -34,9 +35,15 @@ function read(text: string): CavemanRequest | null {
 }
 
 describe('reading a /caveman message', () => {
-  it('recognises every level on the Menu, off among them', () => {
+  it('recognises every level on the Menu, off among them [fence:caveman-menu-round-trips]', () => {
+    const why =
+      'Every level on the Caveman Menu must round-trip, typed as `/caveman <level>`, through ' +
+      'readCommand and back to itself (ADR-0023). A Channel that draws the Menu draws each ' +
+      'name as a button, and a button is a message roma sends itself: a name that does not ' +
+      'round-trip is a button roma does not recognise. The hyphen in wenyan-full is why this ' +
+      'is not theoretical.'
     for (const level of CAVEMAN_MENU) {
-      expect(read(`/caveman ${level}`)).toEqual({ kind: 'chosen', level })
+      expect(read(`/caveman ${level}`), why).toEqual({ kind: 'chosen', level })
     }
   })
 
@@ -50,9 +57,12 @@ describe('reading a /caveman message', () => {
   // Off the Menu and reachable only through `ROMA_CAVEMAN`, on the rule
   // `ultracode` already reaches `ROMA_EFFORT` by. Refused here exactly as a typo
   // is, so that roma does not advertise something no Caller can have.
-  it('refuses the two wenyan levels an operator may pin', () => {
+  it('refuses the two wenyan levels an operator may pin [fence:caveman-unknown-is-refused]', () => {
     for (const level of OFF_MENU_WENYAN) {
-      expect(read(`/caveman ${level}`)).toEqual({ kind: 'unknown', name: level })
+      expect(read(`/caveman ${level}`), UNKNOWN_IS_REFUSED).toEqual({
+        kind: 'unknown',
+        name: level,
+      })
     }
   })
 
@@ -63,8 +73,8 @@ describe('reading a /caveman message', () => {
     expect(read('/caveman wenyan')).toEqual({ kind: 'unknown', name: 'wenyan' })
   })
 
-  it('refuses a level roma does not offer, and says which', () => {
-    expect(read('/caveman terse')).toEqual({ kind: 'unknown', name: 'terse' })
+  it('refuses a level roma does not offer, and says which [fence:caveman-unknown-is-refused]', () => {
+    expect(read('/caveman terse'), UNKNOWN_IS_REFUSED).toEqual({ kind: 'unknown', name: 'terse' })
   })
 
   it('reads no argument as a request to report', () => {
@@ -141,12 +151,37 @@ describe('what an operator may pin', () => {
     }
   })
 
-  it('does not take a level nothing downstream would ever refuse', () => {
-    expect(isPinnableCaveman('bananas')).toBe(false)
-    expect(isPinnableCaveman('FULL')).toBe(false)
-    expect(isPinnableCaveman('')).toBe(false)
+  it('does not take a level nothing downstream would ever refuse [fence:caveman-pin-refused-at-boot]', () => {
+    const why =
+      'isPinnableCaveman must refuse at boot anything that is not one of the seven levels ' +
+      '(ADR-0030). A Caveman is roma’s own word for text roma assembles, so nothing downstream ' +
+      'ever sees it to refuse it: an unrecognised one appends a ruleset whose intensity table ' +
+      'has no rows.'
+    expect(isPinnableCaveman('bananas'), why).toBe(false)
+    expect(isPinnableCaveman('FULL'), why).toBe(false)
+    expect(isPinnableCaveman(''), why).toBe(false)
+  })
+
+  // What an Audit Record says where no deployment setting named a Caveman. Both
+  // that and pinning `off` resolve to the same Pinned Caveman, so this word is the
+  // only thing left that tells them apart.
+  it('has a word for “nothing named one” that is not a level [fence:caveman-not-pinned-is-no-level]', () => {
+    const why =
+      'CAVEMAN_NOT_PINNED must be spelled unlike any level, `off` above all (ADR-0030). A ' +
+      'deployment that pinned off chose something and one that named nothing did not; spelled ' +
+      '`off`, a month of Audit Records attributes every Task on a roma that never heard of ' +
+      'ADR-0030 to a setting nobody made.'
+    expect(CAVEMAN_NOT_PINNED, why).not.toBe(CAVEMAN_OFF)
+    expect([...EVERY_LEVEL, ...CAVEMAN_NAMES], why).not.toContain(CAVEMAN_NOT_PINNED)
+    expect(isPinnableCaveman(CAVEMAN_NOT_PINNED), why).toBe(false)
   })
 })
+
+const UNKNOWN_IS_REFUSED =
+  'A /caveman argument that is not on the Menu must be read as unknown and refused, never ' +
+  'passed on as work (ADR-0030, as ADR-0014 for /model). The Caller Marker goes above the ' +
+  'message, so Claude Code never sees a command: somebody is billed for a Turn answering a ' +
+  'plausible sentence about their typo, here about a skill this deployment never installed.'
 
 describe('the ruleset roma appends', () => {
   // Not the ruleset filtered to a level called off, which is several thousand
@@ -234,14 +269,19 @@ function upstreamBody(): string {
   return upstreamSkill().replace(/^---[\s\S]*?---\s*/, '')
 }
 
-describe('the three lines that describe a machine roma does not install', () => {
+describe('the three lines that describe a machine roma does not install [fence:caveman-tracker-lines-removed]', () => {
+  const TRACKER =
+    'The ruleset must drop every caveman line that describes its tracker hook — the prose ' +
+    'off-switch, the Switch line and the hardcoded Default — because roma installs no tracker ' +
+    '(ADR-0030). Left in, roma’s record says a level while the model has stopped, the prompt ' +
+    'advertises values the Menu refuses, and the default is caveman’s rather than ROMA_CAVEMAN’s.'
   // The phrase works because `caveman-mode-tracker.js` watches `UserPromptSubmit`
   // for it, and roma installs no tracker. Left in, roma's record would say `full`
   // while the model had stopped (ADR-0030).
   it('offers no way to turn it off in prose', () => {
     for (const level of LEVELS_WITH_RULES) {
-      expect(cavemanRuleset(level)).not.toContain('stop caveman')
-      expect(cavemanRuleset(level)).not.toContain('normal mode')
+      expect(cavemanRuleset(level), TRACKER).not.toContain('stop caveman')
+      expect(cavemanRuleset(level), TRACKER).not.toContain('normal mode')
     }
   })
 
@@ -250,15 +290,17 @@ describe('the three lines that describe a machine roma does not install', () => 
   // refuse two names its own system prompt offered. ADR-0023's consequence list
   // names that failure exactly, by a different route.
   it('advertises no Command, and so cannot advertise a value roma does not offer', () => {
-    for (const level of LEVELS_WITH_RULES) expect(cavemanRuleset(level)).not.toContain('/caveman')
+    for (const level of LEVELS_WITH_RULES) {
+      expect(cavemanRuleset(level), TRACKER).not.toContain('/caveman')
+    }
   })
 
   // The line that hardcoded `full`. What it names now is a runtime value, which
   // is why the ruleset is a template rather than six finished strings.
   it('names the level in force where caveman hardcodes its own default', () => {
     for (const level of LEVELS_WITH_RULES) {
-      expect(cavemanRuleset(level)).toContain(`Current level: **${level}**.`)
-      expect(cavemanRuleset(level)).not.toContain('Default: **full**')
+      expect(cavemanRuleset(level), TRACKER).toContain(`Current level: **${level}**.`)
+      expect(cavemanRuleset(level), TRACKER).not.toContain('Default: **full**')
     }
   })
 })
@@ -310,28 +352,28 @@ describe('what roma borrowed, and what it changed', () => {
   // The claim ADR-0030 makes and nothing else keeps: everything but those three
   // is verbatim. Rows and examples are excluded because dropping them per level
   // is the filter's whole job, which the tests above pin.
-  it('carries every other line of it verbatim', () => {
+  it('carries every other line of it verbatim [fence:caveman-borrowed-text-verbatim]', () => {
     const rules = cavemanRuleset('full')
     const borrowed = upstreamBody()
       .split('\n')
       .filter((line) => !/^\|\s*\*\*/.test(line) && !/^- \S+?:\s/.test(line))
       .filter((line) => !REWRITTEN.includes(line))
 
-    for (const line of borrowed) expect(rules).toContain(line)
+    for (const line of borrowed) expect(rules, BORROWED_VERBATIM).toContain(line)
   })
 
   // The other direction, and what makes the pair a statement rather than a
   // gesture: any word of the borrowed prose edited by accident arrives here as a
   // fourth line. The shortened Persistence line is not among these three because
   // shortening left a prefix of caveman's own line, which is still its text.
-  it('adds nothing to it but the level in force', () => {
+  it('adds nothing to it but the level in force [fence:caveman-borrowed-text-verbatim]', () => {
     for (const level of LEVELS_WITH_RULES) {
       const upstream = upstreamBody()
       const added = cavemanRuleset(level)
         .split('\n')
         .filter((line) => !upstream.includes(line))
 
-      expect(added).toEqual([
+      expect(added, BORROWED_VERBATIM).toEqual([
         `CAVEMAN MODE ACTIVE — level: ${level}`,
         `Current level: **${level}**.`,
         'Persisted outside chat: write normal prose — code, comments, commits, docs, issue/PR/MR text, memory files, third-party messages. Level persist until changed or session end.',
@@ -362,8 +404,17 @@ const UPSTREAM_COMMIT = '3098342'
 const UPSTREAM_SHA256 = 'daf9cec496ebd039809d8236f99f17fa1b4beaadf8ce4e2d532d0da51d70afce'
 
 describe('the evidence roma’s ruleset was derived from', () => {
-  it('is caveman’s SKILL.md at the commit ADR-0030 pinned', () => {
-    expect(createHash('sha256').update(upstreamSkill()).digest('hex')).toBe(UPSTREAM_SHA256)
+  it('is caveman’s SKILL.md at the commit ADR-0030 pinned [fence:caveman-borrowed-text-verbatim]', () => {
+    expect(createHash('sha256').update(upstreamSkill()).digest('hex'), BORROWED_VERBATIM).toBe(
+      UPSTREAM_SHA256,
+    )
     expect(UPSTREAM_COMMIT).toHaveLength(7)
   })
 })
+
+const BORROWED_VERBATIM =
+  "roma's ruleset must be caveman's SKILL.md at the pinned commit, word for word, except the " +
+  'three lines ADR-0030 rewrites; the vendored copy under test/fixtures/caveman is the ' +
+  'evidence. The text is somebody else’s under MIT, and these checks are the only account ' +
+  'of what roma borrowed: a sentence tidied in borrowedRules, or the fixture edited to match, ' +
+  'loses it.'

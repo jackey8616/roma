@@ -36,10 +36,8 @@
  * against Claude Code, so an alias would be a spelling roma had chosen to claim
  * rather than one it inherited.
  *
- * `auto` is not here because it cannot be. `--effort auto` is rejected by the
- * CLI's own parser, so the only way roma could offer it is by omitting `--effort`
- * — which reopens the shared settings file that passing it on every spawn closes.
- * It is not refused; it is incompatible with pinning, and pinning won.
+ * `auto` is not here because it cannot be pinned.
+ * Enforced by `fence:menu-effort-offers-no-auto`.
  */
 export const EFFORT_MENU: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
@@ -88,10 +86,8 @@ export const ULTRACODE = 'ultracode'
  * the person decides, because the script has been wrong before and could not
  * tell.
  *
- * **Do not turn fable's `—` into a `false` on the next re-audit.** It reads
- * unnamed on all three gates exactly as its neighbours do; flipping it would
- * have roma tell every Caller on fable that their `/effort` does not apply,
- * which is the ADR-0016 mistake in the one row nothing else would catch.
+ * fable reads unnamed on all three gates exactly as its neighbours do.
+ * Enforced by `fence:menu-fable-takes-effort`.
  *
  * **It reports; it does not gate.** roma uses it for two things and refuses
  * nothing because of it: it says so, in the reply to an `/effort` or a `/model`
@@ -114,14 +110,10 @@ export const EFFORT_MATRIX: Readonly<Record<string, boolean>> = {
 }
 
 /**
- * Whether this model takes an effort, or null where the Matrix does not say.
- *
- * Three answers rather than two, and the third is the honest one for a model the
- * Matrix has never been read about — which is what a deployment that pinned
- * something off the Model Menu has. Defaulting it to yes would have roma assert
- * a fact it has not established; defaulting it to no would have roma tell a
- * Caller their setting is inert when it may well not be. Null says neither, and
- * every caller here treats it as "say nothing extra".
+ * Whether this model takes an effort, or null where the Matrix does not say —
+ * which is what a deployment that pinned something off the Model Menu has, and
+ * every caller treats as "say nothing extra".
+ * Enforced by `fence:menu-effort-unread-model-says-nothing`.
  */
 export function takesEffort(model: string): boolean | null {
   return Object.hasOwn(EFFORT_MATRIX, model) ? (EFFORT_MATRIX[model] ?? null) : null
@@ -163,12 +155,8 @@ export type EffortRequest =
   | {
       /**
        * A level roma does not offer — a typo, or `ultracode`, which is the
-       * operator's and not a Caller's.
-       *
-       * Refused rather than passed on as work, for `ModelRequest`'s reason: the
-       * Caller Marker goes above the message, so Claude Code never sees a command
-       * at all and somebody is billed for a Turn that answers a plausible
-       * sentence about their typo.
+       * operator's and not a Caller's. Refused rather than passed on as work.
+       * Enforced by `fence:menu-effort-unknown-is-refused`.
        */
       readonly kind: 'unknown'
       readonly name: string
@@ -196,11 +184,8 @@ export function readEffortRequest(argument: string | null): EffortRequest {
  * The Menu plus `ultracode`, and `default` deliberately not among them: it names
  * the Pinned Effort, so a deployment pinning it would be naming itself.
  *
- * Asked at boot and answered locally, with no process involved. It is the one
- * wrong-effort failure that needs no measurement to catch, and missing it is
- * expensive: an unrecognised `--effort` does not fail the spawn — it warns on
- * stderr, starts, and runs on the build's own default — so roma would be wrong
- * about the effort of every Session it serves and nothing would stop.
+ * Asked at boot and answered locally, with no process involved.
+ * Enforced by `fence:menu-effort-pin-refused-at-boot`.
  */
 export function isPinnableEffort(value: string): boolean {
   return EFFORT_MENU.includes(value) || value === ULTRACODE

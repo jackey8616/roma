@@ -147,7 +147,8 @@ helper buys is freshness against the one-hour clock, and keeping the token out o
 the process environment — where `env`, a stack trace, or a diagnostic command
 would write it into a **Transcript roma has promised never to delete**
 (ADR-0006). The hour is what bounds that; nothing longer-lived than an hour could
-be allowed anywhere near an append-only record.
+be allowed anywhere near an append-only record. Enforced by
+`fence:startup-no-forge-token-in-env`.
 
 **Amended — one helper is not the whole mechanism, because `gh` is not `git`.**
 Issues and pull requests are a good part of what this exists for: `issues: write`
@@ -206,7 +207,7 @@ two places, neither of them the author field.
 applies only to interactive commits with no `-m`, and the agent always passes
 `-m`. Like the helper, this is for honesty and not for enforcement — an agent
 with a shell can defeat it, and the point is that the ordinary path records the
-truth.
+truth. *Not enforced (ADR-0031): not built.*
 
 **Amended 2026-07-30 by ADR-0009**, which corrects the address rather than the
 decision. The trailer originally read `Requested-by: alice@example.com
@@ -259,7 +260,8 @@ an Ingress Message exists, and a failure blocks the boot — the Startup
 Self-Check's shape, for the Startup Self-Check's reason. A bad private key that
 surfaced instead as an inexplicable `git clone` failure inside somebody's Turn
 would read as "roma is broken" with no diagnosis attached. Unlike the Claude
-self-check, this one is free.
+self-check, this one is free. Enforced by
+`fence:startup-installation-proved-at-boot`.
 
 ### The agent is told what it has
 

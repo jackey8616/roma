@@ -100,7 +100,7 @@ describe('a token the forge has rejected', () => {
   // one Session handing back a credential another was given before the hour
   // turned. Throwing away the current token because an old one failed would be
   // roma re-minting on somebody else's stale news.
-  it('leaves the current one alone when it is an older token being rejected', async () => {
+  it('leaves the current one alone when it is an older token being rejected [fence:session-token-discard-is-narrow]', async () => {
     const { tokens, minter, advance } = tokensAt()
     const first = await tokens.current()
     advance(HOUR_MS - 60_000)
@@ -109,10 +109,17 @@ describe('a token the forge has rejected', () => {
 
     tokens.discard(first)
 
-    expect(await tokens.current()).toBe(second)
-    expect(minter.minted).toHaveLength(2)
+    expect(await tokens.current(), DISCARD_IS_NARROW).toBe(second)
+    expect(minter.minted, DISCARD_IS_NARROW).toHaveLength(2)
   })
 })
+
+const DISCARD_IS_NARROW =
+  'discard must drop only the token it names, and at most once a cooldown (ADR-0008). An ' +
+  'erase can name a token a refresh already replaced, and dropping whatever is held then ' +
+  "re-mints on somebody else's stale news; and one token serves every Session, so a 404 " +
+  'loop on a repository the Installation does not reach would otherwise discard everybody’s ' +
+  'token once per attempt.'
 
 describe('a rejection that is not about the credential', () => {
   // One token serves every Session, and `git` erases for reasons that have
@@ -120,7 +127,7 @@ describe('a rejection that is not about the credential', () => {
   // reach authenticates fine and then 404s. Left unguarded, an agent looping on
   // a name that does not exist mints on every attempt, which is the rate limit
   // this class exists to stay under.
-  it('is honoured once and then ignored for a while', async () => {
+  it('is honoured once and then ignored for a while [fence:session-token-discard-is-narrow]', async () => {
     const { tokens, minter, advance } = tokensAt()
     const first = await tokens.current()
 
@@ -130,8 +137,8 @@ describe('a rejection that is not about the credential', () => {
     tokens.discard(second)
     advance(5_000)
 
-    expect(await tokens.current()).toBe(second)
-    expect(minter.minted).toHaveLength(2)
+    expect(await tokens.current(), DISCARD_IS_NARROW).toBe(second)
+    expect(minter.minted, DISCARD_IS_NARROW).toHaveLength(2)
   })
 
   // What is given up is bounded: a minute, after which a genuinely dead

@@ -44,11 +44,15 @@ describe('reading the Discord channel out of the environment', () => {
   // One version, in both places. A Gateway on one and a REST call on another is
   // roma reading one shape and asking for a different one, and that failure
   // arrives in a payload rather than at boot.
-  it('speaks one version of the API on both of them', () => {
+  it('speaks one version of the API on both of them [fence:discord-one-api-version]', () => {
+    const why =
+      'The Gateway URL and the REST base must name one API version (ADR-0029). On two, roma ' +
+      'reads one shape and asks for another, and that fails inside a payload rather than at ' +
+      'boot (#191).'
     const version = /\bv=?(\d+)/.exec(DEFAULT_GATEWAY_URL)?.[1]
 
     expect(version).toBeDefined()
-    expect(DEFAULT_API_BASE).toContain(`/v${version ?? ''}`)
+    expect(DEFAULT_API_BASE, why).toContain(`/v${version ?? ''}`)
   })
 
   it('lets a deployment point either one somewhere else', () => {

@@ -18,19 +18,9 @@
 export const CAVEMAN_OFF = 'off'
 
 /**
- * What the Audit Record carries where nothing on the deployment named a Caveman.
- *
- * **Not `off`, because a deployment that pinned `off` chose something and one
- * that named nothing did not.** Both resolve to the same Pinned Caveman before
- * anything downstream can tell them apart, and a month of records that spelled
- * both `off` would attribute every Task on a roma that never heard of ADR-0030
- * to a setting nobody made — which is the one reading that makes those records
- * useless for the agenda they are the instrument for.
- *
- * Deliberately not spelled like a level, which is `EFFORT_NOT_APPLIED`'s move
- * for `EFFORT_NOT_APPLIED`'s reason: a ledger read months later cannot mistake
- * it for one, and `isPinnableCaveman` goes on refusing it if it is ever typed
- * at roma.
+ * What the Audit Record carries where nothing on the deployment named a Caveman:
+ * not `off`, and not spelled like any level.
+ * Enforced by `fence:caveman-not-pinned-is-no-level`.
  */
 export const CAVEMAN_NOT_PINNED = 'not-pinned'
 
@@ -50,11 +40,8 @@ export const CAVEMAN_NOT_PINNED = 'not-pinned'
  * the Audit Record would carry two spellings for one level.
  *
  * This is the Menu a Caller types, and a Channel that can draw one draws it —
- * pressing means what typing means, so a name added here **is** a button, and a
- * button is a message roma sends itself (ADR-0023). `commands.test.ts` is what
- * stands between this list and a name that does not round-trip through
- * `readCommand`; the hyphen in `wenyan-full` is why that check is not
- * theoretical, and `wiring.test.ts` presses that name across the whole distance.
+ * pressing means what typing means, so a name added here **is** a button
+ * (ADR-0023). Enforced by `fence:caveman-menu-round-trips`.
  */
 export const CAVEMAN_MENU: readonly string[] = ['off', 'lite', 'full', 'ultra', 'wenyan-full']
 
@@ -94,12 +81,8 @@ export const OFF_MENU_WENYAN: readonly string[] = ['wenyan-lite', 'wenyan-ultra'
  * Whether an operator may pin this Caveman, which is a wider question than what
  * a Caller may choose.
  *
- * Asked at boot and answered locally, with no process involved — and here that is
- * not a choice between roma and something downstream. An unrecognised `--effort`
- * at least reaches Claude Code, which warns about it; an unrecognised Caveman
- * reaches nothing at all, because it is roma's own word for text roma assembles
- * itself. Unrefused, it would append a ruleset whose intensity table had no rows
- * in it.
+ * Asked at boot and answered locally, with no process involved.
+ * Enforced by `fence:caveman-pin-refused-at-boot`.
  */
 export function isPinnableCaveman(value: string): boolean {
   return CAVEMAN_MENU.includes(value) || OFF_MENU_WENYAN.includes(value)
@@ -131,14 +114,8 @@ export type CavemanRequest =
   | {
       /**
        * A level roma does not offer — a typo, `wenyan`, or one of the two wenyan
-       * levels that are the operator's and not a Caller's.
-       *
-       * Refused rather than passed on as work, for `EffortRequest`'s reason: the
-       * Caller Marker goes above the message, so Claude Code never sees a command
-       * at all and somebody is billed for a Turn that answers a plausible
-       * sentence about their typo. Sharper here than there, because the sentence
-       * a mistyped Caveman would buy is one about a third-party skill this
-       * deployment does not have installed.
+       * levels that are the operator's and not a Caller's. Refused rather than
+       * passed on as work. Enforced by `fence:caveman-unknown-is-refused`.
        */
       readonly kind: 'unknown'
       readonly name: string
@@ -182,35 +159,7 @@ export function cavemanRuleset(level: string): string {
   return `CAVEMAN MODE ACTIVE — level: ${level}\n\n${onlyAtLevel(borrowedRules(level), level)}`
 }
 
-/**
- * caveman's `SKILL.md` body at the pinned commit, with three of its lines
- * rewritten.
- *
- * **Never edit a word of the rest of it.** This is somebody else's text under
- * MIT, `test/fixtures/caveman/SKILL.md` is the copy it was derived from, and
- * `caveman.test.ts` holds both that copy's hash and the claim that roma's version
- * differs from it by exactly the three lines below — so a sentence tidied here
- * fails the run, and a sentence tidied here and the test relaxed to match loses
- * the only account of what roma borrowed.
- *
- * ADR-0030's table argues all four rewrites and the parenthetical that goes with
- * the last of them. Three lines because the second carries two of the rows:
- *
- * - `Off only: …` and `Default: **full**. Switch: …` — the first three rows, the
- *   second line carrying two. `Current level:` is what replaces the default, and
- *   it is the spelling caveman's own hook writes when it cannot find this file.
- *   **Nothing replaces the switch list, and `/caveman` existing is not a reason
- *   to put one back**: what the table condemns is prose advertising names against
- *   a Menu that does not offer them, and the Menu is `CAVEMAN_MENU`'s to state.
- * - The `## Boundaries` line — the fourth row. The cut is its off-switch sentence
- *   and `(/caveman-compress exempt)`, and nothing on either side of them: the
- *   carve-out sharing that line is the one thing ADR-0030 requires survive
- *   verbatim.
- *
- * The `CAVEMAN MODE ACTIVE` prefix is deliberately not here. The hook writes it
- * around the filtered body rather than inside it, and keeping that split is what
- * lets this constant be diffed line for line against the vendored file.
- */
+/** Enforced by `fence:caveman-borrowed-text-verbatim`. */
 function borrowedRules(level: string): string {
   return `Respond terse like smart caveman. All technical substance stay. Only fluff die.
 

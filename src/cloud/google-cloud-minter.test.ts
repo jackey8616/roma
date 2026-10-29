@@ -122,14 +122,18 @@ describe('exchanging the key for a Cloud Token', () => {
   // A clock a few seconds fast issues an assertion "in the future", which is
   // rejected — and would present as roma failing to mint on a machine that is
   // otherwise working perfectly. The same minute `appJwt` backdates by.
-  it('backdates the assertion rather than issuing it exactly now', async () => {
+  it('backdates the assertion rather than issuing it exactly now [fence:cloud-assertion-is-backdated]', async () => {
+    const why =
+      'The assertion is issued a minute in the past (ADR-0015). A clock a few seconds fast ' +
+      'issues one "in the future", Google rejects it, and roma fails to mint on a machine ' +
+      'that is otherwise working perfectly (#99).'
     const { minter, exchanges } = googleAnswering(A_TOKEN)
 
     await minter.mint()
 
     const claims = claimsOf(exchanges[0]?.form.get('assertion') ?? '')
-    expect(claims['iat']).toBe(Math.floor(NOW / 1000) - 60)
-    expect(claims['exp']).toBe(Math.floor(NOW / 1000) - 60 + 3600)
+    expect(claims['iat'], why).toBe(Math.floor(NOW / 1000) - 60)
+    expect(claims['exp'], why).toBe(Math.floor(NOW / 1000) - 60 + 3600)
   })
 
   it('is signed with the private key, RS256', async () => {
@@ -165,12 +169,16 @@ describe('exchanging the key for a Cloud Token', () => {
   // Guessing an hour is the one direction that cannot be walked back: the whole
   // protection here is the credential's lifetime, and a token roma believes in
   // for longer than it is good for is what the caching must not produce.
-  it('treats a token with an unreadable lifetime as already spent', async () => {
+  it('treats a token with an unreadable lifetime as already spent [fence:cloud-unreadable-lifetime-is-spent]', async () => {
+    const why =
+      'A Cloud Token whose lifetime cannot be read expires now: used once, never cached ' +
+      "(ADR-0015: the whole protection is the credential's lifetime). Guessing it long is the " +
+      'one direction that cannot be walked back — a token cached past its real life (#99).'
     const { minter } = googleAnswering(() => ({
       body: { access_token: 'ya29.a-token', expires_in: 'about an hour' },
     }))
 
-    expect((await minter.mint()).expiresAt).toBe(NOW)
+    expect((await minter.mint()).expiresAt, why).toBe(NOW)
   })
 
   // A 200 with nothing usable in it. Better as a refusal here than as an empty

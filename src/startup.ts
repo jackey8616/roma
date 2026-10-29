@@ -50,10 +50,8 @@ export interface ShimsOptions {
    * roma's own directory: the Credential Shim socket, and the gitconfig every
    * Session runs under.
    *
-   * Deliberately not under `workRoot`. That tree is reclaimed after seven idle
-   * days, and a reclaimed socket would present as every credential request in
-   * roma failing at once with no explanation. Not inside a Working Directory
-   * either — the agent runs `git add -A` in there.
+   * Neither under `workRoot` nor inside a Working Directory. Enforced by
+   * `fence:startup-shim-dir-is-roma-own`.
    */
   readonly dir: string
   /**
@@ -74,15 +72,9 @@ export type ReachLogRecord =
        * What this deployment reaches on one provider, and which identity it is.
        *
        * Written on every boot for every Reach, including the ones whose answer is
-       * "none". Which deployment an operator is looking at is exactly the
-       * question, and a line that appeared only sometimes would make its absence
-       * mean two things — no Reach, or an older roma.
-       *
-       * It is also the record of the boot proof: the line is written after the
-       * proof, so a boot that reaches it is a boot where that Reach worked. A
-       * proof that minted gets no `reach-token-minted` of its own, because that
-       * token was never served to anybody and counting it would put a standing +1
-       * on every deployment's mint rate.
+       * "none", after the proof: it is the record of the boot proof, which gets
+       * no `reach-token-minted` of its own. Enforced by
+       * `fence:startup-reach-line-every-boot`.
        */
       readonly event: 'reach'
       readonly credential: CredentialWanted
@@ -116,10 +108,8 @@ export interface StartRomaOptions {
    * Metered billing, and the ceiling on it. Omitted, roma has no Overflow: a
    * blocked Task waits for the window and is never offered a way past it.
    *
-   * The credential and the cap together, because neither is any use without the
-   * other. A key with no cap makes ADR-0002's "off by default" ceremony rather
-   * than protection; a cap with no key caps nothing. Requiring them as one
-   * object is how a deployment cannot configure half of it.
+   * The credential and the cap together, never one without the other. Enforced
+   * by `fence:env-overflow-whole-and-roma-own`.
    *
    * **The self-check does not verify this credential.** It drives a real Turn,
    * which on a metered key costs metered money at every boot — so the first
@@ -157,33 +147,21 @@ export interface StartRomaOptions {
   /**
    * Where the Audit Records go, one file per calendar month.
    *
-   * Required, and deliberately not defaulted to somewhere under `workRoot`: that
-   * tree is walked by a reclaim that deletes what nothing has touched for seven
-   * days, and a default that quietly landed there would delete the log over a
-   * quiet week. A deployment naming a durable path is the whole of what makes
-   * "records survive a restart" true, and it is not something to be guessed at
-   * on a deployment's behalf — the number in these files is the only record of
-   * who spent what, and it cannot be reconstructed after the fact.
+   * Required, never defaulted. Enforced by `fence:startup-durable-paths-are-required`.
    */
   readonly auditRoot: string
   /**
    * CLAUDE_CONFIG_DIR and CLAUDE_SECURESTORAGE_CONFIG_DIR, both pointed here.
    *
-   * Required, for two promises that would otherwise be conditional on a
-   * deployment remembering it. It is what keeps a Session's credential
-   * resolution off the host's keychain (ADR-0002), and it is where Claude Code
-   * writes the Transcript — which ADR-0005 makes the only record there is of
-   * what an agent did, on the strength of it living somewhere roma named.
+   * Required, never defaulted. Enforced by `fence:startup-durable-paths-are-required`.
    */
   readonly configDir: string
   /**
    * One Reach per credential a Session's tools can ask for.
    *
    * Every one of them is proved live before anything that could accept an Ingress
-   * Message exists. A record rather than a list so that none can be left out: a
-   * roma with no `code` Reach would prove no key, announce nothing, and fail every
-   * `git` request inside somebody's Turn, which is the failure blocking the boot
-   * exists to prevent (ADR-0008, ADR-0020 §3).
+   * Message exists. A record rather than a list, so that none can be left out.
+   * Enforced by `fence:startup-every-reach-is-named`.
    *
    * A deployment with no cloud key has a Cloud Reach all the same — the
    * unavailable one, which announces nothing and answers the Cloud Shortcut that
@@ -267,18 +245,13 @@ export interface Roma {
 /**
  * Start roma: verify the credential, then build everything that runs on it.
  *
- * The order is the point, and it is enforced by construction rather than by
- * convention. Nothing that can accept an ingress message exists until the
- * self-check has passed — a boot that fails the check throws from here having
- * built no pool, no queue and no Core, so there is nothing for a message to
- * arrive at and no way to start serving one by accident. "Failure blocks
- * startup" is therefore not a rule anybody has to remember to obey.
+ * Nothing that can accept an ingress message exists until the self-check has
+ * passed. Enforced by `fence:startup-nothing-before-the-self-check`.
  *
- * It is otherwise deliberately thin. Its only other decision is *ownership* —
- * the pool, the queue and the generation record are built here rather than by
- * the Core that uses them, because every cap and rule they carry is roma-wide,
- * and a Core that made its own would turn each of them into one per Channel,
- * which is now a live mistake rather than an anticipated one.
+ * Its only other decision is *ownership*: the pool, the queue and the generation
+ * record are built here, once, for every Core. Enforced by
+ * `fence:startup-one-queue-for-every-channel` and
+ * `fence:startup-one-session-record-for-every-channel`.
  */
 export async function startRoma({
   credential,
@@ -315,9 +288,7 @@ export async function startRoma({
   for (const reach of eachReach(reaches)) {
     const { account } = await reach.prove()
     proved.set(reach.credential, account)
-    // Said on every boot for every Reach, including the ones with nothing to say,
-    // so that which deployment this is can be read off the log rather than
-    // inferred from a line that is not there.
+    // Enforced by `fence:startup-reach-line-every-boot`.
     log?.({ event: 'reach', credential: reach.credential, account })
   }
 
@@ -396,9 +367,7 @@ export async function startRoma({
   const documentUse = new ReachUse()
   const shimServer = await ShimServer.listen({
     socketPath,
-    // One `FreshTokens` per Reach, never one shared: they hold different
-    // credentials with different expiries. The arithmetic is one class; the state
-    // is not.
+    // Enforced by `fence:startup-one-fresh-tokens-per-reach`.
     reaches: servedReaches(reaches, proved, log),
     // Every request over the socket, whichever credential it was for. What is kept
     // of it is decided one layer up — the socket knows a request happened and
@@ -430,36 +399,12 @@ export async function startRoma({
     ...(overflow === undefined ? {} : { overflow: sessionEnv(overflow.credential) }),
   }
 
-  // The tree every Session's Working Directory sits in, and every record roma
-  // keeps about a Conversation beside them. Built once and handed to all five
-  // things under it — the pool, the three record classes and the Core — so none
-  // of them is told a path to join for itself.
-  //
-  // What they have to agree on is the *path*, not this object: nothing here is
-  // held between calls, so two of these over one root behave identically. One
-  // instance is how that agreement is made rather than hoped for, which is the
-  // argument `ChosenRecord` makes for itself below. Two over *different* roots
-  // is the failure, and `CoreOptions.workRoot` is where what it costs is
-  // written down.
+  // Enforced by `fence:startup-core-and-pool-share-the-work-root`.
   const work = new WorkRoot(workRoot)
 
-  // Beside the generations, and handed to both the pool and the Core. What has
-  // to be one thing is the *work root* rather than the object — `ChosenRecord`
-  // keeps nothing between calls, it reads and writes files — and passing one
-  // instance to both is how that is made true rather than hoped for. What must
-  // not happen is the pool being built without it: roma would answer `/model`
-  // perfectly, write a perfect record, and run every Turn on the Pinned Model.
+  // Enforced by `fence:startup-pool-reads-the-chosen-records`.
   const models = chosenModels({ workRoot: work, pinnedModel })
-  // Beside them, and handed to both for the same reason and at higher stakes: a
-  // pool built without this answers `/effort` perfectly, writes a perfect record,
-  // and runs every Turn at the Pinned Effort — with nothing anywhere in the
-  // stream to contradict it, because `system/init` carries no effort field.
   const efforts = chosenEfforts({ workRoot: work, pinnedEffort })
-  // And the third, handed to both for the reason the first two are, at stakes of
-  // a third kind: a pool built without this answers `/caveman` perfectly, writes
-  // a perfect record, and appends the Pinned Caveman's ruleset to every Session —
-  // and what contradicts it is nothing anybody can point at, only roma answering
-  // at the wrong length.
   const cavemen = chosenCavemen({ workRoot: work, pinnedCaveman })
 
   const pool = new SessionPool({
@@ -520,10 +465,7 @@ export async function startRoma({
   }
 
   return {
-    // Not built here and handed to a binding: a Core paired with the wrong
-    // Channel would answer every message into somebody else's product, and
-    // nothing downstream of here could tell. Each binding builds its own, over
-    // its own Adapter.
+    // Enforced by `fence:startup-each-core-on-its-own-channel`.
     channels: channels.map((binding) =>
       binding.coreOver((channel) => new Core({ channel, ...shared })),
     ),
@@ -540,8 +482,7 @@ export async function startRoma({
       try {
         await pool.shutdown()
       } finally {
-        // Whatever the pool did. A socket left listening on a roma that is
-        // otherwise gone is a credential still being served to nothing.
+        // Enforced by `fence:startup-socket-closed-whatever-the-pool-did`.
         await shimServer.close()
       }
     },

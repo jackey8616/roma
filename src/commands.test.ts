@@ -100,8 +100,13 @@ describe('reading a message as a Command', () => {
 
     // Not a malformed `/model` — it is the Command asking roma to report, which
     // is what that gesture can honestly mean in a text channel.
-    it('is the same Command with nothing after it', () => {
-      expect(readCommand('/model')).toEqual({ command: 'model', argument: null })
+    it('is the same Command with nothing after it [fence:commands-bare-head-is-a-command]', () => {
+      const why =
+        'An argument-taking head must stay a Command on its own (ADR-0014, ADR-0017): its ' +
+        'spelling is on the whole-message table as well as the argument table, and dropping it ' +
+        'from the first stops `/model` alone being a Command, so it falls through as prose and ' +
+        'somebody is billed for a Turn about it.'
+      expect(readCommand('/model'), why).toEqual({ command: 'model', argument: null })
     })
 
     // An argument roma does not offer is still a Command, and is refused as one
@@ -119,10 +124,14 @@ describe('reading a message as a Command', () => {
     // One argument is an argument; three words are a sentence. This is what
     // keeps a message somebody meant for the agent from being swallowed by a
     // Command that would answer it with a refusal.
-    it('leaves a message that merely begins with it as work', () => {
-      expect(readCommand('/model the deploy as a state machine')).toBeNull()
-      expect(readCommand('/model opus please')).toBeNull()
-      expect(readCommand('/models')).toBeNull()
+    it('leaves a message that merely begins with it as work [fence:commands-one-argument-or-none]', () => {
+      const why =
+        'A head takes one argument or none (ADR-0003, ADR-0014): two words after it are a ' +
+        'sentence meant for the agent, and reading them as a Command swallows the message and ' +
+        'answers it with a refusal.'
+      expect(readCommand('/model the deploy as a state machine'), why).toBeNull()
+      expect(readCommand('/model opus please'), why).toBeNull()
+      expect(readCommand('/models'), why).toBeNull()
     })
 
     it('carries the arguments the other three take', () => {
@@ -148,10 +157,13 @@ describe('reading a message as a Command', () => {
     // Claude Code's no-argument `/config` is a settings panel and a panel has no
     // form in a chat message, so reporting is what that gesture can honestly
     // mean in one (ADR-0017).
-    it('is the same Command with nothing after it', () => {
-      expect(readCommand('/effort')).toEqual({ command: 'effort', argument: null })
-      expect(readCommand('/caveman')).toEqual({ command: 'caveman', argument: null })
-      expect(readCommand('/config')).toEqual({ command: 'config', argument: null })
+    it('is the same Command with nothing after it [fence:commands-bare-head-is-a-command]', () => {
+      const why =
+        'An argument-taking head must stay a Command on its own (ADR-0016, ADR-0017, ADR-0030): ' +
+        'dropping it from the whole-message table turns the bare head into billed prose.'
+      expect(readCommand('/effort'), why).toEqual({ command: 'effort', argument: null })
+      expect(readCommand('/caveman'), why).toEqual({ command: 'caveman', argument: null })
+      expect(readCommand('/config'), why).toEqual({ command: 'config', argument: null })
     })
 
     // Claimed so that it can be *refused*: `/config key=value` writes a settings
@@ -191,15 +203,24 @@ describe('reading a message as a Command', () => {
 
   // Every slash command that is not roma's is somebody else's — Claude Code's to
   // answer as a Relay if it is on the ADR-0012 list, and work if it is not.
-  it('claims no slash command that is not its own', () => {
+  it('claims no slash command that is not its own [fence:commands-no-prefix-match]', () => {
+    const why =
+      'A Command is named exactly, never matched by prefix or by shape (ADR-0003): a rule that ' +
+      '"begins with a slash and looks like ours" inherits every command a later Claude Code ' +
+      'release adds and swallows it, where a named list fails closed.'
     // `/compact` is a Relay since ADR-0018 and `/newsletter` is nobody's; both
     // have to fall through here, and for the same reason.
-    expect(readCommand('/compact')).toBeNull()
-    expect(readCommand('/compact keep the ADRs')).toBeNull()
-    expect(readCommand('/newsletter')).toBeNull()
+    expect(readCommand('/compact'), why).toBeNull()
+    expect(readCommand('/compact keep the ADRs'), why).toBeNull()
+    expect(readCommand('/newsletter'), why).toBeNull()
     // A Relay, which `readRelay` answers — and only because nothing here did.
     // Asserted from this side too, since a Command shadows one silently.
-    expect(readCommand('/context')).toBeNull()
+    expect(readCommand('/context'), why).toBeNull()
+    // Heads that begin with one of roma's, on both tables: a prefix match on
+    // either would claim them.
+    expect(readCommand('/models opus'), why).toBeNull()
+    expect(readCommand('/effortless max'), why).toBeNull()
+    expect(readCommand('/stopwatch'), why).toBeNull()
   })
 
   // Claude Code's `/clear` takes a name and roma's reset takes nothing, so the
@@ -215,8 +236,11 @@ describe('reading a message as a Command', () => {
   // The same opening on `/config`, recorded rather than fixed: closing it means
   // deciding what a multi-word argument would mean to roma, and it would mean
   // nothing (ADR-0017).
-  it('leaves a /config of two words to Claude Code', () => {
-    expect(readCommand('/config foo bar')).toBeNull()
+  it('leaves a /config of two words to Claude Code [fence:commands-one-argument-or-none]', () => {
+    const why =
+      'A head takes one argument or none (ADR-0017): `/config foo bar` is left open as prose ' +
+      'rather than swallowed.'
+    expect(readCommand('/config foo bar'), why).toBeNull()
   })
 
   it('leaves ordinary work alone', () => {
@@ -266,7 +290,11 @@ describe('reading a message as a Command', () => {
  * the mechanism `effort-menu.ts` says "somebody remembers" stopped being.
  */
 describe('a Menu name a Caller may press instead of type', () => {
-  it('round-trips through the Command reader, for every name on all three Menus', () => {
+  it('round-trips through the Command reader, for every name on all three Menus [fence:commands-menu-names-round-trip]', () => {
+    const why =
+      'A Menu button is a message (ADR-0023), so commandFor must write what readCommand reads ' +
+      'back as the same choice: a name that does not round-trip falls through as work and ' +
+      'bills a Turn for a button press.'
     const menus = [
       { command: 'model' as const, names: MENU_NAMES },
       { command: 'effort' as const, names: EFFORT_NAMES },
@@ -275,7 +303,7 @@ describe('a Menu name a Caller may press instead of type', () => {
 
     for (const { command, names } of menus) {
       for (const name of names) {
-        expect(readCommand(commandFor(command, name))).toEqual({ command, argument: name })
+        expect(readCommand(commandFor(command, name)), why).toEqual({ command, argument: name })
       }
     }
   })

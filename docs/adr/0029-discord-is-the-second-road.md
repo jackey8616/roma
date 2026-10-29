@@ -400,7 +400,9 @@ it is the one unverified reading a decision here actually rests on.
   429s count toward the *"10,000 per 10 minutes"* invalid-request limit, whose
   penalty is not scoped to the channel that caused it. ADR-0028 moved the retry
   into `deliver()`; this is the constraint that retry inherits, and it has no
-  counterpart on Chat, whose Adapter retries nothing.
+  counterpart on Chat, whose Adapter retries nothing. Enforced by
+  `fence:discord-waits-what-discord-asked`. Enforced by `fence:discord-attempts-bounded`.
+  Enforced by `fence:discord-no-sleeping-through-a-ban`.
 
 ## Alternatives considered
 

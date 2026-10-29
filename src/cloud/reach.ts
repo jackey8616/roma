@@ -36,16 +36,7 @@ export function cloudReach(minter: CloudMinter): AvailableReach<'cloud'> {
     minter,
 
     async prove(): Promise<ReachProof> {
-      // Thrown, never turned into the unavailable arm. A revoked key that reported
-      // "this deployment has no Cloud Reach" would tell every Session a sentence
-      // that is false, and ADR-0015 §8 is explicit that a key that exists and does
-      // not work still stops the boot.
-      //
-      // Refused in `readConfiguration`'s *shape* rather than inside it, which is
-      // the gap ADR-0015 §8 records and does not close: that reader is synchronous
-      // and this is a network round trip. The wrapping lives here rather than in
-      // `startRoma` because how a Reach refuses is the Reach's — the forge's
-      // refusals name what they found and are worth more unwrapped.
+      // Enforced by `fence:reach-a-broken-key-blocks-the-boot`.
       try {
         await minter.mint()
       } catch (error) {
@@ -84,14 +75,9 @@ export function noCloudReach(): Reach<'cloud'> {
 /**
  * The Cloud Reach this deployment configured, or the one it did not.
  *
- * **This function is the whole of ADR-0015 §4 now.** It takes the key
- * `readCloudEnv` read from the path the deployment named, and nothing else — no
- * `GoogleAuth`, no Application Default Credentials, nothing that would go looking
- * for a credential. It is inside `src/cloud/`, which
- * `src/cloud-containment.test.ts` binds against every way of asking a library to
- * find one, and that is why the composition root no longer needs a rule of its
- * own: it never names the constructor, so the substitution cannot be written
- * there. See ADR-0020 §7 before adding a source match back.
+ * It takes the key `readCloudEnv` read from the path the deployment named, and
+ * nothing else. Enforced by `fence:cloud-never-resolves-a-credential`. The
+ * composition root has no rule of its own; see ADR-0020 §7.
  */
 export function cloudReachFrom(env: CloudEnv | null): Reach<'cloud'> {
   return env === null ? noCloudReach() : cloudReach(new GoogleCloudMinter(env))

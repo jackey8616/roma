@@ -71,6 +71,7 @@ async function shimInFrontOf(stub: string, minter = new FakeMinter()) {
 /** A `gh` that says what it was given, and nothing else. */
 const REPORTS_ITSELF = `#!/bin/sh
 echo "GH_TOKEN=\${GH_TOKEN-<unset>}"
+echo "GITHUB_TOKEN=\${GITHUB_TOKEN-<unset>}"
 echo "args=$*"
 exit 0
 `
@@ -106,14 +107,23 @@ describe('the gh Shim', () => {
   // A credential nobody chose is worse than none. `gh` reads `GH_TOKEN` and
   // `GITHUB_TOKEN`, and either could arrive from anywhere — so both are cleared
   // before anything else happens, and put back only with what roma minted.
-  it('never lets a token from somewhere else through', async () => {
+  it('never lets a token from somewhere else through [fence:github-gh-runs-on-no-inherited-token]', async () => {
+    const why =
+      'The gh Shim clears every inherited `GH_TOKEN` and `GITHUB_TOKEN` before it mints, ' +
+      'whichever way the mint goes (ADR-0008: the agent acts as the App, on a token roma ' +
+      'minted). Left in place, when roma cannot mint `gh` runs silently on a stale credential ' +
+      'nobody chose (#62).'
     const minter = new FakeMinter()
     minter.failsWith = new Error('the App is unreachable')
     const gh = await shimInFrontOf(REPORTS_ITSELF, minter)
 
-    const ran = await gh.run(['issue', 'list'], { GH_TOKEN: 'somebody-elses-token' })
+    const ran = await gh.run(['issue', 'list'], {
+      GH_TOKEN: 'somebody-elses-token',
+      GITHUB_TOKEN: 'another-stale-token',
+    })
 
-    expect(ran.stdout).toContain('GH_TOKEN=<unset>')
+    expect(ran.stdout, why).toContain('GH_TOKEN=<unset>')
+    expect(ran.stdout, why).toContain('GITHUB_TOKEN=<unset>')
     // The tool still runs, and fails in its own words about the command that was
     // actually attempted. roma's reason is on stderr for the agent to relay.
     expect(ran.stderr).toContain('the App is unreachable')

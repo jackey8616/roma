@@ -58,24 +58,10 @@
  *
  * Applied by a person, and re-applied whenever the pin moves — nothing in the
  * stream marks a command as safe, so the first clause cannot be checked by
- * machine. Exactly one part of it can: that no string here is also a Command,
- * which is what keeps the dangerous spellings out of reach by construction
- * rather than by name, and `relays.test.ts` asserts it against the real table.
+ * machine. Exactly one part of it can, and is: that no string here is also a
+ * Command.
  *
- * A whitelist rather than a denylist, and that is the decision rather than the
- * shortcut. Under a denylist a release that adds a destructive non-interactive
- * command adds it to roma as permitted; under this, the same release adds one
- * that does not work until somebody puts it here. It fails closed. The pool a
- * denylist would have to keep up with is populated and dangerous — `/clear`
- * moves Claude Code to a session roma does not know about, `/model` takes a
- * Session off the model roma believes it is on, `/config` sets anything at all —
- * and every one of those is free and non-interactive on the pinned build.
- *
- * `/clear` is out of reach twice over since ADR-0013, and `/model` since
- * ADR-0014: both are roma's own Commands now, and the Core reads a Command before
- * it consults this list. `/model` is the sharper of the two — relayed, the choice
- * would live in a process that ends at Eviction, so what a Caller would get is a
- * setting that reverts at a moment they cannot see rather than model switching.
+ * Enforced by `fence:relays-no-command-overlap` and by `fence:relays-whitelist-fails-closed`.
  */
 
 /**
@@ -193,12 +179,10 @@ export interface RelayRequest {
  * the Caller Marker *after* it safe — there is no Caller text for a forged marker
  * to hide in.
  *
- * Case is ignored on the head, and the canonical spelling is what gets sent. A
- * phone keyboard capitalises the first letter of a message on its own, and
- * `/Context` is nobody asking for something else. The **argument** is left
- * exactly as it was typed: it is an instruction to a summariser rather than a
- * name to be matched, and lowercasing somebody's prose would be roma editing what
- * they asked to keep.
+ * Case is ignored on the head, and the canonical spelling is what gets sent. The
+ * argument is left exactly as it was typed.
+ *
+ * Enforced by `fence:relays-argument-verbatim`.
  */
 export function readRelay(text: string): RelayRequest | null {
   const message = text.trim()

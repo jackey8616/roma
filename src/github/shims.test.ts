@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { gitConfig, gitCredentialHelper } from './shims.js'
 
@@ -43,13 +44,31 @@ describe('the gitconfig every Session runs under', () => {
   // happily; what it cannot do is resolve the `.js` specifiers the Shim imports
   // by, and `--import` resolves a bare name against git's working directory
   // rather than roma's. Both halves of that were a real from-source failure.
-  it('asks for a loader, by absolute URL, when the Shim is TypeScript', () => {
+  it('asks for a loader, by absolute URL, when the Shim is TypeScript [fence:github-loader-by-absolute-path]', () => {
+    const why =
+      'From a checkout the helper loads tsx by absolute path, resolved with `createRequire` ' +
+      '(ADR-0008). Node 22 cannot resolve the `.js` specifiers the Shim imports by; `--import` ' +
+      "resolves a bare `tsx` against git's working directory, the agent's, which has no " +
+      '`node_modules`; and `import.meta.resolve` is unavailable under the test transform. ' +
+      'Each makes every from-source credential request fail (#62).'
     const helper = gitCredentialHelper(
       '/checkout/src/github/git-credential-shim.ts',
       '/usr/bin/node',
     )
 
-    expect(helper).toMatch(/--import \/\S*tsx\S*/)
-    expect(helper.endsWith(' /checkout/src/github/git-credential-shim.ts')).toBe(true)
+    expect(helper, why).toMatch(/--import \/\S*tsx\S*/)
+    expect(helper.endsWith(' /checkout/src/github/git-credential-shim.ts'), why).toBe(true)
+  })
+
+  it('finds the Shim beside itself, with its own extension [fence:github-shim-beside-this-file]', () => {
+    const shim = gitCredentialHelper().split(' ').at(-1) ?? ''
+
+    expect(
+      existsSync(shim) && shim.endsWith('git-credential-shim.ts'),
+      'The Shim is found beside shims.ts with whatever extension shims.ts has, never a ' +
+        'hard-coded `.js` (ADR-0008). The image runs `dist/github/shims.js` and a developer runs ' +
+        '`src/github/shims.ts`; hard-coded, a from-source roma names a Shim that is not there ' +
+        `and every credential request fails. Named: ${shim} (#62).`,
+    ).toBe(true)
   })
 })

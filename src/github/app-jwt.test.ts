@@ -32,14 +32,20 @@ function claimsOf(jwt: string): { iat: number; exp: number; iss: string } {
 }
 
 describe('the JWT roma signs as its App', () => {
+  const JWT_WHY =
+    'The App JWT is backdated a minute, once, and spans nine minutes from `iat` (ADR-0008). ' +
+    'Without the backdate a clock a few seconds fast issues a JWT "in the future" and GitHub ' +
+    'rejects it; added twice, `exp - iat` reaches the ten-minute maximum GitHub refuses on, ' +
+    'a refusal that surfaces as "roma cannot mint" with no hint that time is why (#62).'
+
   it('signs as the App id', () => {
     expect(claimsOf(appJwt({ appId: '12345', privateKey: PEM, now: NOW })).iss).toBe('12345')
   })
 
   // GitHub's own guidance, and the reason is a clock that is a few seconds fast:
   // a JWT issued "in the future" is rejected outright.
-  it('is issued a minute in the past, against a clock that may be fast', () => {
-    expect(claimsOf(appJwt({ appId: '12345', privateKey: PEM, now: NOW })).iat).toBe(
+  it('is issued a minute in the past, against a clock that may be fast [fence:github-jwt-backdated-once]', () => {
+    expect(claimsOf(appJwt({ appId: '12345', privateKey: PEM, now: NOW })).iat, JWT_WHY).toBe(
       NOW / 1000 - 60,
     )
   })
@@ -48,11 +54,11 @@ describe('the JWT roma signs as its App', () => {
   // `iat`, so a nine-minute span leaves a minute of room; spending that room on
   // the backdating instead would put every JWT roma signs on the boundary, where
   // any rounding on GitHub's side is a refusal nobody can diagnose.
-  it('spans nine of the ten minutes GitHub allows, not all ten', () => {
+  it('spans nine of the ten minutes GitHub allows, not all ten [fence:github-jwt-backdated-once]', () => {
     const { iat, exp } = claimsOf(appJwt({ appId: '12345', privateKey: PEM, now: NOW }))
 
-    expect(exp - iat).toBe(9 * 60)
-    expect(exp - NOW / 1000).toBe(8 * 60)
+    expect(exp - iat, JWT_WHY).toBe(9 * 60)
+    expect(exp - NOW / 1000, JWT_WHY).toBe(8 * 60)
   })
 
   it('is signed with the private key, RS256', async () => {

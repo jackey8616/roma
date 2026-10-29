@@ -47,9 +47,8 @@ export interface Delivery<Event = unknown> {
    * Not finished with it, and roma is not going to be.
    *
    * For the failures another attempt could get past — the Channel being
-   * unreachable, most of all. Not for an event roma cannot read: that one will
-   * fail identically for ever, and giving it back makes it a message the
-   * subscriber trips over on every pass.
+   * unreachable, most of all. Not for an event roma cannot read. Enforced by
+   * `fence:serve-unreadable-is-finished-and-logged`.
    *
    * **What it buys is the Transport's, and may be nothing.** A Transport with
    * somewhere to hand a Delivery back to delivers it again; one without — a

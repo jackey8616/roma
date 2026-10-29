@@ -8,19 +8,25 @@ const AUTO = recordedStream('compaction-auto')
 /** The failure on its own, provoked with the threshold under the floor. */
 const FAILED = recordedStream('compaction-failed')
 
+const SNAKE_CASE =
+  'A Compaction must be read off `compact_metadata`, the snake_case the stream carries, never ' +
+  "the transcript's camelCase `compactMetadata` that #98 was written against (ADR-0019, " +
+  'measured in #100). A reader written from the transcript finds undefined and reports every ' +
+  'Compaction as none, while looking like it works.'
+
 describe('reading a Compaction off the stream', () => {
-  it('reads the boundary the capture holds', () => {
+  it('reads the boundary the capture holds [fence:stream-compaction-snake-case]', () => {
     const [boundary] = ofKind(AUTO.events, 'system/compact_boundary')
     expect(boundary).toBeDefined()
 
-    expect(readCompaction(boundary!)).toEqual({
+    expect(readCompaction(boundary!), SNAKE_CASE).toEqual({
       trigger: 'auto',
       preTokens: 61486,
       postTokens: 1375,
     })
   })
 
-  it('is not fooled by the transcript spelling', () => {
+  it('is not fooled by the transcript spelling [fence:stream-compaction-snake-case]', () => {
     // What #98 was written against — Claude Code's own parser, reading its
     // transcript files, where the field is `compactMetadata`. A reader written
     // from that quote finds nothing on stdout and reports every Compaction as no
@@ -31,7 +37,7 @@ describe('reading a Compaction off the stream', () => {
       compactMetadata: { trigger: 'auto', pre_tokens: 61486, post_tokens: 1375 },
     } as const
 
-    expect(readCompaction(transcript)).toEqual({
+    expect(readCompaction(transcript), SNAKE_CASE).toEqual({
       trigger: null,
       preTokens: null,
       postTokens: null,
@@ -95,10 +101,15 @@ describe('how seriously roma takes one', () => {
     expect(severityOf('error')).toBe('unexplained')
   })
 
-  it('leaves a code it has never seen unexplained rather than benign', () => {
-    // The `shared-window.ts` lesson, one file over: a value roma has not seen
-    // must not be quietly folded into the answer that means "nothing happened".
-    expect(severityOf('some_code_a_later_release_added')).toBe('unexplained')
-    expect(severityOf(null)).toBe('unexplained')
+  it('leaves a code it has never seen unexplained rather than benign [fence:stream-unknown-compaction-code-is-unexplained]', () => {
+    const why =
+      'severityOf must list the codes it believes harmless and treat every other code as ' +
+      'unexplained, never list the serious ones and assume the rest benign (ADR-0019). The ' +
+      'other way round fails silently on the release that adds a code, which is the ' +
+      '`shared-window.ts` mistake one file over: a value roma has not seen folded into the ' +
+      'answer that means nothing happened.'
+    expect(severityOf('some_code_a_later_release_added'), why).toBe('unexplained')
+    expect(severityOf('error'), why).toBe('unexplained')
+    expect(severityOf(null), why).toBe('unexplained')
   })
 })
