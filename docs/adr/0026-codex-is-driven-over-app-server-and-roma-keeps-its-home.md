@@ -12,17 +12,18 @@ of claims that must be re-established against roma's own pinned build before
 any of this ships. Where a measurement later disagrees, the measurement wins and
 this file gets amended.
 
-**Amended 2026-10-29** by the first measurement (#149,
-`docs/codex-app-server-verification.md`, Codex 0.165.0). The decisions are
-unchanged; one consequence moved. Five statements of fact were wrong for the
-pinned build — where the effort goes, where usage and compaction arrive, what
-the home holds, that the two thread-id keys are one id, and that the posture
-has no per-thread route outside the experimental surface. The last is the
-consequence: agenda item 7's "no" now has a named repair, so it no longer
-blocks shipping on its own. One statement about hermes-agent has stopped
-being true, and the seeding step has a form that makes no copy. Each is
-marked inline. Item 3's scope is narrowed to what #149 measured, and the
-agenda gains the item ADR-0030 added to it.
+**Amended 2026-10-29** by #149 (`docs/codex-app-server-verification.md`,
+Codex 0.165.0). The decisions are unchanged. Statements of fact that were
+wrong for the pinned build are corrected inline, and each says what it rests
+on, because they rest on different things. **Measured**: usage arrives on
+`thread/tokenUsage/updated`, the home holds the build's own state, and a
+thread started with no effort reports none. **Read off the build's own
+schema**, and each still the named agenda item's to measure: the effort goes
+on `turn/start`, compaction is an item, the two thread-id keys are two ids,
+and the posture has a stable per-thread setting. **Read off hermes-agent's
+source**: it now resumes threads. The seeding step gains a form that makes no
+copy, item 3's scope is narrowed to what #149 measured, and the agenda gains
+the item ADR-0030 added to it.
 
 The spike that the design this pull request previously proposed gated
 construction on survives here as that agenda, extended by one item the review
@@ -97,8 +98,8 @@ contents are a format that belongs to the build, and a second reason, beside
 the refresh below, it cannot be read-only. It is what configuring Codex
 *means*: a deployment that wants the second Runtime must have it, and a
 deployment that does not needs nothing new and is not asked for anything
-(ADR-0025). Where Codex is configured it is required exactly the way `ROMA_CLAUDE_CONFIG_DIR`
-is, and for the same two reasons at once:
+(ADR-0025). Where Codex is configured it is required exactly the way
+`ROMA_CLAUDE_CONFIG_DIR` is, and for the same two reasons at once:
 
 - `sessions/` holds the rollout files, which are **the Transcript of a Codex
   Session** — the only account there is of what the agent did. Everything
@@ -112,10 +113,12 @@ is, and for the same two reasons at once:
   documented foot-gun — two copies race, the loser is invalidated, and the
   operator sees an auth failure that no setting explains.
 
-The operator seeds `auth.json` once and lets the CLI keep it fresh from then
-on. **Amended — by logging in straight into the mount**, `CODEX_HOME=<mount>
-codex login`, rather than by logging in elsewhere and placing the file: the
-login is born where it lives, so there is never a second copy to race. roma
+The operator seeds `auth.json` once, per Codex's own CI guidance: log in on a
+trusted machine, place the file in the mount, and let the CLI keep it fresh
+from then on. **Amended — the simplest placing makes no copy at all:** where
+the mount is reachable from a machine that can log in, `CODEX_HOME=<mount>
+codex login` writes the login straight into it. Elsewhere the file is moved,
+never copied, and the machine it came from treats its login as spent. roma
 builds no OAuth flow of its own — the convention is
 `CLAUDE_CODE_OAUTH_TOKEN`'s: the operator obtains the Runtime's own
 credential, and roma carries it without ever interpreting it. The Minter is
@@ -204,8 +207,9 @@ by roma into `CODEX_HOME/config.toml` — via the config file rather than the
 protocol's per-thread `permissions` parameter, because the reference
 implementation live-tested that parameter as experimental-gated and rejected
 without matching config. (**Amended** — the pinned build's stable `sandbox` on
-`thread/start` is the fallback where the config file does not land; agenda
-item 7.) Same posture, same caveat, one more process it is true of.
+`thread/start` is a candidate fallback where the config file does not land,
+unmeasured; agenda item 7.) Same posture, same caveat, one more process it is
+true of.
 
 ## Verification agenda
 
@@ -223,11 +227,8 @@ number and so does the review that asked for it. The order by how much falls is
 and 7 describe a resident process and none of them reads the same way once that
 answer is no. Item 6 is the one that survives it, in changed form — concurrent
 processes sharing one credential is a live question under either process model,
-and a worse one under exec-per-Turn, which has more of them. Item 7 keeps its
-place though its "no" now has a repair (**amended**): what that "no" reaches is
-the security posture, the one outcome on this list that is neither money nor
-wording, and a fallback is only as good as the measurement that it lands.
-Item 1 is the one place the order should not be read as a schedule —
+and a worse one under exec-per-Turn, which has more of them. Item 1 is the one
+place the order should not be read as a schedule —
 it touches no Codex at all and can be captured against the Workspace roma
 already has, so it runs first in wall-clock whatever its rank.
 
@@ -253,9 +254,9 @@ already has, so it runs first in wall-clock whatever its rank.
    on `turn/start`, and which model actually answers, remain. A negative
    answer splits. If the per-call parameters fail but the `config.toml`
    backstop holds, the pin survives and loses its second belt. If neither can
-   make the pinned model the one that answers, *The pins* has no mechanism and the Startup
-   Self-Check has nothing to probe for — and what goes with it is ADR-0003's
-   sentence, that roma runs the model it insists on rather than the vendor's
+   make the pinned model the one that answers, *The pins* has no mechanism and
+   the Startup Self-Check has nothing to probe for — and what goes with it is
+   ADR-0003's sentence, that roma runs the model it insists on rather than the vendor's
    default, which this Runtime may not ship without. ADR-0025's Opening would
    be naming a model on somebody's word.
 4. Thread id key tolerance (**amended** — on the pinned build `id` and
@@ -286,14 +287,18 @@ already has, so it runs first in wall-clock whatever its rank.
    roma has to build; the cost of not asking is an outage with no visible
    cause.
 7. The permission profile lands from `config.toml` and the agent can write
-   in its Working Directory and nowhere it should not. **Amended — a negative
-   answer now has a named repair.** The per-thread `permissions` parameter is
-   still experimental and still rejected above, but the pinned build's stable
-   surface has `sandbox` on `thread/start` (`read-only`, `workspace-write`,
-   `danger-full-access`) and `sandboxPolicy` on `turn/start`, so if
-   `config.toml` does not land, roma sets the posture per thread instead. What
-   stays unacceptable is the outcome neither route reaches: Codex at its own
-   default, a security decision nobody made, arrived at by omission.
+   in its Working Directory and nowhere it should not. A negative answer is the
+   only one on this list with no repair named anywhere: the per-thread
+   `permissions` parameter is already rejected above on the reference
+   implementation's live test, so if `config.toml` does not land either, roma
+   has no way to set the posture and Codex runs at whatever its own default is
+   — a security decision nobody made, arrived at by omission. This item blocks
+   shipping rather than reshaping a section. **Amended — with one candidate
+   repair, unmeasured.** The pinned build's schema has a stable `sandbox` on
+   `thread/start` (`read-only`, `workspace-write`, `danger-full-access`) and
+   `sandboxPolicy` on `turn/start`, outside the experimental surface
+   `permissions` sits behind. This item measures it beside `config.toml`; until
+   it has, the sentence above stands.
 8. The pinned build's own reasoning-effort levels, read the way Claude Code's
    were: `scripts/claude-code-effort-matrix.ts` extracted them and a person
    reviewed the table before it became a constant. This Runtime's pinnable set

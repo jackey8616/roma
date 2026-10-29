@@ -8,7 +8,7 @@ import { defineConfig } from 'vitest/config'
 // exclusion is structural rather than a flag someone has to remember to pass:
 // those tests are slow and spend Shared Window quota, so accidentally running them
 // costs real money. The same suffix keeps out the Codex live tests, which spend
-// the ChatGPT subscription and have a config of their own.
+// Codex's Shared Window and have a config of their own.
 // `scripts/` is here because the automation in it has logic worth asserting —
 // `scripts/claude-code-drift.ts` parses the Dockerfile's pin and writes the report
 // that gets filed — and none of it needs a credential or a network. It widens what

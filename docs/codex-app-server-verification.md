@@ -71,7 +71,7 @@ ADR-0026 is amended for each but the last:
 
 ## Q3 — One Turn completes against a seeded credential, on the pinned model
 
-Confirmed, 2026-10-29, spending the ChatGPT subscription. `npm run test:codex-live`
+Confirmed, 2026-10-29, spending Codex's Shared Window. `npm run test:codex-live`
 (`src/codex-app-server.codex.live.test.ts`), with `CODEX_HOME` a directory the operator
 logged into directly (`CODEX_HOME=<dir> codex login`) — so the credential was never a
 copy. `initialize`, `thread/start` on `gpt-5.6-sol`, one `turn/start` asking for `PING`,

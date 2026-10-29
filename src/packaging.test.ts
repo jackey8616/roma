@@ -253,8 +253,8 @@ describe('nothing CI runs can spend a subscription', () => {
 })
 
 /**
- * Every way CI could start spending a subscription — the Shared Window through
- * seam 2, or the ChatGPT one through the Codex live tests.
+ * Every way CI could start spending a Shared Window — Claude Code's through
+ * seam 2, or Codex's through the Codex live tests.
  *
  * The scripts and the file suffix both configs select on are the tests
  * themselves. The credentials are the ones that matter: without them both suites

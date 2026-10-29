@@ -26,15 +26,9 @@ export class CodexAppServer {
   #turn: RunningTurn | null = null
   #lostBecause: string | null = null
 
-  constructor({
-    codexHome,
-    cwd,
-    inherit = {},
-    command = 'codex',
-    spawn = spawnClaudeProcess,
-  }: CodexAppServerOptions) {
+  constructor({ codexHome, cwd, inherit = {}, spawn = spawnClaudeProcess }: CodexAppServerOptions) {
     this.#process = spawn({
-      command,
+      command: 'codex',
       args: ['app-server'],
       cwd,
       // Last, so an inherited `CODEX_HOME` can never point the process at a
@@ -81,8 +75,8 @@ export class CodexAppServer {
   /**
    * Start a thread on a model, and report what the server says it started it on.
    *
-   * There is no effort here because the pinned build's `thread/start` takes none;
-   * it travels on `runTurn`. Approvals are off: a harness Turn has nobody to
+   * There is no effort here: it travels on `runTurn`
+   * (`docs/codex-app-server-verification.md`). Approvals are off: a harness Turn has nobody to
    * approve anything, and the posture a served Session runs under is #153's.
    */
   async startThread({ model, cwd }: CodexThreadRequest): Promise<CodexThread> {
@@ -164,8 +158,8 @@ export class CodexAppServer {
     try {
       message = JSON.parse(line)
     } catch {
-      // Kept where a failure is explained from: a throw out of a stream listener
-      // has nobody waiting to catch it.
+      // Never throw here: this runs inside a stream listener, where nobody is
+      // waiting to catch it and the line would be lost with the process.
       this.#keepStderr(`<not JSON on stdout> ${line.slice(0, 200)}`)
       return
     }
@@ -177,8 +171,6 @@ export class CodexAppServer {
     } else if (typeof id === 'number') {
       this.#reply(id, record)
     } else {
-      // A reply with `id: null` is the server saying it could not read a request,
-      // and whichever one it was now waits for the process to end.
       this.#keepStderr(`<unroutable on stdout> ${line.slice(0, 200)}`)
     }
   }
@@ -295,7 +287,6 @@ export interface CodexAppServerOptions {
   readonly cwd: string
   /** The environment beneath `CODEX_HOME`. Nothing by default. */
   readonly inherit?: Readonly<Record<string, string>>
-  readonly command?: string
   readonly spawn?: SpawnClaudeProcess
 }
 
@@ -337,7 +328,10 @@ export interface CodexTurn {
   readonly tokenUsage: CodexTokenUsage | null
 }
 
-export type CodexTurnStatus = 'completed' | 'interrupted' | 'failed'
+export type CodexTurnStatus = (typeof TURN_STATUSES)[number]
+
+/** The statuses a finished Turn can have; `inProgress` is not one. */
+const TURN_STATUSES = ['completed', 'interrupted', 'failed'] as const
 
 /** One `thread/tokenUsage/updated` reading: the thread's running total, and the last call's. */
 export interface CodexTokenUsage {
@@ -461,9 +455,9 @@ function readBreakdown(value: unknown): CodexTokenBreakdown | null {
   }
 }
 
-/** A status a finished Turn can have; `inProgress` is not one. */
+/** Whether a value is one of `TURN_STATUSES`. */
 function isTurnStatus(value: unknown): value is CodexTurnStatus {
-  return value === 'completed' || value === 'interrupted' || value === 'failed'
+  return TURN_STATUSES.some((status) => status === value)
 }
 
 /** A string field the server must have sent. */

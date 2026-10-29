@@ -21,8 +21,8 @@ ARG CLAUDE_CODE_VERSION=2.1.220
 
 # The Codex this image carries — the second Runtime's pin, exact for the first
 # one's reason (ADR-0026 *The pins*). Every Codex reading in `docs/` is evidence
-# about this build, and moving it is a re-verification event that spends the
-# ChatGPT subscription rather than the Shared Window. `src/packaging.test.ts`
+# about this build, and moving it is a re-verification event that spends
+# Codex's Shared Window rather than Claude Code's. `src/packaging.test.ts`
 # carries the second copy.
 #
 # Carried by every image, including the ones whose deployment configures no

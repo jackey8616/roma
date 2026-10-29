@@ -12,9 +12,9 @@ import {
   seededCodexHome,
 } from '../test/support/live-codex.js'
 
-// A real `codex app-server`. Slow, and it spends the ChatGPT subscription — the
-// other Runtime's money, not the Shared Window's. Excluded from `npm test` and
-// from seam 2 alike; run it with `npm run test:codex-live`.
+// A real `codex app-server`. Slow, and it spends Codex's Shared Window, not
+// Claude Code's. Excluded from `npm test` and from seam 2 alike; run it with
+// `npm run test:codex-live`.
 //
 // #149's floor: a handshake, a thread on the pinned model, and one completed
 // Turn against the operator-seeded credential. What this prints is what

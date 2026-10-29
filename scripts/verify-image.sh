@@ -43,6 +43,26 @@ if [ "${installed}" != "${declared}" ]; then
 fi
 echo "claude --version is ${installed}, as declared"
 
+# The same question for the second Runtime's pin (ADR-0026 *The pins*). The
+# Dockerfile's own `codex --version` proves the binary runs, not which build it
+# is; this is what proves the label and the binary agree.
+codex_label='io.github.jackey8616.roma.codex.version'
+codex_declared="$(docker image inspect --format "{{ index .Config.Labels \"${codex_label}\" }}" "${image}")"
+
+if [ -z "${codex_declared}" ] || [ "${codex_declared}" = '<no value>' ]; then
+  echo "the image carries no ${codex_label} label" >&2
+  exit 1
+fi
+
+# `codex --version` prints `codex-cli 0.165.0`; the version is the second word.
+codex_installed="$(docker run --rm --entrypoint codex "${image}" --version | awk '{ print $2 }')"
+
+if [ "${codex_installed}" != "${codex_declared}" ]; then
+  echo "the image declares Codex ${codex_declared} and contains ${codex_installed}" >&2
+  exit 1
+fi
+echo "codex --version is ${codex_installed}, as declared"
+
 # ---------------------------------------------------------------------------
 # 2. `gh` is in the image, and the Credential Shim is what answers to the name.
 #
