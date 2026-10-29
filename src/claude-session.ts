@@ -170,7 +170,7 @@ interface PendingTurn {
 }
 
 /** The Pinned Model where `ROMA_MODEL` names none. The startup self-check asserts it. */
-export const PINNED_MODEL = 'claude-sonnet-5'
+export const PINNED_MODEL = 'claude-opus-5-5'
 
 /**
  * The Pinned Effort where `ROMA_EFFORT` names none. Unlike the model,

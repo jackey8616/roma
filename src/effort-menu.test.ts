@@ -123,8 +123,8 @@ describe('which models take an effort', () => {
       'all three as unnamed on every gate, and fable most easily flips to false on a re-audit; ' +
       'flipped, roma tells every Caller on fable their /effort does not apply, and nothing ' +
       'else would catch it.'
-    expect(takesEffort('claude-fable-5'), why).toBe(true)
-    expect(takesEffort('claude-opus-5'), why).toBe(true)
+    expect(takesEffort('claude-fable-5-1'), why).toBe(true)
+    expect(takesEffort('claude-opus-5-5'), why).toBe(true)
     expect(takesEffort('claude-sonnet-5'), why).toBe(true)
   })
 

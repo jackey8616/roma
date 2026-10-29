@@ -1,11 +1,11 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PINNED_EFFORT } from '../../src/claude-session.js'
+import { PINNED_EFFORT, PINNED_MODEL } from '../../src/claude-session.js'
 import { sessionIdFor } from '../../src/session-id.js'
 import type { ClaudeEvent } from '../../src/stream-events.js'
 import { FakeClaude, flush, type FakeClaudeProcess } from './fake-claude.js'
-import { EFFORT_ANSWERS, feed, OK } from './recorded-stream.js'
+import { EFFORT_ANSWERS, feed, OK, withInit } from './recorded-stream.js'
 
 /** The three directories a whole roma is given, in the shape it takes them. */
 export interface RomaDirectories {
@@ -101,7 +101,10 @@ export function romaFixture(
     },
     procIn,
     procFor: (conversationKey) => procIn(sessionIdFor(conversationKey)),
-    answerProbe: async (events = OK, effort = EFFORT_ANSWERS.at(PINNED_EFFORT)) => {
+    answerProbe: async (
+      events = withInit(OK, { model: PINNED_MODEL }),
+      effort = EFFORT_ANSWERS.at(PINNED_EFFORT),
+    ) => {
       await flush()
       feed(claude.process, events)
       // Fed after the first, the way a real process answers: the relay is not

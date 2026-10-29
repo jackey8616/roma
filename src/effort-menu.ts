@@ -40,8 +40,8 @@ export const ULTRACODE = 'ultracode'
  * It reports and never gates: roma refuses nothing because of it.
  */
 export const EFFORT_MATRIX: Readonly<Record<string, boolean>> = {
-  'claude-fable-5': true,
-  'claude-opus-5': true,
+  'claude-fable-5-1': true,
+  'claude-opus-5-5': true,
   'claude-sonnet-5': true,
   'claude-haiku-4-5': false,
 }

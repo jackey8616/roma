@@ -29,7 +29,7 @@ describe('the startup self-check against a real claude -p', () => {
     })
 
     expect(report.apiKeySource).toBe('none')
-    expect(report.model).toBe('claude-sonnet-5')
+    expect(report.model).toBe('claude-opus-5-5')
     // What a boot pays to know this. Small, and spent every time roma starts.
     expect(report.costUsd).toBeGreaterThan(0)
     // Recorded rather than asserted: behaviour is version-specific, so a future
