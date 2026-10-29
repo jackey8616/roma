@@ -4,10 +4,11 @@ Date: 2026-10-29
 
 ## Status
 
-Accepted, and **implemented** on the branch that adds this file. Five guardrails
-are checks, the comment whitelist and the ADR citation check run in CI, and a
-pre-commit hook and a Claude Code hook hold the gate. The rest of the inventory
-below is not converted; this ADR records what was, and the rule for the rest.
+Accepted, and **implemented**. Five guardrails were converted with this ADR; a
+sweep that followed converted the rest of the inventory (see *Amended — the
+sweep*). The comment whitelist and the ADR citation check run in CI, CI is
+required on `main` by a repository ruleset, and a pre-commit hook and a Claude
+Code hook hold the gate.
 
 ## Context
 
@@ -96,11 +97,41 @@ under its existing name.
 - **A person can still skip the hook.** `git commit --no-verify` from a terminal
   is not refused; the Claude Code hook only governs an agent. CI is the backstop,
   and CI is the gate that counts. *Not enforced (ADR-0031).*
-- 59 guardrails that could fail have no check yet. They are listed in the
-  inventory, `docs/guardrail-inventory.md`, with their origin and suggested rung.
-  Converting one deletes its prose and shrinks the suppressions file.
+- **CI is required, by a repository setting.** The ruleset "main: CI must pass,
+  squash only" requires the `checks` job and the ADR-number job. A repository
+  administrator may still push to `main` directly, as a release does.
+  *Not enforced (ADR-0031).* That both job names still exist is held:
+  Enforced by `fence:required-check-names`.
+- A citation may name several checks (`Enforced by` and names joined by commas
+  or `and`), and every name in it must resolve. Enforced by
+  `fence:every-cited-name-resolves`.
 - The pre-commit hook needs the Node `.nvmrc` names. Under another one it stops
   before ESLint and says which Node to use, so the error does not point a person
   at `--no-verify`. Enforced by `fence:hook-names-the-node-it-needs`.
 - A fence name picks out one check: two test files carrying the same
   `[fence:<id>]` fail the ADR check. Enforced by `fence:one-name-one-fence`.
+
+## Amended — the sweep
+
+The rest of the inventory was converted the same way, one slice of `src/` at a
+time, then the ADRs. Every check was shown red against the change re-planted
+before it was cited. Afterwards: 325 fences, 348 citations in `src/` and 79 in
+`docs/adr/`, 1373 suppressed comments where there were 1821, and 1533 tests
+where there were 1406.
+
+**About one claim in ten in the inventory was wrong.** A test it said held a
+guardrail passed with the bug re-planted, usually because the fixture never
+reached the case. Each of those got a new test or a stronger assertion, so a
+guardrail now counts as held only when its fence has been seen to fail.
+
+What is left, each recorded where it applies:
+
+- Unbuilt Decisions: ADR-0008's Requested-by trailer and ADR-0025's Runtime offer.
+  *Not enforced (ADR-0031): not built.*
+- `new GoogleAuth()` in the composition root passes every test (ADR-0015, ADR-0020).
+  *Not enforced (ADR-0031).*
+- ADR-0007's drift check is held for its parsing; the I/O entry point that reads
+  the Dockerfile and the registry is not tested.
+- ADR-0011 says a Task stopped while queued never fetches its Enclosures. It
+  does: Enclosures are written before the Task is queued. Whether the ADR or the
+  code should change is an open decision, so that paragraph cites nothing.
