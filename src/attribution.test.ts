@@ -17,11 +17,12 @@ describe('marking a message with who asked', () => {
     )
   })
 
-  // Falling back rather than going without: a Turn with no marker is read as
-  // "the same person as last time", which is the misattribution the marker
-  // exists to prevent — so it has to be there even when there is no name for it.
-  it('falls back to the id where the Channel had no name', () => {
-    expect(attributed({ ...ADA, callerName: null, text: 'fix the CI' })).toBe(
+  it('falls back to the id where the Channel had no name [fence:attribution-marker-without-a-name]', () => {
+    const why =
+      'A message whose Caller has no display name must still carry a marker, naming the id ' +
+      '(ADR-0009). A Turn with no marker is read as "the same person as last time", which is ' +
+      'the misattribution the marker exists to prevent.'
+    expect(attributed({ ...ADA, callerName: null, text: 'fix the CI' }), why).toBe(
       '<from>users/17</from>\n\nfix the CI',
     )
   })

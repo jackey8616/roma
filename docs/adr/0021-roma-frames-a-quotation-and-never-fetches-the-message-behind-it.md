@@ -219,7 +219,8 @@ repairs, and the keys are what tell them apart.
 - `IngressMessage` gains `quotation`, and `PendingEnclosure`/`WrittenEnclosure`
   gain `from`. All three are required and nullable, on the argument `callerName`
   already makes: a Channel that had one and forgot to hand it over is
-  indistinguishable from a Channel that never has any.
+  indistinguishable from a Channel that never has any. Enforced by
+  `fence:adapter-ingress-says-everything`.
 - A message whose only content is a Quotation is a request, on ADR-0011's
   argument for a screenshot with no words. Somebody who quotes a message and
   @-mentions roma without typing spends a Turn.

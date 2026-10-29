@@ -222,7 +222,8 @@ The key file is loaded explicitly, by the path the environment gave. roma never
 asks a Google library to *find* a credential, because finding one is a precedence
 chain ending at the metadata server: on a Google host, a missing or unreadable
 key would otherwise resolve silently to roma's own identity, and roma would mint
-Cloud Tokens for the one identity §2 exists to exclude.
+Cloud Tokens for the one identity §2 exists to exclude. Enforced by
+`fence:cloud-never-resolves-a-credential`.
 
 This repository has paid for the general version of that mistake already, in
 `build-env.ts`:
@@ -232,7 +233,7 @@ This repository has paid for the general version of that mistake already, in
 > order, so a process handed both runs on one and silently changes model.
 
 Same shape, second vendor. A missing key must produce a *failure*, never a
-*substitution*.
+*substitution*. Enforced by `fence:cloud-refuses-only-a-named-path`.
 
 **Amended 2026-08-02 by ADR-0020 §7 — in how this is enforced, not in what it
 says.** This section was carried by two guards. `RESOLVES_A_CREDENTIAL`, which bans
@@ -242,7 +243,9 @@ because `new GoogleCloudMinter` moved inside `src/cloud/`, behind
 `cloudReachFrom(env: CloudEnv | null)`, so the substitution the match watched for
 can no longer be written there and the directory rule now binds the construction
 site for the first time. If you are reading this because the guard looks thin: read
-ADR-0020 §7 before adding a source match back.
+ADR-0020 §7 before adding a source match back. The composition
+root's half — a `new GoogleAuth()` written in `src/startup.ts` — passes every
+test, and ADR-0020 records that gap as accepted. *Not enforced (ADR-0031).*
 
 ### 5. A Cloud Token is scoped to `cloud-platform`, and that is not configurable
 

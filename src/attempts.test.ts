@@ -274,7 +274,11 @@ describe('what a Task spent', () => {
   // A Compaction is what a credential's money went on, so it is filed the way
   // the money is. Summed across credentials instead, a metered record would say
   // it included a Compaction the subscription had already paid for.
-  it('files a Compaction under the credential whose Attempt it happened in', () => {
+  it('files a Compaction under the credential whose Attempt it happened in [fence:attempts-compaction-on-its-attempt]', () => {
+    const why =
+      'A Compaction is filed under the Attempt it happened in, never on the Task (ADR-0019). ' +
+      'Filed on the Task, a metered record reports a Compaction the subscription paid for, and ' +
+      'the one fact that explains why an Overflow Task cost what it did lands on the wrong bill.'
     const attempts = new Attempts('shared-window')
 
     attempts.begins()
@@ -284,8 +288,8 @@ describe('what a Task spent', () => {
     attempts.payWith('overflow')
     attempted(attempts, turn())
 
-    expect(attempts.spentOn('shared-window').compaction).toEqual(COMPACTION)
-    expect(attempts.spentOn('overflow').compaction).toBeNull()
+    expect(attempts.spentOn('shared-window').compaction, why).toEqual(COMPACTION)
+    expect(attempts.spentOn('overflow').compaction, why).toBeNull()
   })
 
   // The field answers whether this Task's cost includes a Compaction and who

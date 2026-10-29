@@ -1152,7 +1152,12 @@ describe('the Commands roma answers itself', () => {
   // the half-written answer the interrupt cut off. Not a silent completion
   // either — a Task that ends with nothing said leaves someone waiting for a
   // result that is never coming.
-  it('reports a stopped Task as stopped', async () => {
+  it('reports a stopped Task as stopped [fence:core-stop-reported-as-stopped]', async () => {
+    const why =
+      'A Task ended by /stop must be reported as stopped, neither a failure nor a silent ' +
+      'completion (ADR-0003). As a failure it reads as roma breaking and carries the ' +
+      'half-written answer the interrupt cut off as its reason; with nothing said, somebody ' +
+      'waits for a result that is never coming.'
     const { adapter, core, start } = newCore()
     const { task, proc } = await start('write me an essay')
 
@@ -1160,7 +1165,7 @@ describe('the Commands roma answers itself', () => {
     feed(proc, INTERRUPTED.turn(1))
     await task
 
-    expect(posted(adapter.instructions)).toEqual([
+    expect(posted(adapter.instructions), why).toEqual([
       opening(),
       { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
       { kind: 'command-outcome', conversationKey: KEY, command: 'stop', carriedOut: true },
@@ -3326,15 +3331,41 @@ describe('the first thing roma says in a Session', () => {
   // front of is still owed to whoever asked. Refused by position rather than by
   // kind, because the Opening and the answer are both `result` — which is the
   // point of it having no kind of its own.
-  it('runs the Task anyway when the Channel refuses the Opening', async () => {
+  const NEVER_OUTWARDS =
+    'An Opening may never fail outwards (ADR-0024): everything the message goes on to ' +
+    'produce waits on its promise, so a rejection rejects the Task’s own delivery, hands ' +
+    'the Delivery back to the Transport, and redelivers a Turn that has already been paid ' +
+    'for. A Channel refusing it, or the record of it failing to write, is absorbed.'
+
+  it('runs the Task anyway when the Channel refuses the Opening [fence:core-opening-never-fails-outwards]', async () => {
     const { core, delivered } = refusingTheOpening(newCore())
 
     await core.say('hello')
 
-    expect(posted(delivered)).toEqual([
+    expect(posted(delivered), NEVER_OUTWARDS).toEqual([
       { kind: 'progress', conversationKey: KEY, progress: { phase: 'working' } },
       { kind: 'result', conversationKey: KEY, text: 'ok' },
     ])
+  })
+
+  // The other way an Opening can fail, and the one that is never retried: the
+  // Opening was said, and only the note of it was lost.
+  it('runs the Task anyway when the Opening was said and its record could not be written [fence:core-opening-never-fails-outwards]', async () => {
+    const shared = newCore()
+    const opened = shared.work.openedRecord(sessionIdFor(KEY))
+    const write = shared.work.writeRecord.bind(shared.work)
+    vi.spyOn(shared.work, 'writeRecord').mockImplementation((path, contents) => {
+      if (path === opened) throw new Error('EACCES: the Work Root cannot be written to')
+      write(path, contents)
+    })
+
+    await expect(shared.say('hello'), NEVER_OUTWARDS).resolves.toBeUndefined()
+
+    expect(posted(shared.adapter.instructions).at(-1), NEVER_OUTWARDS).toEqual({
+      kind: 'result',
+      conversationKey: KEY,
+      text: 'ok',
+    })
   })
 
   // Delayed rather than lost. The record is written once the Channel has taken

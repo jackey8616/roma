@@ -595,12 +595,17 @@ describe('replying in Chat', () => {
   // An app cannot create a thread of its own, so replying into the caller's
   // thread with this option is the only way a thread ever comes to exist. It is
   // also what makes the Conversation Key stable from the first reply onwards.
-  it('replies into the thread, with the option that establishes one', async () => {
+  it('replies into the thread, with the option that establishes one [fence:gchat-reply-into-a-thread-name]', async () => {
+    const why =
+      'A Conversation Key in a space is a thread resource name, spaces/{space}/threads/{thread}, ' +
+      'and a reply goes into it with REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD (ADR-0004). ' +
+      'spaces/{space}/messages/{message} is a message name: an adapter parsing for that reads ' +
+      'every real thread key as malformed and never replies in a space at all.'
     const { adapter, api } = newAdapter()
 
     await adapter.deliver(to(THREAD, { kind: 'result', text: 'the answer' }))
 
-    expect(api.messages[0]?.posted).toEqual({
+    expect(api.messages[0]?.posted, why).toEqual({
       space: SPACE,
       thread: THREAD,
       text: `${TO}the answer`,

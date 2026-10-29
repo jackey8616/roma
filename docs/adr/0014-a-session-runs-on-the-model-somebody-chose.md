@@ -220,7 +220,7 @@ What it rejected is a *general* rule, and the reason is growth: a rule keyed on
 "begins with a slash and looks like ours" inherits every command a later release
 adds. A named list of argument-taking heads does not grow on its own. It is the
 Readout whitelist's shape — fails closed, and adding a string is a deliberate act
-somebody has to write down.
+somebody has to write down. Enforced by `fence:commands-no-prefix-match`.
 
 The sentence ADR-0003 defends the whole-message rule with — "Neither of roma's two
 takes an argument, so there is nothing this rule turns away that was meant for

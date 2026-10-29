@@ -62,7 +62,8 @@ and **always in non-interactive mode**."
 So the obvious approach — keeping an API key in the container environment for
 the overflow valve below — would silently route *every* run to metered billing
 and never touch the subscription. There is no warning; it would surface as an
-unexpected invoice.
+unexpected invoice. Enforced by `fence:buildenv-no-stray-key`. Enforced by
+`fence:startup-self-check-catches-a-stray-key`.
 
 **Amended — confirmed, and worse than described. The key takes the model with
 it.** With both credentials present, the prototype observed:
@@ -95,7 +96,7 @@ overflow:  { ANTHROPIC_API_KEY: <key> }           # OAuth token absent
 The key must be **absent**, not empty — an empty string still occupies its slot
 in the precedence order. Both secrets are read from GCP Secret Manager into the
 Node process and never enter the container's global environment, the image, or
-version control.
+version control. Enforced by `fence:buildenv-no-stray-key`.
 
 A consequence worth noting: the overflow valve stops being a special mode and
 becomes just a different environment map.
@@ -183,7 +184,7 @@ carries it.
   fix. The total belongs to the process rather than to the session — measured
   when the session pool first evicted and resumed one, and recorded in ADR-0003's
   observability section — so the baseline restarts with every process and nothing
-  has to be carried across an eviction.
+  has to be carried across an eviction. Enforced by `fence:session-cost-is-a-delta`.
 
 **Amended — "off by default" is a variable roma names for itself.** The ingress
 subscriber (#13) is where a deployment first has to say whether overflow exists,
@@ -212,4 +213,4 @@ credential handling was placed at the spawn boundary.
 One amendment-era caveat: because the credential also determines the model, a
 migration must set `--model` deliberately rather than inherit whatever the new
 credential defaults to. Otherwise a change of billing silently becomes a change
-of capability and cost.
+of capability and cost. Enforced by `fence:session-model-always-passed`.

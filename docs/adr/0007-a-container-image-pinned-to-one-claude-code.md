@@ -124,7 +124,8 @@ default nobody had to type — so the documented `docker run`, which mounted one
 volume, put the Transcript in the container's writable layer and discarded it on
 every replacement. roma was doing the deleting after all, on a schedule nobody
 chose, by a route the decision not to delete never looked down. #54 took the
-default out and gave the documented run a second volume.
+default out and gave the documented run a second volume. Enforced by
+`fence:image-no-default-for-data`.
 
 The paragraph below is the argument that already existed for the audit root. It
 is true of the Transcript word for word, which is the point: nothing new had to be
@@ -242,7 +243,8 @@ It runs as a non-root user, on `node:22-slim`.
   unresolvable pin, an unparseable `ARG`, a missing `Dockerfile` or a failed
   registry lookup ends the run **red** — only a successful comparison is allowed
   to be quiet. A drift check that swallowed its own failures would pass forever
-  while watching nothing, and a green tick reads as "the pin is current".
+  while watching nothing, and a green tick reads as "the pin is current". Enforced by
+  `fence:drift-check-fails-loud`.
 
   **This makes upgrading visible, not safe.** The re-verification this ADR asks
   for is still a human spending Shared Window money and reading a behavioural

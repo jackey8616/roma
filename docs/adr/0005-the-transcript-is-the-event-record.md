@@ -89,13 +89,15 @@ above leans on the Transcript being somewhere known, and that cannot rest on a
 variable a deployment may omit. Making it required also turns ADR-0002's isolation
 from a promise conditional on configuration into an unconditional one: there is no
 longer a way to start roma whose Claude Code processes resolve credentials against
-the host's keychain.
+the host's keychain. Enforced by
+`fence:env-no-fallback-for-what-cannot-be-lost`.
 
 Required all the way down rather than only in `env-config.ts`, which is the one
 judgement call #34 left open. `buildEnv` is driven directly by tests as well as
 by `startRoma`, so an optional parameter there would have kept a way to break
 both promises that the type did not mention — at the cost of a few test call
-sites naming a directory, which they should have been doing anyway.
+sites naming a directory, which they should have been doing anyway. Enforced by
+`fence:buildenv-config-dir-is-required`.
 
 ## Consequences
 

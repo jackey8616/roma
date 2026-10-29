@@ -103,13 +103,18 @@ describe('how the process is invoked', () => {
     expect(claude.lastSpawn.args).not.toContain('--append-system-prompt')
   })
 
-  it('pins the model, because it follows the credential rather than the config', () => {
+  it('pins the model, because it follows the credential rather than the config [fence:session-model-always-passed]', () => {
+    const why =
+      '--model must be passed on every spawn (ADR-0002). The model a Claude Code process runs ' +
+      "on follows the credential it resolved rather than roma's config, so a spawn without " +
+      '--model turns a billing change, such as moving a Task to Overflow, silently into a ' +
+      'model change.'
     const { claude, session } = newSession()
 
     session.start()
 
     const args = claude.lastSpawn.args
-    expect(args[args.indexOf('--model') + 1]).toBe('claude-sonnet-5')
+    expect(args[args.indexOf('--model') + 1], why).toBe('claude-sonnet-5')
   })
 
   /**
@@ -149,13 +154,21 @@ describe('how the process is invoked', () => {
   // --verbose is in here because the CLI requires it: "When using --print,
   // --output-format=stream-json requires --verbose". Pinned so it cannot be
   // tidied away as noise; seam 2 checks that the requirement is still real.
-  it('runs the invocation the spec pins', () => {
+  it('runs the invocation the spec pins [fence:session-invocation-pinned]', () => {
+    const why =
+      'The claude -p invocation is pinned (ADR-0001, ADR-0003, ADR-0010). --verbose is a ' +
+      'precondition of stream-json output under --print: without it the process exits before ' +
+      'one event reaches the stream. --include-partial-messages is what moves the ' +
+      'Acknowledgement while a Turn generates; dropped, it freezes for the whole Turn.'
+    const bare =
+      '--bare must never be passed (ADR-0001, ADR-0003). It skips OAuth and keychain reads and ' +
+      'requires ANTHROPIC_API_KEY, so it breaks subscription auth (ADR-0002) for every Session.'
     const { claude, session } = newSession()
 
     session.start()
 
     expect(claude.lastSpawn.command).toBe('claude')
-    expect(claude.lastSpawn.args).toEqual(
+    expect(claude.lastSpawn.args, why).toEqual(
       expect.arrayContaining([
         '-p',
         '--input-format',
@@ -169,9 +182,7 @@ describe('how the process is invoked', () => {
         'bypassPermissions',
       ]),
     )
-    // --bare skips OAuth and requires ANTHROPIC_API_KEY, which would break
-    // subscription auth entirely.
-    expect(claude.lastSpawn.args).not.toContain('--bare')
+    expect(claude.lastSpawn.args, bare).not.toContain('--bare')
   })
 
   it('runs in the Session working directory with only the environment it was given', () => {

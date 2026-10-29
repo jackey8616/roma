@@ -385,27 +385,32 @@ describe('starting roma', () => {
 })
 
 describe('proving roma can reach the code, before anything can ask it to', () => {
+  const INSTALLATION_AT_BOOT =
+    'The GitHub Installation must be asked for at boot, before anything that could accept an ' +
+    'Ingress Message exists, and a failure must block the boot (ADR-0008). Checked lazily, a ' +
+    'bad private key surfaces as an inexplicable clone failure inside somebody’s Turn, ' +
+    'which reads as "roma is broken" with no diagnosis attached.'
   // Free, unlike the Claude one, and asked first for that reason: a deployment
   // that is wrong in both ways is told about the cheap problem without having
   // paid for a Turn to find out about the other.
-  it('asks for the Installation before it drives a single Turn', async () => {
+  it('asks for the Installation before it drives a single Turn [fence:startup-installation-proved-at-boot]', async () => {
     const roma = boot()
 
     await flush()
 
-    expect(roma.minter.installations).toBe(1)
+    expect(roma.minter.installations, INSTALLATION_AT_BOOT).toBe(1)
   })
 
   // The Startup Self-Check's shape, for the Startup Self-Check's reason. A bad
   // private key surfacing instead as an inexplicable `git clone` failure inside
   // somebody's Turn would read as "roma is broken" with no diagnosis attached.
-  it('refuses to start at all when it cannot', async () => {
+  it('refuses to start at all when it cannot [fence:startup-installation-proved-at-boot]', async () => {
     const roma = boot({ minter: new FakeMinter({ failsWith: new Error('a bad private key') }) })
 
-    await expect(roma.starting).rejects.toThrow('a bad private key')
+    await expect(roma.starting, INSTALLATION_AT_BOOT).rejects.toThrow('a bad private key')
     // Not one process. The paid check never ran, because the free one had
     // already answered.
-    expect(roma.claude.spawns).toHaveLength(0)
+    expect(roma.claude.spawns, INSTALLATION_AT_BOOT).toHaveLength(0)
   })
 
   // On the log rather than on what `startRoma` returns. Nothing read the returned
@@ -1200,7 +1205,12 @@ describe('putting a credential in front of a Session’s tools', () => {
   // The one thing that must never be in a process environment. It expires within
   // the hour, and a Resident Session outliving an hour is ordinary — and `env` in
   // a Turn would write it into a Transcript roma has promised never to delete.
-  it('puts no credential for the forge in any Session’s environment', async () => {
+  it('puts no credential for the forge in any Session’s environment [fence:startup-no-forge-token-in-env]', async () => {
+    const why =
+      'No token for the forge may be minted into a Session’s environment (ADR-0008). An ' +
+      'environment is fixed at spawn while a Resident Session outlives the hour the token ' +
+      'lasts, and `env`, a stack trace or a diagnostic command would write it into a ' +
+      'Transcript roma has promised never to delete (ADR-0006).'
     const roma = boot()
     await roma.answerProbe()
     const { core } = await roma.starting
@@ -1218,8 +1228,8 @@ describe('putting a credential in front of a Session’s tools', () => {
     feed(roma.procFor(KEY), OK)
     await handled
 
-    expect(roma.minter.minted).toEqual([])
-    expect(Object.keys(env)).not.toContain('GH_TOKEN')
+    expect(roma.minter.minted, why).toEqual([])
+    expect(Object.keys(env), why).not.toContain('GH_TOKEN')
   })
 })
 

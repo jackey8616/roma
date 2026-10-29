@@ -35,13 +35,19 @@ ARG CLAUDE_CODE_VERSION
 RUN npm install --global @anthropic-ai/claude-code@\${CLAUDE_CODE_VERSION}
 `
 
-describe('the pin is read from the Dockerfile, not restated', () => {
+const LOUD =
+  'The drift check must end red on anything it cannot read — no ARG, a commented or ' +
+  'unresolvable pin, two pins, a registry document with no exact version — and be quiet only ' +
+  'on a successful comparison (ADR-0007, #52). A check that swallowed its own failures would ' +
+  'pass forever while watching nothing, and a green tick reads as "the pin is current".'
+
+describe('the pin is read from the Dockerfile, not restated [fence:drift-check-fails-loud]', () => {
   it('reads the version the ARG assigns', () => {
     expect(pinnedClaudeCode(DOCKERFILE)).toBe('2.1.220')
   })
 
   it('refuses a Dockerfile with no ARG line rather than reporting nothing', () => {
-    expect(() => pinnedClaudeCode('FROM node:22-slim\n')).toThrow(/ARG CLAUDE_CODE_VERSION/)
+    expect(() => pinnedClaudeCode('FROM node:22-slim\n'), LOUD).toThrow(/ARG CLAUDE_CODE_VERSION/)
   })
 
   it('refuses a commented-out pin, which assigns nothing', () => {
@@ -49,7 +55,7 @@ describe('the pin is read from the Dockerfile, not restated', () => {
     // the Dockerfile explains itself at length, and several of its comments name
     // versions. Reading prose as an instruction is how a check ends up watching
     // a sentence.
-    expect(() => pinnedClaudeCode('# ARG CLAUDE_CODE_VERSION=2.1.220\n')).toThrow(
+    expect(() => pinnedClaudeCode('# ARG CLAUDE_CODE_VERSION=2.1.220\n'), LOUD).toThrow(
       /ARG CLAUDE_CODE_VERSION/,
     )
   })
@@ -60,7 +66,7 @@ describe('the pin is read from the Dockerfile, not restated', () => {
       // A pin that has to be resolved before it means anything is a pin this
       // check cannot compare, and comparing it anyway would report drift against
       // a string. Red, and naming what it found.
-      expect(() => pinnedClaudeCode(`ARG CLAUDE_CODE_VERSION=${value}\n`)).toThrow(
+      expect(() => pinnedClaudeCode(`ARG CLAUDE_CODE_VERSION=${value}\n`), LOUD).toThrow(
         /CLAUDE_CODE_VERSION/,
       )
     },
@@ -72,11 +78,11 @@ describe('the pin is read from the Dockerfile, not restated', () => {
     // in the Dockerfile.
     const twice = `ARG CLAUDE_CODE_VERSION=2.1.220\nARG CLAUDE_CODE_VERSION=2.1.221\n`
 
-    expect(() => pinnedClaudeCode(twice)).toThrow(/twice|two/i)
+    expect(() => pinnedClaudeCode(twice), LOUD).toThrow(/twice|two/i)
   })
 })
 
-describe('the published version is read from the registry document', () => {
+describe('the published version is read from the registry document [fence:drift-check-fails-loud]', () => {
   it('reads the version of the latest dist-tag', () => {
     expect(publishedClaudeCode({ name: '@anthropic-ai/claude-code', version: '2.1.221' })).toBe(
       '2.1.221',
@@ -90,7 +96,7 @@ describe('the published version is read from the registry document', () => {
     ['an error document', { error: 'Not found' }],
     ['nothing at all', null],
   ])('refuses %s rather than comparing against it', (_, document) => {
-    expect(() => publishedClaudeCode(document)).toThrow(/registry/i)
+    expect(() => publishedClaudeCode(document), LOUD).toThrow(/registry/i)
   })
 })
 

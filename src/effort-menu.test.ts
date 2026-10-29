@@ -48,8 +48,13 @@ describe('reading an /effort message', () => {
   // level — the build's own table is `{ultracode:"xhigh"}` — it is `xhigh` plus
   // dynamic workflow orchestration, which turns one Task into a fleet on a
   // window everybody shares.
-  it('refuses ultracode from a Caller, as it refuses any other name', () => {
-    expect(read(`/effort ${ULTRACODE}`)).toEqual({ kind: 'unknown', name: ULTRACODE })
+  it('refuses ultracode from a Caller, as it refuses any other name [fence:menu-effort-holds-back-ultracode]', () => {
+    const why =
+      '`ultracode` must stay off the Effort Menu, reachable only through ROMA_EFFORT (ADR-0016). ' +
+      'It is xhigh plus dynamic workflow orchestration, which turns one Task into a fleet on a ' +
+      'window everybody shares, paid for by everybody else in the thread.'
+    expect(read(`/effort ${ULTRACODE}`), why).toEqual({ kind: 'unknown', name: ULTRACODE })
+    expect(EFFORT_MENU, why).not.toContain(ULTRACODE)
   })
 
   // `--effort auto` is rejected by the CLI's own parser, so the only way roma

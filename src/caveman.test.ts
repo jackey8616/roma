@@ -269,14 +269,19 @@ function upstreamBody(): string {
   return upstreamSkill().replace(/^---[\s\S]*?---\s*/, '')
 }
 
-describe('the three lines that describe a machine roma does not install', () => {
+describe('the three lines that describe a machine roma does not install [fence:caveman-tracker-lines-removed]', () => {
+  const TRACKER =
+    'The ruleset must drop every caveman line that describes its tracker hook — the prose ' +
+    'off-switch, the Switch line and the hardcoded Default — because roma installs no tracker ' +
+    '(ADR-0030). Left in, roma’s record says a level while the model has stopped, the prompt ' +
+    'advertises values the Menu refuses, and the default is caveman’s rather than ROMA_CAVEMAN’s.'
   // The phrase works because `caveman-mode-tracker.js` watches `UserPromptSubmit`
   // for it, and roma installs no tracker. Left in, roma's record would say `full`
   // while the model had stopped (ADR-0030).
   it('offers no way to turn it off in prose', () => {
     for (const level of LEVELS_WITH_RULES) {
-      expect(cavemanRuleset(level)).not.toContain('stop caveman')
-      expect(cavemanRuleset(level)).not.toContain('normal mode')
+      expect(cavemanRuleset(level), TRACKER).not.toContain('stop caveman')
+      expect(cavemanRuleset(level), TRACKER).not.toContain('normal mode')
     }
   })
 
@@ -285,15 +290,17 @@ describe('the three lines that describe a machine roma does not install', () => 
   // refuse two names its own system prompt offered. ADR-0023's consequence list
   // names that failure exactly, by a different route.
   it('advertises no Command, and so cannot advertise a value roma does not offer', () => {
-    for (const level of LEVELS_WITH_RULES) expect(cavemanRuleset(level)).not.toContain('/caveman')
+    for (const level of LEVELS_WITH_RULES) {
+      expect(cavemanRuleset(level), TRACKER).not.toContain('/caveman')
+    }
   })
 
   // The line that hardcoded `full`. What it names now is a runtime value, which
   // is why the ruleset is a template rather than six finished strings.
   it('names the level in force where caveman hardcodes its own default', () => {
     for (const level of LEVELS_WITH_RULES) {
-      expect(cavemanRuleset(level)).toContain(`Current level: **${level}**.`)
-      expect(cavemanRuleset(level)).not.toContain('Default: **full**')
+      expect(cavemanRuleset(level), TRACKER).toContain(`Current level: **${level}**.`)
+      expect(cavemanRuleset(level), TRACKER).not.toContain('Default: **full**')
     }
   })
 })

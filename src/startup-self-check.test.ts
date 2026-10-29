@@ -158,13 +158,21 @@ describe('the startup self-check', () => {
   // `claude-opus-5[1m]` as well, but that run did not pass `--model`; seam 2
   // measured the same stray key against roma's pinned invocation leaving the
   // model at `claude-sonnet-5`. apiKeySource is what gives a stray key away.
-  it('fails when the credential resolves to an API key instead', async () => {
+  it('fails when the credential resolves to an API key instead [fence:startup-self-check-catches-a-stray-key]', async () => {
+    const why =
+      'The self-check must refuse to start when a Shared Window probe reports apiKeySource ' +
+      '"ANTHROPIC_API_KEY" (ADR-0002, ADR-0003). A key that reaches Claude Code overrides the ' +
+      'subscription on every non-interactive run, with no warning, and is otherwise learned ' +
+      'about from an invoice.'
     const { check } = selfCheck({
       events: upToFirst(withInit(OK, { apiKeySource: 'ANTHROPIC_API_KEY' }), 'system/init'),
     })
 
     const { failures: failed } = await failures(check)
-    expect(failed.map((failure) => failure.condition)).toEqual(['credential'])
+    expect(
+      failed.map((failure) => failure.condition),
+      why,
+    ).toEqual(['credential'])
   })
 
   // Both conditions at once, off the pre-pinning capture where they really did

@@ -210,7 +210,8 @@ otherwise unbounded. A broad `spreadsheets` or `documents` scope is **not folder
 it reaches every file of that kind the account can see, so any employee who shares a
 spreadsheet with the account's email address hands it to every Conversation, silently and
 with no roma change. Under `drive.file` that widening **cannot touch the write side at
-all**, because `drive.file` does not care what was shared — only what was created.
+all**, because `drive.file` does not care what was shared — only what was created. Enforced by
+`fence:documents-both-drive-scopes`.
 
 `drive.readonly` is the read side, and it does not have that property: it reaches
 everything shared with the account. It is here for two things. Somebody may put reference

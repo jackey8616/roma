@@ -32,11 +32,13 @@ describe('buildEnv', () => {
       expect(env['CLAUDE_CODE_OAUTH_TOKEN']).toBe('oauth-token')
     })
 
-    // Absent, not empty. An empty string still occupies its slot in Claude Code's
-    // credential precedence, and a present ANTHROPIC_API_KEY silently moves the
-    // model from claude-sonnet-5 to claude-opus-5[1m] (ADR-0003).
-    it('leaves ANTHROPIC_API_KEY absent rather than empty', () => {
-      expect('ANTHROPIC_API_KEY' in env).toBe(false)
+    it('leaves ANTHROPIC_API_KEY absent rather than empty [fence:buildenv-no-stray-key]', () => {
+      const why =
+        'A Shared Window process must have no ANTHROPIC_API_KEY at all: not inherited from the ' +
+        'host, and not set to an empty string (ADR-0002). A key, when set, always overrides the ' +
+        'subscription in non-interactive mode, so a stray one silently routes every run to ' +
+        'metered billing; an empty one still occupies its slot in the precedence order.'
+      expect('ANTHROPIC_API_KEY' in env, why).toBe(false)
     })
   })
 
@@ -84,14 +86,19 @@ describe('buildEnv', () => {
    * narrowing that list is now a decision about effort as well as about
    * credentials, and this is where somebody finds that out.
    */
-  it('keeps a host CLAUDE_CODE_EFFORT_LEVEL out, which would otherwise beat --effort', () => {
+  it('keeps a host CLAUDE_CODE_EFFORT_LEVEL out, which would otherwise beat --effort [fence:buildenv-no-host-effort]', () => {
+    const why =
+      'A host CLAUDE_CODE_EFFORT_LEVEL must never reach a Claude Code process (ADR-0016). ' +
+      'Precedence was measured as CLAUDE_CODE_EFFORT_LEVEL > --effort > settings.effortLevel, ' +
+      'so it would beat every --effort roma passes while roma went on reporting and recording ' +
+      'the level it asked for. PASSTHROUGH is about effort now as well as credentials.'
     const env = buildEnv({
       credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
       inherit: HOST,
       configDir: CONFIG_DIR,
     })
 
-    expect('CLAUDE_CODE_EFFORT_LEVEL' in env).toBe(false)
+    expect('CLAUDE_CODE_EFFORT_LEVEL' in env, why).toBe(false)
   })
 
   it('omits a passthrough variable the host does not define [fence:buildenv-unset-stays-absent]', () => {

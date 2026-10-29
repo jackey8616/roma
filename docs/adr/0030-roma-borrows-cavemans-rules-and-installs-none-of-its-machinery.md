@@ -353,7 +353,7 @@ of `jackey8616/caveman`, with three lines rewritten:
 
 **All four describe the tracker hook**, which is the piece the section above
 declines to install. Removing them is not editorial taste; it is deleting the
-manual for a part that is not in the box.
+manual for a part that is not in the box. Enforced by `fence:caveman-tracker-lines-removed`.
 
 The fourth row is here because the first three were written from a reading of
 caveman's `## Persistence` section and the fourth line is in `## Boundaries`,
@@ -414,7 +414,7 @@ neither. It appears in both, **and only where the Session's Caveman is not
 `off`**: ADR-0024 gives the Opening its job as telling somebody what they are on
 when the answer is not obvious, and a deployment that never turns this on has
 nothing to tell. The conditional tail is not a new shape on that sentence —
-`#modelTakesNone` is already one.
+`#modelTakesNone` is already one. Enforced by `fence:core-opening-says-what-config-says`.
 
 The sentence's `Change either with` becomes `Change any with` when the third fact
 is present, because *either* was only ever true of two.

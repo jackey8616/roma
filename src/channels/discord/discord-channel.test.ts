@@ -2360,16 +2360,21 @@ describe('a press is acknowledged before anything answers it', () => {
 // the channel that earned it, so a loop in one Conversation is an outage of
 // every Conversation — the Gateway included.
 describe('a call Discord refused', () => {
-  it('waits exactly as long as Discord asked before trying again', async () => {
+  // Read off the response, never hard coded: Discord's per-route limits are
+  // dynamic and its reference says so in as many words.
+  it('waits exactly as long as Discord asked before trying again [fence:discord-waits-what-discord-asked]', async () => {
+    const why =
+      'A retry after a 429 must wait the Retry-After Discord sent, never a time of roma’s ' +
+      'own (ADR-0029). A 429 counts toward the 10,000-per-10-minutes invalid-request limit, ' +
+      'whose penalty is a block on the whole API, the Gateway included, not on the channel ' +
+      'that earned it.'
     const channel = await messaged(inDm())
     channel.api.failNext('post', refusal(429, 1_500))
 
     await channel.adapter.deliver(to(DM, { kind: 'result', text: 'the answer' }))
 
-    // Read off the response, never hard coded: Discord's per-route limits are
-    // dynamic and its reference says so in as many words.
-    expect(channel.waits).toEqual([1_500])
-    expect(channel.api.texts).toEqual(['the answer'])
+    expect(channel.waits, why).toEqual([1_500])
+    expect(channel.api.texts, why).toEqual(['the answer'])
   })
 
   // Where Discord named no time at all — a 503, or a socket that never answered

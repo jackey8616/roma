@@ -291,7 +291,7 @@ describe('naming a Session versus reaching it again', () => {
   // feeds a real 401 at a Session whose directory exists and requires one spawn.
   // What tells them apart is in the events — a lost resume carries `errors` and
   // no `result` text, a failed Turn carries the text and no `errors`.
-  it('starts a fresh Session when the refused resume arrives as a result event', async () => {
+  it('starts a fresh Session when the refused resume arrives as a result event [fence:pool-wrong-flag-recovers]', async () => {
     const { claude, pool, workRoot, processFor, log } = newPool()
     spawnedBefore(workRoot, A)
 
@@ -304,10 +304,10 @@ describe('naming a Session versus reaching it again', () => {
     await flush()
     feed(processFor(A), OK)
 
-    expect((await turn).text).toBe('ok')
-    expect(claude.spawns[0]?.args).toContain('--resume')
-    expect(claude.spawns[1]?.args).toContain('--session-id')
-    expect(log).toContainEqual({
+    expect((await turn).text, RECOVERS).toBe('ok')
+    expect(claude.spawns[0]?.args, RECOVERS).toContain('--resume')
+    expect(claude.spawns[1]?.args, RECOVERS).toContain('--session-id')
+    expect(log, RECOVERS).toContainEqual({
       event: 'resume-lost',
       sessionId: A,
       refusal: expect.stringContaining('No conversation found'),

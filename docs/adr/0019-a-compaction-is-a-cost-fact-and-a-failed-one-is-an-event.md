@@ -140,7 +140,7 @@ delta exists to avoid, one field over.
 **It is filed under the credential that paid for it,** on the Attempt rather than
 on the Task. A Task blocked on the Shared Window and rerun on Overflow produces
 two records; summed, the metered one would report a Compaction the subscription
-had already paid for.
+had already paid for. Enforced by `fence:attempts-compaction-on-its-attempt`.
 
 ### The Caller is not told about one that worked
 
@@ -181,7 +181,7 @@ is a new value being folded into the answer that means "nothing to see". So the
 codes roma has a positive reason to believe are harmless are written down, and a
 code a later release adds lands in `unexplained`: the operator sees it, nobody is
 told a wrong story about their thread, and somebody decides which list it belongs
-on.
+on. Enforced by `fence:stream-unknown-compaction-code-is-unexplained`.
 
 **Matching on the error *text* is refused, and costs nothing to refuse.** #98
 rejected it as the mistake `shared-window.ts` already made once — defining
