@@ -124,11 +124,6 @@
       "count": 2
     }
   },
-  "src/commands.ts": {
-    "roma/comment-whitelist": {
-      "count": 5
-    }
-  },
   "src/compaction.ts": {
     "roma/comment-whitelist": {
       "count": 11
@@ -136,7 +131,7 @@
   },
   "src/core.ts": {
     "roma/comment-whitelist": {
-      "count": 455
+      "count": 362
     }
   },
   "src/documents/document-token.ts": {

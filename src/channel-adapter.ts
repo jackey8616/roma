@@ -3,13 +3,10 @@ import type { Command } from './commands.js'
 /**
  * Something sent along with a message, before anybody has fetched it.
  *
- * The one member of the inbound contract that is not yet a value. An Enclosure
- * can be tens of megabytes and is sized by whoever sent it, so fetching it when
- * the message is *read* would buffer it across queueing, across Parking — which
- * CONTEXT.md defines as holding no process — and across a `/stop` that means
- * nobody ever wanted it. `redeem` is therefore called once, by the Core, after
- * the Session is known and immediately before the bytes are written to disk
- * (ADR-0011).
+ * The one member of the inbound contract that is not yet a value: `redeem` is
+ * called once, by the Core, after the Session is known and immediately before
+ * the bytes are written to disk (ADR-0011).
+ * Enforced by `fence:core-enclosures-redeemed-late`.
  *
  * A named type rather than a bare `() => Promise<…>` on `IngressMessage`, so
  * that a reader can see that something here has not happened yet: everything
@@ -20,13 +17,9 @@ export interface PendingEnclosure {
   /**
    * What the Channel says the sender called it.
    *
-   * Printed and never interpreted — it is put in front of the agent so a log
-   * can be told from a screenshot, and it is **never** made into a path.
-   * `contentName` is chosen by whoever sent the message, so using it to address
-   * a file means defending traversal, collision and whatever a filesystem does
-   * with 200 characters of Unicode, all at once. roma mints the path instead
-   * (ADR-0011), which leaves this a string like any other the Channel supplies:
-   * untrusted, and harmless because nothing decides anything by it.
+   * Printed and never interpreted: it is put in front of the agent so a log can
+   * be told from a screenshot, and roma mints the path instead (ADR-0011).
+   * Enforced by `fence:core-enclosure-path-is-minted`.
    */
   readonly name: string
   /**
@@ -41,11 +34,8 @@ export interface PendingEnclosure {
    * the same list as one the Caller picked out of their own file browser
    * (ADR-0021).
    *
-   * Named the same way a Quotation's author is, because it is the same person
-   * and a reader comparing the two tags should not have to work that out.
-   * Required rather than optional, so that a Channel with somebody to name says
-   * so rather than forgetting to — the argument `callerName` and `enclosures`
-   * both make below.
+   * Named the same way a Quotation's author is, because it is the same person.
+   * Enforced by `fence:adapter-ingress-says-everything`.
    */
   readonly from: string | null
   /**
@@ -134,34 +124,24 @@ export interface IngressMessage {
    *
    * Beside `caller` rather than instead of it: the id is what a reply is
    * addressed with and what tells two people of the same name apart, and the
-   * name is the half worth reading. Required rather than optional, so that a
-   * Channel with no name for somebody says so instead of forgetting to.
+   * name is the half worth reading.
+   * Enforced by `fence:adapter-ingress-says-everything`.
    */
   readonly callerName: string | null
   readonly text: string
   /**
    * What was sent alongside the text, in the order the Channel gave them.
    *
-   * Required rather than optional, and empty where there are none — the same
-   * argument `callerName` makes: a Channel that has something to hand over and
-   * forgets to is indistinguishable from one that had nothing, and the failure
-   * is silent. Silence is the fault this whole area exists to fix, so the type
-   * makes every Channel answer the question.
+   * Empty where there are none.
+   * Enforced by `fence:adapter-ingress-says-everything`.
    */
   readonly enclosures: readonly PendingEnclosure[]
   /**
    * The passage this message quotes, or null where it quotes none.
    *
-   * Beside the text rather than folded into it, and that is the whole of why the
-   * Core learns a word for this at all. An Adapter that spliced a quotation into
-   * `text` would be composing what the model reads — which is the Core's, and
-   * only the Core's, because `readCommand` matches the **whole** message:
-   * quoting something and typing `/stop` would quietly stop meaning `/stop`, on
-   * the one Channel that had done it (ADR-0021).
-   *
-   * Required and nullable for the reason `callerName` is: a Channel that had one
-   * and forgot to hand it over is indistinguishable from a Channel whose
-   * messages never quote anything.
+   * Beside the text rather than folded into it: composing what the model reads
+   * is the Core's (ADR-0021). Enforced by `fence:core-command-ignores-the-quotation`.
+   * Required and nullable. Enforced by `fence:adapter-ingress-says-everything`.
    */
   readonly quotation: Quotation | null
 }
@@ -247,11 +227,7 @@ export type TaskProgress =
        * what the Result is about to say, in the same Conversation, seconds
        * apart. ADR-0010 is where that was decided and what it cost.
        *
-       * A number rather than nothing, and that is load-bearing: this is what
-       * tells a Reporter that one moment of writing differs from the last, and
-       * a phase carrying no number at all would compare equal to itself every
-       * time and leave the Acknowledgement frozen for the whole of a
-       * generating Turn — which is what a dead Task looks like.
+       * A number rather than nothing. Enforced by `fence:core-writing-progress-moves`.
        */
       readonly phase: 'writing'
       readonly characters: number
@@ -586,11 +562,8 @@ export interface ChannelAdapter<Event = unknown> {
    * given. So an Adapter keeping an acknowledgement may drop it on one of those
    * four and does not have to defend against an update arriving afterwards.
    *
-   * A guarantee rather than an obligation, and the Core is what keeps it:
-   * `ProgressReporter.stop` drops whatever was still queued. Left to the
-   * Adapters it would be a rule every Channel had to be told, and the first one
-   * was written without knowing it — a late update finds no acknowledgement to
-   * edit and posts a second message, underneath the answer.
+   * A guarantee rather than an obligation, and the Core is what keeps it.
+   * Enforced by `fence:core-no-update-after-the-answer`.
    *
    * `blocked`, `overflow-refused` and `context-full` are **not** endings: they
    * are messages about a Task that is still going, and updates follow them.
