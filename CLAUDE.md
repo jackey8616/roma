@@ -10,6 +10,9 @@ Shared Window everybody shares. Run it when you have changed something the strea
 depends on, not as a matter of course. It lives in its own Vitest config so `npm test` can
 never reach it, and it needs `CLAUDE_CODE_OAUTH_TOKEN` in a `.env` at the repo root.
 
+**`npm run test:codex-live` spends the ChatGPT subscription** — a real `codex app-server`,
+in its own `vitest.codex.config.ts`, needing `ROMA_CODEX_HOME` in `.env`. Same rule.
+
 See `README.md` for the rest, and `test/fixtures/claude-stream/README.md` for what the
 recorded streams are and where they came from.
 

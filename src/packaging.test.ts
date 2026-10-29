@@ -44,6 +44,13 @@ const CLAUDE_CODE_VERSION = '2.1.220'
  */
 const GH_VERSION = '2.96.0'
 
+/**
+ * The Codex the image carries — ADR-0026's second pin, kept the way the first is:
+ * a second copy, so that editing the Dockerfile alone turns the run red. Every
+ * Codex reading in `docs/` is evidence about this build and no other.
+ */
+const CODEX_VERSION = '0.165.0'
+
 describe('the image carries its own Claude Code, pinned exactly', () => {
   it('installs the version every measurement in this repo was taken against', () => {
     // Interpolated into a pattern, so the version's dots have to stop being
@@ -67,6 +74,21 @@ describe('the image carries its own Claude Code, pinned exactly', () => {
     )
 
     expect(specifiers).toEqual(['@${CLAUDE_CODE_VERSION}'])
+  })
+})
+
+describe('the image carries its own Codex, pinned exactly', () => {
+  it('installs the version the Codex readings were taken against', () => {
+    const pinned = CODEX_VERSION.replaceAll('.', String.raw`\.`)
+    expect(dockerfile()).toMatch(new RegExp(`^ARG CODEX_VERSION=${pinned}$`, 'm'))
+  })
+
+  it('installs that version rather than whatever npm would resolve today', () => {
+    const specifiers = [...dockerfile().matchAll(/@openai\/codex(\S*)/g)].map(
+      ([, specifier]) => specifier,
+    )
+
+    expect(specifiers).toEqual(['@${CODEX_VERSION}'])
   })
 })
 
@@ -189,6 +211,13 @@ describe('the image defaults the one path whose loss is by design', () => {
     expect(dockerfile()).not.toMatch(/ROMA_AUDIT_ROOT[\s=]/)
     expect(dockerfile()).not.toMatch(/ROMA_CLAUDE_CONFIG_DIR[\s=]/)
   })
+
+  it('sets no Codex home — it holds that Runtime’s Transcript and its only credential', () => {
+    // ADR-0026 *The home*: `sessions/` is the rollout files, and `auth.json` is a
+    // single-use refresh token's only valid copy. A default would put both in the
+    // writable layer, and configuring Codex at all is the deployment's to decide.
+    expect(dockerfile()).not.toMatch(/(ROMA_)?CODEX_HOME[\s=]/)
+  })
 })
 
 /**
@@ -213,10 +242,10 @@ describe('the lists that rest on the pin say so', () => {
   })
 })
 
-describe('nothing CI runs can reach seam 2', () => {
-  it('runs no seam 2 test and is handed no Shared Window token', () => {
+describe('nothing CI runs can spend a subscription', () => {
+  it('runs no live test and is handed neither Runtime’s credential', () => {
     const offenders = automation().filter(({ source }) =>
-      SEAM_2.some((pattern) => pattern.test(withoutComments(source))),
+      PAID_RUNS.some((pattern) => pattern.test(withoutComments(source))),
     )
 
     expect(offenders.map(({ file }) => file)).toEqual([])
@@ -224,16 +253,23 @@ describe('nothing CI runs can reach seam 2', () => {
 })
 
 /**
- * Every way CI could start spending Shared Window quota.
+ * Every way CI could start spending a subscription — the Shared Window through
+ * seam 2, or the ChatGPT one through the Codex live tests.
  *
- * The first two are the tests themselves — the opt-in script and the file suffix
- * its config selects on. The third is the token, which is the one that matters:
- * without it seam 2 fails rather than runs, so automation that never sees one
- * cannot spend anything even if somebody wires the script up by hand. It is also
- * the pattern that catches the version of this that is not a mistake, which is a
- * release job "proving the image works" by booting roma for real.
+ * The scripts and the file suffix both configs select on are the tests
+ * themselves. The credentials are the ones that matter: without them both suites
+ * fail rather than run, so automation that never sees one cannot spend anything
+ * even if somebody wires a script up by hand. They are also the patterns that
+ * catch the version of this that is not a mistake, which is a release job
+ * "proving the image works" by booting roma for real.
  */
-const SEAM_2 = [/\btest:seam2\b/, /\.live\.test\b/, /\bCLAUDE_CODE_OAUTH_TOKEN\b/]
+const PAID_RUNS = [
+  /\btest:seam2\b/,
+  /\btest:codex-live\b/,
+  /\.live\.test\b/,
+  /\bCLAUDE_CODE_OAUTH_TOKEN\b/,
+  /\bROMA_CODEX_HOME\b/,
+]
 
 /** The Dockerfile as Docker reads it: the instructions, without the commentary. */
 function dockerfile(): string {
@@ -250,7 +286,7 @@ function dockerfile(): string {
  * The sweep is deliberately unfiltered rather than limited to what a workflow
  * names, so a script added and wired up later cannot arrive outside the guard.
  * The price is that it also reads files CI hands no work to, `*.test.ts` under
- * `scripts/` among them — so the SEAM_2 patterns below constrain the *prose* of
+ * `scripts/` among them — so the PAID_RUNS patterns above constrain the *prose* of
  * those tests as well as the commands of the real scripts. That is a live
  * constraint, not a hypothetical: `scripts/claude-code-drift.test.ts` passes
  * because it writes "seam 2" rather than `test:seam2`. Narrowing the filter would

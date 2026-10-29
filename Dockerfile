@@ -4,7 +4,8 @@
 # Two stages, because they want opposite things. The builder needs the whole
 # toolchain — TypeScript, the test-only dependencies, the lot — and produces one
 # directory. The runtime needs that directory, the two runtime dependencies, and
-# Claude Code, and nothing the builder used is allowed to follow it in.
+# the two Runtimes' CLIs — Claude Code and Codex — and nothing the builder used is
+# allowed to follow it in.
 
 # The Claude Code this image carries, exact rather than floating.
 #
@@ -17,6 +18,17 @@
 # what the re-verification is. Named exactly rather than globbed: `0006-*` used
 # to match this file and matches a different decision now.
 ARG CLAUDE_CODE_VERSION=2.1.220
+
+# The Codex this image carries — the second Runtime's pin, exact for the first
+# one's reason (ADR-0026 *The pins*). Every Codex reading in `docs/` is evidence
+# about this build, and moving it is a re-verification event that spends the
+# ChatGPT subscription rather than the Shared Window. `src/packaging.test.ts`
+# carries the second copy.
+#
+# Carried by every image, including the ones whose deployment configures no
+# Codex: the binary is inert without a `CODEX_HOME`, and an image that differed
+# by deployment would be two images to verify.
+ARG CODEX_VERSION=0.165.0
 
 # The GitHub CLI the image carries, and the checksum of the tarball it comes in.
 #
@@ -121,6 +133,13 @@ RUN npm ci --omit=dev && npm cache clean --force
 ARG CLAUDE_CODE_VERSION
 RUN npm install --global @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
+# The same, for `codex`, which `src/codex-app-server.ts` spawns as a bare
+# command. The package resolves its platform binary through an optional
+# dependency pinned to the same version, so the exact specifier pins both.
+ARG CODEX_VERSION
+RUN npm install --global @openai/codex@${CODEX_VERSION} && npm cache clean --force \
+  && codex --version
+
 COPY --from=builder /app/dist ./dist
 
 # The `gh` Credential Shim, under the name the agent will type. Three lines of
@@ -200,19 +219,19 @@ ENV HOME=/home/node \
     ROMA_WORK_ROOT=/var/lib/roma/work \
     ROMA_SHIM_DIR=/run/roma
 
-# `audit` and `claude` are made and owned here even though nothing points at
-# either. Setting the variable and making the directory are different acts: an
-# empty named volume mounted over a path the image never created is materialised
-# `root:root`, and roma runs as `node` — so the operator who mounts one would
-# clear the refusal above and then lose the first Audit Record, or the first
-# Transcript, to EACCES, which is the same data gone by a longer route. A bind
-# mount brings the host's own ownership and needs to be writable by uid 1000;
-# the README says so.
+# `audit`, `claude` and `codex` are made and owned here even though nothing
+# points at any of them. Setting the variable and making the directory are
+# different acts: an empty named volume mounted over a path the image never
+# created is materialised `root:root`, and roma runs as `node`. The operator who
+# mounts one would clear the refusal above, for the two it covers, and then lose
+# the first Audit Record, the first Transcript or the Codex login to EACCES,
+# which is the same data gone by a longer route. A bind mount brings the host's
+# own ownership and needs to be writable by uid 1000; the README says so.
 #
 # `/run/roma` is made here for a different reason again: roma creates it at boot
 # if it is missing, and it cannot, because `/run` belongs to root and roma is
 # `node`.
-RUN mkdir -p /var/lib/roma/work /var/lib/roma/claude /var/lib/roma/audit /run/roma \
+RUN mkdir -p /var/lib/roma/work /var/lib/roma/claude /var/lib/roma/audit /var/lib/roma/codex /run/roma \
   && chown -R node:node /var/lib/roma /run/roma \
   && chmod 0700 /run/roma
 
@@ -239,4 +258,5 @@ LABEL org.opencontainers.image.title="roma" \
       org.opencontainers.image.source="https://github.com/jackey8616/roma" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
-      io.github.jackey8616.roma.claude-code.version="${CLAUDE_CODE_VERSION}"
+      io.github.jackey8616.roma.claude-code.version="${CLAUDE_CODE_VERSION}" \
+      io.github.jackey8616.roma.codex.version="${CODEX_VERSION}"
