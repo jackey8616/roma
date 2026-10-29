@@ -18,8 +18,12 @@ function read(text: string): ModelRequest | null {
 
 describe('reading a /model message', () => {
   it('recognises every name on the Menu', () => {
-    expect(read('/model fable')).toEqual({ kind: 'chosen', name: 'fable', model: 'claude-fable-5' })
-    expect(read('/model opus')).toEqual({ kind: 'chosen', name: 'opus', model: 'claude-opus-5' })
+    expect(read('/model fable')).toEqual({
+      kind: 'chosen',
+      name: 'fable',
+      model: 'claude-fable-5-1',
+    })
+    expect(read('/model opus')).toEqual({ kind: 'chosen', name: 'opus', model: 'claude-opus-5-5' })
     expect(read('/model sonnet')).toEqual({
       kind: 'chosen',
       name: 'sonnet',
@@ -53,7 +57,7 @@ describe('reading a /model message', () => {
   // check. What it decides is what roma is willing to put the shared window
   // behind.
   it('offers neither a full model id nor the 1M variants', () => {
-    expect(read('/model claude-opus-5')).toEqual({ kind: 'unknown', name: 'claude-opus-5' })
+    expect(read('/model claude-opus-5-5')).toEqual({ kind: 'unknown', name: 'claude-opus-5-5' })
     expect(read('/model opus[1m]')).toEqual({ kind: 'unknown', name: 'opus[1m]' })
     expect(read('/model sonnet[1m]')).toEqual({ kind: 'unknown', name: 'sonnet[1m]' })
     // Named alongside them now that `fable` itself is on the Menu, which is what
@@ -74,7 +78,7 @@ describe('reading a /model message', () => {
     expect(read('  /model opus\n')).toEqual({
       kind: 'chosen',
       name: 'opus',
-      model: 'claude-opus-5',
+      model: 'claude-opus-5-5',
     })
     expect(read('  /model  ')).toEqual({ kind: 'report' })
   })
@@ -82,7 +86,7 @@ describe('reading a /model message', () => {
   // A phone keyboard capitalises the first letter of a message on its own, and
   // `/Model Opus` is nobody asking for something else.
   it('ignores case, in the head and in the name', () => {
-    expect(read('/Model Opus')).toEqual({ kind: 'chosen', name: 'opus', model: 'claude-opus-5' })
+    expect(read('/Model Opus')).toEqual({ kind: 'chosen', name: 'opus', model: 'claude-opus-5-5' })
     expect(read('/MODEL')).toEqual({ kind: 'report' })
   })
 
@@ -112,8 +116,8 @@ describe('reading a /model message', () => {
 /** The Menu read backwards, which is how roma says what a Session is already on. */
 describe('naming the model a Session is on', () => {
   it('answers with the name a Caller would have typed', () => {
-    expect(menuNameFor('claude-fable-5')).toBe('fable')
-    expect(menuNameFor('claude-opus-5')).toBe('opus')
+    expect(menuNameFor('claude-fable-5-1')).toBe('fable')
+    expect(menuNameFor('claude-opus-5-5')).toBe('opus')
     expect(menuNameFor('claude-sonnet-5')).toBe('sonnet')
     expect(menuNameFor('claude-haiku-4-5')).toBe('haiku')
   })
@@ -122,6 +126,10 @@ describe('naming the model a Session is on', () => {
   // the id, so the report can fall back to the id as the truthful answer.
   it('says nothing for a model no name on the Menu resolves to', () => {
     expect(menuNameFor('claude-mythos-5')).toBeNull()
+    // Earlier releases of a line that is on the Menu: served upstream, but no
+    // name resolves to them, and a record naming one is refused.
+    expect(menuNameFor('claude-fable-5')).toBeNull()
+    expect(menuNameFor('claude-opus-5')).toBeNull()
     expect(menuNameFor('claude-opus-5[1m]')).toBeNull()
   })
 })

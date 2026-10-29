@@ -103,8 +103,8 @@ describe('which models take an effort', () => {
   // Literals for the same reason haiku is one: the loop below only asks that
   // every Menu model has *an* answer, which `false` would satisfy.
   it('says the other three Menu models take one', () => {
-    expect(takesEffort('claude-fable-5')).toBe(true)
-    expect(takesEffort('claude-opus-5')).toBe(true)
+    expect(takesEffort('claude-fable-5-1')).toBe(true)
+    expect(takesEffort('claude-opus-5-5')).toBe(true)
     expect(takesEffort('claude-sonnet-5')).toBe(true)
   })
 

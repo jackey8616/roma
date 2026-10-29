@@ -84,7 +84,7 @@ describe('how the process is invoked', () => {
     session.start()
 
     const args = claude.lastSpawn.args
-    expect(args[args.indexOf('--model') + 1]).toBe('claude-sonnet-5')
+    expect(args[args.indexOf('--model') + 1]).toBe('claude-opus-5-5')
   })
 
   /**

@@ -257,8 +257,10 @@ interface PendingTurn {
  * without a word. Pinning changes nothing that was already correct — it turns a
  * silent drift into a mismatch the startup self-check can assert on, which is
  * why that check and this constant have to name the same model.
+ *
+ * The pinned Claude Code predates this model (ADR-0014, amended 2026-10-29).
  */
-export const PINNED_MODEL = 'claude-sonnet-5'
+export const PINNED_MODEL = 'claude-opus-5-5'
 
 /**
  * The effort every Session runs at, pinned rather than left to a settings file.

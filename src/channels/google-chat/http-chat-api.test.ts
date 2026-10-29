@@ -177,7 +177,7 @@ describe('the buttons that choose off a Menu', () => {
     await api.post({
       space: SPACE,
       thread: null,
-      text: 'This conversation is on sonnet (claude-sonnet-5).',
+      text: 'This conversation is on opus (claude-opus-5-5).',
       actions: ['fable', 'opus', 'sonnet', 'haiku', 'default'].map((option) => ({
         label: option,
         action: 'choose',

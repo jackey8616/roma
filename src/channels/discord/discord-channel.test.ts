@@ -1383,7 +1383,7 @@ describe('what a Conversation is told', () => {
     await channel.adapter.deliver(
       to(DM, {
         kind: 'choice',
-        text: 'This conversation is on sonnet (claude-sonnet-5). You can choose: fable, opus, sonnet, haiku, default.',
+        text: 'This conversation is on opus (claude-opus-5-5). You can choose: fable, opus, sonnet, haiku, default.',
         chooses: 'model',
         options: ['fable', 'opus', 'sonnet', 'haiku', 'default'],
         refused: null,
@@ -1391,7 +1391,7 @@ describe('what a Conversation is told', () => {
     )
 
     expect(channel.api.texts).toEqual([
-      'This conversation is on sonnet (claude-sonnet-5). You can choose: fable, opus, sonnet, haiku, default.',
+      'This conversation is on opus (claude-opus-5-5). You can choose: fable, opus, sonnet, haiku, default.',
     ])
   })
 
@@ -1433,11 +1433,11 @@ describe('what a Conversation is told', () => {
     const channel = await messaged(addressed())
 
     await channel.adapter.deliver(
-      to(MESSAGE, { kind: 'result', text: 'Running on claude-sonnet-5.' }, 'opening-1'),
+      to(MESSAGE, { kind: 'result', text: 'Running on claude-opus-5-5.' }, 'opening-1'),
     )
     await channel.adapter.deliver(to(MESSAGE, { kind: 'progress', progress: { phase: 'working' } }))
 
-    expect(channel.api.texts).toEqual(['Running on claude-sonnet-5.', 'Working…'])
+    expect(channel.api.texts).toEqual(['Running on claude-opus-5-5.', 'Working…'])
     expect(channel.api.messages.map(({ posted }) => posted.channel)).toEqual([MESSAGE, MESSAGE])
     expect(channel.api.threads).toHaveLength(1)
   })

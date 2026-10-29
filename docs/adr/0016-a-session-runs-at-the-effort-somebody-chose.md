@@ -20,6 +20,11 @@ are three. Marked inline below.
 gained a row. `fable` went onto the Model Menu, so `claude-fable-5` is now a model
 a Session can run on and the Matrix owes it an answer. Marked inline below.
 
+**Amended 2026-10-29**, the same way again: the decision stands and two rows
+moved. `fable` resolves to `claude-fable-5-1` and `opus` to `claude-opus-5-5`,
+and the extractor cannot say anything about either because the pinned bundle
+has never heard of them. Marked inline below.
+
 Repeats ADR-0014's shape for a second per-Session setting, and the repetition is
 the point: `/effort` fails as a relay for the same reason `/model` does, and the
 machinery that solved it is already here. What is **not** repeated is how roma
@@ -266,12 +271,13 @@ committed as a constant.
 It anchors on the **server-side feature-flag names** — `Ede(e,"effort")`,
 `"xhigh_effort"`, `"max_effort"` — rather than on minified identifiers, because
 the flag names are a contract with something and the identifiers are renamed every
-build. Against 2.1.220 it yields, for roma's Menu:
+build. Against 2.1.220 it yields `—` for every row but haiku's, and a person
+reads that output into `EFFORT_MATRIX`, which for roma's Menu holds:
 
 | model | takes effort | xhigh | max |
 | --- | --- | --- | --- |
-| `claude-fable-5` | yes | yes | yes |
-| `claude-opus-5` | yes | yes | yes |
+| `claude-fable-5-1` | yes | yes | yes |
+| `claude-opus-5-5` | yes | yes | yes |
 | `claude-sonnet-5` | yes | yes | yes |
 | `claude-haiku-4-5` | **no** | no | no |
 
@@ -282,6 +288,16 @@ than a weaker one: the extractor reports it *unnamed* on all three gates, and th
 describes itself as `Deeper reasoning than high, just below maximum (Fable 5,
 Opus 4.7+, Sonnet 5)`, which names Fable 5 first. Reading that silence as a
 refusal is the mistake the paragraph below was written about.
+
+**Amended 2026-10-29 — the `claude-fable-5-1` and `claude-opus-5-5` rows
+replaced `claude-fable-5` and `claude-opus-5`.** Both read `—` on every gate, as
+their predecessors did, and that `—` must not be read as a `no`. The `yes` for
+`claude-opus-5-5` is covered by the `xhigh` self-description's `Opus 4.7+`. The
+`yes` for `claude-fable-5-1` is the first row nothing in the build supports:
+2.1.220 predates Fable 5.1 and names it nowhere, so it rests on the model's own
+documentation — `effort` from `low` to `max`, default `high`. Opus 5.5 defaults
+to `medium` on the API; neither default runs under roma, which passes `--effort`
+on every spawn.
 
 **It reports; it does not gate.** Nothing fails a build on it, nothing in CI
 watches it, and roma refuses nothing because of it. This is `claude-code-drift.ts`'s
