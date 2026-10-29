@@ -14,7 +14,7 @@
 import type { Rule, SourceCode } from 'eslint'
 import type { Comment, Node } from 'estree'
 import { fileURLToPath } from 'node:url'
-import { ENFORCED_BY, fencesIn, unresolved, type Fences } from '../fence-names.js'
+import { citedIn, fencesIn, unresolved, type Fences } from '../fence-names.js'
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url))
 
@@ -85,7 +85,7 @@ function judge(
   if (DIRECTIVE.test(text)) return WITH_REASON.test(text) ? null : { messageId: 'directive' }
   if (SAFETY.test(text)) return null
 
-  const cited = [...text.matchAll(ENFORCED_BY)].map(([, name]) => name!)
+  const cited = citedIn(text).map(({ name }) => name)
   for (const name of cited) {
     const why = unresolved(name, known)
     if (why !== null) return { messageId: 'citation', data: { why } }

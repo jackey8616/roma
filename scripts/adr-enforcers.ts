@@ -7,7 +7,7 @@
  * is the I/O.
  */
 
-import { ENFORCED_BY, unresolved, type Fences } from './fence-names.js'
+import { citedIn, unresolved, type Fences } from './fence-names.js'
 
 /** One ADR, by filename, and its text. */
 export interface Adr {
@@ -26,10 +26,9 @@ export interface Dangling {
 /** Every "Enforced by" in these ADRs that does not resolve. */
 export function danglingEnforcers(adrs: readonly Adr[], fences: Fences): Dangling[] {
   return adrs.flatMap(({ file, text }) =>
-    [...text.matchAll(ENFORCED_BY)].flatMap((match) => {
-      const name = match[1]!
+    citedIn(text).flatMap(({ name, index }) => {
       const why = unresolved(name, fences)
-      const line = text.slice(0, match.index).split('\n').length
+      const line = text.slice(0, index).split('\n').length
       return why === null ? [] : [{ file, line, name, why }]
     }),
   )

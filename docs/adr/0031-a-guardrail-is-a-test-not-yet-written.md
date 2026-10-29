@@ -99,5 +99,8 @@ under its existing name.
 - 59 guardrails that could fail have no check yet. They are listed in the
   inventory, `docs/guardrail-inventory.md`, with their origin and suggested rung.
   Converting one deletes its prose and shrinks the suppressions file.
-- The pre-commit hook needs Node 22, which `.nvmrc` already asks for. Under an
-  older `node`, ESLint refuses to run and the commit fails loudly, not quietly.
+- The pre-commit hook needs the Node `.nvmrc` names. Under another one it stops
+  before ESLint and says which Node to use, so the error does not point a person
+  at `--no-verify`. Enforced by `fence:hook-names-the-node-it-needs`.
+- A fence name picks out one check: two test files carrying the same
+  `[fence:<id>]` fail the ADR check. Enforced by `fence:one-name-one-fence`.

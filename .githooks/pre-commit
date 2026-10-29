@@ -1,5 +1,14 @@
 #!/bin/sh
 # Enforced by `fence:no-verify-is-refused`.
 set -e
+
+want="$(cat "$(git rev-parse --show-toplevel)/.nvmrc")"
+have="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo none)"
+if [ "$have" != "$want" ]; then
+  echo "pre-commit: roma's checks need Node $want (.nvmrc); this shell has Node $have." >&2
+  echo "Run \`nvm use\` and commit again. Skipping the hook is not the fix (ADR-0031)." >&2
+  exit 1
+fi
+
 npm run --silent lint
 npm run --silent check:adr-enforcers
