@@ -45,16 +45,7 @@ export function documentReach(minter: DocumentMinter): AvailableReach<'documents
     minter,
 
     async prove(): Promise<ReachProof> {
-      // Thrown, never turned into the unavailable arm. A revoked key that
-      // reported "this deployment has no Document Reach" would tell every Session
-      // a sentence that is false — ADR-0020 §2 names a `try`/`catch` around this
-      // factory as the most natural-looking wrong edit in the file, and it is
-      // wrong here for exactly the reason it is wrong there.
-      //
-      // Two refusals rather than one, because they send an operator to two
-      // different places: the first is about a key, and the second is about a
-      // folder or a role. Wrapped in `readConfiguration`'s shape so that they
-      // read like every other thing wrong with a deployment's configuration.
+      // Enforced by `fence:reach-a-broken-key-blocks-the-boot`.
       try {
         await minter.mint()
       } catch (error) {
@@ -75,10 +66,7 @@ export function documentReach(minter: DocumentMinter): AvailableReach<'documents
     },
 
     announce(): string {
-      // Thrown rather than defaulted, for `githubReach`'s reason: the empty
-      // version of this announcement names a folder roma never proved, and an
-      // agent told to write into one it cannot write to spends a Turn finding
-      // that out from a 403.
+      // Enforced by `fence:reach-announces-only-what-it-proved`.
       if (depot === null) throw new Error('roma announced its Depot before proving it')
       return announceDocuments(minter.account, depot)
     },
@@ -106,14 +94,9 @@ export function noDocumentReach(): Reach<'documents'> {
 /**
  * The Document Reach this deployment configured, or the one it did not.
  *
- * The composition root's entry point, and it is what keeps ADR-0015 §4's rule
- * true for a second Google credential: it takes what `readDocumentEnv` read from
- * the path the deployment named, and nothing else — no `GoogleAuth`, no
- * Application Default Credentials, nothing that would go looking for a
- * credential. It is inside `src/documents/`, which
- * `src/document-containment.test.ts` binds against every way of asking a library
- * to find one, so the substitution cannot be written at the composition root
- * either: that file never names the constructor (ADR-0020 §7).
+ * The composition root's entry point: it takes what `readDocumentEnv` read from
+ * the path the deployment named, and nothing else.
+ * Enforced by `fence:documents-never-resolves-a-credential`.
  */
 export function documentReachFrom(env: DocumentEnv | null): Reach<'documents'> {
   return env === null ? noDocumentReach() : documentReach(new GoogleDocumentMinter(env))

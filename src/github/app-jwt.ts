@@ -12,13 +12,7 @@ import { createSign } from 'node:crypto'
  */
 const LIFETIME_S = 9 * 60
 
-/**
- * How far into the past `iat` is set.
- *
- * GitHub's own guidance, and the reason is a clock that is a few seconds fast:
- * a JWT issued "in the future" is rejected, which would present as roma failing
- * to mint on a machine that is otherwise working perfectly.
- */
+/** Enforced by `fence:github-jwt-backdated-once`. */
 const BACKDATED_S = 60
 
 export interface AppJwtOptions {
@@ -44,10 +38,7 @@ export interface AppJwtOptions {
 export function appJwt({ appId, privateKey, now = Date.now() }: AppJwtOptions): string {
   const issuedAt = Math.floor(now / 1000) - BACKDATED_S
   const header = { alg: 'RS256', typ: 'JWT' }
-  // Measured from `iat`, not from now. GitHub validates the *span* — `exp` more
-  // than ten minutes after `iat` is refused — so adding the backdating back in
-  // here would put the span at exactly 600 seconds, on the boundary, with the
-  // margin below spent rather than held.
+  // Enforced by `fence:github-jwt-backdated-once`.
   const payload = { iat: issuedAt, exp: issuedAt + LIFETIME_S, iss: appId }
 
   const signed = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(payload))}`

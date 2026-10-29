@@ -162,6 +162,23 @@ describe('a real git, asking a real Credential Shim', () => {
       }),
     )
   })
+
+  it('says why on stderr, where git cannot read it as a credential [fence:github-complaint-goes-to-stderr]', async () => {
+    const why =
+      "The Shim's complaint goes to stderr, never stdout and never nowhere (ADR-0008). git " +
+      "parses the helper's stdout as `key=value` credential fields, so a sentence there is " +
+      'read as one; swallowed, git says only that authentication failed and nobody can tell ' +
+      'why (#62).'
+    const minter = new FakeMinter()
+    minter.failsWith = new Error('the App private key was rejected')
+    const roma = await pointGitAtRoma(minter)
+
+    const filled = await roma.git('fill', `url=https://github.com/${REPOSITORY}\n\n`)
+
+    expect(filled.stderr, why).toContain('the App private key was rejected')
+    // What git says when the sentence reached it on stdout: it read it as a field.
+    expect(filled.stderr, why).not.toContain('invalid credential line')
+  })
 })
 
 /** One `git credential …`, with stdin written and stdout collected. */

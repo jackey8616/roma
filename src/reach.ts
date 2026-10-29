@@ -75,20 +75,7 @@ interface Reaching<C extends CredentialWanted> {
    * everything working right up to the first API call.
    */
   readonly credential: C
-  /**
-   * Prove this Reach works, or block the boot.
-   *
-   * Asked once, at startup, before anything that could accept an Ingress Message
-   * exists. A key that is syntactically perfect and revoked is a blind spot no
-   * amount of parsing closes, so roma uses the key rather than reading it — and a
-   * failure that surfaced instead as an inexplicable `git clone` inside somebody's
-   * Turn would read as "roma is broken" with no diagnosis attached (ADR-0008).
-   *
-   * **Throwing is the only way to report a Reach that is configured and does not
-   * work.** Returning the unavailable arm instead would tell every Session that
-   * this deployment has no such Reach, which for a revoked key is a lie
-   * (ADR-0020 §2).
-   */
+  /** Prove this Reach works, or block the boot. Enforced by `fence:reach-a-broken-key-blocks-the-boot`. */
   prove(): Promise<ReachProof>
   /**
    * What every Session is told it can reach, or `''` where there is nothing to
@@ -111,10 +98,7 @@ export type AvailableReach<C extends CredentialWanted = CredentialWanted> = Reac
  * A Reach this deployment was given no key for.
  *
  * Present rather than absent, always, and carrying the sentence roma answers a
- * request for it with. "There is none" is an answer roma gives out loud rather
- * than a case it has no branch for (ADR-0015 §9) — and a Reach that were simply
- * missing would read, to whatever consulted it, as one that does not apply, which
- * is how an agent ends up investigating its `PATH`.
+ * request for it with. Enforced by `fence:reach-no-key-is-a-reach-that-says-so`.
  *
  * Reachable from a key that is absent and from nothing else. See `prove`.
  */
@@ -126,17 +110,9 @@ export type Reach<C extends CredentialWanted = CredentialWanted> =
   AvailableReach<C> | UnavailableReach<C>
 
 /**
- * One Reach per credential roma can be asked for.
+ * One Reach per credential roma can be asked for, and `code` always available.
+ * Enforced by `fence:reach-one-per-credential`.
  *
- * A record over `CredentialWanted` rather than a list, and the difference is
- * ADR-0008. A list cannot say "one per credential", so a roma with no `code`
- * Reach would typecheck — and would prove no key at boot, announce nothing, and
- * fail every `git` request inside somebody's Turn, which is the exact failure
- * blocking the boot exists to prevent. `CredentialWanted` is closed, so this is
- * total by construction and the composition root cannot leave a member out.
- *
- * `code` is an `AvailableReach` because required means required: there is no
- * development mode that skips the forge credential, and now no way to spell one.
  * `cloud` and `documents` are the full union because ADR-0015 §9 and ADR-0022 §8
  * make their unavailable arm the ordinary case — most deployments have neither.
  */
@@ -147,11 +123,8 @@ export interface Reaches {
 }
 
 /**
- * Every Reach, in the order they are proved and announced.
- *
- * The order is `code` first, and it is load-bearing rather than alphabetical: a
- * deployment broken in several ways is told about the free check first, and a
- * boot with a bad App key makes no network call to Google at all (ADR-0020 §4).
+ * Every Reach, in the order they are proved and announced: `code` first.
+ * Enforced by `fence:reach-code-is-proved-first`.
  */
 export function eachReach(reaches: Reaches): readonly Reach[] {
   return [reaches.code, reaches.cloud, reaches.documents]

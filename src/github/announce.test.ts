@@ -38,14 +38,20 @@ describe('what a Session is told it can reach', () => {
   // The advertisement is capped, not the access — a thousand-repository
   // Installation would otherwise spend more of every Turn's context on a
   // directory than on the work.
-  it('caps how many it names, and says how many there are', () => {
+  it('caps how many it names, and says how many there are [fence:github-announcement-caps-the-advertisement]', () => {
+    const why =
+      'The announcement names at most 100 repositories, says how many there are, and says ' +
+      'the rest are reachable the same way (ADR-0008). It is prepended to every Turn, so the ' +
+      'whole list of a large Installation spends the context on a directory; and the cap is ' +
+      'on the advertisement, not the access — an agent that reads it as the access refuses ' +
+      'work it can do (#62).'
     const many = Array.from({ length: 250 }, (_, at) => `a-team/r${String(at)}`)
 
     const said = announce({ account: 'a-team', repositories: many })
 
-    expect(said).toContain('250 repositories')
-    expect(said).toContain('…and 150 more')
-    expect(said).not.toContain('a-team/r200')
+    expect(said, why).toContain('250 repositories')
+    expect(said, why).toMatch(/…and 150 more, all of them reachable/)
+    expect(said, why).not.toContain('a-team/r200')
   })
 
   // An App installed on nothing is a real state — somebody installed it and

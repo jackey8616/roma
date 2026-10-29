@@ -92,10 +92,16 @@ describe('everything that knows which cloud this is lives in one directory', () 
   // The vendor-generic half, which `src/documents/` may legitimately name too —
   // it holds the second service account key and the second JWT-bearer exchange,
   // and it is bound by a rule of its own.
-  it('names Google nowhere a rule does not bind', () => {
+  it('names Google nowhere a rule does not bind [fence:cloud-google-named-only-where-bound]', () => {
     const offenders = matching(containment('cloud', BOUND_BY_ANOTHER_RULE).outside, GOOGLE_SPECIFIC)
 
-    expect(offenders.map(({ file }) => file)).toEqual([])
+    expect(
+      offenders.map(({ file }) => file),
+      'Google is named only under src/cloud/ and src/documents/, each bound by its own ' +
+        'containment rule (ADR-0020 §7, ADR-0022). A shared token-exchange factory anywhere ' +
+        'else would construct a Google credential in a directory no rule binds, where the ' +
+        'resolution-chain denylist cannot see it (#119, #132).',
+    ).toEqual([])
   })
 
   // Not relaxed for the other Google directory, deliberately: a scope is the one
@@ -121,10 +127,17 @@ describe('roma mints from the key it was given, never from a resolution chain', 
   // The whole of §4, and the reason it is a test rather than a comment: the
   // failure it prevents is silent, arrives by *doing nothing*, and only on
   // production hosts.
-  it('has no code under src/cloud/ that could ask a library to find a credential', () => {
+  it('has no code under src/cloud/ that could ask a library to find a credential [fence:cloud-never-resolves-a-credential]', () => {
     const offenders = matching(containment('cloud').inside, RESOLVES_A_CREDENTIAL)
 
-    expect(offenders.map(({ file }) => file)).toEqual([])
+    expect(
+      offenders.map(({ file }) => file),
+      'Nothing under src/cloud/ may ask a library to find a credential: the key is read by ' +
+        'the exact path the deployment named and signed here (ADR-0015 §4). Application ' +
+        'Default Credentials ends at the metadata server, so on the Google hosts roma runs on ' +
+        "a missing key resolves to roma's own identity — the one a Cloud Reach must never be. " +
+        'Handing the library a key explicitly works today and leaves that path one edit away (#99).',
+    ).toEqual([])
   })
 
   /**

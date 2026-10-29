@@ -99,9 +99,7 @@ export class HttpChatApi implements ChatApi {
     })
 
     const name = nameOf(answer)
-    // A post that succeeded without a name leaves an acknowledgement roma cannot
-    // edit, and the consequence would otherwise surface minutes later as an edit
-    // of `undefined` against an API that has never heard of it.
+    // Enforced by `fence:gchat-post-refuses-a-nameless-message`.
     if (name === null) throw new Error('Chat accepted the message but returned no resource name')
     return name
   }
@@ -109,10 +107,7 @@ export class HttpChatApi implements ChatApi {
   /**
    * Replace the text of a message roma posted.
    *
-   * `updateMask=text` is required rather than a nicety: without it Chat is not
-   * told which field is being replaced. An acknowledgement that quietly stopped
-   * updating is indistinguishable from a Task that died, which is the one thing
-   * that message exists to rule out.
+   * Enforced by `fence:gchat-edit-names-the-field`.
    */
   async edit(name: string, text: string): Promise<void> {
     await this.#send({

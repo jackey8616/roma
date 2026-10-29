@@ -200,7 +200,7 @@ describe('minting an Installation Token', () => {
   // Guessing an hour is the one direction that cannot be walked back: the whole
   // protection here is the credential's lifetime, and a token roma believes in
   // for longer than it is good for is exactly what the caching must not produce.
-  it('treats a token with an unreadable expiry as already spent', async () => {
+  it('treats a token with an unreadable expiry as already spent [fence:github-unreadable-expiry-is-spent]', async () => {
     const now = Date.parse('2026-07-30T12:00:00Z')
     const { minter } = githubAnswering(
       {
@@ -214,6 +214,11 @@ describe('minting an Installation Token', () => {
     )
     await minter.installation()
 
-    expect((await minter.mint()).expiresAt).toBe(now)
+    expect(
+      (await minter.mint()).expiresAt,
+      'An Installation Token whose expiry cannot be read expires now: used once, never cached ' +
+        "(ADR-0008: the whole protection is the credential's lifetime). Assuming an hour is the " +
+        'one direction that cannot be walked back — a token cached past its real life (#62).',
+    ).toBe(now)
   })
 })

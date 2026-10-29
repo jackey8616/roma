@@ -24,11 +24,7 @@ export function githubReach(minter: InstallationMinter): AvailableReach<'code'> 
     minter,
 
     async prove(): Promise<ReachProof> {
-      // The free check, and the first one roma makes. A bad private key or an App
-      // installed twice is found before a single paid Turn has been driven.
-      // Failure throws, which blocks the boot: a failure that surfaced instead as
-      // an inexplicable `git clone` inside somebody's Turn would read as "roma is
-      // broken" with no diagnosis attached.
+      // Enforced by `fence:reach-a-broken-key-blocks-the-boot`.
       installation = await minter.installation()
       return { account: installation.account }
     },

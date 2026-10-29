@@ -1,4 +1,9 @@
-import type { IngressMessage, PendingEnclosure, Quotation } from '../../channel-adapter.js'
+import type {
+  IngressMessage,
+  OutboundInstruction,
+  PendingEnclosure,
+  Quotation,
+} from '../../channel-adapter.js'
 import { commandFor } from '../../commands.js'
 import type { OperatorLog } from '../../operator-log.js'
 
@@ -62,19 +67,7 @@ export type ChatEventLogRecord =
  */
 export type ChatEvent = Readonly<Record<string, unknown>>
 
-/**
- * The two ways an event says "this is a 1:1 conversation".
- *
- * Asked of the space, never the message. Both `spaceType` and its deprecated
- * predecessor `type` are read, because which one an event carries depends on how
- * it was delivered: a DM read as a space makes every message its own
- * Conversation, and a space read as a DM merges everybody into one.
- *
- * **Never** `spaceThreadingState`, the obvious-looking field: it is documented
- * output-only, so an event need not carry it, and `GROUPED_MESSAGES` spaces have
- * threads too — keying on it sends every space message down the DM path.
- * https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces
- */
+/** Enforced by `fence:gchat-conversation-key-from-the-space`. */
 const DIRECT_MESSAGE = 'DIRECT_MESSAGE'
 const DM = 'DM'
 
@@ -86,9 +79,8 @@ const DM = 'DM'
  * @-mention go in, and what comes out is a key, a Caller and some text.
  *
  * Null covers everything roma is delivered and does not answer: the app being
- * added to or removed from a space, a card click, and — the one that matters —
- * anything an app said. Chat marks app messages `type: "BOT"`, and answering
- * them is how two bots in one space talk to each other until somebody notices.
+ * added to or removed from a space, a card click, and anything an app said.
+ * Enforced by `fence:gchat-never-answers-an-app`.
  */
 export function readIngressMessage(
   event: ChatEvent,
@@ -120,18 +112,7 @@ export function readIngressMessage(
   // `from` each carries — an Enclosure is an Enclosure, whoever sent it, and the
   // Core writes them all into one Working Directory in one pass.
   const enclosures = [...readEnclosures(message, null, download, log), ...quoted.enclosures]
-  // A message with *nothing* in it is not a request — a bare @-mention with
-  // nothing after it, say, where answering would spend a Turn asking Claude Code
-  // what to make of an empty message.
-  //
-  // Nothing in it, rather than no text in it. That distinction did not exist
-  // when this rule was written, because text was all a message could carry; a
-  // pasted screenshot with no words is the most ordinary thing there is to do in
-  // a chat window and carries more than most one-line messages (ADR-0011).
-  //
-  // A Quotation counts as something in it, on exactly that argument: pointing at
-  // a message is what a chat window is for, and quoting an error at roma without
-  // typing a word is the same act as pasting the screenshot (ADR-0021).
+  // Enforced by `fence:gchat-answers-anything-with-content`.
   if (text === '' && enclosures.length === 0 && quoted.quotation === null) return null
 
   return {
@@ -144,27 +125,7 @@ export function readIngressMessage(
   }
 }
 
-/**
- * Which Conversation an event is about, or null where roma should not answer it.
- *
- * The Conversation Key doubles as the address a reply goes to, which is what lets
- * this Adapter store nothing: `spaces/{space}/threads/{thread}` is a thread,
- * `spaces/{space}` on its own is a DM, and `GoogleChatAdapter` reads the
- * difference back out of the key months later.
- *
- * One reading for both kinds of event roma answers — a message, and a button
- * press on the card roma posted. Two would be two things that can drift, and a
- * Conversation Key that drifts is a Session that loses its context.
- *
- * Never `message.thread` in a DM: Chat puts a thread on those messages too, and
- * reading it would make every message in the DM its own Conversation — the
- * opposite of the one long-lived Session per person ADR-0004 wants.
- *
- * Never the space as a fallback in a threaded space either. A message there with
- * no thread on it should not happen, and treating it as the space would put one
- * Conversation's context into every other Conversation in that space —
- * everybody's work in everybody else's replies. Unanswered is at least visible.
- */
+/** Enforced by `fence:gchat-conversation-key-from-the-space`. */
 function conversationKeyOf(
   event: ChatEvent,
   message: Readonly<Record<string, unknown>>,
@@ -374,11 +335,8 @@ export function readOverflowTaken(event: ChatEvent): string | null {
  * from three weeks ago safe to press, and why nothing has to be remembered
  * between posting one and its being pressed.
  *
- * **Never route this through `readIngressMessage`.** The message on a press
- * event is roma's *own* card, whose sender is an app: that reader's bot guard
- * would swallow it, and relaxing the guard to let it through would both re-open
- * the two-apps-answering-each-other fault and credit the choice to roma. Whoever
- * pressed is on `event.user`, never on the message's sender.
+ * Whoever pressed is on `event.user`, never on the message's sender.
+ * Enforced by `fence:gchat-press-is-read-off-the-presser`.
  *
  * Written from Google's documented shape rather than from a capture, like every
  * other reading in this file, and this one rests on the message travelling with
@@ -389,15 +347,7 @@ export function readChosenOption(event: ChatEvent): IngressMessage | null {
   const chooses = pressed(event, CHOOSE, CHOOSES_PARAMETER)
   const option = pressed(event, CHOOSE, OPTION_PARAMETER)
   if (chooses === null || option === null) return null
-  // Only the three Commands that have a Menu. A parameter naming anything else
-  // is a press roma never put out, and synthesising `/stop` or `/clear` from one
-  // would reach a Command through a door meant for a Menu.
-  //
-  // **Never widen this alone, and never widen `OutboundInstruction`'s `chooses`
-  // alone.** A Menu the Core offers and this cannot read back is a button that
-  // does nothing, under a Caller who goes on waiting for it; the other way round
-  // is a Command reachable through a card roma never posts.
-  if (chooses !== 'model' && chooses !== 'effort' && chooses !== 'caveman') return null
+  if (!isMenu(chooses)) return null
 
   const user = asRecord(event['user'])
   const caller = asString(user?.['name'])
@@ -416,6 +366,16 @@ export function readChosenOption(event: ChatEvent): IngressMessage | null {
     enclosures: [],
     quotation: null,
   }
+}
+
+/** Enforced by `fence:gchat-reads-only-the-menus-it-draws`. */
+type Menu = Extract<OutboundInstruction, { kind: 'choice' }>['chooses']
+
+/** Enforced by `fence:gchat-reads-only-the-menus-it-draws`. */
+const MENUS: Readonly<Record<Menu, true>> = { model: true, effort: true, caveman: true }
+
+function isMenu(name: string): name is Menu {
+  return Object.hasOwn(MENUS, name)
 }
 
 /**

@@ -10,13 +10,9 @@ import {
 /**
  * How many messages roma will hold a lease on at once.
  *
- * Generous rather than tight, and the reason is `/stop`. A Command is answered
- * outside the Task Queue precisely so that it never waits behind the Task it was
- * sent to stop — but a message Pub/Sub is holding back has not reached the Core
- * to be recognised as a Command at all, so flow control set near the concurrency
- * cap would reinstate the very wait the Core is careful to avoid. Twenty is well
- * above anything one team produces at once, and the Task Queue is what actually
- * limits how much runs.
+ * Twenty is well above anything one team produces at once, and the Task Queue
+ * is what actually limits how much runs.
+ * Enforced by `fence:gchat-flow-control-above-the-cap`.
  */
 export const DEFAULT_MAX_MESSAGES = 20
 

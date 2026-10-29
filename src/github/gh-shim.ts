@@ -37,9 +37,7 @@ export async function main(
   err: NodeJS.WritableStream = process.stderr,
 ): Promise<number> {
   const child: NodeJS.ProcessEnv = { ...env }
-  // Cleared first, whichever way the mint goes. A stale `GH_TOKEN` inherited
-  // from somewhere else would otherwise be what `gh` ran on when roma could not
-  // produce one — a credential nobody chose, used silently.
+  // Enforced by `fence:github-gh-runs-on-no-inherited-token`.
   for (const name of TOKEN_VARS) delete child[name]
 
   const answer = await credentialFor(

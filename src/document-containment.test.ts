@@ -90,10 +90,33 @@ describe('roma mints from the key it was given, never from a resolution chain', 
   // same reason: the failure it prevents is silent, arrives by *doing nothing*,
   // and only on production hosts. A Document Reach that resolved would be roma's
   // own identity holding whatever that identity holds in Drive.
-  it('has no code under src/documents/ that could ask a library to find a credential', () => {
+  it('has no code under src/documents/ that could ask a library to find a credential [fence:documents-never-resolves-a-credential]', () => {
     const offenders = matching(containment('documents').inside, RESOLVES_A_CREDENTIAL)
 
-    expect(offenders.map(({ file }) => file)).toEqual([])
+    expect(
+      offenders.map(({ file }) => file),
+      'Nothing under src/documents/ may ask a library to find a credential: the key is read ' +
+        'by the exact path the deployment named and signed here (ADR-0022 §1, ADR-0015 §4). ' +
+        'Application Default Credentials ends at the metadata server, so on the Google hosts ' +
+        "roma runs on a missing key resolves to roma's own identity, holding whatever that " +
+        'identity holds in Drive (#132).',
+    ).toEqual([])
+  })
+
+  // The two Google exchanges are written twice. One shared between them is a
+  // factory for Google credentials, and wherever it lives, one directory takes
+  // its construction from the other's.
+  it('shares no exchange with src/cloud/, in either direction [fence:documents-shares-no-exchange-with-the-cloud]', () => {
+    const fromCloud = matching(containment('documents').inside, [/from '\.\.\/cloud\//])
+    const fromDocuments = matching(containment('cloud').inside, [/from '\.\.\/documents\//])
+
+    expect(
+      [...fromCloud, ...fromDocuments].map(({ file }) => file),
+      'src/documents/ and src/cloud/ each sign their own JWT-bearer exchange and import ' +
+        'nothing from each other (ADR-0022, ADR-0020 §7). Neither may take its scope or its ' +
+        'construction from anywhere but itself, and a shared factory outside both is a way to ' +
+        'construct a Google credential in a directory no containment rule binds (#132).',
+    ).toEqual([])
   })
 
   /**

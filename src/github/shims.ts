@@ -10,36 +10,13 @@ import { fileURLToPath } from 'node:url'
  * as text and knows nothing about what is in it.
  */
 
-/**
- * The Shim, beside this file, with whatever extension this file has.
- *
- * Never hard-code `.js`: the image runs `dist/github/shims.js` and a developer
- * runs `src/github/shims.ts`, and running roma from source is supposed to work.
- */
+/** Enforced by `fence:github-shim-beside-this-file`. */
 function shimBesideThisFile(): string {
   const here = fileURLToPath(import.meta.url)
   return here.replace(/shims\.(m?[jt]s)$/, 'git-credential-shim.$1')
 }
 
-/**
- * What has to be in front of the Shim for `node` to be able to load it.
- *
- * Nothing from `dist/`; from a checkout, a TypeScript loader — and the reason is
- * narrower than "it is TypeScript". Node 22 strips types fine but cannot resolve
- * the `../shim-client.js` the Shim imports, because that file is `.ts` on disk.
- * Measured on Node 22.22 and git 2.41: plain `node` dies with
- * ERR_MODULE_NOT_FOUND, git falls through to asking for a username, and every
- * credential request in a from-source roma fails.
- *
- * Resolved to an absolute path, never the bare name `tsx`: `--import` resolves
- * against the working directory, and git runs the helper inside the agent's,
- * which has no `node_modules`.
- *
- * `createRequire`, never `import.meta.resolve` — the obvious way is unavailable
- * under the test runner's transform, so it would work everywhere except where it
- * is asserted. Only on the `.ts` branch, so `dist/` never asks for a dev
- * dependency it was built without.
- */
+/** Enforced by `fence:github-loader-by-absolute-path`. */
 function loaderFor(shim: string): string {
   if (!shim.endsWith('.ts') && !shim.endsWith('.mts')) return ''
   return ` --import ${createRequire(import.meta.url).resolve('tsx')}`

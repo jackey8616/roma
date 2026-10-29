@@ -74,19 +74,26 @@ describe('a deployment with a Document Reach', () => {
 
   // The key names where it is exchanged, so roma uses what it was given rather
   // than a constant that would be wrong for anybody Google ever moves.
-  it('exchanges where the key says, and has an answer where it does not', () => {
+  it('exchanges where the key says, and has an answer where it does not [fence:documents-exchanges-where-the-key-says]', () => {
+    const why =
+      "The token endpoint is the key file's own `token_uri`, defaulted only where the key " +
+      'omits it (ADR-0022 §2, for the reason ADR-0015 gives). A hardcoded constant silently ' +
+      'ignores a key that says otherwise; whoever can write the file can replace the whole ' +
+      'key, so roma takes the endpoint from the key and from nowhere else (#132).'
     const named = keyFile(JSON.stringify({ ...A_KEY, token_uri: 'https://elsewhere.test/token' }))
     const { token_uri, ...silent } = A_KEY
 
     expect(
       readDocumentEnv({ [DOCUMENT_KEY_FILE_VAR]: named, [DOCUMENT_DEPOT_VAR]: DEPOT })
         ?.tokenEndpoint,
+      why,
     ).toBe('https://elsewhere.test/token')
     expect(
       readDocumentEnv({
         [DOCUMENT_KEY_FILE_VAR]: keyFile(JSON.stringify(silent)),
         [DOCUMENT_DEPOT_VAR]: DEPOT,
       })?.tokenEndpoint,
+      why,
     ).toBe('https://oauth2.googleapis.com/token')
   })
 })
@@ -112,17 +119,31 @@ describe('a deployment with none', () => {
  * deployment that set one variable gets the no-Document-Reach behaviour, and
  * finds out from an agent saying it has no way to write a document.
  */
-describe('a Document Reach configured halfway', () => {
+describe('a Document Reach configured halfway [fence:documents-both-variables-or-neither]', () => {
+  const WHY =
+    'Half a Document Reach refuses the boot, naming the other variable, and never reads as ' +
+    'no Document Reach (ADR-0022 §2). A key with no Depot has nowhere to write and a Depot ' +
+    'with no key is a folder nobody can reach; falling through, the deployment silently has ' +
+    'no Reach and finds out from an agent saying it cannot write a document (#132).'
+
   it('refuses a key with no Depot, naming the variable that is missing', () => {
     const path = keyFile(JSON.stringify(A_KEY))
 
-    expect(() => readDocumentEnv({ [DOCUMENT_KEY_FILE_VAR]: path })).toThrow(ConfigurationMissing)
-    expect(() => readDocumentEnv({ [DOCUMENT_KEY_FILE_VAR]: path })).toThrow(DOCUMENT_DEPOT_VAR)
+    expect(() => readDocumentEnv({ [DOCUMENT_KEY_FILE_VAR]: path }), WHY).toThrow(
+      ConfigurationMissing,
+    )
+    expect(() => readDocumentEnv({ [DOCUMENT_KEY_FILE_VAR]: path }), WHY).toThrow(
+      DOCUMENT_DEPOT_VAR,
+    )
   })
 
   it('refuses a Depot with no key, naming the variable that is missing', () => {
-    expect(() => readDocumentEnv({ [DOCUMENT_DEPOT_VAR]: DEPOT })).toThrow(ConfigurationMissing)
-    expect(() => readDocumentEnv({ [DOCUMENT_DEPOT_VAR]: DEPOT })).toThrow(DOCUMENT_KEY_FILE_VAR)
+    expect(() => readDocumentEnv({ [DOCUMENT_DEPOT_VAR]: DEPOT }), WHY).toThrow(
+      ConfigurationMissing,
+    )
+    expect(() => readDocumentEnv({ [DOCUMENT_DEPOT_VAR]: DEPOT }), WHY).toThrow(
+      DOCUMENT_KEY_FILE_VAR,
+    )
   })
 
   // Story 26, and the reason both halves are read synchronously: every problem

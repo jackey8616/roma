@@ -78,10 +78,17 @@ describe('posting a message', () => {
   // A post that "succeeded" without a name leaves an acknowledgement roma cannot
   // edit, and the failure would surface minutes later as an edit of `undefined`.
   // Refused here, where it still says what went wrong.
-  it('refuses a response that carries no message name', async () => {
+  it('refuses a response that carries no message name [fence:gchat-post-refuses-a-nameless-message]', async () => {
+    const why =
+      'A post Chat accepted without a resource name must throw at the post (ADR-0010: the ' +
+      'acknowledgement is edited in place by that name). Returned as it is, the failure ' +
+      'surfaces minutes later as an edit of `undefined` against an API that has never heard ' +
+      'of it, far from its cause (#31).'
     const { api } = recording({ notAMessage: true })
 
-    await expect(api.post({ space: SPACE, thread: null, text: 'hello' })).rejects.toThrow(/name/i)
+    await expect(api.post({ space: SPACE, thread: null, text: 'hello' }), why).rejects.toThrow(
+      /name/i,
+    )
   })
 
   // Rejecting means the Conversation was not told, which is the one failure the
@@ -217,12 +224,16 @@ describe('editing a message', () => {
   // `updateMask` is not optional: without it Chat has no instruction about which
   // field is being replaced, and an acknowledgement that silently stopped
   // updating is exactly what a dead Task looks like.
-  it('replaces the text of a message roma posted, by its resource name', async () => {
+  it('replaces the text of a message roma posted, by its resource name [fence:gchat-edit-names-the-field]', async () => {
+    const why =
+      'An edit carries `updateMask=text`, or Chat is not told which field is replaced ' +
+      '(ADR-0010). An acknowledgement that quietly stopped updating is indistinguishable from ' +
+      'a Task that died, which is the one thing that message exists to rule out (#31).'
     const { api, last } = recording({})
 
     await api.edit(POSTED, 'Working…')
 
-    expect(last()).toEqual({
+    expect(last(), why).toEqual({
       method: 'PATCH',
       url: `${CHAT_API}/${POSTED}?updateMask=text`,
       body: { text: 'Working…' },

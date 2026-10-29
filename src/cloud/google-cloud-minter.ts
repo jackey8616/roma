@@ -44,14 +44,7 @@ const GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:jwt-bearer'
  */
 const ASSERTION_LIFETIME_S = 3600
 
-/**
- * How far into the past `iat` is set.
- *
- * The same minute `appJwt` backdates by, for the same reason: a clock a few
- * seconds fast issues an assertion "in the future", which is rejected — and
- * would present as roma failing to mint on a machine that is otherwise working
- * perfectly.
- */
+/** Enforced by `fence:cloud-assertion-is-backdated`. */
 const BACKDATED_S = 60
 
 /** Google answered, and the answer was not one roma can use. */
@@ -86,13 +79,8 @@ export interface GoogleCloudMinterOptions {
  * which is arithmetic rather than product knowledge and is tested against a fake
  * of the port.
  *
- * Signed here rather than with a library, exactly as `appJwt` is and for the
- * same reason: the whole of it is three base64url segments and one RS256
- * signature, and a dependency that reaches a private key is a dependency
- * somebody has to keep reading. `google-auth-library` is installed and could do
- * this — what it *also* does is resolve a credential when it is not handed one,
- * and that chain ends at the metadata server. Handing it a key explicitly would
- * work today and would put the resolution path one edit away forever.
+ * Signed here rather than with a library, exactly as `appJwt` is.
+ * Enforced by `fence:cloud-never-resolves-a-credential`.
  *
  * **The key never leaves this object.** What the agent is handed expires within
  * the hour, which is the whole of what ADR-0015 buys: the agent can narrow what
@@ -150,10 +138,7 @@ export class GoogleCloudMinter implements CloudMinter {
     const lifetimeS = minted.expires_in
     return {
       token,
-      // A token whose lifetime roma cannot read is treated as expiring now, so
-      // it is used once and never cached — `GitHubMinter`'s rule, for its
-      // reason. The whole protection here is the credential's lifetime, and
-      // guessing it long is the one direction that cannot be walked back.
+      // Enforced by `fence:cloud-unreadable-lifetime-is-spent`.
       expiresAt:
         typeof lifetimeS === 'number' && Number.isFinite(lifetimeS)
           ? this.#now() + lifetimeS * 1000

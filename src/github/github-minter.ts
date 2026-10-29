@@ -155,10 +155,7 @@ export class GitHubMinter implements InstallationMinter {
     const expiresAt = Date.parse(minted.expires_at)
     return {
       token: minted.token,
-      // A token whose expiry roma cannot read is treated as expiring now, so it
-      // is used once and never cached. Better than assuming an hour: the whole
-      // protection here is the credential's lifetime, and guessing it long is
-      // the one direction that cannot be walked back.
+      // Enforced by `fence:github-unreadable-expiry-is-spent`.
       expiresAt: Number.isFinite(expiresAt) ? expiresAt : this.#now(),
     }
   }

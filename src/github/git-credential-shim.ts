@@ -58,9 +58,7 @@ export async function main(
     env,
   )
 
-  // On stderr rather than swallowed, and never on stdout: git parses stdout as
-  // the answer, and a sentence in there would be read as a credential field.
-  // git will report authentication failed in its own words; this is why.
+  // Enforced by `fence:github-complaint-goes-to-stderr`.
   if (answer.complaint !== null) err.write(`${answer.complaint}\n`)
   if (operation === 'erase' || answer.token === null) return 0
 

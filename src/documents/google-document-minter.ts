@@ -12,12 +12,7 @@ import type { Depot, DocumentMinter } from './depot.js'
  *
  * `drive.file` is per-file — what this app created and nothing else — which is
  * what makes the write side immune to somebody sharing a document with this
- * identity.
- *
- * **Do not delete `drive.readonly` as unused.** The Depot folder was not created
- * by this app, so `drive.file` cannot read it: removing this line removes
- * `depot()` with it, and the finding out happens at the next deployment rather
- * than at the edit (ADR-0022 §3).
+ * identity. Enforced by `fence:documents-both-drive-scopes`.
  */
 const SCOPES = [
   'https://www.googleapis.com/auth/drive.file',
@@ -40,14 +35,7 @@ const GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:jwt-bearer'
 /** How long the signed assertion is good for. An hour, Google's documented maximum. */
 const ASSERTION_LIFETIME_S = 3600
 
-/**
- * How far into the past `iat` is set.
- *
- * The same minute `appJwt` and `GoogleCloudMinter` backdate by, for the same
- * reason: a clock a few seconds fast issues an assertion "in the future", which
- * is rejected — and would present as roma failing to mint on a machine that is
- * otherwise working perfectly.
- */
+/** Enforced by `fence:documents-assertion-is-backdated`. */
 const BACKDATED_S = 60
 
 /** Where Drive's files live. The v3 REST API, which is what the image can speak. */
@@ -102,21 +90,12 @@ export interface GoogleDocumentMinterOptions {
  * expiry, serving concurrent askers from one mint and discarding a rejected
  * token are `FreshTokens`', which is arithmetic rather than product knowledge.
  *
- * **Written twice rather than shared with `GoogleCloudMinter`, deliberately.**
- * The two exchanges are the same shape, and the sharing that would remove the
- * duplication is the sharing ADR-0022 forbids: nothing may make it possible to
- * construct a Google credential from outside a directory a containment rule
- * binds, and neither directory may take its scope from anywhere but its own
- * constant. ADR-0020 §7 moved the cloud's construction *inside* its own
- * directory precisely so the rule would bind the construction site; a factory in
- * a directory no rule binds would undo that for both of them. This repository
- * has paid for the general version of that mistake once already.
+ * **Written twice rather than shared with `GoogleCloudMinter`, deliberately**
+ * (ADR-0022). Enforced by `fence:documents-shares-no-exchange-with-the-cloud`.
+ * Enforced by `fence:cloud-google-named-only-where-bound`.
  *
- * Signed here rather than with a library, exactly as `appJwt` is: the whole of
- * it is three base64url segments and one RS256 signature, and
- * `google-auth-library` — which is installed, for roma's *own* identity —
- * resolves a credential when it is not handed one, and that chain ends at the
- * metadata server.
+ * Signed here rather than with a library, exactly as `appJwt` is.
+ * Enforced by `fence:documents-never-resolves-a-credential`.
  *
  * **The key never leaves this object.** What the agent is handed expires within
  * the hour. It is **not** out of the agent's reach, and neither is the App's PEM
@@ -176,10 +155,7 @@ export class GoogleDocumentMinter implements DocumentMinter {
     const lifetimeS = minted.expires_in
     return {
       token,
-      // A token whose lifetime roma cannot read is treated as expiring now, so it
-      // is used once and never cached. The whole protection here is the
-      // credential's lifetime, and guessing it long is the one direction that
-      // cannot be walked back.
+      // Enforced by `fence:documents-unreadable-lifetime-is-spent`.
       expiresAt:
         typeof lifetimeS === 'number' && Number.isFinite(lifetimeS)
           ? this.#now() + lifetimeS * 1000
@@ -196,10 +172,8 @@ export class GoogleDocumentMinter implements DocumentMinter {
    * Cloud Reach has the roles a Task will need, so permission-denied still
    * surfaces inside a Turn"*. Here it costs one call and a `fields=` parameter.
    *
-   * It mints its own token rather than being handed one. Two round trips at
-   * boot, and it buys a refusal that names the right thing: a revoked key
-   * reported as a Depot problem would send an operator to a share dialog for a
-   * key that was never going to work.
+   * It mints its own token rather than being handed one.
+   * Enforced by `fence:documents-depot-mints-its-own-token`.
    *
    * **It is a snapshot and not a guarantee.** An account removed from the shared
    * drive an hour after boot is a 403 inside somebody's Turn. This narrows the

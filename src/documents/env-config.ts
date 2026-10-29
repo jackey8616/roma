@@ -24,15 +24,8 @@ export interface DocumentEnv {
   /** The key's private half, PEM, already read off disk. */
   readonly privateKey: string
   /**
-   * Where the assertion is exchanged.
-   *
-   * Read from the key's own `token_uri` rather than hardcoded, for the reason
-   * `readCloudEnv` gives: the key is what names it, and a constant would
-   * silently ignore a file that said something else. Whoever can write this file
-   * can put their own key in it, so a file that could redirect the exchange is
-   * already a file that could replace the whole credential — what roma must not
-   * do is take an endpoint from anywhere *other* than the key it is signing
-   * with, and nothing here does.
+   * Where the assertion is exchanged: the key's own `token_uri`, defaulted only
+   * for a key that omits it. Enforced by `fence:documents-exchanges-where-the-key-says`.
    */
   readonly tokenEndpoint: string
   /** The Depot: the one folder roma is told the agent works in. */
@@ -50,11 +43,8 @@ export interface DocumentEnv {
  * is better than the Cloud Reach manages (ADR-0015 §8 records that a revoked
  * cloud key costs a second boot, because only its *proof* is a round trip).
  *
- * **Both variables or neither.** A key with no Depot is a credential with
- * nowhere to write; a Depot with no key is a folder nobody can reach. Half of it
- * is a deployment that meant to have a Document Reach, so it refuses here naming
- * the other variable rather than quietly becoming the deployment that has none —
- * which reads as the feature being broken (ADR-0022 §2).
+ * **Both variables or neither.** Half of it refuses, naming the other variable.
+ * Enforced by `fence:documents-both-variables-or-neither`.
  *
  * **Absent is not a problem.** Most deployments have neither variable and are
  * meant to be untouched by all of this: roma starts, announces nothing about
@@ -68,10 +58,7 @@ export interface DocumentEnv {
  * which identity.
  *
  * **Read by the exact path it was given**, and never by asking a library to find
- * a credential. That chain ends at the metadata server, so on the Google hosts
- * roma is designed for a missing key would resolve to roma's *own* identity
- * (ADR-0015 §4, ADR-0022 §1). `src/document-containment.test.ts` is what keeps
- * that true.
+ * a credential. Enforced by `fence:documents-never-resolves-a-credential`.
  *
  * Neither variable is added to the environment allowlist a Session is spawned
  * with. The key never enters the agent's process environment.
