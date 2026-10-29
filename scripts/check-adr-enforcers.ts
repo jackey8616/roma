@@ -10,7 +10,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { danglingEnforcers, danglingMessage } from './adr-enforcers.js'
-import { claimedTwiceMessage, ENFORCED_BY, fencesIn } from './fence-names.js'
+import { citedIn, claimedTwiceMessage, fencesIn } from './fence-names.js'
 import { rules } from './lint/plugin.js'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
@@ -34,5 +34,5 @@ if (dangling.length > 0) {
   process.exit(1)
 }
 
-const cited = adrs.reduce((n, { text }) => n + [...text.matchAll(ENFORCED_BY)].length, 0)
+const cited = adrs.reduce((n, { text }) => n + citedIn(text).length, 0)
 console.log(`every one of ${cited} "Enforced by" in docs/adr/ names a check that exists`)

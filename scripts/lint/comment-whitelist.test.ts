@@ -66,6 +66,10 @@ tester.run('roma/comment-whitelist [fence:comment-whitelist]', commentWhitelist,
       errors: [{ messageId: 'citation' }],
     },
     {
+      code: `// Enforced by \`${REAL}\` and \`fence:does-not-exist\`.\nconst u = 1`,
+      errors: [{ messageId: 'citation' }],
+    },
+    {
       code: '// Enforced by `vitest`.\nconst v = 1',
       errors: [{ messageId: 'citation' }],
     },

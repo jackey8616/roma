@@ -41,6 +41,27 @@ describe('an ADR that says a check enforces it [fence:adr-enforcers-exist]', () 
     expect(danglingEnforcers(adrs, FENCES)).toMatchObject([{ line: 1, name: 'fence:gone' }])
   })
 
+  it('checks every name a citation lists, not only the first [fence:every-cited-name-resolves]', () => {
+    const why =
+      'Each name in "Enforced by `a`, `b` and by `c`" must resolve (ADR-0031). Reading only the ' +
+      'first lets a paragraph cite a renamed or deleted check after a real one, and still pass.'
+    const adrs = [
+      { file: 'a.md', text: 'Enforced by `fence:held`, `fence:gone-1` and by `fence:gone-2`.' },
+      { file: 'b.md', text: 'Enforced by `fence:held` and `fence:gone-3`.' },
+    ]
+
+    expect(
+      danglingEnforcers(adrs, FENCES).map((d) => d.name),
+      why,
+    ).toEqual(['fence:gone-1', 'fence:gone-2', 'fence:gone-3'])
+  })
+
+  it('stops the list where the prose goes on about something else', () => {
+    const adrs = [{ file: 'a.md', text: 'Enforced by `fence:held`, in `src/` outside its tests.' }]
+
+    expect(danglingEnforcers(adrs, FENCES)).toEqual([])
+  })
+
   it('refuses a name that is not a check at all', () => {
     const adrs = [{ file: 'a.md', text: 'Enforced by `code review`.' }]
 

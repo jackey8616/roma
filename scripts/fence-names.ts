@@ -18,8 +18,25 @@ import { globSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import freeRun from '../vitest.config.js'
 
-/** How a comment or an ADR says which check holds a rule. */
-export const ENFORCED_BY = /Enforced by\s+`([^`]+)`/g
+/**
+ * How a comment or an ADR says which checks hold a rule: `Enforced by` and one
+ * or more names in backticks, joined by commas, `and` or `and by`.
+ */
+export const ENFORCED_BY =
+  /Enforced by\s+(`[^`]+`(?:\s*(?:,\s*(?:and\s+)?|and\s+)(?:by\s+)?`[^`]+`)*)/g
+
+/** One name a citation gives, and where in the text its citation starts. */
+export interface Cited {
+  readonly name: string
+  readonly index: number
+}
+
+/** Every name every `Enforced by` in `text` cites, not only the first of each. */
+export function citedIn(text: string): Cited[] {
+  return [...text.matchAll(ENFORCED_BY)].flatMap((match) =>
+    [...match[1]!.matchAll(/`([^`]+)`/g)].map(([, name]) => ({ name: name!, index: match.index })),
+  )
+}
 
 /** The checks that exist, and where each one lives. */
 export interface Fences {
