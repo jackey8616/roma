@@ -397,7 +397,7 @@ a process, the process ends for reasons the Caller cannot observe, and the next
 one starts on the pin. The result is not model switching but a setting that
 reverts at random. It is also refused by the Readout membership rule as written —
 "changes no state of the Session or of Claude Code" — and ADR-0012 names `/model`
-specifically as a string that must not be relayed.
+specifically as a string that must not be relayed. *Not enforced (ADR-0031).*
 
 **Relay it *and* remember it,** so a live process switches without a cold start
 and the choice is re-applied at the next spawn. Rejected, though it is the only

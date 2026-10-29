@@ -495,7 +495,7 @@ description on every spawn, where the append pays nothing; and a Session that
 does use it pays the description, the nudge, the body once invoked, *and* a Skill
 tool call whose round trip is spent on the output side. There is no lazy case to
 win: caveman has to shape the first sentence, so the body is loaded before the
-first response or it is useless. The append is cheaper in both states.
+first response or it is useless. The append is cheaper in both states. *Not enforced (ADR-0031).*
 
 **Append the ruleset unedited.** Rejected: see the table above. It would make
 `/caveman` report a state the model had abandoned and make roma refuse two names

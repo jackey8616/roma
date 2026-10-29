@@ -286,6 +286,42 @@ describe('naming a Session versus reaching it again', () => {
     })
   })
 
+  describe('the refusal it logs [fence:refusal-keeps-both-halves]', () => {
+    const WHY =
+      'The resume-lost record must carry both what the CLI wrote on stderr and the ' +
+      "ending's own reason, each once (ADR-0005: the Operator Log is what roma decided, " +
+      'and why). stderr alone loses the reason once the CLI writes a warning first; the ' +
+      'reason alone throws away the only clue to a refusal nobody has met yet (#107).'
+
+    async function refusalAfter(stderr: string): Promise<string> {
+      const { pool, workRoot, processFor, log } = newPool()
+      spawnedBefore(workRoot, A)
+      const turn = pool.send(A, 'hello')
+      await flush()
+      if (stderr !== '') processFor(A).emitStderr(stderr)
+      feed(processFor(A), RESUME_LOST)
+      await flush()
+      feed(processFor(A), OK)
+      await turn
+      const record = log.find((entry) => entry.event === 'resume-lost')
+      return record !== undefined && 'refusal' in record ? record.refusal : ''
+    }
+
+    it('keeps a warning the CLI wrote first, and the reason after it', async () => {
+      const refusal = await refusalAfter('Warning: an unrelated deprecation\n')
+
+      expect(refusal, WHY).toContain('Warning: an unrelated deprecation')
+      expect(refusal, WHY).toContain('No conversation found')
+    })
+
+    it('does not repeat a reason stderr already carried', async () => {
+      const said = 'No conversation found with session ID: a21816d1-937a-4916-a51e-f9f21b0c0950'
+      const refusal = await refusalAfter(`${said}\n`)
+
+      expect(refusal.split(said).length - 1, WHY).toBe(1)
+    })
+  })
+
   // The other thing the terminal-event ordering changes, and the one nothing
   // else would catch. A `ClaudeExitedError` correction is by definition a
   // process that has already gone; this one is a process the pool has heard

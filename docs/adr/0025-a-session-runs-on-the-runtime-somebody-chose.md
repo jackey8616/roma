@@ -116,7 +116,7 @@ availability:
   enforced in `src/session-pool.ts`, which takes the session id off what the
   CLI said and "never off the transcript's own path — that path is undocumented
   and Claude Code's to change". Codex's rollout files are the same kind of
-  thing and inherit the same refusal.
+  thing and inherit the same refusal. *Not enforced (ADR-0031).*
 
 ## The offer
 

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Enforced by `fence:no-verify-is-refused`.
+set -e
+npm run --silent lint
+npm run --silent check:adr-enforcers

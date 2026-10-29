@@ -260,11 +260,7 @@ export class Attempts {
    * parks — so the last one is always the Attempt the Task ended on: the answer
    * where there is one, and the last thing tried where there is not.
    *
-   * Kept in the order the Attempts happened rather than grouped by credential,
-   * which is the whole reason this is a list. Grouped, the only order left is
-   * which credential *first* paid, and a Task blocked on the Shared Window,
-   * rerun on Overflow, blocked again, and answered by the window coming back
-   * names Overflow — the one credential of the two that produced nothing.
+   * Enforced by `fence:answered-by-the-last-attempt`.
    */
   answeredOn(): CredentialKind | null {
     return this.#made.at(-1)?.credential ?? null

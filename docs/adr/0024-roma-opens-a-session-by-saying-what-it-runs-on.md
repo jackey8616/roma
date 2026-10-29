@@ -249,7 +249,7 @@ was lost.
 **The Acknowledgement's first line, or its first frame only.** Rejected above. The
 first-frame variant satisfies the words "roma's first reply says it" and loses the
 sentence five seconds later, which is worse than not saying it: a notice nobody can
-scroll back to is a notice that was never given.
+scroll back to is a notice that was never given. *Not enforced (ADR-0031).*
 
 **Prefixed to the first Result.** Rejected. The information's whole value is being
 in time to change the answer, and this delivers it after the answer.

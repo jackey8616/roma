@@ -1261,14 +1261,7 @@ function sameTerms(
   )
 }
 
-/**
- * How the CLI refused, for the Operator Log: everything it wrote, plus the
- * reason where that is not already in it.
- *
- * Both halves, never one: stderr alone loses the reason as soon as the process
- * writes a warning first, and the reason alone throws away the only clue there
- * is about a refusal nobody has met yet.
- */
+/** How the CLI refused, for the Operator Log. Enforced by `fence:refusal-keeps-both-halves`. */
 function refusalOf(stderr: string, reason: string): string {
   if (stderr.includes(reason)) return stderr
   if (stderr === '') return reason

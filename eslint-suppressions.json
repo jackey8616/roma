@@ -1,0 +1,302 @@
+{
+  "src/attempts.ts": {
+    "roma/comment-whitelist": {
+      "count": 15
+    }
+  },
+  "src/attribution.ts": {
+    "roma/comment-whitelist": {
+      "count": 7
+    }
+  },
+  "src/audit-log.ts": {
+    "roma/comment-whitelist": {
+      "count": 75
+    }
+  },
+  "src/build-env.ts": {
+    "roma/comment-whitelist": {
+      "count": 10
+    }
+  },
+  "src/caveman.ts": {
+    "roma/comment-whitelist": {
+      "count": 2
+    }
+  },
+  "src/channels/discord/binding.ts": {
+    "roma/comment-whitelist": {
+      "count": 5
+    }
+  },
+  "src/channels/discord/discord-adapter.ts": {
+    "roma/comment-whitelist": {
+      "count": 68
+    }
+  },
+  "src/channels/discord/discord-events.ts": {
+    "roma/comment-whitelist": {
+      "count": 49
+    }
+  },
+  "src/channels/discord/env-config.ts": {
+    "roma/comment-whitelist": {
+      "count": 2
+    }
+  },
+  "src/channels/discord/gateway-transport.ts": {
+    "roma/comment-whitelist": {
+      "count": 66
+    }
+  },
+  "src/channels/discord/http-discord-api.ts": {
+    "roma/comment-whitelist": {
+      "count": 25
+    }
+  },
+  "src/channels/discord/render.ts": {
+    "roma/comment-whitelist": {
+      "count": 43
+    }
+  },
+  "src/channels/google-chat/binding.ts": {
+    "roma/comment-whitelist": {
+      "count": 16
+    }
+  },
+  "src/channels/google-chat/chat-events.ts": {
+    "roma/comment-whitelist": {
+      "count": 62
+    }
+  },
+  "src/channels/google-chat/env-config.ts": {
+    "roma/comment-whitelist": {
+      "count": 1
+    }
+  },
+  "src/channels/google-chat/google-chat-adapter.ts": {
+    "roma/comment-whitelist": {
+      "count": 37
+    }
+  },
+  "src/channels/google-chat/http-chat-api.ts": {
+    "roma/comment-whitelist": {
+      "count": 5
+    }
+  },
+  "src/channels/google-chat/pubsub-transport.ts": {
+    "roma/comment-whitelist": {
+      "count": 16
+    }
+  },
+  "src/channels/google-chat/render.ts": {
+    "roma/comment-whitelist": {
+      "count": 49
+    }
+  },
+  "src/channels/main.ts": {
+    "roma/comment-whitelist": {
+      "count": 33
+    }
+  },
+  "src/claude-session.ts": {
+    "roma/comment-whitelist": {
+      "count": 27
+    }
+  },
+  "src/cloud/cloud-token.ts": {
+    "roma/comment-whitelist": {
+      "count": 1
+    }
+  },
+  "src/cloud/env-config.ts": {
+    "roma/comment-whitelist": {
+      "count": 6
+    }
+  },
+  "src/cloud/google-cloud-minter.ts": {
+    "roma/comment-whitelist": {
+      "count": 10
+    }
+  },
+  "src/cloud/reach.ts": {
+    "roma/comment-whitelist": {
+      "count": 12
+    }
+  },
+  "src/commands.ts": {
+    "roma/comment-whitelist": {
+      "count": 5
+    }
+  },
+  "src/compaction.ts": {
+    "roma/comment-whitelist": {
+      "count": 11
+    }
+  },
+  "src/core.ts": {
+    "roma/comment-whitelist": {
+      "count": 455
+    }
+  },
+  "src/documents/document-token.ts": {
+    "roma/comment-whitelist": {
+      "count": 1
+    }
+  },
+  "src/documents/env-config.ts": {
+    "roma/comment-whitelist": {
+      "count": 5
+    }
+  },
+  "src/documents/google-document-minter.ts": {
+    "roma/comment-whitelist": {
+      "count": 31
+    }
+  },
+  "src/documents/reach.ts": {
+    "roma/comment-whitelist": {
+      "count": 22
+    }
+  },
+  "src/enclosures.ts": {
+    "roma/comment-whitelist": {
+      "count": 2
+    }
+  },
+  "src/env-config.ts": {
+    "roma/comment-whitelist": {
+      "count": 31
+    }
+  },
+  "src/fresh-tokens.ts": {
+    "roma/comment-whitelist": {
+      "count": 11
+    }
+  },
+  "src/github/announce.ts": {
+    "roma/comment-whitelist": {
+      "count": 2
+    }
+  },
+  "src/github/app-jwt.ts": {
+    "roma/comment-whitelist": {
+      "count": 7
+    }
+  },
+  "src/github/env-config.ts": {
+    "roma/comment-whitelist": {
+      "count": 2
+    }
+  },
+  "src/github/gh-shim.ts": {
+    "roma/comment-whitelist": {
+      "count": 17
+    }
+  },
+  "src/github/git-credential-shim.ts": {
+    "roma/comment-whitelist": {
+      "count": 14
+    }
+  },
+  "src/github/github-minter.ts": {
+    "roma/comment-whitelist": {
+      "count": 19
+    }
+  },
+  "src/github/reach.ts": {
+    "roma/comment-whitelist": {
+      "count": 16
+    }
+  },
+  "src/github/shims.ts": {
+    "roma/comment-whitelist": {
+      "count": 3
+    }
+  },
+  "src/progress-phrase.ts": {
+    "roma/comment-whitelist": {
+      "count": 20
+    }
+  },
+  "src/progress-reporter.ts": {
+    "roma/comment-whitelist": {
+      "count": 26
+    }
+  },
+  "src/reach.ts": {
+    "roma/comment-whitelist": {
+      "count": 3
+    }
+  },
+  "src/relays.ts": {
+    "roma/comment-whitelist": {
+      "count": 20
+    }
+  },
+  "src/serve.ts": {
+    "roma/comment-whitelist": {
+      "count": 24
+    }
+  },
+  "src/session-generation.ts": {
+    "roma/comment-whitelist": {
+      "count": 19
+    }
+  },
+  "src/session-id.ts": {
+    "roma/comment-whitelist": {
+      "count": 5
+    }
+  },
+  "src/session-pool.ts": {
+    "roma/comment-whitelist": {
+      "count": 123
+    }
+  },
+  "src/shared-window.ts": {
+    "roma/comment-whitelist": {
+      "count": 1
+    }
+  },
+  "src/shim-client.ts": {
+    "roma/comment-whitelist": {
+      "count": 9
+    }
+  },
+  "src/shim-server.ts": {
+    "roma/comment-whitelist": {
+      "count": 45
+    }
+  },
+  "src/shortcut.ts": {
+    "roma/comment-whitelist": {
+      "count": 20
+    }
+  },
+  "src/startup-self-check.ts": {
+    "roma/comment-whitelist": {
+      "count": 43
+    }
+  },
+  "src/startup.ts": {
+    "roma/comment-whitelist": {
+      "count": 137
+    }
+  },
+  "src/stream-events.ts": {
+    "roma/comment-whitelist": {
+      "count": 8
+    }
+  },
+  "src/task-queue.ts": {
+    "roma/comment-whitelist": {
+      "count": 14
+    }
+  },
+  "src/work-root.ts": {
+    "roma/comment-whitelist": {
+      "count": 8
+    }
+  }
+}

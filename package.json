@@ -18,13 +18,19 @@
     "format:check": "prettier --check .",
     "check:adr-collision": "tsx scripts/check-adr-collision.ts",
     "check:claude-code-drift": "tsx scripts/check-claude-code-drift.ts",
-    "check:claude-code-effort-matrix": "tsx scripts/check-claude-code-effort-matrix.ts"
+    "check:claude-code-effort-matrix": "tsx scripts/check-claude-code-effort-matrix.ts",
+    "lint": "eslint src",
+    "check:adr-enforcers": "tsx scripts/check-adr-enforcers.ts",
+    "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true"
   },
   "devDependencies": {
     "@types/node": "^22.18.13",
+    "eslint": "10.12.0",
+    "jiti": "2.7.0",
     "prettier": "3.9.6",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
+    "typescript-eslint": "8.71.2",
     "vitest": "^3.2.4"
   },
   "dependencies": {

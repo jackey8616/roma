@@ -120,17 +120,11 @@ rather than as a setting to be enabled in advance — people are poor at
 predicting which work will turn out to be interruptible, and are well placed to
 judge it once blocked.
 
-**Amended again — what a spent window looks like is still unmeasured, and the
-implementation says so.** Every capture in `test/fixtures/claude-stream/` reports
-`status: "allowed"`, including the one quoted above; measuring the other case
-means deliberately draining the window the whole team shares, which blocks
-everybody until it resets. So `spentUntil` in `src/quota.ts` reads *anything that
-is not `allowed`* as spent, and that one function is the whole of the guess —
-deliberately shaped to survive being wrong, since a status roma has never seen
-parks a Task and says so rather than running it into a wall. It also refuses to
-call the window spent when the event carries no `resetsAt`: a Task parked against
-a moment that never arrives waits for ever, and nothing would come and look at it
-again. Correct it there, and nowhere else, once somebody has seen one.
+**Amended again — only `rejected` is spent.** Enforced by
+`fence:only-rejected-is-spent`. An earlier amendment here read *anything that is
+not `allowed`* as spent; `allowed_warning` proved that wrong (#83), and the check
+is now the statement of the rule. A window that is spent but carries no
+`resetsAt` is not parked either, and the same check holds that.
 
 - Anyone may press it. Restricting it to an admin turns a person into an
   approval queue and leaves urgent work stuck whenever they are offline.
