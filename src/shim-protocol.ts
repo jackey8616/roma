@@ -20,10 +20,9 @@
  * first entry in CONTEXT.md's list of things not to call a Working Directory
  * (ADR-0022 §1).
  *
- * A closed union, which is what makes `Reaches` total by construction: adding a
- * member here is a compile error at the composition root until it is wired. That
- * is the friction ADR-0020 §8 priced and called correct, and it should not be
- * worked around.
+ * A closed union, so that adding a member is a compile error at the composition
+ * root until it is wired (ADR-0020 §8). Enforced by
+ * `fence:shim-credential-wanted-is-closed`.
  */
 export type CredentialWanted = 'code' | 'cloud' | 'documents'
 

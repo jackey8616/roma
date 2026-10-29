@@ -13,69 +13,22 @@ import { join } from 'node:path'
 /** ADR-0003: one working directory per Session, reclaimed after seven days idle. */
 const WORK_DIR_TTL_MS = 7 * 24 * 60 * 60_000
 
-/**
- * What a record of a Conversation's generation is called, next to the working
- * directories of the Sessions it names.
- *
- * A file, never a directory: `reclaimIdle` deletes directories nothing has used
- * for seven days and steps over everything else, so a directory here would be
- * reclaimed — sending the Conversation back to the Session it was moved off,
- * with the context `/clear` was used to drop.
- */
+/** Enforced by `fence:workroot-records-survive-the-sweep`. */
 const GENERATION_SUFFIX = '.generation'
 
-/**
- * What a record of a Session's Chosen Model is called, beside the generations.
- *
- * A file for the same reason, and the stakes are the same shape: reclaimed, a
- * Conversation that went quiet for seven days would come back on the Pinned
- * Model having asked for something else, at a moment nobody can observe.
- */
+/** Enforced by `fence:workroot-records-survive-the-sweep`. */
 const MODEL_SUFFIX = '.model'
 
-/**
- * What a record of a Session's Chosen Effort is called, beside the models.
- *
- * A file for the same reason, at higher stakes: reclaimed, a Conversation that
- * went quiet comes back at the Pinned Effort having asked for something else,
- * and nothing in the stream would say so — `system/init` carries no effort
- * field at all (ADR-0016).
- */
+/** Enforced by `fence:workroot-records-survive-the-sweep`. */
 const EFFORT_SUFFIX = '.effort'
 
-/**
- * What a record of a Session's Chosen Caveman is called, beside the efforts.
- *
- * A file for the same reason, at stakes of a third kind: reclaimed, a
- * Conversation that went quiet comes back on the Pinned Caveman having asked for
- * something else — and unlike the model and the effort, what that changes is how
- * roma *writes*. Somebody who turned it `off` to get a careful explanation would
- * get a terse one, and the evidence would be the prose itself rather than
- * anything anybody could point at (ADR-0030).
- */
+/** Enforced by `fence:workroot-records-survive-the-sweep`. */
 const CAVEMAN_SUFFIX = '.caveman'
 
-/**
- * What the record that a Session has had its Opening is called, beside the Cavemen.
- *
- * A file for the reason the other four are, and it is the one where the
- * contrast is the whole point: the Session Pool's spawn file says the same
- * Session has been started before and lives *inside* the Working Directory
- * precisely so the reclaim takes it, because a reclaimed Session must go on
- * being spawned as new. This one must survive exactly that sweep — a
- * Conversation quiet for a fortnight has forgotten nothing and is not opened
- * again (ADR-0024).
- */
+/** Enforced by `fence:workroot-records-survive-the-sweep`. */
 const OPENED_SUFFIX = '.opened'
 
-/**
- * "There is no record", told apart from every other way a read can fail.
- *
- * Its own function for one caller, and a name rather than a saving: it was three
- * callers before the read moved here. The name is the point — `catch { return
- * null }` is the bug it is spelled out to prevent, and `readRecord` is where
- * what that bug would cost is argued.
- */
+/** Enforced by `fence:workroot-unreadable-is-not-missing`. */
 function isMissing(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT'
 }
@@ -141,10 +94,8 @@ export class WorkRoot {
    * Enclosure as any other, and the Enclosure has to be written before the Turn
    * that reads it (ADR-0011).
    *
-   * Deliberately not a promise that the directory is there. Creating one is a
-   * spawn's business, and #105 is what happens when the two are confused: for as
-   * long as the directory's existence was the record that a Session existed,
-   * writing an Enclosure into it made roma resume a Session it had never run.
+   * Not a promise that the directory is there; creating one is a spawn's
+   * business. Enforced by `fence:workroot-session-dir-makes-nothing`.
    */
   sessionDir(sessionId: string): string {
     return join(this.#root, sessionId)
@@ -185,14 +136,9 @@ export class WorkRoot {
    * writing into it. Asked for rather than known: this module has no idea what a
    * process is, and the pool that does is the only caller.
    *
-   * Required rather than optional, so that forgetting it is a type error instead
-   * of an empty set — an empty set here deletes the directory out from under
-   * every running Turn.
+   * Required. Enforced by `fence:workroot-in-use-is-required`.
    *
-   * Files are stepped over, and that is the rule this module exists to hold:
-   * every record roma keeps about a Conversation sits beside these directories
-   * as a file, and a sweep that took them would drop a Session's Chosen Model on
-   * the floor while the Session itself was still being talked to.
+   * Files are stepped over. Enforced by `fence:workroot-records-survive-the-sweep`.
    *
    * What is deliberately left behind is the Transcript, and what that costs is
    * argued where it is recovered rather than restated here — see
@@ -273,9 +219,8 @@ export class WorkRoot {
    *
    * Null means the file is not there, which is the ordinary answer: almost every
    * Conversation has never used `/clear` and almost every Session runs on the
-   * Pinned Model. Every other failure throws, because a record that may exist and
-   * cannot be read is not the same as one nobody wrote, and answering "none" to
-   * both is how a Chosen Model disappears without anybody being told.
+   * Pinned Model. Every other failure throws. Enforced by
+   * `fence:workroot-unreadable-is-not-missing`.
    *
    * Trimmed here so that three callers do not each remember to.
    */
@@ -291,23 +236,9 @@ export class WorkRoot {
   }
 
   /**
-   * Write one record so that nothing can ever read half of it.
-   *
-   * Every reader of a record refuses one it cannot make sense of rather than
-   * guessing at it — a generation that is not a count, a model that is not on
-   * the Menu — and all of them are right to. None of those readers is here;
-   * they are the three classes in `session-generation.ts`, and this is the write
-   * that keeps them from ever having to defend against a torn line. That is not
-   * the same as the state being unreachable: a `writeFileSync` onto the live name leaves a third
-   * thing a reader can observe besides the old contents and the new, and a
-   * machine that loses power mid-write is what produces it. What the
-   * Conversation gets is a thread that stops working for a write nobody got
-   * wrong.
-   *
-   * A rename within one directory is atomic, so a reader sees the old record or
-   * the new one and never a part of either. The temporary name is in that same
-   * directory for exactly that reason: across filesystems a rename is a copy,
-   * and a copy is the thing being avoided.
+   * Write one record so that nothing can ever read half of it: a temporary name
+   * in the same directory, renamed over the record. Enforced by
+   * `fence:workroot-record-write-is-atomic`.
    *
    * What it can leave behind is a `.pending` file, where the power went between
    * the write and the rename. It is bounded — one per record, overwritten by the
@@ -331,11 +262,8 @@ export class WorkRoot {
    * Forget a record, whether or not there was one.
    *
    * `force` for the Session nobody ever moved, where there is nothing to delete
-   * and that is the state being asked for. Deliberately **not** `recursive`: a
-   * directory where a record should be is something roma did not put there and
-   * cannot read, so this throws rather than quietly removing it — and the
-   * Command answers that it failed instead of saying it moved a Session it did
-   * not.
+   * and that is the state being asked for. Throws on a directory where a record
+   * should be. Enforced by `fence:workroot-forget-is-not-recursive`.
    */
   forgetRecord(path: string): void {
     rmSync(path, { force: true })

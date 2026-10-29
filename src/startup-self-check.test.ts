@@ -3,8 +3,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildEnv, type Credential } from './build-env.js'
-import { PINNED_EFFORT, TERMINATE_GRACE_MS } from './claude-session.js'
 import {
+  PINNED_EFFORT,
+  TERMINATE_GRACE_MS,
+  TurnFailedError,
+  type ClaudeSession,
+  type Turn,
+} from './claude-session.js'
+import {
+  relayCommand,
   reportsEffort,
   startupSelfCheck,
   StartupSelfCheckFailed,
@@ -30,6 +37,20 @@ import {
  * than stopping there.
  */
 const DEAD_TOKEN = [...OK.slice(0, -1), ...FAILED.slice(-1)]
+
+/** A Turn that failed having said nothing at all. */
+const EMPTY_TURN: Turn = {
+  text: '',
+  costUsd: null,
+  durationMs: 0,
+  isError: true,
+  subtype: 'error_during_execution',
+  stopReason: null,
+  terminalReason: null,
+  turns: null,
+  outputTokens: null,
+  result: { type: 'result' },
+}
 
 const OAUTH: Credential = { kind: 'shared-window', oauthToken: 'token' }
 const OVERFLOW: Credential = { kind: 'overflow', apiKey: 'sk-ant-key' }
@@ -149,11 +170,19 @@ describe('the startup self-check', () => {
   // Both conditions at once, off the pre-pinning capture where they really did
   // co-occur. An operator told only about the model would go looking for a
   // config change that never happened.
-  it('reports every condition that failed, not only the first', async () => {
+  it('reports every condition that failed, not only the first [fence:startup-self-check-reports-every-failure]', async () => {
+    const why =
+      'The self-check must report every condition that failed, not stop at the first (#27). ' +
+      'They arrive together and are not independent: a stray key moves apiKeySource and can ' +
+      'take the model with it, and an operator told only about the model goes looking for a ' +
+      'config change that never happened.'
     const { check } = selfCheck({ events: STRAY_KEY })
 
     const { failures: failed } = await failures(check)
-    expect(failed.map((failure) => failure.condition)).toEqual(['credential', 'model'])
+    expect(
+      failed.map((failure) => failure.condition),
+      why,
+    ).toEqual(['credential', 'model'])
   })
 
   // The whole point of failing at init rather than at the end of the Turn. This
@@ -252,16 +281,58 @@ describe('the startup self-check', () => {
   // a token that fails with 401 on first use, so it is the obvious thing to
   // reach for the day someone decides this check is too slow to run at boot —
   // and it would pass in exactly the case that costs a morning to diagnose.
-  it('probes with roma’s own -p invocation, never an auth subcommand', async () => {
+  it('probes with roma’s own -p invocation, never an auth subcommand [fence:startup-self-check-probes-with-p]', async () => {
+    const why =
+      'The self-check must drive a live `-p` Turn, invoked exactly as roma invokes Sessions, ' +
+      'and never `claude auth status` (#27): that reports loggedIn: true for any non-empty ' +
+      'string, including a token that 401s on first use — the failure that costs a morning.'
     const { claude, check } = selfCheck()
     await check
 
-    expect(claude.lastSpawn.command).toBe('claude')
-    expect(claude.lastSpawn.args).toContain('-p')
-    expect(claude.lastSpawn.args).not.toContain('auth')
-    expect(claude.lastSpawn.args).toEqual(
+    expect(
+      claude.spawns.map(({ args }) => args.includes('auth')),
+      why,
+    ).not.toContain(true)
+    expect(claude.lastSpawn.command, why).toBe('claude')
+    expect(claude.lastSpawn.args, why).toContain('-p')
+    expect(claude.lastSpawn.args, why).not.toContain('auth')
+    expect(claude.lastSpawn.args, why).toEqual(
       expect.arrayContaining(['--model', 'claude-sonnet-5', '--output-format', 'stream-json']),
     )
+  })
+
+  it('runs the probe on a Session of its own, new every boot [fence:startup-self-check-probe-is-its-own-session]', async () => {
+    const why =
+      'The probe must run on a fresh Session id, spawned new and never resumed (#27). Nothing ' +
+      'roma serves is on it, so a probe Turn cannot land in anybody’s context — on a fixed or ' +
+      'real Session id, or resumed, it lands in a Transcript somebody else is reading.'
+    const first = selfCheck()
+    await first.check
+    const second = selfCheck()
+    await second.check
+    const idOf = ({ args }: { args: readonly string[] }) => args[args.indexOf('--session-id') + 1]
+
+    for (const { claude } of [first, second]) {
+      expect(claude.lastSpawn.args, why).toContain('--session-id')
+      expect(claude.lastSpawn.args, why).not.toContain('--resume')
+    }
+    expect(idOf(first.claude.lastSpawn), why).not.toBe(idOf(second.claude.lastSpawn))
+  })
+
+  it('refuses a Turn that completed with no system/init [fence:startup-self-check-refuses-without-init]', async () => {
+    const why =
+      'A probe Turn with no system/init event must refuse the boot as `init` (#27): apiKeySource ' +
+      'and the model are both read from it, so a stream without one would pass the self-check ' +
+      'having checked nothing.'
+    const { check } = selfCheck({
+      events: OK.filter((event) => !(event.type === 'system' && event['subtype'] === 'init')),
+    })
+
+    const { failures: failed } = await failures(check)
+    expect(
+      failed.map((failure) => failure.condition),
+      why,
+    ).toEqual(['init'])
   })
 
   // A probe process left behind would hold a Session nobody will ever send to —
@@ -359,18 +430,26 @@ describe('what the probe says about its effort', () => {
    * would have this check pass in exactly the case it exists to catch: `--effort`
    * missing from the spawn arguments altogether.
    */
-  it('does not accept an unpinned answer that happens to name the pinned level', async () => {
+  it('does not accept an unpinned answer that happens to name the pinned level [fence:startup-self-check-auto-vetoes]', async () => {
+    const why =
+      'An effort answer naming `auto` must disagree with every pinned level (#110). The build ' +
+      'says "Effort level: auto (currently high)" when nothing pinned one, and high is the ' +
+      'Pinned Effort of every deployment without ROMA_EFFORT — so a bare level-word match ' +
+      'passes on the default deployment exactly when --effort is missing (ADR-0016).'
     const { log, check } = selfCheck({ effortAnswer: EFFORT_ANSWERS.unpinned(PINNED_EFFORT) })
 
-    expect((await check).effort.agrees).toBe(false)
-    expect(log).toHaveLength(1)
+    expect((await check).effort.agrees, why).toBe(false)
+    expect(log, why).toHaveLength(1)
   })
 
   // `high` is inside `xhigh`, so a substring match would have a deployment
   // pinned at `high` accept a process reporting `xhigh`.
-  it('does not read xhigh as high', () => {
-    expect(reportsEffort('Current effort level: xhigh', 'high')).toBe(false)
-    expect(reportsEffort('Current effort level: xhigh', 'xhigh')).toBe(true)
+  it('does not read xhigh as high [fence:startup-self-check-effort-word-boundaries]', () => {
+    const why =
+      'The pinned level must be matched as a whole word, not a substring (#110): `high` is ' +
+      'inside `xhigh`, so a Session pinned at high would accept an answer of xhigh.'
+    expect(reportsEffort('Current effort level: xhigh', 'high'), why).toBe(false)
+    expect(reportsEffort('Current effort level: xhigh', 'xhigh'), why).toBe(true)
   })
 
   // A relay that failed is a disagreement roma cannot resolve rather than an
@@ -385,6 +464,25 @@ describe('what the probe says about its effort', () => {
     expect(log).toHaveLength(1)
   })
 
+  it.each([
+    ['a process that died', new Error('the process exited')],
+    ['a failed Turn that said nothing', new TurnFailedError(EMPTY_TURN)],
+  ])(
+    'answers null rather than throwing for %s [fence:startup-self-check-relay-never-throws]',
+    async (_, failure) => {
+      const why =
+        'relayCommand must answer null rather than throw when the process said nothing (#110): ' +
+        'its only caller is boot, and the effort question is the one condition that must never ' +
+        'refuse it (ADR-0016).'
+      const session = { send: () => Promise.reject(failure) } as unknown as ClaudeSession
+
+      expect(
+        await relayCommand(session, '/effort current').catch((error: unknown) => error),
+        why,
+      ).toBeNull()
+    },
+  )
+
   /**
    * The relay is under the same deadline the Turn was, and it must be.
    *
@@ -398,18 +496,33 @@ describe('what the probe says about its effort', () => {
    * continues" is the decision (ADR-0016) and a process too slow to answer a free
    * local command has failed nothing the boot depends on.
    */
-  it('gives up on a relay that never answers, and starts anyway', async () => {
+  it('gives up on a relay that never answers, and starts anyway [fence:startup-self-check-relay-under-the-deadline]', async () => {
+    const why =
+      'The effort relay must race the same deadline as the Turn, and the deadline must resolve ' +
+      'it to a disagreement rather than reject (#110, ADR-0016). Outside the timeout, a probe ' +
+      'that answers the Turn and then goes quiet holds boot open for ever; rejected, a prose ' +
+      'disagreement becomes a refusal to boot — an outage over thinking at the wrong depth.'
     vi.useFakeTimers()
     try {
       const { log, check } = selfCheck({ timeoutMs: 1_000, effortAnswer: null })
+      let settled = false
+      const outcome = check.finally(() => {
+        settled = true
+      })
+      outcome.catch(() => {})
       // Past the deadline, with the relay still outstanding. Without the race
-      // this promise never settles and the test times out instead.
+      // this promise never settles, which is the hang this test exists for.
       await vi.advanceTimersByTimeAsync(2_000)
-      const report = await check
+      expect(settled, why).toBe(true)
+      const report = await outcome.catch((error: unknown) =>
+        expect.unreachable(`${why}\n${String(error)}`),
+      )
 
-      expect(report.apiKeySource).toBe('none')
-      expect(report.effort).toMatchObject({ reported: null, agrees: false })
-      expect(log).toEqual([{ event: 'effort-unverified', pinned: PINNED_EFFORT, reported: null }])
+      expect(report.apiKeySource, why).toBe('none')
+      expect(report.effort, why).toMatchObject({ reported: null, agrees: false })
+      expect(log, why).toEqual([
+        { event: 'effort-unverified', pinned: PINNED_EFFORT, reported: null },
+      ])
     } finally {
       vi.useRealTimers()
     }

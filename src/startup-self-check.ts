@@ -28,15 +28,7 @@ const PROBE = 'Reply with OK and nothing else. Do not use any tools.'
  */
 const EFFORT_QUESTION = '/effort current'
 
-/**
- * The word roma's Pinned Effort is never allowed to be, however the sentence is
- * worded around it.
- *
- * The build says `Effort level: auto (currently high)` when nothing pinned one,
- * so a bare level-word match would pass on the default deployment. roma always
- * passes `--effort`, so an `auto` here is the wiring failure this exists to
- * catch, wearing the level's own clothes.
- */
+/** Enforced by `fence:startup-self-check-auto-vetoes`. */
 const UNPINNED = 'auto'
 
 /**
@@ -98,10 +90,8 @@ export interface SelfCheckFailure {
 /**
  * The self-check said no, and roma must not start.
  *
- * Carries every condition that failed rather than the first, because they arrive
- * together and they are not independent: a stray key moves `apiKeySource` and
- * can take the model with it, and an operator told only about the model would go
- * looking for a config change that never happened.
+ * Carries every condition that failed rather than the first. Enforced by
+ * `fence:startup-self-check-reports-every-failure`.
  */
 export class StartupSelfCheckFailed extends Error {
   readonly failures: readonly SelfCheckFailure[]
@@ -228,10 +218,7 @@ export interface StartupSelfCheckReport {
  * - **A `-p` default change to `--bare`**, which upstream intends: it requires an
  *   API key and would break subscription auth outright.
  *
- * **`claude auth status` cannot serve this purpose.** It reports
- * `loggedIn: true` for any non-empty string, including a token that fails with
- * 401 on first use — so it would wave through the one failure that costs a
- * morning to diagnose.
+ * Never `claude auth status`. Enforced by `fence:startup-self-check-probes-with-p`.
  *
  * Fails fast where it can. `system/init` carries both assertions and arrives
  * about half a second in, before the first API call, so a wrong credential is
@@ -250,8 +237,7 @@ export async function startupSelfCheck({
   log = writeToStderr,
 }: StartupSelfCheckOptions): Promise<StartupSelfCheckReport> {
   const session = new ClaudeSession({
-    // Its own Session, used once and never resumed. Nothing roma serves is on
-    // it, so a probe Turn cannot land in anybody's context.
+    // Enforced by `fence:startup-self-check-probe-is-its-own-session`.
     sessionId: randomUUID(),
     cwd,
     env,
@@ -296,25 +282,10 @@ export async function startupSelfCheck({
   try {
     session.start()
     const turn = await Promise.race([session.send(PROBE), refusedAtInit, expired])
-    // A Turn that completed without one means the field both assertions are made
-    // on was never in the stream. Silence here would be a self-check that passes
-    // by having checked nothing.
+    // Enforced by `fence:startup-self-check-refuses-without-init`.
     const { init } = reported
     if (init === null) throw new StartupSelfCheckFailed([noInit()])
-    // Last, and after both assertions, because it is the only condition here
-    // that does not block. Everything that can refuse the boot has refused by
-    // now, so nothing below can turn a disagreement about prose into an outage.
-    //
-    // Under the same deadline the Turn was, and spending it differently. `send`
-    // settles on a stream result or on the process dying, so a probe that
-    // answered the Turn and then never answers this would hold the boot open for
-    // ever — the one condition designed never to block would be the only one
-    // outside the timeout, and a check that exists to stop a hang would have
-    // become one. It must not *refuse* on the deadline either, so the deadline
-    // resolves this to null, which reads as a disagreement roma cannot resolve
-    // exactly as a failed relay does. Whatever the Turn left of the budget is
-    // what this gets, which is the right way round: the deadline is how long roma
-    // will spend booting, not how long each exchange may take.
+    // Enforced by `fence:startup-self-check-relay-under-the-deadline`.
     const reportedEffort = await Promise.race([
       relayCommand(session, EFFORT_QUESTION),
       expired.then<null, null>(
@@ -365,9 +336,7 @@ export async function startupSelfCheck({
  * is no second caller today, and that is worth saying out loud: it is written as
  * a primitive on the strength of what it is, not on the strength of a plan.
  *
- * **Null rather than a throw**, because the only caller must not fail on it. A
- * process that cannot answer a free local command has something wrong with it, and
- * saying so in the Operator Log is the whole of what roma does about that.
+ * Null rather than a throw. Enforced by `fence:startup-self-check-relay-never-throws`.
  */
 export async function relayCommand(
   session: ClaudeSession,
@@ -394,18 +363,10 @@ export async function relayCommand(
  * check that matched one of them would fire on a release that reworded it. What
  * it must fire on is a changed *level*.
  *
- * Word boundaries rather than a substring, because `high` is inside `xhigh` and
- * a bare `includes` would have a Session pinned at `high` accept an answer of
- * `xhigh`.
+ * As a whole word. Enforced by `fence:startup-self-check-effort-word-boundaries`.
  *
  * **`auto` disagrees with everything, and that is stricter than ADR-0016 wrote
- * down.** The ADR asks for the level word anywhere in the message; this adds one
- * word that vetoes. It is here because the loose rule alone proves nothing for
- * the commonest deployment there is: `Effort level: auto (currently high)` is
- * what the build says when nothing pinned an effort, it contains `high`, and
- * `high` is the Pinned Effort of everybody who has not set `ROMA_EFFORT` — so a
- * bare level-word match would pass in exactly the case the check exists to catch,
- * `--effort` missing from the spawn arguments altogether.
+ * down.** Enforced by `fence:startup-self-check-auto-vetoes`.
  *
  * The cost is a false disagreement if a release ever writes something like
  * `Current effort level: high (auto-selected)`, which is the prose-brittleness

@@ -1,13 +1,9 @@
 import { MINTER_SOCKET_VAR, SESSION_ID_VAR } from './shim-protocol.js'
 
 /**
- * The credential a Claude Code process runs under.
+ * The credential a Claude Code process runs under: one of the two, never both.
  *
- * A union rather than two optional fields, because the two are mutually
- * exclusive in fact and not only in intent: Claude Code resolves credentials in
- * precedence order, so a process handed both runs on one and silently changes
- * model (ADR-0003 measured claude-sonnet-5 under the OAuth token and
- * claude-opus-5[1m] the moment a stray ANTHROPIC_API_KEY appeared).
+ * Enforced by `fence:buildenv-one-credential-at-a-time`.
  */
 export type Credential =
   | { readonly kind: 'shared-window'; readonly oauthToken: string }
@@ -66,13 +62,7 @@ export interface BuildEnvOptions {
   /**
    * CLAUDE_CONFIG_DIR and CLAUDE_SECURESTORAGE_CONFIG_DIR, both pointed here.
    *
-   * Required, and required here rather than only at the caller that reads the
-   * environment: without it a process resolves credentials against whatever the
-   * host has — including a keychain login that does not exist inside a container
-   * — and writes its Transcript under the `HOME` this file passes through. Both
-   * are unconditional promises elsewhere (ADR-0002's isolation, ADR-0005's
-   * Transcript), and an option here is a way to break them that the type would
-   * not mention.
+   * Enforced by `fence:buildenv-config-dir-is-required`.
    */
   readonly configDir: string
   /** How this Session's tools reach roma for a credential. */
@@ -91,9 +81,7 @@ const PASSTHROUGH = ['PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'TMPDIR'] as const
  * Construct a Claude Code process environment explicitly.
  *
  * Nothing is inherited implicitly. A variable the host does not define is left
- * *absent* rather than set to an empty string — an empty string still occupies
- * its slot in credential precedence, which is the difference between "resolve
- * the next credential" and "fail with this one".
+ * absent. Enforced by `fence:buildenv-unset-stays-absent`.
  */
 export function buildEnv({
   credential,

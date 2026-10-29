@@ -182,14 +182,7 @@ export class ShimServer {
   ) => void
   readonly #taskFor: (sessionId: string) => string | null
   readonly #log: OperatorLog<ShimLogRecord>
-  /**
-   * The connections currently open, so that `close` can cut them.
-   *
-   * `net.Server.close` waits for every one of them, and unlike `http.Server`
-   * there is no `closeAllConnections` to ask for. Kept rather than hoped about,
-   * because a Shim that connects and never speaks would otherwise be the reason
-   * roma does not shut down.
-   */
+  /** Enforced by `fence:shim-close-cuts-open-connections`. */
   readonly #open = new Set<Socket>()
 
   private constructor(options: ShimServerOptions, server: Server) {
@@ -204,10 +197,8 @@ export class ShimServer {
   /**
    * Make the directory, take the socket, and start answering.
    *
-   * The stale socket is removed first. A container that was killed rather than
-   * stopped leaves the file behind, and `listen` on an existing path fails with
-   * EADDRINUSE — which would present as roma refusing to boot after every hard
-   * restart, for a file that nothing is listening on.
+   * A stale socket left by a boot that did not clean up is removed first.
+   * Enforced by `fence:shim-stale-socket-taken-over`.
    */
   static async listen(options: ShimServerOptions): Promise<ShimServer> {
     mkdirSync(dirname(options.socketPath), { recursive: true, mode: 0o700 })
@@ -236,11 +227,8 @@ export class ShimServer {
   /**
    * Stop answering, and take the socket file with it.
    *
-   * Open connections are cut rather than waited for. This runs after every
-   * Session's process is already dead, so anything still holding a connection is
-   * a Shim whose tool has nothing left to talk to — and `close` alone waits for
-   * every one of them, which would make a Shim that never disconnects the reason
-   * roma does not shut down.
+   * Open connections are cut rather than waited for. Enforced by
+   * `fence:shim-close-cuts-open-connections`.
    */
   async close(): Promise<void> {
     const closed = new Promise<void>((done) => this.#server.close(() => done()))
@@ -298,16 +286,7 @@ export class ShimServer {
     const reach = this.#reaches[credential]
 
     if (request.operation === 'erase') {
-      // Only `git` ever sends one — the Cloud Shortcut has nothing to hand back,
-      // because nothing it prints goes through a tool that could report the
-      // rejection. It is routed by the Reach all the same, so that a caller who
-      // does send one cannot drop the *other* credential by naming the wrong
-      // side: an agent could otherwise force a re-mint of every Session's
-      // Installation Token by erasing tokens labelled cloud.
-      //
-      // Ahead of the unavailable answer below, and deliberately: an erase for a
-      // credential roma has none of is a rejection of nothing, and it has always
-      // been recorded as `credential-rejected` rather than as a failure.
+      // Enforced by `fence:shim-erase-routed-by-reach`.
       if ('tokens' in reach && typeof request.token === 'string' && request.token !== '') {
         reach.tokens.discard(request.token)
       }
@@ -362,10 +341,7 @@ function readRequest(line: string): ShimRequest {
   if (operation !== 'get' && operation !== 'erase') {
     throw new Error(`unknown operation ${JSON.stringify(operation)}`)
   }
-  // Absent is `code`, which is what the two Credential Shims send and what every
-  // request sent before there was a second credential meant. A value that is not
-  // one of the three is refused rather than defaulted: defaulting it would answer
-  // a request for a credential roma does not have with one it does.
+  // Enforced by `fence:shim-unknown-credential-refused`.
   if (
     credential !== undefined &&
     credential !== 'code' &&

@@ -154,14 +154,9 @@
       "count": 8
     }
   },
-  "src/enclosures.ts": {
-    "roma/comment-whitelist": {
-      "count": 2
-    }
-  },
   "src/env-config.ts": {
     "roma/comment-whitelist": {
-      "count": 31
+      "count": 18
     }
   },
   "src/fresh-tokens.ts": {
@@ -261,7 +256,7 @@
   },
   "src/shim-server.ts": {
     "roma/comment-whitelist": {
-      "count": 45
+      "count": 30
     }
   },
   "src/shortcut.ts": {
@@ -271,7 +266,7 @@
   },
   "src/startup-self-check.ts": {
     "roma/comment-whitelist": {
-      "count": 43
+      "count": 23
     }
   },
   "src/startup.ts": {
@@ -291,7 +286,7 @@
   },
   "src/work-root.ts": {
     "roma/comment-whitelist": {
-      "count": 8
+      "count": 2
     }
   }
 }
