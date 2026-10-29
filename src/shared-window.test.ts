@@ -82,15 +82,18 @@ describe('deciding whether Overflow can even be offered', () => {
     ).toBe(true)
   })
 
-  // The same mistake as `spentUntil`'s, one field over. `overageStatus` carries
-  // the same three values, and `allowed_warning` on it means the account is
-  // close to its credit limit and may still spend. Withheld, somebody already
-  // waiting on a spent window is denied a valve that works.
-  it('is offered where overage is allowed but close to its limit', () => {
+  it('is offered where overage is allowed but close to its limit [fence:window-overflow-offered-on-warning]', () => {
+    const why =
+      'Overflow must be offered on overageStatus `allowed_warning` (ADR-0002, Overflow). It ' +
+      'carries the same three values as `status`: `allowed_warning` means the account is close ' +
+      'to its credit limit and may still spend — Claude Code reads it as "You\'re close to your ' +
+      'usage limit". Offering only on `allowed` withholds a valve that works from somebody ' +
+      'already waiting on a spent window, the mistake spentUntil made one field over (#83).'
     expect(
       overflowOffer(
         readSharedWindow(withStatus('rejected', { overageStatus: 'allowed_warning' }))!,
       ),
+      why,
     ).toBe(true)
   })
 

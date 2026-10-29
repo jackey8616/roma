@@ -46,17 +46,9 @@ export interface About {
   /**
    * Serialise this against its key, but do not count it against the cap.
    *
-   * For a free Relay (ADR-0012), and the two halves are answered differently
-   * because they are different rules. Serialisation is forced — two processes
-   * writing one Session file corrupt it, and a Relay needs that Session's
-   * process like anything else — so a Relay queues behind the Session's work
-   * and there is no way around it.
-   *
-   * The cap is a choice, and ADR-0003 argues it entirely in terms of model
-   * work: retry storms holding a slot for three minutes, one bad credential
-   * reaching "bot halted" on its own. A free Relay drives no Turn, spends nothing
-   * and cannot storm. Counted, three people asking what is going on could stop
-   * the work they are asking about.
+   * For a free Relay (ADR-0012). It still queues behind its Session's work:
+   * enforced by `fence:queue-relay-still-serialised`. It is not counted against
+   * the cap: enforced by `fence:queue-free-relay-uncapped`.
    *
    * It does not let processes multiply either: what bounds those is the Session
    * Pool's `MAX_RESIDENT`, whatever this says.
@@ -90,9 +82,8 @@ interface Waiting {
  * one Session file corrupt it. And **three Tasks run at once** across all
  * Sessions, because the machine and the Shared Window are shared.
  *
- * One queue for the whole of roma, not one per Channel: the cap is global, so a
- * queue held per Core would quietly become three Tasks *per Channel*. It is
- * shared exactly the way the Session Pool is, and for the same reason.
+ * One queue for the whole of roma, not one per Channel, shared exactly the way
+ * the Session Pool is. Enforced by `fence:queue-one-for-all-channels`.
  *
  * What it deliberately does not own is what a Task *is*. It takes a key and a
  * function, so nothing here knows about Sessions, Turns, or Conversations —
@@ -144,10 +135,8 @@ export class TaskQueue {
    *
    * Null covers two different things on purpose, because the answer is the same
    * either way and inventing a distinction would invite somebody to act on it: a
-   * key with nothing running, and a Task whose caller named none. What it must
-   * never do is guess — a credential request that belongs to no running Task is
-   * recorded as belonging to no Task rather than to the nearest one, which is the
-   * same rule the Audit Record applies when it writes a Turn down as unpriced.
+   * key with nothing running, and a Task whose caller named none. Never a guess.
+   * Enforced by `fence:queue-task-for-never-guesses`.
    */
   taskFor(key: string): string | null {
     return this.#busy.get(key)?.taskId ?? null
@@ -195,13 +184,7 @@ export class TaskQueue {
     }
   }
 
-  /**
-   * Take a slot for `key`, or report that there is not one to take.
-   *
-   * The serialisation check applies to everything and the cap check does not:
-   * an uncapped entry still cannot join a key that is busy, because that rule is
-   * about a file two processes must not both write.
-   */
+  /** Enforced by `fence:queue-relay-still-serialised`. */
   #claim(key: string, taskId: string | null, capped: boolean): boolean {
     if (capped && this.running >= this.#maxConcurrent) return false
     if (this.#busy.has(key)) return false
@@ -209,20 +192,7 @@ export class TaskQueue {
     return true
   }
 
-  /**
-   * Start whatever the queue can now start.
-   *
-   * Arrival order, stepping over a Task whose Session is busy: strict
-   * head-of-line order lets one chatty Conversation hold every other behind a
-   * Session that is simply not free yet.
-   *
-   * The slot is claimed here, never by the Task, so two admissions in one pass
-   * cannot both take the last one.
-   *
-   * Walks the whole list, never stopping at a full cap — an uncapped entry
-   * behind one is still admissible, and stopping would hold every free Relay
-   * hostage to exactly the busy period they exist to ask about.
-   */
+  /** Enforced by `fence:queue-pump-steps-over-a-busy-session`, `fence:queue-pump-claims-the-slot` and `fence:queue-pump-walks-past-full-cap`. */
   #pump(): void {
     for (let i = 0; i < this.#waiting.length;) {
       const next = this.#waiting[i]

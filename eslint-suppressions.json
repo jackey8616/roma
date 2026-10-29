@@ -1,7 +1,7 @@
 {
   "src/attempts.ts": {
     "roma/comment-whitelist": {
-      "count": 15
+      "count": 8
     }
   },
   "src/attribution.ts": {
@@ -11,7 +11,7 @@
   },
   "src/audit-log.ts": {
     "roma/comment-whitelist": {
-      "count": 75
+      "count": 73
     }
   },
   "src/build-env.ts": {
@@ -236,7 +236,7 @@
   },
   "src/serve.ts": {
     "roma/comment-whitelist": {
-      "count": 24
+      "count": 21
     }
   },
   "src/session-generation.ts": {
@@ -251,7 +251,7 @@
   },
   "src/session-pool.ts": {
     "roma/comment-whitelist": {
-      "count": 123
+      "count": 99
     }
   },
   "src/shared-window.ts": {
@@ -291,7 +291,7 @@
   },
   "src/task-queue.ts": {
     "roma/comment-whitelist": {
-      "count": 14
+      "count": 12
     }
   },
   "src/work-root.ts": {

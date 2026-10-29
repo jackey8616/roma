@@ -24,20 +24,7 @@ const MAX_RESIDENT = 10
 /** ADR-0003: idle processes are reaped after fifteen minutes. */
 const IDLE_REAP_MS = 15 * 60_000
 const RECLAIM_INTERVAL_MS = 60 * 60_000
-/**
- * The file that says this Session has been spawned before.
- *
- * Never the Working Directory existing, which is what this replaced: ADR-0011
- * writes an Enclosure before the Turn, so a first message carrying an attachment
- * made the directory and the next line read it as a Session that already
- * existed. Every later message then resumed a Transcript nobody had written
- * (#105).
- *
- * On disk, so the rule survives a restart; *inside* the Working Directory, so
- * the seven-day reclaim takes it along — a Session whose directory was
- * reclaimed must go on being spawned as new and recovered by
- * `transcript-survived`. Dot-prefixed to stay out of the agent's listing.
- */
+/** Enforced by `fence:pool-spawned-before-is-a-file`. */
 const SPAWN_FILE = '.roma-session'
 /**
  * What `claude --session-id` says when a transcript for that id already exists.
@@ -204,14 +191,7 @@ export type PoolLogRecord =
       readonly idleMs: number
     }
 
-/**
- * A spawn that guessed wrong about whether the Session exists, and what to do.
- *
- * `reason` is carried, never read off the process at write time: the refusal
- * roma meets in production settles the Turn from a terminal event, and stderr
- * arrives on a separate pipe with no guarantee of having landed. Without this
- * the record added for that case is blank in it.
- */
+/** Enforced by `fence:pool-refusal-reason-is-carried`. */
 interface Correction {
   readonly event: 'resume-lost' | 'transcript-survived'
   readonly resume: boolean
@@ -288,11 +268,8 @@ export type CredentialEnvs = Readonly<Partial<Record<CredentialKind, BuildSessio
  */
 export interface SessionModels {
   /**
-   * Carried so that this port and `SessionEfforts` stay distinct.
-   *
-   * Without it the two are one structural type, and the pool holds them in
-   * adjacent options — swapped, every process spawns with the effort as its
-   * model and nothing anywhere says so.
+   * Carried so that this port and `SessionEfforts` stay distinct. Enforced by
+   * `fence:pool-ports-are-distinct`.
    */
   readonly kind: 'model'
   inForce(sessionId: string): string
@@ -348,9 +325,8 @@ export interface SessionCavemen {
  * reads and `appendSystemPrompt` is what the argv carries. Both are here because
  * both are needed at a different moment — the append at the spawn, the level at
  * the swap, where a record naming several thousand characters of ruleset would be
- * unreadable. They are resolved together in `#acquire` and never separately, so
- * that the text a process is started with and the level a swap names it by can
- * never be two readings of one record.
+ * unreadable. They are resolved together in `#acquire` and never separately.
+ * Enforced by `fence:pool-caveman-read-once`.
  */
 export interface SpawnTerms {
   readonly credential: CredentialKind
@@ -359,11 +335,8 @@ export interface SpawnTerms {
   /** The Caveman level `appendSystemPrompt` below was rendered from. */
   readonly caveman: string
   /**
-   * Absent where there is nothing to append, and never empty for it: the flag is
-   * gated on this being `undefined` and never on it being `''` (`ClaudeSession`'s
-   * argv). What that costs whoever assembles the text — an empty part dropped
-   * before the join rather than trimmed after it — is argued at
-   * `#appendSystemPromptFor`, which is the one place that assembles it.
+   * Absent where there is nothing to append, and never empty for it. Enforced by
+   * `fence:pool-empty-append-is-absent`.
    */
   readonly appendSystemPrompt: string | undefined
 }
@@ -641,11 +614,8 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * How short the process serving this Session was asked to be, or null where
    * none is serving it.
    *
-   * The Resident's own answer and never `#cavemanFor`'s. Resolving it again
-   * would be a second reading of a record a `/caveman` can have moved since the
-   * spawn, and what the Audit Record this feeds needs is what a Turn ran at
-   * rather than what the Session is set to now (ADR-0030) — the pool is the only
-   * place the first of those exists.
+   * The Resident's own answer, never a fresh reading of the record. Enforced by
+   * `fence:pool-caveman-is-what-the-process-ran-at`.
    *
    * Null for a Session with no process: a Task stopped in the queue, a
    * Conversation roma could not name a Session for, a process that died with its
@@ -720,17 +690,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     )
   }
 
-  /**
-   * Run one Turn on a resident, correcting a spawn that guessed wrong once.
-   *
-   * `corrected` is what bounds that to once, and it has to be carried rather
-   * than inferred. Each correction flips the flag, so the *opposite* diagnosis
-   * becomes available to the retry — and a CLI that refuses whichever flag it is
-   * given would otherwise be answered with `--session-id`, `--resume`,
-   * `--session-id`, for as long as the pool is willing to spawn. `#spawn` is
-   * serialised through `#spawning`, so that loop would starve every other
-   * Session as well as this one.
-   */
+  /** Enforced by `fence:pool-correction-is-once`. */
   async #turn(resident: Resident, text: string, corrected = false): Promise<Turn> {
     resident.busy = true
     this.#cancelReap(resident)
@@ -795,9 +755,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * `/model` writes a record and tears nothing down.
    */
   async #acquire(sessionId: string, credential: CredentialKind): Promise<Resident> {
-    // Resolved once and used twice, never read twice: the append below is
-    // rendered from this very string, so the text a process is started with and
-    // the level a swap names it by cannot describe different records.
+    // Enforced by `fence:pool-caveman-read-once`.
     const caveman = this.#cavemanFor(sessionId)
     const terms: SpawnTerms = {
       credential,
@@ -847,31 +805,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     return this.#cavemen?.inForce(sessionId) ?? this.#caveman ?? CAVEMAN_OFF
   }
 
-  /**
-   * What this Session's next process is told about itself: what roma can reach,
-   * and how short to be.
-   *
-   * Assembled here rather than by the composition root, which is the whole of
-   * ADR-0030's first Consequence read forwards. Both halves were settled at boot
-   * until a Caveman could be chosen per Session; the announcements still are, and
-   * the ruleset is not, and the pool is the only thing that knows which Session
-   * is about to start.
-   *
-   * A blank line between the parts rather than a joined paragraph, because they
-   * are separate subjects — an agent skimming a system prompt reads a break as a
-   * change of one, which it is. The Caveman goes *after* every Reach on that same
-   * join: what roma can reach is what this Session may do, and how short to be is
-   * how it should answer, and the second is only useful once the first is read.
-   *
-   * **Never trim the join instead of dropping the empty parts before it.** An
-   * unavailable Reach announces nothing and an `off` Caveman renders nothing, and
-   * `--append-system-prompt` is gated on the value being absent rather than on
-   * its being empty — so a part joined and then tidied leaves a blank line on the
-   * argv of every Session in the deployment.
-   *
-   * Takes the level rather than the Session so that `#acquire` resolves the
-   * record once; `SpawnTerms` is where what that buys is argued.
-   */
+  /** Enforced by `fence:pool-reaches-before-the-ruleset` and `fence:pool-empty-parts-dropped-before-join`. */
   #appendSystemPromptFor(caveman: string): string | undefined {
     const said = [...this.#announcements, cavemanRuleset(caveman)]
       .filter((part) => part !== '')
@@ -881,8 +815,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
 
   async #spawn(sessionId: string, terms: SpawnTerms, resume?: boolean): Promise<Resident> {
     const spawned = this.#spawning.then(() => this.#spawnNow(sessionId, terms, resume))
-    // The queue itself never carries a rejection onward: a Session that failed
-    // to start is that caller's problem, not the next one's.
+    // Enforced by `fence:pool-failed-spawn-does-not-block-the-next`.
     this.#spawning = spawned.catch(() => undefined)
     return await spawned
   }
@@ -988,10 +921,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       // is not in the middle of a Turn.
       const victim = [...this.#residents.values()].find((resident) => !resident.busy)
       if (victim === undefined) {
-        // Reached only if the Task queue's concurrency cap is ever raised to the
-        // resident cap or above, since only a running Task makes a Session busy.
-        // Refusing loudly beats evicting a Session out from under a running Turn,
-        // which would fail a Task that was doing nothing wrong.
+        // Enforced by `fence:pool-busy-session-is-never-evicted`.
         throw new Error(`every one of the ${this.#residents.size} resident Sessions is busy`)
       }
       await this.#retire(victim, 'evict')
@@ -1001,8 +931,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   /** End a resident's process because roma wants its slot or its idleness back. */
   async #retire(resident: Resident, event: 'evict' | 'reap'): Promise<void> {
     this.#leave(resident)
-    // Logged before the signal rather than after: this is the moment an operator
-    // is looking for, and a termination that hangs must not swallow it.
+    // Enforced by `fence:pool-eviction-logged-before-termination`.
     this.#log({
       event,
       sessionId: resident.sessionId,
@@ -1097,14 +1026,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     this.#abandon(resident, 'retries')
   }
 
-  /**
-   * Stop waiting on a Turn that is only retrying, and give its slot back.
-   *
-   * The process goes; the Turn is never interrupted. An interrupt is measured
-   * against a process that is *working* — ~20ms, and it stays alive — and says
-   * nothing about one asleep in a 35-second backoff, which is exactly the case
-   * this cap exists for. The Session survives on the transcript on disk.
-   */
+  /** Enforced by `fence:pool-storm-ends-the-process`. */
   #abandon(resident: Resident, limit: 'retries' | 'window'): void {
     const watch = resident.retry
     if (watch === null || resident.storm !== null) return
@@ -1126,10 +1048,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       status: watch.last.errorStatus,
       error: watch.last.error,
     })
-    // Not awaited: the Turn's own rejection is what the caller is waiting on,
-    // and it arrives with the process's exit. Termination cannot reject —
-    // signals and waiting — and the catch is here so it can never become an
-    // unhandled rejection either.
+    // Enforced by `fence:pool-detached-termination-is-caught`.
     void this.#terminate(resident).catch(() => {})
   }
 
@@ -1148,8 +1067,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   #scheduleReap(resident: Resident): void {
     this.#cancelReap(resident)
     const timer = setTimeout(() => {
-      // Cannot reject: termination is signals and waiting. The catch is here so
-      // that a timer can never turn into an unhandled rejection.
+      // Enforced by `fence:pool-detached-termination-is-caught`.
       void this.#retire(resident, 'reap').catch(() => {})
     }, IDLE_REAP_MS)
     timer.unref?.()
@@ -1188,19 +1106,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     }
   }
 
-  /**
-   * A spawn refused because the flag was wrong about whether the Session exists,
-   * and which flag to try instead. Null for every other failure.
-   *
-   * The record of existence can be wrong both ways, and left alone either one
-   * poisons the Conversation for good, because every later message repeats the
-   * same spawn: a Session that died before its transcript was written looks
-   * created, and one whose directory the reclaim took looks new.
-   *
-   * Read off what the CLI said, never off the transcript's own path — that path
-   * is undocumented and Claude Code's to change, and ADR-0006 keeps the pool
-   * from knowing the config directory at all. A wasted spawn exits immediately.
-   */
+  /** Enforced by `fence:pool-wrong-flag-recovers`. */
   #wrongFlag(resident: Resident, error: unknown): Correction | null {
     // The shape production actually produces, and the branch that fires in a
     // deployment: under `--output-format stream-json` the refusal is a terminal
@@ -1227,37 +1133,19 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   }
 }
 
-/**
- * Whether a running process was started for the terms the next Turn needs.
- *
- * A function rather than inline comparisons, so a term added to `SpawnTerms`
- * cannot be checked at the spawn and forgotten here — the failure with no
- * symptom, a Session served by a process started for something else.
- *
- * **The append is compared and `caveman` is deliberately not, which is the one
- * asymmetry here worth knowing before editing it.** The two are one fact in two
- * currencies and comparing either would answer the same today; the append is the
- * one compared because it is what the process's argv actually carries, so a
- * second per-Session part joined into it later is caught here for free rather
- * than needing to be remembered. `caveman` earns its place on `SpawnTerms` at
- * `#swap`, which needs a word an operator can read, and it cannot drift from the
- * append because `#acquire` renders one from the other.
- *
- * This comparison did not exist until ADR-0030, and leaving it out until then was
- * the right way round: `#swap` knew three reasons and fell through to
- * `credential`, so an append that differed would have ended a process and told an
- * operator the bill had moved when it had not. The fourth reason and this line
- * arrive together.
- */
-function sameTerms(
-  resident: Resident,
-  { credential, model, effort, appendSystemPrompt }: SpawnTerms,
-): boolean {
-  return (
-    resident.credential === credential &&
-    resident.model === model &&
-    resident.effort === effort &&
-    resident.appendSystemPrompt === appendSystemPrompt
+/** Enforced by `fence:pool-every-term-is-compared`. */
+const COMPARED: { readonly [Term in keyof SpawnTerms]: boolean } = {
+  credential: true,
+  model: true,
+  effort: true,
+  caveman: false,
+  appendSystemPrompt: true,
+}
+
+/** Enforced by `fence:pool-every-term-is-compared`. */
+function sameTerms(resident: Resident, terms: SpawnTerms): boolean {
+  return (Object.keys(COMPARED) as (keyof SpawnTerms)[]).every(
+    (term) => !COMPARED[term] || resident[term] === terms[term],
   )
 }
 

@@ -125,15 +125,27 @@ describe('which credential answered', () => {
 })
 
 describe('what a Task spent', () => {
-  it('keeps the two bills apart rather than summing them', () => {
+  const BILLS_APART =
+    'spentOn must count only the Attempts this credential paid for (ADR-0002: Overflow is ' +
+    'metered money under a cap, the Shared Window is not). Summed and filed under the ' +
+    'credential the Task ended on, the subscription’s share is charged to the Overflow cap, ' +
+    'which then refuses other people’s work over money nobody spent on a card, and the reply ' +
+    'shows it as what the Overflow decision cost (#56).'
+  const UNPRICED =
+    'Zero is a claim, made only where no message had gone by that point in the Task (ADR-0002, ' +
+    'the Audit Record is a floor). A Turn that began and reported nothing — a process that died, ' +
+    'a Retry Storm — spent real tokens nothing will name; `reported ?? 0`, or tracking whether a ' +
+    'message went per credential, reports that money and those tokens as free (#56, #192).'
+
+  it('keeps the two bills apart rather than summing them [fence:attempts-bills-kept-apart]', () => {
     const attempts = new Attempts('shared-window')
 
     attempted(attempts, turn({ costUsd: 0.02 }))
     attempts.payWith('overflow')
     attempted(attempts, turn({ costUsd: 0.03 }))
 
-    expect(attempts.spentOn('shared-window')).toMatchObject({ costUsd: 0.02 })
-    expect(attempts.spentOn('overflow')).toMatchObject({ costUsd: 0.03 })
+    expect(attempts.spentOn('shared-window'), BILLS_APART).toMatchObject({ costUsd: 0.02 })
+    expect(attempts.spentOn('overflow'), BILLS_APART).toMatchObject({ costUsd: 0.03 })
   })
 
   it('adds up the Attempts one credential made', () => {
@@ -158,7 +170,7 @@ describe('what a Task spent', () => {
   // is the same kind of number arriving the same way: a per-Turn delta, one per
   // Attempt, belonging to whichever credential paid for that Attempt. Summed
   // across the two, a metered record would claim output the subscription bought.
-  it('keeps the two bills’ output tokens apart, and adds each credential’s up', () => {
+  it('keeps the two bills’ output tokens apart, and adds each credential’s up [fence:attempts-bills-kept-apart]', () => {
     const attempts = new Attempts('shared-window')
 
     attempted(attempts, turn({ outputTokens: 200 }))
@@ -166,22 +178,22 @@ describe('what a Task spent', () => {
     attempts.payWith('overflow')
     attempted(attempts, turn({ outputTokens: 50 }))
 
-    expect(attempts.spentOn('shared-window').outputTokens).toBe(500)
-    expect(attempts.spentOn('overflow').outputTokens).toBe(50)
+    expect(attempts.spentOn('shared-window').outputTokens, BILLS_APART).toBe(500)
+    expect(attempts.spentOn('overflow').outputTokens, BILLS_APART).toBe(50)
   })
 
   // The pair the Audit Record has to be able to tell apart. Zero is a claim and
   // is only made where it is certain; a Turn that began and reported no usage
   // produced tokens nothing will ever name, and calling those nothing would
   // flatter whatever setting the month is being compared against.
-  it('produced nothing with certainty only where the message never went', () => {
+  it('produced nothing with certainty only where the message never went [fence:attempts-unpriced-is-not-free]', () => {
     const never = new Attempts('shared-window')
     neverSent(never)
     const unmeasured = new Attempts('shared-window')
     attempted(unmeasured, null)
 
-    expect(never.spentOn('shared-window').outputTokens).toBe(0)
-    expect(unmeasured.spentOn('shared-window').outputTokens).toBeNull()
+    expect(never.spentOn('shared-window').outputTokens, UNPRICED).toBe(0)
+    expect(unmeasured.spentOn('shared-window').outputTokens, UNPRICED).toBeNull()
   })
 
   // A Turn the build priced and said nothing else about. The two figures are
@@ -208,36 +220,36 @@ describe('what a Task spent', () => {
   })
 
   // The other way round is the one that would report money as free.
-  it('is unpriced rather than free where a Turn began and nothing priced it', () => {
+  it('is unpriced rather than free where a Turn began and nothing priced it [fence:attempts-unpriced-is-not-free]', () => {
     const attempts = new Attempts('shared-window')
 
     attempted(attempts, null)
 
-    expect(attempts.spentOn('shared-window').costUsd).toBeNull()
+    expect(attempts.spentOn('shared-window').costUsd, UNPRICED).toBeNull()
   })
 
   // Once a message has gone, nothing after it can claim the Task was free —
   // `null ?? 0` is `0`, so a later Attempt that never sent one would otherwise
   // overwrite the unpriced reading and report real tokens as free.
-  it('stays unpriced when a later Attempt never reached Claude Code', () => {
+  it('stays unpriced when a later Attempt never reached Claude Code [fence:attempts-unpriced-is-not-free]', () => {
     const attempts = new Attempts('shared-window')
 
     attempted(attempts, null)
     neverSent(attempts)
 
-    expect(attempts.spentOn('shared-window').costUsd).toBeNull()
+    expect(attempts.spentOn('shared-window').costUsd, UNPRICED).toBeNull()
   })
 
   // And the message having gone on the *other* credential still counts: the
   // question is whether this Task spent anything, not which bill it went on.
-  it('stays unpriced when the message went on another credential', () => {
+  it('stays unpriced when the message went on another credential [fence:attempts-unpriced-is-not-free]', () => {
     const attempts = new Attempts('shared-window')
 
     attempted(attempts, null)
     attempts.payWith('overflow')
     neverSent(attempts)
 
-    expect(attempts.spentOn('overflow').costUsd).toBeNull()
+    expect(attempts.spentOn('overflow').costUsd, UNPRICED).toBeNull()
   })
 
   it('keeps what earlier Attempts were priced at when a later one is not', () => {
@@ -292,6 +304,17 @@ describe('what a Task spent', () => {
 })
 
 describe('booking a wait on the Shared Window', () => {
+  const BOUNDED =
+    'A park must end: none where the event gives no `resetsAt`, and none after MAX_PARKS ' +
+    '(ADR-0002, Quota exhaustion). A Task parked against a moment that never arrives waits for ' +
+    'ever, and nothing else in roma comes back to look at it; a third "still blocked" lands on ' +
+    'a Conversation that stopped watching hours ago (#29).'
+  const CLEARED =
+    'Starting an Attempt must clear the last one’s reading of the Shared Window (ADR-0002). A ' +
+    'reading left behind has a `resetsAt` already passed, so a later failure carrying none of ' +
+    'its own — a dead process, a Retry Storm — parks against the past and reruns instantly, ' +
+    'for ever, each Attempt reported as the window being spent (#29).'
+
   it('quotes the reset time the provider gave', () => {
     expect(blocked(spent())).toBeDefined()
     expect(blocked(spent()).takePark()).toMatchObject({ resetsAt: RESETS_AT })
@@ -310,8 +333,8 @@ describe('booking a wait on the Shared Window', () => {
 
   // A Task parked against a moment that never arrives waits for ever, and
   // nothing else in roma would come and look at it.
-  it('owes no wait where the event will not say when the window comes back', () => {
-    expect(blocked(spent({ resetsAt: null })).takePark()).toBeNull()
+  it('owes no wait where the event will not say when the window comes back [fence:attempts-park-is-bounded]', () => {
+    expect(blocked(spent({ resetsAt: null })).takePark(), BOUNDED).toBeNull()
   })
 
   it('says whether the provider would sell overage, and not whether roma can', () => {
@@ -323,24 +346,24 @@ describe('booking a wait on the Shared Window', () => {
 
   // Two, and not because a parked Task is expensive — it holds no slot. A third
   // "still blocked" lands on a Conversation that stopped watching hours ago.
-  it('stops owing one after two', () => {
+  it('stops owing one after two [fence:attempts-park-is-bounded]', () => {
     const attempts = blocked(spent())
 
     expect(attempts.takePark()).not.toBeNull()
     blockedOn(attempts, spent())
     expect(attempts.takePark()).not.toBeNull()
     blockedOn(attempts, spent())
-    expect(attempts.takePark()).toBeNull()
+    expect(attempts.takePark(), BOUNDED).toBeNull()
   })
 
   // Not tidiness: the stale reading's `resetsAt` has already passed, so a later
   // failure carrying none of its own would park against a moment in the past.
-  it('forgets the last Attempt’s reading when the next one starts', () => {
+  it('forgets the last Attempt’s reading when the next one starts [fence:attempts-reading-cleared-at-start]', () => {
     const attempts = blocked(spent())
 
     attempted(attempts, null)
 
-    expect(attempts.takePark()).toBeNull()
+    expect(attempts.takePark(), CLEARED).toBeNull()
   })
 })
 
@@ -352,8 +375,13 @@ describe('how long to wait for the window', () => {
   // The floor, as a number rather than an interval to sit through: a reset time
   // already in the past would otherwise rerun the Task instantly, fail, and park
   // again, spinning as fast as Claude Code can start.
-  it('waits a minute at least, on a reset time that has already passed', () => {
-    expect(waitMsUntil(RESETS_AT, RESETS_AT * 1000 + 60_000)).toBe(60_000)
+  it('waits a minute at least, on a reset time that has already passed [fence:attempts-park-floor]', () => {
+    const why =
+      'A park waits at least MIN_PARK_MS (ADR-0002). A reset time already in the past — a ' +
+      'stale one from the provider, a clock that disagrees with theirs — otherwise reruns the ' +
+      'Task instantly; it fails, parks again, and spins as fast as Claude Code can start, ' +
+      'announcing itself on every Attempt (#29).'
+    expect(waitMsUntil(RESETS_AT, RESETS_AT * 1000 + 60_000), why).toBe(60_000)
   })
 })
 
@@ -364,15 +392,19 @@ describe('which credential pays', () => {
 
   // Overflow is taken on a Task that is already parked, so it moves the next
   // Attempt and cannot move the one already billed.
-  it('moves the next Attempt and not the one in flight', () => {
+  it('moves the next Attempt and not the one in flight [fence:attempts-pay-for-the-next]', () => {
+    const why =
+      'payWith must move the next Attempt, never the one in flight (ADR-0002, Overflow). ' +
+      'Overflow is taken on a Task already parked and applies to one Attempt; moving the one ' +
+      'in flight bills metered money for an Attempt the Shared Window was paying for (#56).'
     const attempts = new Attempts('shared-window')
 
     const paidBy = attempts.begins()
     attempts.payWith('overflow')
     attempts.ended(turn())
 
-    expect(paidBy).toBe('shared-window')
-    expect(attempts.answeredOn()).toBe('shared-window')
-    expect(attempts.begins()).toBe('overflow')
+    expect(paidBy, why).toBe('shared-window')
+    expect(attempts.answeredOn(), why).toBe('shared-window')
+    expect(attempts.begins(), why).toBe('overflow')
   })
 })

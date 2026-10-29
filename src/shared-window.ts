@@ -29,11 +29,7 @@ export function spentUntil(window: SharedWindow): number | null {
  *
  * `overageStatus` carries the same three values as `status` and they mean the
  * same things about a different pot, so `allowed_warning` is offered here too.
- * It says the account is close to its usage credit limit and may still spend —
- * Claude Code's own reading of the pair is "You're close to your usage limit",
- * a warning rather than a refusal. Declining to offer on it would withhold a
- * valve that works from somebody already waiting on a spent window, which is
- * the same mistake `spentUntil` above was making, one field over.
+ * Enforced by `fence:window-overflow-offered-on-warning`.
  *
  * `rejected` is the one that means no, and `overageDisabledReason` says which
  * kind of no — `no_limits_configured` in every capture roma holds.
