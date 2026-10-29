@@ -48,6 +48,14 @@ jobs:
 
       - run: npm run typecheck
 
+      # The comment whitelist (ADR-0031). Violations older than the rule are in
+      # eslint-suppressions.json, and a suppression nothing needs any more fails
+      # this step too, so the file only shrinks.
+      - run: npm run lint
+
+      # Every "Enforced by" in docs/adr/ names a check that exists (ADR-0031).
+      - run: npm run check:adr-enforcers
+
       # The default run: fast, free, deterministic. It cannot reach seam 2 —
       # those tests live in their own Vitest config, and `src/packaging.test.ts`
       # fails if any workflow here ever names one or is handed the token they

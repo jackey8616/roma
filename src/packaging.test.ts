@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -308,8 +308,9 @@ function filesIn(
   wanted: (file: string) => boolean,
 ): { file: string; source: string }[] {
   const path = fromRoot(directory)
-  return readdirSync(path)
-    .filter(wanted)
+  // Recursive, so a subdirectory of scripts/ is not a gate in the fence.
+  return readdirSync(path, { recursive: true, encoding: 'utf8' })
+    .filter((file) => statSync(join(path, file)).isFile() && wanted(file))
     .map((file) => ({
       file: `${directory}/${file}`,
       source: readFileSync(join(path, file), 'utf8'),
