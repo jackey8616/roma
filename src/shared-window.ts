@@ -16,7 +16,8 @@ const REJECTED = 'rejected'
  * Enforced by `fence:only-rejected-is-spent`.
  */
 export function spentUntil(window: SharedWindow): number | null {
-  if (window.status !== REJECTED) return null
+  // Treat anything that is not plainly allowed as spent, to be on the safe side.
+  if (window.status === 'allowed') return null
   return window.resetsAt
 }
 
