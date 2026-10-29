@@ -180,16 +180,56 @@ describe('the image defaults the one path whose loss is by design', () => {
     // Transcript, which ADR-0005 says is the only account there is of what an
     // agent did and ADR-0006 says roma deletes nothing from.
     //
-    // Both directories are made and owned all the same, which is a different
-    // act: an empty named volume mounted over a path the image never created
-    // comes out `root:root` and roma runs as `node`. So this looks for the
-    // assignment rather than the name — and for both spellings of one, because
-    // `ENV NAME value` without the `=` is legacy Dockerfile syntax that still
-    // works and would otherwise slip past.
+    // This looks for the assignment rather than the name — and for both
+    // spellings of one, because `ENV NAME value` without the `=` is legacy
+    // Dockerfile syntax that still works and would otherwise slip past.
     expect(dockerfile()).not.toMatch(/ROMA_AUDIT_ROOT[\s=]/)
     expect(dockerfile()).not.toMatch(/ROMA_CLAUDE_CONFIG_DIR[\s=]/)
   })
+
+  it.each(['/var/lib/roma/audit', '/var/lib/roma/claude'])(
+    'makes %s and gives it to node [fence:volume-paths-owned-by-node]',
+    (path) => {
+      const why =
+        `The image must mkdir ${path} and chown it to node:node (ADR-0007, "stays silent ` +
+        'on the two that are data"). Docker materialises an empty named volume over a path ' +
+        'the image never created as root:root, and roma runs as node, so the first Audit ' +
+        'Record or Transcript is lost to EACCES once the volume clears the startup refusal (#54).'
+      const runs = instructions().filter((line) => line.startsWith('RUN '))
+      const made = runs.find((run) => words(run, 'mkdir').includes(path))
+
+      expect(made, why).toBeDefined()
+      const owners = words(made ?? '', 'chown').filter((w) => !w.startsWith('-'))
+      expect(owners[0], why).toBe('node:node')
+      expect(
+        owners.slice(1).some((owned) => path === owned || path.startsWith(`${owned}/`)),
+        why,
+      ).toBe(true)
+    },
+  )
 })
+
+/** The Dockerfile's instructions, one per entry, with line continuations joined. */
+function instructions(): string[] {
+  return dockerfile()
+    .replace(/\\\n/g, ' ')
+    .split('\n')
+    .map((line) => line.trim())
+}
+
+/** The arguments of each `command` inside one shell instruction, up to the next `&&`. */
+function words(run: string, command: string): string[] {
+  return run
+    .split('&&')
+    .map((step) =>
+      step
+        .trim()
+        .replace(/^RUN\s+/, '')
+        .split(/\s+/),
+    )
+    .filter(([head]) => head === command)
+    .flatMap(([, ...rest]) => rest)
+}
 
 /**
  * The two lists that are a person's judgement about one Claude Code build.

@@ -137,23 +137,25 @@ interface RelayEntry {
  *
  * The table never grows on its own, which is the whole of the guarantee.
  */
-const RELAYS: Readonly<Record<string, RelayEntry>> = {
-  // Show current context usage: how full this Session's context window is.
-  '/context': { cost: 'free', takesArgument: false },
-  // Replace this Session's conversation with a summary, keeping what the Caller
-  // asked to keep. The first entry that costs money, and the whole of ADR-0018.
-  //
-  // The only entry that takes an argument, because dropping it would leave
-  // `/compact` differing from auto-compaction only in *timing* — and "what gets
-  // kept" is the other half of the want, the half upstream's own warning
-  // advertises: "Autocompact will trigger soon, which discards older messages.
-  // Use `/compact` now to control what gets kept."
-  //
-  // One spelling: the pinned build's descriptor declares no aliases, so
-  // ADR-0013's fault — a spelling roma leaves unclaimed is one somebody is
-  // billed for — has nothing to bite on here.
-  '/compact': { cost: 'paid', takesArgument: true },
-}
+const RELAYS: ReadonlyMap<string, RelayEntry> = new Map(
+  Object.entries({
+    // Show current context usage: how full this Session's context window is.
+    '/context': { cost: 'free', takesArgument: false },
+    // Replace this Session's conversation with a summary, keeping what the Caller
+    // asked to keep. The first entry that costs money, and the whole of ADR-0018.
+    //
+    // The only entry that takes an argument, because dropping it would leave
+    // `/compact` differing from auto-compaction only in *timing* — and "what gets
+    // kept" is the other half of the want, the half upstream's own warning
+    // advertises: "Autocompact will trigger soon, which discards older messages.
+    // Use `/compact` now to control what gets kept."
+    //
+    // One spelling: the pinned build's descriptor declares no aliases, so
+    // ADR-0013's fault — a spelling roma leaves unclaimed is one somebody is
+    // billed for — has nothing to bite on here.
+    '/compact': { cost: 'paid', takesArgument: true },
+  }),
+)
 
 /** One Relay as it was typed: which command, what followed it, what it costs. */
 export interface RelayRequest {
@@ -218,19 +220,9 @@ export function readRelay(text: string): RelayRequest | null {
   return { command, argument: split[2] ?? '', cost: head.cost }
 }
 
-/**
- * One entry of the table, and **only** an entry roma wrote there.
- *
- * Not `RELAYS[word]`: an object literal inherits `Object.prototype`, so
- * `RELAYS['constructor']` answers with a function, and the single word
- * `constructor` would go on the wire as a free Relay and be audited as one.
- *
- * `Object.hasOwn` rather than a null-prototype table, because the guard belongs
- * at the lookup — a table declared safe has to be traced back to its
- * declaration, and a second table added beside it inherits nothing.
- */
+/** One entry of the table. Enforced by `fence:table-lookup-ignores-the-prototype`. */
 function entryFor(spelling: string): RelayEntry | undefined {
-  return Object.hasOwn(RELAYS, spelling) ? RELAYS[spelling] : undefined
+  return RELAYS.get(spelling)
 }
 
 /**
@@ -242,5 +234,5 @@ function entryFor(spelling: string): RelayEntry | undefined {
  * cost class against the pinned build.
  */
 export function relaySpellings(): readonly string[] {
-  return Object.keys(RELAYS)
+  return [...RELAYS.keys()]
 }

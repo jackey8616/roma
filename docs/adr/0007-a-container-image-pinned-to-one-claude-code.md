@@ -151,6 +151,8 @@ error — the same data gone by a longer route, and gone at the point where the
 refusal has stopped protecting anything. A bind mount carries the host's
 ownership regardless, so the README says to `chown` both.
 
+Enforced by `fence:volume-paths-owned-by-node`.
+
 ### The image is verified against two questions, and roma is not booted in CI
 
 roma cannot be started in CI. `startGoogleChatRoma` needs a Shared Window token,

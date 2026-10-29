@@ -83,20 +83,22 @@ export interface CommandRequest {
  * the rule above cannot be what put it here; `Command` is where its own reason
  * is written down.
  */
-const COMMANDS: Readonly<Record<string, Command>> = {
-  '/stop': 'stop',
-  '/clear': 'clear',
-  '/reset': 'clear',
-  '/new': 'clear',
-  '/model': 'model',
-  '/effort': 'effort',
-  '/caveman': 'caveman',
-  '/config': 'config',
-  '/settings': 'config',
-  '/usage': 'usage',
-  '/cost': 'usage',
-  '/stats': 'usage',
-}
+const COMMANDS: ReadonlyMap<string, Command> = new Map(
+  Object.entries({
+    '/stop': 'stop',
+    '/clear': 'clear',
+    '/reset': 'clear',
+    '/new': 'clear',
+    '/model': 'model',
+    '/effort': 'effort',
+    '/caveman': 'caveman',
+    '/config': 'config',
+    '/settings': 'config',
+    '/usage': 'usage',
+    '/cost': 'usage',
+    '/stats': 'usage',
+  }),
+)
 
 /**
  * The heads that may be followed by an argument, and nothing else may.
@@ -115,12 +117,14 @@ const COMMANDS: Readonly<Record<string, Command>> = {
  * deciding what roma would answer about five skills it does not install
  * (ADR-0030).
  */
-const TAKES_AN_ARGUMENT: Readonly<Record<string, Command>> = {
-  '/model': 'model',
-  '/effort': 'effort',
-  '/caveman': 'caveman',
-  '/config': 'config',
-}
+const TAKES_AN_ARGUMENT: ReadonlyMap<string, Command> = new Map(
+  Object.entries({
+    '/model': 'model',
+    '/effort': 'effort',
+    '/caveman': 'caveman',
+    '/config': 'config',
+  }),
+)
 
 /**
  * Every spelling roma claims, in the order the table declares them.
@@ -134,7 +138,7 @@ const TAKES_AN_ARGUMENT: Readonly<Record<string, Command>> = {
  * these eight and would have gone on passing while covering half the table.
  */
 export function commandSpellings(): readonly string[] {
-  return Object.keys(COMMANDS)
+  return [...COMMANDS.keys()]
 }
 
 /**
@@ -184,7 +188,7 @@ export function commandFor(
 export function readCommand(text: string): CommandRequest | null {
   const message = text.trim().toLowerCase()
 
-  const whole = named(COMMANDS, message)
+  const whole = COMMANDS.get(message)
   if (whole !== undefined) return { command: whole, argument: null }
 
   const [head = '', argument, ...rest] = message.split(/\s+/)
@@ -193,19 +197,6 @@ export function readCommand(text: string): CommandRequest | null {
   // swallowed by a Command that would answer it with a refusal.
   if (argument === undefined || rest.length > 0) return null
 
-  const withArgument = named(TAKES_AN_ARGUMENT, head)
+  const withArgument = TAKES_AN_ARGUMENT.get(head)
   return withArgument === undefined ? null : { command: withArgument, argument }
-}
-
-/**
- * What one of these tables says about a spelling, and **only** what roma wrote
- * there.
- *
- * Not `table[spelling]`: an object literal inherits `Object.prototype`, so
- * `COMMANDS['constructor']` answers with a function, and the single word
- * `constructor` was swallowed as a Command that does not exist instead of
- * reaching the agent. `__proto__` the same.
- */
-function named(table: Readonly<Record<string, Command>>, spelling: string): Command | undefined {
-  return Object.hasOwn(table, spelling) ? table[spelling] : undefined
 }

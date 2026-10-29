@@ -82,10 +82,13 @@ describe('which credential answered', () => {
     expect(new Attempts('shared-window').answeredOn()).toBeNull()
   })
 
-  // The defect this module was built around. Read off which credential *first*
-  // paid, this Task names Overflow — the one credential of the two that produced
-  // nothing — and the Audit Record is the only place the question is answerable.
-  it('is the credential of the last Attempt, not of the one that first paid', () => {
+  it('is the credential of the last Attempt, not of the one that first paid [fence:answered-by-the-last-attempt]', () => {
+    const why =
+      'answeredOn must be the credential of the last Attempt, in the order Attempts happened ' +
+      '(ADR-0002: the Audit Record is the only place per-user attribution exists, and the ' +
+      'Overflow cap is counted from it). Grouped by credential, a Task blocked on the window, ' +
+      'rerun on Overflow, blocked again and answered by the window names Overflow, which ' +
+      'produced nothing (#56).'
     const attempts = new Attempts('shared-window')
 
     attempted(attempts, null)
@@ -94,8 +97,8 @@ describe('which credential answered', () => {
     attempts.payWith('shared-window')
     attempted(attempts, turn())
 
-    expect(attempts.answeredOn()).toBe('shared-window')
-    expect(attempts.credentials()).toEqual(['shared-window', 'overflow'])
+    expect(attempts.answeredOn(), why).toBe('shared-window')
+    expect(attempts.credentials(), why).toEqual(['shared-window', 'overflow'])
   })
 
   // A Task that failed has no answer, and is filed under what it last tried.

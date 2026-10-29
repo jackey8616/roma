@@ -35,38 +35,36 @@ describe('reading what the stream says about the Shared Window', () => {
   })
 })
 
-describe('deciding the Shared Window is spent', () => {
+describe('deciding the Shared Window is spent [fence:only-rejected-is-spent]', () => {
+  const WHY =
+    'Only `rejected` is spent (ADR-0002, Quota exhaustion). Nothing reads this until an ' +
+    'Attempt has already failed, so widening it hides the real failure: a Turn that failed ' +
+    'for another reason while the window was `allowed_warning`, or on a status roma has never ' +
+    'seen, is reported as a quota outage, parked, and rerun with the real error shown to ' +
+    'nobody (#83). A spent window with no `resetsAt` is not parked either: nothing would ever ' +
+    'wake the Task.'
+
   it('says a Turn on an allowed window is not blocked', () => {
-    expect(spentUntil(readSharedWindow(ALLOWED)!)).toBeNull()
+    expect(spentUntil(readSharedWindow(ALLOWED)!), WHY).toBeNull()
   })
 
   it('reads a rejected window as spent, and quotes the reset time from the event', () => {
-    expect(spentUntil(readSharedWindow(withStatus('rejected'))!)).toBe(1785271200)
+    expect(spentUntil(readSharedWindow(withStatus('rejected'))!), WHY).toBe(1785271200)
   })
 
-  // The bug this change exists for. `allowed_warning` means the window is nearly
-  // spent and is still serving — Claude Code goes on answering, and its own
-  // renderer ignores the value entirely below 70% utilization. Read as spent, a
-  // Turn that failed for some other reason was reported as a quota outage with a
-  // reset time, and whatever really failed was never shown to anybody.
   it('does not read a window that is merely close to spent as spent', () => {
-    expect(spentUntil(readSharedWindow(withStatus('allowed_warning'))!)).toBeNull()
+    expect(spentUntil(readSharedWindow(withStatus('allowed_warning'))!), WHY).toBeNull()
   })
 
-  // The lesson rather than a preference, and the reverse of the rule that was
-  // here before. roma cannot know what a value it has never seen means, and the
-  // two ways of being wrong are not symmetric: called spent, an unknown status
-  // invents a quota story and buries whatever really failed; called not spent,
-  // the Caller gets the failure roma actually observed, in Claude Code's words.
   it('does not invent a quota outage from a status it has never seen', () => {
-    expect(spentUntil(readSharedWindow(withStatus('something_later'))!)).toBeNull()
+    expect(spentUntil(readSharedWindow(withStatus('something_later'))!), WHY).toBeNull()
   })
 
-  // A window roma is told is spent and not told when it comes back is one it
-  // cannot park a Task against: the Task would wait for a moment that never
-  // arrives, and nothing would ever come and look at it again.
   it('refuses to call it spent when the event says nothing about the reset', () => {
-    expect(spentUntil(readSharedWindow(withStatus('rejected', { resetsAt: null }))!)).toBeNull()
+    expect(
+      spentUntil(readSharedWindow(withStatus('rejected', { resetsAt: null }))!),
+      WHY,
+    ).toBeNull()
   })
 })
 

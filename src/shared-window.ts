@@ -13,34 +13,7 @@ const REJECTED = 'rejected'
 /**
  * When the Shared Window comes back, or null if it has not run out.
  *
- * **Only `rejected` is spent.** This used to read "anything that is not
- * `allowed`", chosen deliberately as the shape that survives being wrong — and
- * it did not survive, because the value it had not seen was `allowed_warning`,
- * which means the window is *nearly* spent and is still serving. Claude Code
- * emits it once a utilization threshold is crossed and goes on answering; its
- * own renderer treats it as a banner and ignores it entirely below 70%.
- *
- * What that cost is narrower than it looks, and worth stating exactly so that
- * nobody widens it back by accident. Nothing consults this until an Attempt has
- * already failed — the Core parks only on the failure path — so a healthy Turn
- * was never affected. What was affected is every Turn that failed for some
- * other reason while the window was in warning: roma told the Caller the shared
- * quota was spent and quoted a reset time, parked the Task, and ran it again up
- * to twice more, with the real error — a 500, a dead process, a Retry Storm —
- * nowhere in what anybody was told.
- *
- * An unrecognised status is **not** spent, which is the opposite of the old
- * rule and is the lesson rather than a preference. roma cannot know what a value
- * it has never seen means, and the two ways of being wrong are not symmetric:
- * reading an unknown status as spent invents a quota story and hides a real
- * failure, where reading it as not-spent reports the failure roma actually
- * observed, in Claude Code's own words. A wrong answer that shows its working
- * beats a confident one that does not.
- *
- * Null also when the event will not say when the window comes back, which is a
- * different judgement: a Task parked against a moment that never arrives waits
- * for ever, and nothing else in roma will come and look at it. Better a Task
- * that fails and can be sent again.
+ * Enforced by `fence:only-rejected-is-spent`.
  */
 export function spentUntil(window: SharedWindow): number | null {
   if (window.status !== REJECTED) return null
