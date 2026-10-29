@@ -26,3 +26,36 @@ describe('CI runs the checks that hold the fence [fence:ci-runs-the-fences]', ()
     expect(checksJob(), why).toContain(`- run: ${step}\n`)
   })
 })
+
+describe('the drift workflow makes its own label [fence:drift-creates-its-label]', () => {
+  it('creates the label, idempotently, before anything reads it', () => {
+    const why =
+      'The drift report must create its label with --force before it lists or files by it ' +
+      '(#59). A first run in a repository that has never had the label would otherwise fail ' +
+      'on `gh issue list --label`, and the stale pin goes unreported.'
+    const drift = readFileSync(`${root}.github/workflows/claude-code-drift.yml`, 'utf8')
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('#'))
+      .join('\n')
+    const created = drift.search(/gh label create "\$\{LABEL\}" --force/)
+    const used = drift.search(/--label "\$\{LABEL\}"|--label \$LABEL/)
+
+    expect(created, why).toBeGreaterThan(-1)
+    expect(used, why).toBeGreaterThan(created)
+  })
+})
+
+describe('the required checks keep their names [fence:required-check-names]', () => {
+  it.each(['typecheck, test, build', 'no two ADRs take one number'])(
+    'ci.yml still has a job named %s',
+    (name) => {
+      const why =
+        `The "main: CI must pass, squash only" ruleset requires a check named "${name}" ` +
+        '(ADR-0031). Renaming the job retires the status the ruleset waits for, and every ' +
+        'pull request blocks on a check that never reports again.'
+      const ci = readFileSync(`${root}.github/workflows/ci.yml`, 'utf8')
+
+      expect(ci, why).toContain(`    name: ${name}\n`)
+    },
+  )
+})

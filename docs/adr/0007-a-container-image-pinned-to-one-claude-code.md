@@ -297,7 +297,7 @@ default it, and #54 took the default out.)*
 an *anonymous* volume, and `docker run --rm` — which is what `README.md`'s
 example uses — removes anonymous volumes on exit. It would read as protection in
 the Dockerfile and lose the Transcript anyway, which is worse than no protection:
-the operator stops looking.
+the operator stops looking. Enforced by `fence:image-adds-no-skills-or-volumes`.
 
 **Boot roma in CI to prove the image works.** Rejected. It needs a Shared Window
 token and Google credentials in a public repository's secrets, and the startup

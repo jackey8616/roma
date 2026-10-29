@@ -24,10 +24,7 @@ jobs:
   # `typecheck` and `build` are not redundant. `build` compiles `src` alone, so
   # it would not typecheck the tests; `typecheck` covers everything and emits
   # nothing.
-  # Do not add `format` to this job's name: the name is the string a branch
-  # protection rule requires, so editing it retires the check the rule waits for
-  # and every pull request blocks on one that never reports again. The name is
-  # allowed to under-describe the steps; the rule is not allowed to go stale.
+  # Enforced by `fence:required-check-names`.
   checks:
     name: typecheck, test, build
     runs-on: ubuntu-latest
@@ -85,10 +82,8 @@ jobs:
   # about not making the other checks pay. It needs `fetch-depth: 0`, which the
   # other three have no use for; and it is the only check here that does not apply
   # to a push to main, where the union *is* main and there is nothing to compare
-  # against. Keeping it separate also leaves the name of the job above alone, which
-  # is the name a branch protection rule requires — and this job's own name is not
-  # on that list, so a red run here is visible rather than blocking until somebody
-  # adds it, which is a repository setting and not a change to this file.
+  # against. Keeping it separate also leaves the name of the job above alone.
+  # Enforced by `fence:required-check-names`.
   adr-numbers:
     name: no two ADRs take one number
     if: github.event_name == 'pull_request'

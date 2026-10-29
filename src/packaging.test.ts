@@ -209,6 +209,49 @@ describe('the image defaults the one path whose loss is by design', () => {
   )
 })
 
+describe('the image keeps out of what Claude Code reads [fence:image-adds-no-skills-or-volumes]', () => {
+  it('declares no VOLUME', () => {
+    const why =
+      'The image must not declare a VOLUME (ADR-0007, "VOLUME /var/lib/roma/claude instead ' +
+      'of the refusal", rejected). It makes an anonymous volume, which `docker run --rm` ' +
+      'removes on exit: the Transcript is lost while the Dockerfile reads as protecting it.'
+
+    expect(
+      instructions().filter((line) => /^VOLUME\b/i.test(line)),
+      why,
+    ).toEqual([])
+  })
+
+  it('writes nothing under a .claude directory', () => {
+    const why =
+      'No instruction may write a .claude path (ADR-0030). Claude Code resolves project ' +
+      'skills under every ancestor of the Working Directory up to /, and roma never git ' +
+      'inits one, so a skill the image puts in /var/lib/roma/work, /var/lib/roma, /var/lib, ' +
+      '/var or / is read into every Session.'
+
+    expect(
+      instructions().filter(
+        (line) => /^(COPY|ADD|RUN|WORKDIR)\b/i.test(line) && /\.claude\b/.test(line),
+      ),
+      why,
+    ).toEqual([])
+  })
+})
+
+describe('src/ is TypeScript and nothing else [fence:src-ships-only-typescript]', () => {
+  it('holds no file tsc would not compile into dist/', () => {
+    const why =
+      'Every file under src/ must be .ts (ADR-0030, "The ruleset is a TypeScript constant"). ' +
+      '`build` is `rm -rf dist && tsc` and the image copies dist/ alone, so a .md or .json ' +
+      'under src/ is silently missing from the image while every test that reads it passes.'
+
+    expect(
+      filesIn('src', (file) => !file.endsWith('.ts')).map(({ file }) => file),
+      why,
+    ).toEqual([])
+  })
+})
+
 /** The Dockerfile's instructions, one per entry, with line continuations joined. */
 function instructions(): string[] {
   return dockerfile()

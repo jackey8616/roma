@@ -115,6 +115,7 @@ directory on the chain and no repository root to stop at, and runs to `/`. On
 the way it stats `.claude/skills` under `/var/lib/roma/work`, `/var/lib/roma`,
 `/var/lib`, `/var` and `/`. The first of those may be a mounted volume. **The
 other four are the image's own filesystem, and a `COPY` can write any of them.**
+Enforced by `fence:image-adds-no-skills-or-volumes`.
 
 **So the sentence this section used to end on is wrong, and the decision it
 supported is not.** It read: *there is no path an image can bake a skill into
@@ -378,7 +379,8 @@ upstream turns the run red, and somebody decides.
 
 `src/` holds no file that is not `.ts`, `build` is `rm -rf dist && tsc`, and the
 runtime stage copies `dist/` — so a `.md` under `src/` would silently not ship,
-and a `.md` anywhere else needs a `COPY` this image does not otherwise want. The
+and a `.md` anywhere else needs a `COPY` this image does not otherwise want.
+Enforced by `fence:src-ships-only-typescript`. The
 derived ruleset is therefore a constant in `src/`, one template plus roma's own
 copy of caveman's fifteen-line level filter. One template rather than six
 finished strings for the reason `ChosenRecord` is one class: the same idea
