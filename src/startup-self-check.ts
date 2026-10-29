@@ -308,15 +308,7 @@ export async function startupSelfCheck({
     throw new StartupSelfCheckFailed([probeFailed(error)])
   } finally {
     clearTimeout(deadline)
-    // Always, and on every path: a probe process left running would hold a
-    // Session nobody will ever send to, and on the failure paths it is a process
-    // roma has already decided it does not trust.
-    //
-    // Escalating to SIGKILL rather than waiting for the exit, because the path
-    // that most needs the process gone is the deadline — and a process that blew
-    // the deadline is exactly the one that may not answer a SIGTERM either. A
-    // plain `terminate` here would hold the refusal behind an unbounded wait and
-    // turn the check that exists to stop a hang into one.
+    // Enforced by `fence:startup-self-check-always-ends-the-probe`.
     await session.terminateOrKill()
   }
 }

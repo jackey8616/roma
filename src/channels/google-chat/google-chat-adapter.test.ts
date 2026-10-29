@@ -442,6 +442,28 @@ describe('the message a message quotes', () => {
     }
   })
 
+  it('carries nothing of the space a forward came from [fence:gchat-forward-names-no-space]', () => {
+    const why =
+      'forwardedMetadata.spaceDisplayName must never be carried into the message (ADR-0021 §4). ' +
+      'For a forwarded DM it holds the other participant’s name rather than a space’s, so ' +
+      '<quoted from="Bob" space="Alice"> would read as Alice being a place: a fact that misleads ' +
+      'in a knowable fraction of cases is worse than no fact.'
+    const { adapter } = newAdapter()
+    const forwarded = quoting(SAID, {
+      quoteType: 'FORWARD',
+      forwardedMetadata: { space: 'spaces/ELSEWHERE', spaceDisplayName: 'Alice Liddell' },
+    })
+
+    const message = adapter.toIngress(inSpace('why?', forwarded))
+
+    expect(message?.quotation, why).toEqual({
+      text: 'the deploy failed at step 3',
+      author: 'users/99',
+    })
+    expect(JSON.stringify(message), why).not.toContain('Alice Liddell')
+    expect(JSON.stringify(message), why).not.toContain('spaces/ELSEWHERE')
+  })
+
   // A Channel is entitled to have no name for somebody. What roma must not do is
   // invent one — an unattributed passage in front of the model is read as the
   // Caller's own words, which is the misattribution the whole tag exists for.

@@ -161,7 +161,8 @@ Quotation.
 `forwardedMetadata.spaceDisplayName` is deliberately **not** carried. For a
 forwarded DM it holds the other participant's name rather than a space's, so
 `<quoted from="Bob" space="Alice">` would read as Alice being a place. A fact that
-misleads in a knowable fraction of cases is worse than no fact.
+misleads in a knowable fraction of cases is worse than no fact. Enforced by
+`fence:gchat-forward-names-no-space`.
 
 ### 5. A quoted message's attachments are ordinary Enclosures, marked with whose
 

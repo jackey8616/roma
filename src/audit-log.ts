@@ -109,9 +109,7 @@ export interface AuditRecord {
   /**
    * What this Task cost, as the per-Turn delta.
    *
-   * Never `total_cost_usd` raw: that is cumulative for the process, so a fifth
-   * Task logged raw is recorded at the sum of Tasks one through five, and the
-   * monthly Overflow cap built on it would refuse spending that never happened.
+   * Never `total_cost_usd` raw. Enforced by `fence:session-cost-is-a-delta`.
    *
    * Three values rather than two, because "free" and "unpriced" are different
    * facts and only one of them can be added up:
@@ -229,11 +227,9 @@ export interface AuditRecord {
    * months of them. Already computed for ADR-0018's drift check before this
    * field existed; a reading nothing records is one nobody can compare.
    *
-   * Never a running total, which is `costUsd`'s rule for `costUsd`'s reason:
-   * `modelUsage` accumulates for the process, so a fifth Task logged raw would
-   * be recorded at the sum of Tasks one through five and every Task after the
-   * first would look more expensive than it was. `Turn.outputTokens` is where
-   * the differencing is done, once, and this carries what it says.
+   * Never a running total: `Turn.outputTokens` is where the differencing is
+   * done, once, and this carries what it says. Enforced by
+   * `fence:session-output-tokens-never-negative`.
    *
    * Three values rather than two, exactly as `costUsd` has three:
    *
@@ -516,11 +512,8 @@ export function monthOf(at: Date): string {
 
 export interface AuditLogOptions {
   /**
-   * Where the records go.
-   *
-   * Deliberately not under the Work Root: that tree is
-   * walked by a reclaim that deletes anything nothing has touched for seven
-   * days, and these records are exactly what has to survive a quiet week.
+   * Where the records go. Never under the Work Root. Enforced by
+   * `fence:env-audit-root-outside-the-work-root`.
    */
   readonly auditRoot: string
   /**

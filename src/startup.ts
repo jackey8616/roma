@@ -250,7 +250,8 @@ export interface Roma {
  *
  * Its only other decision is *ownership*: the pool, the queue and the generation
  * record are built here, once, for every Core. Enforced by
- * `fence:startup-one-queue-for-every-channel`.
+ * `fence:startup-one-queue-for-every-channel` and
+ * `fence:startup-one-session-record-for-every-channel`.
  */
 export async function startRoma({
   credential,
@@ -398,17 +399,7 @@ export async function startRoma({
     ...(overflow === undefined ? {} : { overflow: sessionEnv(overflow.credential) }),
   }
 
-  // The tree every Session's Working Directory sits in, and every record roma
-  // keeps about a Conversation beside them. Built once and handed to all five
-  // things under it — the pool, the three record classes and the Core — so none
-  // of them is told a path to join for itself.
-  //
-  // What they have to agree on is the *path*, not this object: nothing here is
-  // held between calls, so two of these over one root behave identically. One
-  // instance is how that agreement is made rather than hoped for, which is the
-  // argument `ChosenRecord` makes for itself below. Two over *different* roots
-  // is the failure, and `CoreOptions.workRoot` is where what it costs is
-  // written down.
+  // Enforced by `fence:startup-core-and-pool-share-the-work-root`.
   const work = new WorkRoot(workRoot)
 
   // Enforced by `fence:startup-pool-reads-the-chosen-records`.

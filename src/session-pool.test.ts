@@ -149,17 +149,23 @@ afterEach(async () => {
 })
 
 describe('one working directory per Session', () => {
-  // A shared working directory would let concurrent Sessions corrupt each
-  // other's checkouts, with symptoms that are very hard to diagnose.
-  it('runs each Session in its own directory under the work root', async () => {
+  it('runs each Session in its own directory under the work root [fence:pool-a-session-works-in-its-own-directory]', async () => {
+    const why =
+      'Every Session must be spawned in a Working Directory of its own, named by its Session ' +
+      'id (CONTEXT.md, Working Directory). A directory two Sessions share is one their agents ' +
+      'clone into concurrently, so each corrupts the other’s checkouts with symptoms that are ' +
+      'very hard to diagnose, and one Session’s spawn file makes the other look already created.'
     const { claude, workRoot, send } = newPool()
 
     await send(A, 'hello', OK)
     await send(B, 'hello', OK)
 
-    expect(claude.spawns.map((spawn) => spawn.cwd)).toEqual([join(workRoot, A), join(workRoot, B)])
-    expect(existsSync(join(workRoot, A))).toBe(true)
-    expect(existsSync(join(workRoot, B))).toBe(true)
+    expect(
+      claude.spawns.map((spawn) => spawn.cwd),
+      why,
+    ).toEqual([join(workRoot, A), join(workRoot, B)])
+    expect(existsSync(join(workRoot, A)), why).toBe(true)
+    expect(existsSync(join(workRoot, B)), why).toBe(true)
   })
 
   it('gives every process the environment it was built with, and nothing else', async () => {
@@ -595,21 +601,26 @@ describe('staying under the resident cap', () => {
     expect(claude.processFor(join(workRoot, sessionId(1))).signals).toEqual(['SIGTERM'])
   })
 
-  // Eviction is awaited, so a process that never goes would stall every later
-  // message in the pool — one wedged Session halting roma without a single Task
-  // hanging. SIGTERM exiting 143 is measured; this is the guard for the day it
-  // stops holding.
-  it('escalates to SIGKILL when a process ignores SIGTERM', async () => {
+  // SIGTERM exiting 143 is measured; this is the guard for the day it stops
+  // holding.
+  it('escalates to SIGKILL when a process ignores SIGTERM [fence:pool-eviction-kills-what-ignores-sigterm]', async () => {
+    const why =
+      'Eviction must end a process with terminateOrKill, never a bare terminate (ADR-0003, ' +
+      'accepted risks). Eviction is awaited, so a process that ignores SIGTERM and is only ' +
+      'ever asked to go stalls every later message in the pool — one wedged Session halting ' +
+      'roma without a single Task hanging.'
     const { pool, processFor, log, send } = newPool()
     await send(A, 'hello', OK)
     processFor(A).ignore('SIGTERM')
 
     const evicted = pool.evict(A)
     await vi.advanceTimersByTimeAsync(5_000)
-    await evicted
 
-    expect(processFor(A).signals).toEqual(['SIGTERM', 'SIGKILL'])
-    expect(log).toContainEqual(expect.objectContaining({ event: 'kill', sessionId: A }))
+    // Asked before the eviction is awaited: a pool that never escalates never
+    // finishes evicting either.
+    expect(processFor(A).signals, why).toEqual(['SIGTERM', 'SIGKILL'])
+    await evicted
+    expect(log, why).toContainEqual(expect.objectContaining({ event: 'kill', sessionId: A }))
   })
 
   // A Task routinely runs for minutes and there is no wall-clock timeout, so the

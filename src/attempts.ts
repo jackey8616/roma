@@ -218,8 +218,10 @@ export class Attempts {
   /**
    * Pay for the next Attempt with this credential.
    *
-   * The next one, not the one in flight. Overflow applies to one Attempt, so the
-   * caller moves it back afterwards. Enforced by `fence:attempts-pay-for-the-next`.
+   * The next one, not the one in flight. Enforced by `fence:attempts-pay-for-the-next`.
+   *
+   * Overflow applies to one Attempt, so the caller moves it back afterwards.
+   * Enforced by `fence:core-overflow-is-for-one-attempt`.
    */
   payWith(credential: CredentialKind): void {
     this.#credential = credential

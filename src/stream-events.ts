@@ -25,13 +25,9 @@ export interface TerminalResult {
    * How many model Turns the message drove — `num_turns`, and zero for a local
    * command that answered without one.
    *
-   * **Not the Relay drift check's key any more, and ADR-0018 is where that was
-   * measured false.** A manual `/compact` moved `total_cost_usd` by $0.0453 over
-   * 28,545ms and reported `num_turns: 0`: an entry that stays `type:"local"` and
-   * starts doing model work is invisible here. `cumulativeOutputTokens` below is
-   * what the check reads instead. This is kept because it is still what the
-   * stream says about a message, and it is what tells a local command apart from
-   * a prompt — the other shape an entry can drift into.
+   * Not the Relay drift check's key, which is `cumulativeOutputTokens` below.
+   * Enforced by `fence:core-free-relay-drift-is-one-way`. It is what tells a
+   * local command apart from a prompt.
    *
    * Null where the event carried no count. Not folded into zero: "it drove no
    * Turn" and "this build does not say" are different facts, and only the first

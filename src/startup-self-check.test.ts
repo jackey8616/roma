@@ -242,7 +242,12 @@ describe('the startup self-check', () => {
   // either — and ending the probe is where it would. A process that ignores
   // SIGTERM is the one case the deadline was written for, and waiting on its
   // exit is an unbounded wait holding a decision that has already been made.
-  it('gives up on a probe process that ignores SIGTERM', async () => {
+  it('gives up on a probe process that ignores SIGTERM [fence:startup-self-check-always-ends-the-probe]', async () => {
+    const why =
+      'The self-check must end its probe with terminateOrKill, never a bare terminate (#27). ' +
+      'The path that most needs the probe gone is the deadline, and a process that blew the ' +
+      'deadline is exactly the one that may not answer SIGTERM: waiting on its exit holds the ' +
+      'refusal behind an unbounded wait and turns the check that exists to stop a hang into one.'
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
       const { claude, check } = selfCheck({ events: null, timeoutMs: 5_000 })
@@ -255,9 +260,14 @@ describe('the startup self-check', () => {
       await vi.advanceTimersByTimeAsync(5_000)
       await vi.advanceTimersByTimeAsync(TERMINATE_GRACE_MS)
 
+      // Asked before the refusal is awaited: a check that never escalates never
+      // refuses either.
+      expect(claude.process.signals, why).toEqual(['SIGTERM', 'SIGKILL'])
       const { failures: failed } = await refused
-      expect(failed.map((failure) => failure.condition)).toEqual(['timeout'])
-      expect(claude.process.signals).toEqual(['SIGTERM', 'SIGKILL'])
+      expect(
+        failed.map((failure) => failure.condition),
+        why,
+      ).toEqual(['timeout'])
     } finally {
       vi.useRealTimers()
     }
@@ -337,14 +347,18 @@ describe('the startup self-check', () => {
 
   // A probe process left behind would hold a Session nobody will ever send to —
   // and on the failing path, one roma has just decided it does not trust.
-  it('ends the probe process whether it passed or failed', async () => {
+  it('ends the probe process whether it passed or failed [fence:startup-self-check-always-ends-the-probe]', async () => {
+    const why =
+      'The self-check must end its probe on every path, passed or refused (#27): a probe left ' +
+      'running holds a Session nobody will ever send to, and on the failing path it is a ' +
+      'process roma has just decided it does not trust.'
     const passed = selfCheck()
     await passed.check
     const refused = selfCheck({ events: STRAY_KEY })
     await failures(refused.check)
 
-    expect(passed.claude.process.signals).toContain('SIGTERM')
-    expect(refused.claude.process.signals).toContain('SIGTERM')
+    expect(passed.claude.process.signals, why).toContain('SIGTERM')
+    expect(refused.claude.process.signals, why).toContain('SIGTERM')
   })
 })
 

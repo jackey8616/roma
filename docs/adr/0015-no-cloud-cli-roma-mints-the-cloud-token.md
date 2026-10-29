@@ -144,7 +144,8 @@ The reasoning that got it there is arithmetic, and it transfers whole:
 
 A Google Cloud access token is also about an hour. A Resident Session outliving
 an hour is ordinary. `google-auth-library` is already a runtime dependency,
-surviving `npm ci --omit=dev`, so the means are present.
+surviving `npm ci --omit=dev`, so the means are present. Enforced by
+`fence:startup-cloud-token-is-asked-for-never-kept`.
 
 Two further facts shape the rest.
 
@@ -200,7 +201,8 @@ agent can reach.
 
 A Cloud Token is what the agent gets — an hour long, obtained when something
 needs one, never written into a process environment fixed at spawn, and never
-persisted anywhere that outlives the command it was made for.
+persisted anywhere that outlives the command it was made for. Enforced by
+`fence:startup-cloud-token-is-asked-for-never-kept`.
 
 The key is named to roma by a path rather than inline, following
 `ROMA_GITHUB_PRIVATE_KEY_FILE` and `GOOGLE_APPLICATION_CREDENTIALS`: multi-line

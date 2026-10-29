@@ -4428,10 +4428,12 @@ describe('what Overflow is taken for', () => {
   /** The blocked attempt, priced — a window that ran out with work already done. */
   const BLOCKED_HAVING_SPENT = withTotalCostUsd(BLOCKED_WITH_OVERAGE, 0.02)
 
-  // The attempt, not the Task. Left on the metered credential, a Task that took
-  // Overflow and then failed would go on spending metered money with nobody
-  // asked and no cap consulted.
-  it('goes back to the Shared Window for the next attempt of the same Task', async () => {
+  it('goes back to the Shared Window for the next attempt of the same Task [fence:core-overflow-is-for-one-attempt]', async () => {
+    const why =
+      'Overflow pays for one Attempt, not the Task: after every Attempt the Core moves the ' +
+      'Task back to the credential it was started with (ADR-0002). Left on the metered ' +
+      'credential, a Task that took Overflow and was blocked again would go on spending ' +
+      'metered money with nobody asked and no cap consulted.'
     const { adapter, claude, core, start, procFor } = newCore()
 
     const { task, proc } = await start('hello')
@@ -4451,7 +4453,7 @@ describe('what Overflow is taken for', () => {
     feed(procFor(KEY), OK)
     await task
 
-    expect(claude.lastSpawn.env).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' })
+    expect(claude.lastSpawn.env, why).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' })
   })
 
   // Which credential answered is the order the attempts happened in, not the

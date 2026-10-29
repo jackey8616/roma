@@ -162,7 +162,7 @@ export class ClaudeExitedError extends Error {
 
 export interface ClaudeSessionOptions {
   readonly sessionId: string
-  /** The Session's own working directory. Shared ones let Sessions corrupt each other. */
+  /** The Session's own working directory. Enforced by `fence:pool-a-session-works-in-its-own-directory`. */
   readonly cwd: string
   /** Built by `buildEnv`. Never inherited. */
   readonly env: Readonly<Record<string, string>>
@@ -242,15 +242,7 @@ export const PINNED_MODEL = 'claude-sonnet-5'
 export const PINNED_EFFORT = 'high'
 const COMMAND = 'claude'
 
-/**
- * How long a SIGTERM is given before SIGKILL.
- *
- * Ending a process is always awaited by somebody, so a process that ignores
- * SIGTERM does not merely linger — it stalls whoever is waiting. In the pool
- * that is every later message, which is the "bot halted" state ADR-0003 lists
- * under accepted risks, reached without a single Task hanging. At startup it is
- * the boot itself.
- */
+/** How long a SIGTERM is given before SIGKILL. */
 export const TERMINATE_GRACE_MS = 5_000
 
 /**
@@ -446,7 +438,9 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
    * Enforced by `fence:session-kill-when-term-is-ignored`.
    *
    * `terminate` on its own waits for an exit that a wedged process never
-   * produces, so a caller that awaits the ending wants this one.
+   * produces, so a caller that awaits the ending wants this one. Enforced by
+   * `fence:pool-eviction-kills-what-ignores-sigterm` and
+   * `fence:startup-self-check-always-ends-the-probe`.
    *
    * `onGraceExpired` fires only when the escalation was needed, which is the
    * moment worth recording — a process that had to be killed is a fact about

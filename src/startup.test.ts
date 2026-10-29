@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -123,6 +123,8 @@ function boot({
     hasStarted: () => resolved,
     answerProbe: fixture.answerProbe,
     procFor: fixture.procFor,
+    /** Every directory this roma was given, the Shim directory included. */
+    roots: fixture.roots,
   }
 }
 
@@ -211,21 +213,18 @@ describe('starting roma', () => {
   })
 
   /**
-   * The ADR-0011 half of that wiring, and the only place it can go wrong.
-   *
-   * The Core no longer asks the pool where a Session works — it is handed a Work
-   * Root of its own — so the two agreeing is something this function does rather
-   * than something the types make impossible. Handed different ones, roma writes
-   * every Enclosure where no Session ever looks, names the agent a path that is
-   * not there, and reports nothing at all: the write succeeds, the Turn runs, and
-   * the answer is simply about a file the model could not read.
-   *
    * Asserted here rather than in `core.test.ts`, where the harness hands one
    * object to both and divergence is unreachable without editing the harness.
    * This is the composition root, so this is where the agreement is made and the
    * only place it can be broken.
    */
-  it('writes an Enclosure into the directory it spawns the Session in', async () => {
+  it('writes an Enclosure into the directory it spawns the Session in [fence:startup-core-and-pool-share-the-work-root]', async () => {
+    const why =
+      'The Core and the Session Pool must be handed the same Work Root (ADR-0011, ADR-0028). ' +
+      'The Core no longer asks the pool where a Session works, so their agreeing is something ' +
+      'startRoma does, not something the types make impossible. Handed different ones, roma ' +
+      'writes every Enclosure where no Session ever looks and reports nothing: the write ' +
+      'succeeds, the Turn runs, and the answer is about a file the model could not read.'
     const roma = boot()
     await roma.answerProbe()
     const { core } = await roma.starting
@@ -265,8 +264,9 @@ describe('starting roma', () => {
     await handled
 
     const cwd = roma.claude.lastSpawn.cwd
+    expect(existsSync(join(cwd, '.enclosures')), why).toBe(true)
     const [file] = readdirSync(join(cwd, '.enclosures'))
-    expect(readFileSync(join(cwd, '.enclosures', file!), 'utf8')).toBe('PNG')
+    expect(readFileSync(join(cwd, '.enclosures', file!), 'utf8'), why).toBe('PNG')
   })
 
   // The ADR-0014 half of that wiring. The Core writes a Chosen Model down and
@@ -991,6 +991,64 @@ describe('telling a Session about the cloud', () => {
   })
 })
 
+/** Every regular file under these directories, read whole. Sockets are skipped. */
+function everyFileIn(roots: readonly string[]): { path: string; text: string }[] {
+  return roots.flatMap((root) =>
+    readdirSync(root, { recursive: true, encoding: 'utf8' })
+      .map((name) => join(root, name))
+      .filter((path) => statSync(path).isFile())
+      .map((path) => ({ path, text: readFileSync(path, 'utf8') })),
+  )
+}
+
+describe('where a Cloud Token may be', () => {
+  it('is in no Session’s environment and in no file roma keeps [fence:startup-cloud-token-is-asked-for-never-kept]', async () => {
+    const why =
+      'A Cloud Token is obtained when a command asks the socket for one, and is never written ' +
+      'into a process environment fixed at spawn nor persisted anywhere that outlives that ' +
+      'command (ADR-0015 §3, ADR-0008). An environment is fixed at spawn and would be stale ' +
+      'within the hour while a Resident Session outliving an hour is ordinary; and a token in ' +
+      'an environment or a file is one `env` or `cat` away from a Transcript roma never deletes.'
+    const cloudMinter = new FakeCloudMinter()
+    const roma = boot({ cloudMinter })
+    await roma.answerProbe()
+    const { core } = await roma.starting
+
+    const served = await askMinter(socketPathIn(roma.shims.dir), {
+      session: sessionIdFor(KEY),
+      operation: 'get',
+      credential: 'cloud',
+    })
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
+    await flush()
+    const { env } = roma.claude.lastSpawn
+    feed(roma.procFor(KEY), OK)
+    await handled
+
+    const tokens = cloudMinter.minted.map(({ token }) => token)
+    expect(tokens, why).toContain(served.token)
+    for (const token of tokens) {
+      expect(
+        Object.entries(env).filter(([, value]) => value.includes(token)),
+        why,
+      ).toEqual([])
+      expect(
+        everyFileIn(roma.roots)
+          .filter(({ text }) => text.includes(token))
+          .map(({ path }) => path),
+        why,
+      ).toEqual([])
+    }
+  })
+})
+
 describe('whether a Task used the Cloud Reach', () => {
   // The whole chain, from the only place all of it is visible: something in the
   // agent's userland asks the socket mid-Task, and the line roma writes when the
@@ -1382,6 +1440,27 @@ describe('what a roma serving several Channels is made of', () => {
     await flush()
     feed(roma.fixture.procFor('on-the-second'), OK)
     await two
+  })
+
+  it('moves a Conversation for every Channel when one Channel clears it [fence:startup-one-session-record-for-every-channel]', async () => {
+    const why =
+      'Every Core must read and write the one SessionGenerations record startRoma builds over ' +
+      'the pool’s Work Root (ADR-0028, ADR-0013). A Conversation two Cores each kept their own ' +
+      'answer for is two Conversations: the `/clear` said on one Channel is never heard by the ' +
+      'other, which goes on sending the same Conversation Key to the Session that was cleared.'
+    const roma = bootChannels()
+    await roma.fixture.answerProbe()
+    const { channels } = await roma.starting
+    const [first, second] = channels
+
+    await first!.core.handle(said(KEY, '/clear'))
+    const handled = second!.core.handle(said(KEY))
+    await flush()
+    const spawn = roma.fixture.claude.lastSpawn
+    feed(roma.fixture.procIn(sessionIdFor(KEY, 1)), OK)
+    await handled
+
+    expect(spawn.cwd, why).toBe(join(roma.fixture.dirs.workRoot, sessionIdFor(KEY, 1)))
   })
 
   it('stops serving credentials however the pool’s shutdown went [fence:startup-socket-closed-whatever-the-pool-did]', async () => {

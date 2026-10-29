@@ -481,7 +481,7 @@ function readEnclosures(
     const attachment = asRecord(entry)
     const url = asString(attachment?.['url'])
     if (url === null) continue
-    // Printed and never made into a path — see `PendingEnclosure`.
+    // Enforced by `fence:enclosures-name-is-minted`.
     const name = asString(attachment?.['filename']) ?? 'attachment'
     enclosures.push({ name, from: null, redeem: () => download(url) })
   }

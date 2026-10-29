@@ -36,7 +36,7 @@
   },
   "src/channels/discord/discord-events.ts": {
     "roma/comment-whitelist": {
-      "count": 38
+      "count": 37
     }
   },
   "src/channels/discord/env-config.ts": {
@@ -131,7 +131,7 @@
   },
   "src/core.ts": {
     "roma/comment-whitelist": {
-      "count": 362
+      "count": 359
     }
   },
   "src/documents/document-token.ts": {
@@ -266,12 +266,12 @@
   },
   "src/startup-self-check.ts": {
     "roma/comment-whitelist": {
-      "count": 23
+      "count": 14
     }
   },
   "src/startup.ts": {
     "roma/comment-whitelist": {
-      "count": 110
+      "count": 99
     }
   },
   "src/stream-events.ts": {

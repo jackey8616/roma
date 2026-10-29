@@ -195,65 +195,43 @@ export interface CoreOptions {
    * neither caused that nor fixes it — it is named here only so a reader does
    * not go looking for the guard in the wrong module.
    *
-   * **The same one the pool has.** Given different Work Roots the two agree
-   * about nothing, and roma reports none of it — see
-   * `startup.test.ts`'s "writes an Enclosure into the directory it spawns the
-   * Session in", which is where that agreement is made and the only place it can
-   * be broken. Free until now, because the Core asked the pool and could not
-   * disagree with it; something the composition root keeps true from here on,
-   * exactly as it already does for `models` and `efforts`.
+   * **The same one the pool has.** Enforced by
+   * `fence:startup-core-and-pool-share-the-work-root`.
    */
   readonly workRoot: WorkRoot
   /**
-   * Shared with every other Core, exactly as the pool is.
-   *
-   * Required rather than defaulted, because a queue each Core made for itself
-   * would still work and would still be wrong: the cap is three Tasks across
-   * the whole of roma, and one queue per Channel silently makes it three per
-   * Channel.
+   * Shared with every other Core, exactly as the pool is. Enforced by
+   * `fence:startup-one-queue-for-every-channel`.
    */
   readonly queue: TaskQueue
   /**
    * Which Session each Conversation is on — only a question because `/clear` can
    * move one.
    *
-   * Shared with every other Core over the same working directories, for the
-   * reason the pool and the queue are: a Conversation two Cores each kept their
-   * own answer for would be two Conversations, one of which never heard about
-   * the `/clear`.
+   * Shared with every other Core over the same working directories. Enforced by
+   * `fence:startup-one-session-record-for-every-channel`.
    */
   readonly sessions: SessionGenerations
   /**
    * Which model each Session runs on, and what the deployment pinned.
    *
-   * Given to the Session Pool as well, which is what makes `/model` mean
-   * anything: the Core writes what somebody chose and the pool reads it at the
-   * next spawn. What the two have to agree on is the work root rather than the
-   * object — nothing here is held between calls — and handing one instance to
-   * both is how that agreement is made rather than assumed. A pool built without
-   * it is the failure with no symptom: `/model` answers, the record is written,
-   * and every Turn runs on the Pinned Model.
+   * Given to the Session Pool as well: the Core writes what somebody chose and
+   * the pool reads it at the next spawn. Enforced by
+   * `fence:startup-pool-reads-the-chosen-records`.
    */
   readonly models: ChosenRecord<'model'>
   /**
    * What effort each Session runs at, and what the deployment pinned.
    *
-   * Given to the Session Pool as well, for exactly the reason `models` is: the
-   * Core writes what somebody chose and the pool reads it at the next spawn, and
-   * a pool built without it is the failure with no symptom — `/effort` answers,
-   * the record is written, and every Turn runs at the Pinned Effort. Sharper here
-   * than for the model, because nothing in the stream would ever contradict it.
+   * Given to the Session Pool as well, for the reason `models` is. Enforced by
+   * `fence:startup-pool-reads-the-chosen-records`.
    */
   readonly efforts: ChosenRecord<'effort'>
   /**
    * How short each Session is asked to be, and what the deployment pinned.
    *
-   * Given to the Session Pool as well, for the reason the two above are, and the
-   * symptomless failure it forecloses is the quietest of the three: a pool built
-   * without this answers `/caveman`, writes the record, and appends the Pinned
-   * Caveman's ruleset to every Session — where the model has `system/init` to
-   * contradict it and the effort has nothing, this has *the prose itself*, which
-   * nobody reads as evidence.
+   * Given to the Session Pool as well, for the reason the two above are.
+   * Enforced by `fence:startup-pool-reads-the-chosen-records`.
    */
   readonly cavemen: ChosenRecord<'caveman'>
   /**
@@ -1462,9 +1440,7 @@ export class Core {
       // then refuse other people's work over, and a figure the reply would show
       // as having been spent on a card.
       attempts.ended(turn)
-      // Back to the Shared Window for whatever comes next. Overflow applies to
-      // one Attempt: left set, a Task that took it and failed would go on
-      // spending metered money with nobody asked and no cap consulted.
+      // Enforced by `fence:core-overflow-is-for-one-attempt`.
       attempts.payWith(this.#credential)
 
       if (error === null && turn !== null) {

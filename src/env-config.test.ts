@@ -124,6 +124,33 @@ describe('reading roma out of the environment', () => {
     },
   )
 
+  it.each([
+    ['inside', '/srv/roma/sessions/audit'],
+    ['deeper inside', '/srv/roma/sessions/a/b/audit'],
+    ['that is', '/srv/roma/sessions/'],
+    ['inside, by a relative step,', '/srv/roma/sessions/../sessions/audit'],
+  ])(
+    'refuses an audit root %s the work root [fence:env-audit-root-outside-the-work-root]',
+    (_, auditRoot) => {
+      const why =
+        'ROMA_AUDIT_ROOT must be refused when it is under ROMA_WORK_ROOT (ADR-0002, #31). The ' +
+        'work root is walked by a reclaim that deletes any directory nothing has touched for seven ' +
+        'days, and appending to a month’s file does not touch its directory: the Audit Records — ' +
+        'the only record of who spent what, which the provider cannot reconstruct — are deleted ' +
+        'after a quiet week.'
+
+      expect(() => readRomaEnv({ ...MINIMAL, ROMA_AUDIT_ROOT: auditRoot }), why).toThrow(
+        /ROMA_AUDIT_ROOT/,
+      )
+    },
+  )
+
+  it('takes an audit root beside the work root, whose name merely starts the same', () => {
+    expect(readRomaEnv({ ...MINIMAL, ROMA_AUDIT_ROOT: '/srv/roma/sessions-audit' }).auditRoot).toBe(
+      '/srv/roma/sessions-audit',
+    )
+  })
+
   // An empty string is not a value. It is what a shell leaves behind when a
   // variable was meant to be set from something that turned out to be empty,
   // and taking it at face value would boot roma on an empty token — which the
