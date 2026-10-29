@@ -1,0 +1,3 @@
+#!/bin/sh
+# A node that reports the wrong major version, for the pre-commit hook test.
+echo 16

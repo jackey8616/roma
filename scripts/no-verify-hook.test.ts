@@ -59,3 +59,25 @@ describe('a command that skips the git hooks [fence:no-verify-is-refused]', () =
     expect(pkg.scripts.prepare, WHY).toContain('core.hooksPath .githooks')
   })
 })
+
+describe('the pre-commit hook under the wrong Node [fence:hook-names-the-node-it-needs]', () => {
+  const PRE_COMMIT = `${root}.githooks/pre-commit`
+  const WHY =
+    'Under a Node other than .nvmrc the hook must stop before ESLint and say which Node ' +
+    'it needs (ADR-0031): otherwise ESLint fails with an unrelated error, and the quick ' +
+    'way out a person finds is --no-verify.'
+
+  it('stops, and names the version .nvmrc asks for', () => {
+    const want = readFileSync(`${root}.nvmrc`, 'utf8').trim()
+    const run = spawnSync('sh', [PRE_COMMIT], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${root}scripts/fixtures/node-16:${process.env.PATH}` },
+    })
+
+    expect(run.status, WHY).toBe(1)
+    expect(run.stderr, WHY).toContain(`need Node ${want}`)
+    expect(run.stderr, WHY).toContain('Node 16')
+    expect(run.stderr, WHY).toContain('ADR-0031')
+  })
+})

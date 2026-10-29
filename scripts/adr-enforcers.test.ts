@@ -3,11 +3,12 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { danglingEnforcers, danglingMessage } from './adr-enforcers.js'
-import { fencesIn, type Fences } from './fence-names.js'
+import { claimedTwiceMessage, fencesFrom, fencesIn, type Fences } from './fence-names.js'
 import { rules } from './lint/plugin.js'
 
 const FENCES: Fences = {
   tests: new Map([['fence:held', 'src/held.test.ts']]),
+  claimedTwice: new Map(),
   rules: new Set(['roma/comment-whitelist']),
 }
 
@@ -76,5 +77,50 @@ describe('which fences the free run carries', () => {
     expect(fences.tests.get('fence:comment-whitelist')).toBe(
       'scripts/lint/comment-whitelist.test.ts',
     )
+  })
+})
+
+describe('a fence name picks out one check [fence:one-name-one-fence]', () => {
+  const WHY =
+    'Two test files carrying one fence name must fail (ADR-0031): a citation would ' +
+    'name whichever file was read last, and deleting either would go unnoticed.'
+
+  it('reports a name two files carry, with both files', () => {
+    const fences = fencesFrom(
+      [
+        { file: 'src/a.test.ts', text: "it('holds [fence:shared]', () => {})" },
+        { file: 'src/b.test.ts', text: "describe('also [fence:shared]', () => {})" },
+        { file: 'src/c.test.ts', text: "it('alone [fence:mine]', () => {})" },
+      ],
+      [],
+    )
+
+    expect(fences.claimedTwice, WHY).toEqual(
+      new Map([['fence:shared', ['src/a.test.ts', 'src/b.test.ts']]]),
+    )
+  })
+
+  it('lets one file carry a name on several tests', () => {
+    const fences = fencesFrom(
+      [{ file: 'src/a.test.ts', text: "it('one [fence:x]')\nit('two [fence:x]')" }],
+      [],
+    )
+
+    expect(fences.claimedTwice, WHY).toEqual(new Map())
+    expect(fences.tests.get('fence:x')).toBe('src/a.test.ts')
+  })
+
+  it('says which files and cites ADR-0031', () => {
+    const message = claimedTwiceMessage(new Map([['fence:x', ['a.test.ts', 'b.test.ts']]]))
+
+    expect(message).toContain('fence:x: a.test.ts, b.test.ts')
+    expect(message).toContain('ADR-0031')
+  })
+
+  it('finds no name claimed twice in this repository', () => {
+    const root = fileURLToPath(new URL('..', import.meta.url))
+    const { claimedTwice } = fencesIn(root, [])
+
+    expect(claimedTwice, claimedTwiceMessage(claimedTwice)).toEqual(new Map())
   })
 })
