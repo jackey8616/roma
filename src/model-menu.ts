@@ -17,26 +17,35 @@
  * process that will not start on somebody else's message.
  *
  * **This Menu is a person's judgement about Claude Code 2.1.220** (the ADR-0007
- * pin), read out of that build's own alias table, and it must be re-audited when
- * the pin moves. Nothing enforces that — the version is named here so the drift
- * report's working-tree sweep lists this file under what rests on the pin, which
- * is enumeration rather than enforcement. `src/relays.ts` carries the same line
- * for the same reason.
+ * pin), and it must be re-audited when the pin moves. Nothing enforces that — the
+ * version is named here so the drift report's working-tree sweep lists this file
+ * under what rests on the pin, which is enumeration rather than enforcement.
+ * `src/relays.ts` carries the same line for the same reason.
+ *
+ * **Two of these ids the pinned build does not name.** It hands any full model
+ * id to the API unread (ADR-0014, amended 2026-10-29), which is not evidence the
+ * API serves them under the Shared Window: that is `src/model-menu.live.test.ts`,
+ * unrun on the pin.
  */
 
 /**
  * What each name a Caller may type resolves to.
  *
  * The resolved ids rather than the aliases, because roma passes `--model` the id
- * and files it on the Audit Record: `PINNED_MODEL` is `claude-sonnet-5`, a Caller
- * types `sonnet`, and the two spellings have to come out as one model or the
+ * and files it on the Audit Record: `PINNED_MODEL` is `claude-opus-5-5`, a Caller
+ * types `opus`, and the two spellings have to come out as one model or the
  * ledger has two names for it.
  *
- * That `sonnet` resolves to the same string `PINNED_MODEL` holds is a coincidence
+ * That `opus` resolves to the same string `PINNED_MODEL` holds is a coincidence
  * of what this deployment pins, and the two are deliberately not one constant: an
  * operator moving `ROMA_MODEL` moves the Pinned Model and moves nothing here,
- * because `sonnet` is Claude Code's name for one model and not roma's name for
+ * because `opus` is the name of a line upstream and not roma's name for
  * whichever model it happens to be pinned to.
+ *
+ * **`fable` and `opus` name the current release of each line**, which is what
+ * the names mean upstream. Earlier releases are still served and are
+ * deliberately not kept beside them: a Menu with two opuses asks a Caller to
+ * choose a release, and the Menu is a spending boundary rather than a catalogue.
  *
  * **Ordered most expensive first**, which is not presentation. `MENU_NAMES`
  * derives from `Object.keys` here and both Adapters draw their buttons in that
@@ -44,14 +53,15 @@
  * boundary, so reading it downwards is how a Caller sees what they are reaching
  * for before they reach.
  *
- * **`fable` is on the Menu on a judgement, and this is the judgement.** Fable 5
- * is priced at twice Opus 5 per token on the first-party API — $10/$50 per MTok
- * against $5/$25 — and roma draws on a subscription rather than metered billing,
- * so that ratio is how fast the shared quota drains rather than a bill roma
- * pays. roma is willing to put the Shared Window behind it at that rate. Written
- * here rather than in an ADR because willingness is per-entry, as the `[1m]`
- * refusal below is: the same question, decided the other way (ADR-0014). What
- * would revisit it is evidence, and `/usage` answers out of the Audit Records.
+ * **`fable` is on the Menu on a judgement, and this is the judgement.** Fable
+ * 5.1 is priced at two and a half times Opus 5.5 per token on the first-party
+ * API — $10/$50 per MTok against $4/$20 — and roma draws on a subscription
+ * rather than metered billing, so that ratio is how fast the shared quota drains
+ * rather than a bill roma pays. roma is willing to put the Shared Window behind
+ * it at that rate. Written here rather than in an ADR because willingness is
+ * per-entry, as the `[1m]` refusal below is: the same question, decided the
+ * other way (ADR-0014). What would revisit it is evidence, and `/usage` answers
+ * out of the Audit Records.
  *
  * Deliberately not here: the `[1m]` variants, which Claude Code declares as
  * `opus[1m]`, `sonnet[1m]` and `fable[1m]` at `5x more context`. That multiplier
@@ -59,8 +69,8 @@
  * Turn is still more of a window everybody shares.
  */
 export const MENU: Readonly<Record<string, string>> = {
-  fable: 'claude-fable-5',
-  opus: 'claude-opus-5',
+  fable: 'claude-fable-5-1',
+  opus: 'claude-opus-5-5',
   sonnet: 'claude-sonnet-5',
   haiku: 'claude-haiku-4-5',
 }

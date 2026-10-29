@@ -233,10 +233,26 @@ export const THREE_TURNS = recordedStream('three-turns-one-process')
  * One complete Turn under the Shared Window credential. Its text is "ok".
  *
  * `apiKeySource: "none"`, `model: "claude-sonnet-5"`, `is_error: false` — what a
- * boot that should be allowed to proceed looks like, and what a Task that worked
- * looks like everywhere else.
+ * Task that worked looks like. A boot proceeds only when the probe reports the
+ * model roma pins, which this does not: see `withInit`.
  */
 export const OK: readonly ClaudeEvent[] = THREE_TURNS.turn(1)
+
+/**
+ * The same recorded Turn with `system/init` saying something else.
+ *
+ * Every recording roma holds ran on `claude-sonnet-5`, and the self-check
+ * compares the reported model against the pin — so a boot in a test is
+ * `withInit(OK, { model: PINNED_MODEL })`: one field patched and the Turn around
+ * it real. A recording on the current pin costs money and must be made on the
+ * pinned build (ADR-0007): seam 2's job.
+ */
+export function withInit(
+  events: readonly ClaudeEvent[],
+  patch: Record<string, unknown>,
+): ClaudeEvent[] {
+  return events.map((event) => (kindOf(event) === 'system/init' ? { ...event, ...patch } : event))
+}
 
 /**
  * The whole Turn run under a stray `ANTHROPIC_API_KEY`, as captured.

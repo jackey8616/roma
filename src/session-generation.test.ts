@@ -171,7 +171,7 @@ describe('starting a fresh Session', () => {
     const chosen = models()
 
     sessions.freshSession(KEY)
-    chosen.choose(SESSION, 'claude-opus-5')
+    chosen.choose(SESSION, 'claude-opus-5-5')
 
     expect(readdirSync(workRoot).filter((name) => name.endsWith('.pending'))).toEqual([])
     expect(readdirSync(workRoot).sort()).toEqual(
@@ -330,7 +330,7 @@ describe('the model a Session runs on', () => {
     suffix: '.model',
     pinned: PINNED,
     otherPinned: 'claude-haiku-4-5',
-    chosen: 'claude-opus-5',
+    chosen: 'claude-opus-5-5',
     offMenu: 'claude-something-else',
     refusal: /chosen model/i,
   })
@@ -368,7 +368,7 @@ describe('the effort a Session runs at', () => {
   })
 
   it('is a file beside the model’s, so the reclaim steps over both', () => {
-    models().choose(SESSION, 'claude-opus-5')
+    models().choose(SESSION, 'claude-opus-5-5')
     efforts().choose(SESSION, 'max')
 
     const written = readdirSync(workRoot, { withFileTypes: true })
@@ -426,7 +426,7 @@ describe('the Caveman a Session runs at', () => {
   })
 
   it('is a file beside the other two, so the reclaim steps over all three', () => {
-    models().choose(SESSION, 'claude-opus-5')
+    models().choose(SESSION, 'claude-opus-5-5')
     efforts().choose(SESSION, 'max')
     cavemen().choose(SESSION, 'ultra')
 

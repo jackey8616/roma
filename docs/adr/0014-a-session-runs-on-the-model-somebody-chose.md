@@ -19,6 +19,13 @@ drawn first (#196). Nothing here is overturned: this ADR decides that a Session
 runs on the model somebody chose, and which names the Menu carries was always the
 Menu's own per-entry judgement rather than this document's.
 
+**Amended 2026-10-29**, to the Menu and to the Pinned Model, marked inline the
+same way. `fable` resolves to `claude-fable-5-1`, `opus` to `claude-opus-5-5`,
+and `PINNED_MODEL` is `claude-opus-5-5` — the first time the Pinned Model is not
+what `sonnet` resolves to, and the first time two Menu ids occur nowhere in the
+pinned build's bundle. Nothing here is overturned; what that second fact rests on
+is recorded under Verification status, with what it leaves unmeasured.
+
 Builds on ADR-0013, which decides which string puts a Conversation back on the
 Pinned Model by clearing it.
 
@@ -60,6 +67,22 @@ spawned on the alias and demanded the id back — one spawn asked to carry both 
 assertion about roma and a recording of a table roma does not control, and it went
 red without either being at fault. It now measures the two separately.
 
+**Amended 2026-10-29 — two Menu ids the table does not carry.** The Menu now
+resolves `fable` to `claude-fable-5-1` and `opus` to `claude-opus-5-5`, and
+neither string occurs anywhere in the 2.1.220 bundle, whose alias table still
+reads `fable:"claude-fable-5", opus:"claude-opus-5"`: both models shipped after
+the pin (2.1.287's table reads `fable:"claude-fable-5-1", opus:"claude-opus-5-5"`).
+What carries them is the argument hint measured below — `… default, or a full
+model ID` — and it was **observed at no cost** rather than read, by hand and
+with nothing recorded: 2.1.220 spawned with a credential that cannot be billed
+echoes `--model claude-opus-5-5` and `--model claude-fable-5-1` back unchanged
+in `system/init`, which arrives before the first API call. **Not measured: the
+API serving either under the Shared Window on the pinned build.** The seam 2
+Menu check has not been run on them, and on a developer machine it runs whatever
+`claude` is on `PATH` rather than the pin, so a green run there is evidence
+about a different build. Its alias leg now asks only that a name reach the same
+line, since on this pin `opus` still expands to `claude-opus-5`.
+
 The consequence worth naming: every id on the Menu is an **undated alias**, so the
 model behind it can be re-pointed upstream and the Audit Record will go on
 spelling it the same way across that move. Accepted, because the alternative —
@@ -69,7 +92,9 @@ carries, and the check below is what surfaces it.
 
 `PINNED_MODEL` is `claude-sonnet-5`, which is what `sonnet` resolves to. roma
 pins the resolved id and a Caller would type the alias, so the two spellings have
-to be understood as the same model.
+to be understood as the same model. **Amended 2026-10-29** — `claude-opus-5-5`,
+which is what `opus` resolves to; the sentence holds with the names swapped, and
+so does the reason the two are not one constant.
 
 **Measured — `/model` has two descriptors, and the non-interactive one is live.**
 The bundle declares `{type:"local", name:"model", supportsNonInteractive:!0,
@@ -249,6 +274,17 @@ reads to see what they are reaching for. The pinned build already served
 willing to put the Shared Window behind it at twice Opus 5's per-token rate. It
 is, and that judgement is recorded above `MENU` in `src/model-menu.ts` — beside
 the `[1m]` exclusion's, which is the same question decided the other way.
+
+**Amended 2026-10-29 — the names stand, two of the ids behind them moved, and
+the Menu now runs ahead of the pinned build's alias table on purpose.** `fable`
+resolves to `claude-fable-5-1` and `opus` to `claude-opus-5-5`: a name on the
+Menu means the current release of its line upstream, which may be newer than
+what the pin's own alias table expands it to. The id is what roma sends and what
+the seam 2 check's first leg guards; its second leg asks only that the alias
+reach the same line. The earlier releases are off the Menu rather than kept
+beside them, for the reason above `MENU` in `src/model-menu.ts`, and a record
+naming one is refused (`ChosenModelNotOffered`). fable's willingness judgement
+now stands at two and a half times Opus 5.5's per-token rate.
 
 Not on it: the `[1m]` variants, and arbitrary full model ids. Upstream accepts
 both.

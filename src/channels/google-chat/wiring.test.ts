@@ -336,7 +336,7 @@ describe('a Menu, out on a card and back on a press', () => {
     feed(roma.procFor(), OK)
     await until(() => message.settlements.length > 0)
 
-    expect(roma.claude.lastSpawn.args).toContain('claude-opus-5')
+    expect(roma.claude.lastSpawn.args).toContain('claude-opus-5-5')
   })
 
   // The other half of the same claim: a press is answered in the Conversation it

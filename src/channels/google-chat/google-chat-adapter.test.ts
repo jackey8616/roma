@@ -1057,7 +1057,7 @@ describe('choosing a model, an effort or a Caveman by pressing', () => {
       message: {
         name: `${SPACE}/messages/msg-9`,
         sender: { name: 'users/roma', displayName: 'roma', type: 'BOT' },
-        text: 'This conversation is on sonnet (claude-sonnet-5).',
+        text: 'This conversation is on opus (claude-opus-5-5).',
         ...(direct ? {} : { thread: { name: key } }),
       },
       common: { invokedFunction: 'choose', parameters: { chooses, option } },
@@ -1066,7 +1066,7 @@ describe('choosing a model, an effort or a Caveman by pressing', () => {
 
   const MODEL_MENU = {
     kind: 'choice',
-    text: 'This conversation is on sonnet (claude-sonnet-5). You can choose: fable, opus, sonnet, haiku, default.',
+    text: 'This conversation is on opus (claude-opus-5-5). You can choose: fable, opus, sonnet, haiku, default.',
     chooses: 'model',
     options: ['fable', 'opus', 'sonnet', 'haiku', 'default'],
     refused: null,

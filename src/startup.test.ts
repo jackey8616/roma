@@ -4,6 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import { monthOf, type AuditRecord } from './audit-log.js'
 import type { Credential } from './build-env.js'
+import { PINNED_MODEL } from './claude-session.js'
 import {
   CAVEMAN_MENU,
   CAVEMAN_NOT_PINNED,
@@ -163,7 +164,7 @@ describe('starting roma', () => {
     await roma.answerProbe()
 
     await expect(roma.starting).resolves.toMatchObject({
-      selfCheck: { apiKeySource: 'none', model: 'claude-sonnet-5' },
+      selfCheck: { apiKeySource: 'none', model: PINNED_MODEL },
     })
   })
 
@@ -287,7 +288,7 @@ describe('starting roma', () => {
     feed(roma.procFor(KEY), OK)
     await handled
 
-    expect(roma.claude.lastSpawn.args).toContain('claude-opus-5')
+    expect(roma.claude.lastSpawn.args).toContain('claude-opus-5-5')
   })
 
   // The other half of that wiring, and the half nothing else would notice was

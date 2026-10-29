@@ -18,8 +18,8 @@
  * the operator.
  *
  * **This Menu and this Matrix are a person's judgement about Claude Code
- * 2.1.220** (the ADR-0007 pin), read out of that build, and both must be
- * re-audited when the pin moves. Nothing enforces that — the version is named
+ * 2.1.220** (the ADR-0007 pin), and both must be re-audited when the pin
+ * moves. Nothing enforces that — the version is named
  * here so the drift report's working-tree sweep lists this file under what rests
  * on the pin, which is enumeration rather than enforcement. `src/relays.ts`
  * and `src/model-menu.ts` carry the same line for the same reason, and this is
@@ -78,20 +78,20 @@ export const ULTRACODE = 'ultracode'
  *
  * **Three of these four rows are a person's inference and not the extractor's
  * reading, and the difference is worth knowing before editing them.** The gate
- * refuses by name and allows by name, and roma's other three models are on
- * neither list: what decides them is `M$(r,"effort")`, a server-side entitlement
- * the bundle does not contain. So the extractor reports `claude-haiku-4-5` as a
- * refusal and the other three as *unnamed*, and `true` here is read off what the
- * build says about itself elsewhere — `xhigh` describes itself as
+ * refuses by name and allows by name; `claude-sonnet-5`, `claude-opus-5-5` and
+ * `claude-fable-5-1` are on neither list, so what decides them is
+ * `M$(r,"effort")`, a server-side entitlement the bundle does not contain. Two
+ * of the three `true`s are read off the build's own `xhigh` description —
  * `Deeper reasoning than high, just below maximum (Fable 5, Opus 4.7+,
- * Sonnet 5)`. That is the relationship ADR-0016 designed: the script prints and
- * the person decides, because the script has been wrong before and could not
- * tell.
+ * Sonnet 5)`, whose `+` covers Opus 5.5 — and fable's off the model's own
+ * documentation, because the build predates Fable 5.1 and names it nowhere
+ * (ADR-0016, amended 2026-10-29). That is the relationship ADR-0016 designed:
+ * the script prints and the person decides, because the script has been wrong
+ * before and could not tell.
  *
- * **Do not turn fable's `—` into a `false` on the next re-audit.** It reads
- * unnamed on all three gates exactly as its neighbours do; flipping it would
- * have roma tell every Caller on fable that their `/effort` does not apply,
- * which is the ADR-0016 mistake in the one row nothing else would catch.
+ * **Never turn an unnamed `—` into a `false` on a re-audit.** Flipping one would
+ * have roma tell every Caller on that model that their `/effort` does not apply,
+ * which is the ADR-0016 mistake in the rows nothing else would catch.
  *
  * **It reports; it does not gate.** roma uses it for two things and refuses
  * nothing because of it: it says so, in the reply to an `/effort` or a `/model`
@@ -107,8 +107,8 @@ export const ULTRACODE = 'ultracode'
  * Menu arrives here as an id and no name at all.
  */
 export const EFFORT_MATRIX: Readonly<Record<string, boolean>> = {
-  'claude-fable-5': true,
-  'claude-opus-5': true,
+  'claude-fable-5-1': true,
+  'claude-opus-5-5': true,
   'claude-sonnet-5': true,
   'claude-haiku-4-5': false,
 }
