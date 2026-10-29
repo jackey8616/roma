@@ -1,3 +1,4 @@
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 import type { Credential } from './build-env.js'
 import { CAVEMAN_MENU, isPinnableCaveman, OFF_MENU_WENYAN } from './caveman.js'
 import { EFFORT_MENU, isPinnableEffort, ULTRACODE } from './effort-menu.js'
@@ -183,6 +184,11 @@ export function certain<T>(value: T | null): T {
   return value
 }
 
+function within(root: string, path: string): boolean {
+  const step = relative(resolve(root), resolve(path))
+  return step === '' || (step !== '..' && !step.startsWith(`..${sep}`) && !isAbsolute(step))
+}
+
 /** Read one part of the configuration, keeping its problems rather than throwing. */
 function attempted<T>(read: () => T, problems: string[]): T | null {
   try {
@@ -231,6 +237,13 @@ export function readRomaEnv(env: Environment): RomaEnv {
   // stated consequence of ADR-0008, and a fixed system path is not writable
   // there.
   const shimDir = required(env, 'ROMA_SHIM_DIR', problems)
+  // Enforced by `fence:env-audit-root-outside-the-work-root`.
+  if (workRoot !== null && auditRoot !== null && within(workRoot, auditRoot)) {
+    problems.push(
+      `ROMA_AUDIT_ROOT (${auditRoot}) is inside ROMA_WORK_ROOT (${workRoot}), whose seven-day ` +
+        'reclaim would delete the Audit Records. Put it outside the work root.',
+    )
+  }
 
   const overflow = readOverflow(env, problems)
   const model = envValue(env, 'ROMA_MODEL')
