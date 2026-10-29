@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 
-export interface ClaudeProcessExit {
+export interface RuntimeProcessExit {
   readonly code: number | null
   readonly signal: NodeJS.Signals | null
 }
@@ -21,21 +21,21 @@ export interface SpawnRequest {
  * backpressure — is a detail a fake would otherwise have to imitate correctly to
  * be worth anything.
  */
-export interface ClaudeProcess {
+export interface RuntimeProcess {
   readonly pid: number | undefined
   write(line: string): void
   closeStdin(): void
   kill(signal: NodeJS.Signals): void
   onStdout(listener: (chunk: string) => void): void
   onStderr(listener: (chunk: string) => void): void
-  onExit(listener: (exit: ClaudeProcessExit) => void): void
+  onExit(listener: (exit: RuntimeProcessExit) => void): void
   onError(listener: (error: Error) => void): void
 }
 
-export type SpawnClaudeProcess = (request: SpawnRequest) => ClaudeProcess
+export type SpawnRuntimeProcess = (request: SpawnRequest) => RuntimeProcess
 
-/** Spawn a real `claude` process. */
-export const spawnClaudeProcess: SpawnClaudeProcess = ({ command, args, cwd, env }) => {
+/** Spawn a real Runtime process. */
+export const spawnRuntimeProcess: SpawnRuntimeProcess = ({ command, args, cwd, env }) => {
   const child = spawn(command, [...args], {
     cwd,
     env,

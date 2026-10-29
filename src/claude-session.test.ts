@@ -8,7 +8,7 @@ import {
   type Turn,
 } from './claude-session.js'
 import type { ClaudeEvent } from './stream-events.js'
-import { FakeClaude } from '../test/support/fake-claude.js'
+import { FakeRuntime } from '../test/support/fake-runtime.js'
 import { feed, recordedStream, withTotalCostUsd } from '../test/support/recorded-stream.js'
 
 const SESSION_ID = '11111111-2222-3333-4444-555555555555'
@@ -21,7 +21,7 @@ function newSession(
     appendSystemPrompt?: string
   } = {},
 ) {
-  const claude = new FakeClaude()
+  const claude = new FakeRuntime()
   const session = new ClaudeSession({
     sessionId: SESSION_ID,
     cwd: `/work/${SESSION_ID}`,

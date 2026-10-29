@@ -1,16 +1,16 @@
 import type {
-  ClaudeProcess,
-  ClaudeProcessExit,
-  SpawnClaudeProcess,
+  RuntimeProcess,
+  RuntimeProcessExit,
+  SpawnRuntimeProcess,
   SpawnRequest,
-} from '../../src/claude-process.js'
+} from '../../src/runtime-process.js'
 
 /**
- * One fake `claude` process. It records what was written to its stdin and lets
+ * One fake Runtime process. It records what was written to its stdin and lets
  * a test push bytes back out of its stdout — bytes, not events, so that framing
  * is exercised rather than assumed.
  */
-export class FakeClaudeProcess implements ClaudeProcess {
+export class FakeRuntimeProcess implements RuntimeProcess {
   readonly pid: number
   /** Where this process was spawned — how a test tells one Session's from another's. */
   readonly cwd: string
@@ -23,7 +23,7 @@ export class FakeClaudeProcess implements ClaudeProcess {
   #exited = false
   #stdout: ((chunk: string) => void)[] = []
   #stderr: ((chunk: string) => void)[] = []
-  #exit: ((exit: ClaudeProcessExit) => void)[] = []
+  #exit: ((exit: RuntimeProcessExit) => void)[] = []
   #error: ((error: Error) => void)[] = []
 
   constructor(pid: number, cwd: string, exitOnKill = false) {
@@ -61,7 +61,7 @@ export class FakeClaudeProcess implements ClaudeProcess {
     this.#stderr.push(listener)
   }
 
-  onExit(listener: (exit: ClaudeProcessExit) => void): void {
+  onExit(listener: (exit: RuntimeProcessExit) => void): void {
     this.#exit.push(listener)
   }
 
@@ -88,7 +88,7 @@ export class FakeClaudeProcess implements ClaudeProcess {
     for (const listener of this.#stderr) listener(chunk)
   }
 
-  emitExit(exit: ClaudeProcessExit): void {
+  emitExit(exit: RuntimeProcessExit): void {
     this.#exited = true
     for (const listener of this.#exit) listener(exit)
   }
@@ -109,7 +109,7 @@ export function flush(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve))
 }
 
-export interface FakeClaudeOptions {
+export interface FakeRuntimeOptions {
   /**
    * Whether killing a process makes it exit, the way a real one does.
    *
@@ -120,26 +120,26 @@ export interface FakeClaudeOptions {
   readonly exitOnKill?: boolean
 }
 
-/** A spawner that hands out FakeClaudeProcesses and remembers every request. */
-export class FakeClaude {
+/** A spawner that hands out FakeRuntimeProcesses and remembers every request. */
+export class FakeRuntime {
   readonly spawns: SpawnRequest[] = []
-  readonly processes: FakeClaudeProcess[] = []
+  readonly processes: FakeRuntimeProcess[] = []
 
   readonly #exitOnKill: boolean
 
-  constructor({ exitOnKill = false }: FakeClaudeOptions = {}) {
+  constructor({ exitOnKill = false }: FakeRuntimeOptions = {}) {
     this.#exitOnKill = exitOnKill
   }
 
-  readonly spawn: SpawnClaudeProcess = (request) => {
+  readonly spawn: SpawnRuntimeProcess = (request) => {
     this.spawns.push(request)
-    const proc = new FakeClaudeProcess(4200 + this.processes.length, request.cwd, this.#exitOnKill)
+    const proc = new FakeRuntimeProcess(4200 + this.processes.length, request.cwd, this.#exitOnKill)
     this.processes.push(proc)
     return proc
   }
 
   /** The most recent process spawned for one Session, found by its working directory. */
-  processFor(cwd: string): FakeClaudeProcess {
+  processFor(cwd: string): FakeRuntimeProcess {
     const proc = this.processes.findLast((candidate) => candidate.cwd === cwd)
     if (proc === undefined) throw new Error(`nothing has been spawned in ${cwd}`)
     return proc
@@ -151,7 +151,7 @@ export class FakeClaude {
     return spawn
   }
 
-  get process(): FakeClaudeProcess {
+  get process(): FakeRuntimeProcess {
     const proc = this.processes.at(-1)
     if (proc === undefined) throw new Error('nothing has been spawned')
     return proc

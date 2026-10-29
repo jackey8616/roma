@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { PINNED_EFFORT } from '../../src/claude-session.js'
 import { sessionIdFor } from '../../src/session-id.js'
 import type { ClaudeEvent } from '../../src/stream-events.js'
-import { FakeClaude, flush, type FakeClaudeProcess } from './fake-claude.js'
+import { FakeRuntime, flush, type FakeRuntimeProcess } from './fake-runtime.js'
 import { EFFORT_ANSWERS, feed, OK } from './recorded-stream.js'
 
 /** The three directories a whole roma is given, in the shape it takes them. */
@@ -15,7 +15,7 @@ export interface RomaDirectories {
 }
 
 export interface RomaFixture {
-  readonly claude: FakeClaude
+  readonly claude: FakeRuntime
   /**
    * Spread straight into the options of whatever entry point is under test.
    *
@@ -41,7 +41,7 @@ export interface RomaFixture {
    * Conversation Key derives to — is roma's own rule, and a test that spelled it
    * out would be asserting it in passing every time it wanted to feed a Turn.
    */
-  procFor(conversationKey: string): FakeClaudeProcess
+  procFor(conversationKey: string): FakeRuntimeProcess
   /**
    * The process serving one named Session.
    *
@@ -49,7 +49,7 @@ export interface RomaFixture {
    * Conversation is on — after `/clear`, when the interesting thing is that the
    * next Turn runs somewhere else.
    */
-  procIn(sessionId: string): FakeClaudeProcess
+  procIn(sessionId: string): FakeRuntimeProcess
   /**
    * Answer the self-check's probe Turn and its effort relay, the way a real
    * process would.
@@ -86,7 +86,7 @@ export function romaFixture(
   name: string,
   { workRoot = mkdtempSync(join(tmpdir(), `roma-${name}-`)) }: { workRoot?: string } = {},
 ): RomaFixture {
-  const claude = new FakeClaude({ exitOnKill: true })
+  const claude = new FakeRuntime({ exitOnKill: true })
   const auditRoot = mkdtempSync(join(tmpdir(), `roma-${name}-audit-`))
   const configDir = mkdtempSync(join(tmpdir(), `roma-${name}-claude-`))
   const procIn = (sessionId: string) => claude.processFor(join(workRoot, sessionId))

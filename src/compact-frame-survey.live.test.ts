@@ -3,7 +3,7 @@ import { closeSync, openSync, readFileSync, readdirSync, writeFileSync, writeSyn
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { buildEnv } from './build-env.js'
-import { spawnClaudeProcess, type SpawnClaudeProcess } from './claude-process.js'
+import { spawnRuntimeProcess, type SpawnRuntimeProcess } from './runtime-process.js'
 import { ClaudeSession, TurnFailedError, type Turn } from './claude-session.js'
 import type { ClaudeEvent } from './stream-events.js'
 import {
@@ -203,9 +203,9 @@ interface Reading {
 const READINGS: Reading[] = []
 
 /** Copy every byte of a Session's stdout to a file before anything parses it. */
-function teeing(to: string): SpawnClaudeProcess {
+function teeing(to: string): SpawnRuntimeProcess {
   return (request) => {
-    const process = spawnClaudeProcess(request)
+    const process = spawnRuntimeProcess(request)
     const fd = openSync(to, 'a')
     process.onStdout((chunk) => writeSync(fd, chunk))
     process.onExit(() => closeSync(fd))

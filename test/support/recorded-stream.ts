@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { ClaudeEvent } from '../../src/stream-events.js'
-import type { FakeClaudeProcess } from './fake-claude.js'
+import type { FakeRuntimeProcess } from './fake-runtime.js'
 
 const FIXTURES = fileURLToPath(new URL('../fixtures/claude-stream/', import.meta.url))
 
@@ -203,7 +203,7 @@ export function withoutCompactionTokens(events: readonly ClaudeEvent[]): ClaudeE
  * does to a real stdout at unpredictable moments.
  */
 export function feed(
-  proc: FakeClaudeProcess,
+  proc: FakeRuntimeProcess,
   events: readonly ClaudeEvent[],
   { chunkSize = Infinity }: { chunkSize?: number } = {},
 ): void {

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { apiKeySourceFor, type Credential } from './build-env.js'
-import type { SpawnClaudeProcess } from './claude-process.js'
+import type { SpawnRuntimeProcess } from './runtime-process.js'
 import { ClaudeSession, PINNED_EFFORT, PINNED_MODEL, TurnFailedError } from './claude-session.js'
 import { writeToStderr, type OperatorLog } from './operator-log.js'
 import { readSystemInit, type SystemInit } from './stream-events.js'
@@ -162,7 +162,7 @@ export interface StartupSelfCheckOptions {
    * observed (ADR-0016).
    */
   readonly effort?: string
-  readonly spawn?: SpawnClaudeProcess
+  readonly spawn?: SpawnRuntimeProcess
   readonly timeoutMs?: number
   /** Where a disagreement about the effort goes. Boot continues either way. */
   readonly log?: SelfCheckLog
