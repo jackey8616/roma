@@ -271,7 +271,7 @@
   },
   "src/startup.ts": {
     "roma/comment-whitelist": {
-      "count": 137
+      "count": 110
     }
   },
   "src/stream-events.ts": {

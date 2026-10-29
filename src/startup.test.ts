@@ -15,8 +15,9 @@ import { ConfigurationMissing } from './env-config.js'
 import { sessionIdFor } from './session-id.js'
 import { askMinter } from './shim-client.js'
 import { socketPathIn } from './shim-protocol.js'
-import { bind } from './serve.js'
-import { startRoma, type Roma } from './startup.js'
+import type { Reaches } from './reach.js'
+import { bind, type ChannelBinding } from './serve.js'
+import { startRoma, type Roma, type StartRomaOptions } from './startup.js'
 import { StartupSelfCheckFailed } from './startup-self-check.js'
 import { flush } from '../test/support/fake-claude.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
@@ -34,6 +35,23 @@ import { feed, OK, STRAY_KEY } from '../test/support/recorded-stream.js'
 
 const OAUTH: Credential = { kind: 'shared-window', oauthToken: 'token' }
 const KEY = 'conversation-one'
+
+const BEFORE_THE_CHECK =
+  'Nothing that can take a message — no Core, no bound Channel, no socket serving credentials ' +
+  '— may exist until the startup self-check has passed (#27, ADR-0002). A boot that fails the ' +
+  'check must throw having built none of it, so there is nothing for a message to arrive at ' +
+  'and no way to start serving one on a credential nobody verified.'
+
+const ONE_OF_EVERYTHING =
+  'Every Channel’s Core must share the one queue, pool and records startRoma builds (ADR-0028). ' +
+  'The concurrency cap is three against one Shared Window, not three per Channel; a Core that ' +
+  'built its own would double every cap with no configuration looking wrong.'
+
+const REACH_LINE =
+  'Every boot must write one `reach` line for every Reach, including those with no account, ' +
+  'and the boot proof must write no `reach-token-minted` (#99, ADR-0020). A line that appeared ' +
+  'only sometimes would make its absence mean two things — no Reach, or an older roma — and ' +
+  'counting the proof’s mint, which served nobody, puts a standing +1 on every mint rate.'
 
 let started: Roma[] = []
 let fixtures: RomaFixture[] = []
@@ -134,14 +152,15 @@ describe('starting roma', () => {
   // The acceptance criterion, in the only form it can take: there is nothing to
   // accept an ingress message with until the self-check has passed, because the
   // Core that would accept one does not exist yet.
-  it('builds nothing that can take a message until the self-check has passed', async () => {
+  it('builds nothing that can take a message until the self-check has passed [fence:startup-nothing-before-the-self-check]', async () => {
     const roma = boot()
 
     await flush()
-    expect(roma.hasStarted()).toBe(false)
+    expect(roma.hasStarted(), BEFORE_THE_CHECK).toBe(false)
     // One process, and it is the probe. No Session has been spawned, because
     // nothing has been able to ask for one.
-    expect(roma.claude.spawns).toHaveLength(1)
+    expect(roma.claude.spawns, BEFORE_THE_CHECK).toHaveLength(1)
+    expect(existsSync(socketPathIn(roma.shims.dir)), BEFORE_THE_CHECK).toBe(false)
 
     await roma.answerProbe()
     await expect(roma.starting).resolves.toMatchObject({ core: expect.anything() })
@@ -262,33 +281,59 @@ describe('starting roma', () => {
   // *wrong* work root is invisible here because the Core and the pool would
   // agree about the wrong place. That the record lands beside the generations is
   // `session-pool.test.ts`'s reclaim test.
-  it('lets a Conversation move the model its next Turn runs on', async () => {
-    const roma = boot()
-    await roma.answerProbe()
-    const { core } = await roma.starting
+  it.each([
+    [
+      '/model opus',
+      (spawn: { args: readonly string[] }) => spawn.args[spawn.args.indexOf('--model') + 1],
+      'claude-opus-5',
+    ],
+    [
+      '/effort low',
+      (spawn: { args: readonly string[] }) => spawn.args[spawn.args.indexOf('--effort') + 1],
+      'low',
+    ],
+    [
+      '/caveman ultra',
+      (spawn: { args: readonly string[] }) => announcedTo(spawn).includes(cavemanRuleset('ultra')),
+      true,
+    ],
+  ])(
+    'lets a Conversation move what its next Turn runs on: %s [fence:startup-pool-reads-the-chosen-records]',
+    async (command, read, expected) => {
+      const why =
+        `After \`${command}\`, the next Turn must run on what was chosen: the pool must be built ` +
+        'over the same Chosen Model, Effort and Caveman records the Core writes (ADR-0014, ' +
+        'ADR-0016, ADR-0030; #86, #91). Without one, roma answers the Command perfectly, writes ' +
+        'a perfect record, and runs every Turn on the pinned value — and for the effort nothing ' +
+        'in the stream contradicts it, because system/init carries no effort field.'
+      const roma = boot()
+      await roma.answerProbe()
+      const { core } = await roma.starting
 
-    await core.handle({
-      conversationKey: KEY,
-      caller: 'someone',
-      callerName: 'Someone',
-      text: '/model opus',
-      enclosures: [],
-      quotation: null,
-    })
-    const handled = core.handle({
-      conversationKey: KEY,
-      caller: 'someone',
-      callerName: 'Someone',
-      text: 'hello',
-      enclosures: [],
-      quotation: null,
-    })
-    await flush()
-    feed(roma.procFor(KEY), OK)
-    await handled
+      await core.handle({
+        conversationKey: KEY,
+        caller: 'someone',
+        callerName: 'Someone',
+        text: command,
+        enclosures: [],
+        quotation: null,
+      })
+      const handled = core.handle({
+        conversationKey: KEY,
+        caller: 'someone',
+        callerName: 'Someone',
+        text: 'hello',
+        enclosures: [],
+        quotation: null,
+      })
+      await flush()
+      const spawn = roma.claude.lastSpawn
+      feed(roma.procFor(KEY), OK)
+      await handled
 
-    expect(roma.claude.lastSpawn.args).toContain('claude-opus-5')
-  })
+      expect(read(spawn), why).toBe(expected)
+    },
+  )
 
   // The other half of that wiring, and the half nothing else would notice was
   // missing: a roma whose audit log was not connected answers every message
@@ -463,12 +508,16 @@ describe('proving the Cloud Reach before anything can ask to use it', () => {
   // Written on the boots with nothing to say as well, so that which deployment
   // an operator is looking at can be read off the log rather than inferred from
   // a line that is not there — which would mean two things at once.
-  it('says so at boot when there is no Cloud Reach', async () => {
+  it('says so at boot when there is no Cloud Reach [fence:startup-reach-line-every-boot]', async () => {
     const roma = boot()
     await roma.answerProbe()
     await roma.starting
 
-    expect(roma.log).toContainEqual({ event: 'reach', credential: 'cloud', account: null })
+    expect(roma.log, REACH_LINE).toContainEqual({
+      event: 'reach',
+      credential: 'cloud',
+      account: null,
+    })
   })
 })
 
@@ -622,7 +671,11 @@ describe('serving three credentials over one socket', () => {
   // arrives with a `cloud-platform` token on it (ADR-0020 §3). Asserted from the
   // only place that can see it: roma booted from its real parts, both Reaches
   // present, both asked over the same socket.
-  it('answers each request with its own Reach’s token and account', async () => {
+  it('answers each request with its own Reach’s token and account [fence:startup-one-fresh-tokens-per-reach]', async () => {
+    const why =
+      'Each Reach must be served from a FreshTokens of its own, never one shared (#99, ' +
+      'ADR-0020 §3): they hold different credentials with different expiries, and a shared one ' +
+      'hands a Drive request a cloud-platform token — everything looks fine until the first call.'
     const cloudMinter = new FakeCloudMinter({ account: 'agent@a-project.iam.gserviceaccount.com' })
     const documentMinter = new FakeDocumentMinter({
       account: 'writer@a-project.iam.gserviceaccount.com',
@@ -641,12 +694,12 @@ describe('serving three credentials over one socket', () => {
     // and throw the token away — so the first token *served* is the second token
     // minted, and pinning the count here would be asserting the proof rather than
     // the pairing.
-    expect(code.token).toMatch(/^token-/)
-    expect(code.account).toBe('a-team')
-    expect(cloud.token).toMatch(/^cloud-token-/)
-    expect(cloud.account).toBe('agent@a-project.iam.gserviceaccount.com')
-    expect(documents.token).toMatch(/^document-token-/)
-    expect(documents.account).toBe('writer@a-project.iam.gserviceaccount.com')
+    expect(code.token, why).toMatch(/^token-/)
+    expect(code.account, why).toBe('a-team')
+    expect(cloud.token, why).toMatch(/^cloud-token-/)
+    expect(cloud.account, why).toBe('agent@a-project.iam.gserviceaccount.com')
+    expect(documents.token, why).toMatch(/^document-token-/)
+    expect(documents.account, why).toBe('writer@a-project.iam.gserviceaccount.com')
   })
 
   // Story 18 through the socket rather than through the program: the Shortcut is
@@ -870,14 +923,19 @@ describe('watching for a mint storm', () => {
   // The boot proof mints too, and is deliberately not one of these: it was never
   // served to anybody, and counting it would put a standing +1 on every
   // deployment's mint rate. The `cloud-reach` line is its record.
-  it('does not count the mint that proved the key at boot', async () => {
+  it('does not count the mint that proved the key at boot [fence:startup-reach-line-every-boot]', async () => {
     const roma = boot({ cloudMinter: new FakeCloudMinter() })
     await roma.answerProbe()
     await roma.starting
 
     expect(
-      roma.log.filter((r) => r.event === 'reach-token-minted' && r.credential === 'cloud'),
+      roma.log.filter((r) => r.event === 'reach-token-minted'),
+      REACH_LINE,
     ).toEqual([])
+    expect(
+      roma.log.filter((r) => r.event === 'reach').map((r) => r.credential),
+      REACH_LINE,
+    ).toEqual(['code', 'cloud', 'documents'])
   })
 })
 
@@ -1066,14 +1124,19 @@ describe('putting a credential in front of a Session’s tools', () => {
   // gone a week untouched — a reclaimed socket would present as every credential
   // request in roma failing at once, with no explanation. Not inside a Working
   // Directory either: the agent runs `git add -A` in one of those.
-  it('keeps the socket and the gitconfig in a directory of roma’s own', async () => {
+  it('keeps the socket and the gitconfig in a directory of roma’s own [fence:startup-shim-dir-is-roma-own]', async () => {
+    const why =
+      'The Shim socket and the gitconfig must live in roma’s own directory, never under the ' +
+      'work root or in a Working Directory (#62). The work root is reclaimed after seven idle ' +
+      'days, and a reclaimed socket fails every credential request in roma at once with no ' +
+      'explanation; a Working Directory is where the agent runs `git add -A`.'
     const roma = boot()
     await roma.answerProbe()
     await roma.starting
 
-    expect(existsSync(socketPathIn(roma.shims.dir))).toBe(true)
-    expect(readFileSync(join(roma.shims.dir, 'gitconfig'), 'utf8')).toBe(roma.shims.gitConfig)
-    expect(readdirSync(roma.workRoot)).toEqual([])
+    expect(existsSync(socketPathIn(roma.shims.dir)), why).toBe(true)
+    expect(readFileSync(join(roma.shims.dir, 'gitconfig'), 'utf8'), why).toBe(roma.shims.gitConfig)
+    expect(readdirSync(roma.workRoot), why).toEqual([])
   })
 
   // The one thing that must never be in a process environment. It expires within
@@ -1202,5 +1265,179 @@ describe('telling a Session how short to be', () => {
   // `/usage` is unchanged, and whoever compares two months is the reader.
   it('writes down what the Turn produced, as the Turn’s own delta', async () => {
     expect(await recordUnder('ultra')).toMatchObject({ outputTokens: 17 })
+  })
+})
+
+/**
+ * A roma serving more than one Channel, with every Core it builds counted.
+ *
+ * Its own helper rather than an option on `boot`, which hands back the one
+ * Channel's Core and every test above leans on that.
+ */
+function bootChannels({
+  channels = 2,
+  maxConcurrentTasks,
+}: { channels?: number; maxConcurrentTasks?: number } = {}) {
+  const fixture = romaFixture('startup')
+  fixtures.push(fixture)
+  const shims = fakeShims()
+  fixture.alsoRemove(shims.dir)
+  const adapters = Array.from({ length: channels }, () => new RecordingAdapter())
+  const built = { cores: 0 }
+  const bindings: ChannelBinding[] = adapters.map((adapter) => {
+    const binding = bind(adapter, new FakeTransport())
+    return {
+      coreOver: (build) => {
+        built.cores += 1
+        return binding.coreOver(build)
+      },
+    }
+  })
+  const starting = startRoma({
+    credential: OAUTH,
+    channels: bindings,
+    ...fixture.dirs,
+    reaches: fakeReaches(),
+    shims,
+    spawn: fixture.claude.spawn,
+    log: () => {},
+    selfCheckTimeoutMs: 1_000,
+    ...(maxConcurrentTasks === undefined ? {} : { maxConcurrentTasks }),
+  }).then((roma) => {
+    started.push(roma)
+    return roma
+  })
+  starting.catch(() => {})
+  return { fixture, shims, adapters, built, starting }
+}
+
+/** One message, as a Channel hands it to its Core. */
+function said(conversationKey: string, text = 'hello') {
+  return {
+    conversationKey,
+    caller: 'someone',
+    callerName: 'Someone',
+    text,
+    enclosures: [],
+    quotation: null,
+  }
+}
+
+describe('what a roma serving several Channels is made of', () => {
+  it('binds no Channel and serves no credential when the self-check refuses [fence:startup-nothing-before-the-self-check]', async () => {
+    const roma = bootChannels()
+
+    await roma.fixture.answerProbe(STRAY_KEY)
+
+    await expect(roma.starting, BEFORE_THE_CHECK).rejects.toThrow(StartupSelfCheckFailed)
+    expect(roma.built.cores, BEFORE_THE_CHECK).toBe(0)
+    expect(existsSync(socketPathIn(roma.shims.dir)), BEFORE_THE_CHECK).toBe(false)
+  })
+
+  it('answers each Channel’s messages on that Channel [fence:startup-each-core-on-its-own-channel]', async () => {
+    const why =
+      'Each Core must be built over its own binding’s Adapter, never handed to a binding ready ' +
+      'made (ADR-0028): a Core paired with the wrong Channel answers every message into ' +
+      'somebody else’s product, and nothing downstream of startRoma can tell.'
+    const roma = bootChannels()
+    await roma.fixture.answerProbe()
+    const { channels } = await roma.starting
+
+    for (const [index, { core }] of channels.entries()) {
+      const key = `conversation-${index}`
+      const handled = core.handle(said(key))
+      await flush()
+      feed(roma.fixture.procFor(key), OK)
+      await handled
+    }
+
+    for (const [index, adapter] of roma.adapters.entries()) {
+      expect(
+        new Set(adapter.instructions.map(({ conversationKey }) => conversationKey)),
+        why,
+      ).toEqual(new Set([`conversation-${index}`]))
+      expect(
+        adapter.instructions.some(({ kind }) => kind === 'result'),
+        why,
+      ).toBe(true)
+    }
+  })
+
+  it('holds one concurrency cap across every Channel [fence:startup-one-queue-for-every-channel]', async () => {
+    const roma = bootChannels({ maxConcurrentTasks: 1 })
+    await roma.fixture.answerProbe()
+    const { channels } = await roma.starting
+    const [first, second] = channels
+
+    const one = first!.core.handle(said('on-the-first'))
+    await flush()
+    const two = second!.core.handle(said('on-the-second'))
+    await flush()
+
+    // The probe and the first Channel's Task. The second waits for the slot.
+    expect(roma.fixture.claude.spawns, ONE_OF_EVERYTHING).toHaveLength(2)
+
+    feed(roma.fixture.procFor('on-the-first'), OK)
+    await one
+    await flush()
+    feed(roma.fixture.procFor('on-the-second'), OK)
+    await two
+  })
+
+  it('stops serving credentials however the pool’s shutdown went [fence:startup-socket-closed-whatever-the-pool-did]', async () => {
+    const why =
+      'Shutdown must close the Shim socket in a finally, whatever the pool’s own shutdown did ' +
+      '(#62): a socket left listening on a roma that is otherwise gone is a credential still ' +
+      'being served to nothing.'
+    const roma = bootChannels({ channels: 1 })
+    await roma.fixture.answerProbe()
+    const running = await roma.starting
+    const shutdown = running.pool.shutdown.bind(running.pool)
+    running.pool.shutdown = () => Promise.reject(new Error('the pool could not stop'))
+
+    try {
+      await expect(running.shutdown()).rejects.toThrow('the pool could not stop')
+    } finally {
+      running.pool.shutdown = shutdown
+    }
+
+    expect(existsSync(socketPathIn(roma.shims.dir)), why).toBe(false)
+    await expect(
+      askMinter(socketPathIn(roma.shims.dir), { session: 'anyone', operation: 'get' }),
+      why,
+    ).rejects.toThrow()
+  })
+})
+
+describe('what startRoma will not be started without', () => {
+  it('requires the audit root and the Claude config dir [fence:startup-durable-paths-are-required]', () => {
+    const why =
+      'auditRoot and configDir must stay required on StartRomaOptions, never defaulted (#28, ' +
+      '#37). An audit root defaulted under workRoot is deleted by the seven-day reclaim, and ' +
+      'the Audit Records are the only record of who spent what; an unnamed config dir sends ' +
+      'credential resolution to the host keychain and Transcripts into the host ~/.claude.'
+    const without = (options: StartRomaOptions) => {
+      const { auditRoot: _audit, ...noAuditRoot } = options
+      const { configDir: _config, ...noConfigDir } = options
+      // @ts-expect-error -- fence:startup-durable-paths-are-required: auditRoot must stay required.
+      const a: StartRomaOptions = noAuditRoot
+      // @ts-expect-error -- fence:startup-durable-paths-are-required: configDir must stay required.
+      const b: StartRomaOptions = noConfigDir
+      return [a, b]
+    }
+
+    expect(typeof without, why).toBe('function')
+  })
+
+  it('requires every Reach by name [fence:startup-every-reach-is-named]', () => {
+    const why =
+      'StartRomaOptions.reaches must name every Reach, code first among them (#119, ADR-0020 ' +
+      '§3): a roma with no code Reach proves no key, announces nothing and fails every git ' +
+      'request inside somebody’s Turn — the failure blocking the boot exists to prevent.'
+    const { code: _code, ...noCode } = fakeReaches()
+    // @ts-expect-error -- fence:startup-every-reach-is-named: a Reaches with no code Reach must not compile.
+    const reaches: Reaches = noCode
+
+    expect(Object.keys(reaches).sort(), why).toEqual(['cloud', 'documents'])
   })
 })
