@@ -33,13 +33,7 @@ export const MAX_TEXT = 2000
  */
 export const OVERFLOW_BUTTON = 'Run it on metered billing'
 
-/**
- * How long the name of a thread roma opens may be.
- *
- * **Never let a name past it.** Discord refuses the creation, and a refused
- * thread costs the Conversation the Session its key was minted for (ADR-0029) —
- * so a limit that looks cosmetic is the one that loses a Session.
- */
+/** Enforced by `fence:discord-thread-name-fits`. */
 const MAX_THREAD_NAME = 100
 
 /**
@@ -73,10 +67,7 @@ export type TaskOutcome = NotProgress<OutboundInstruction>
 export function outcomeMessages(instruction: TaskOutcome): string[] {
   switch (instruction.kind) {
     case 'result': {
-      // Its own message or messages, never the acknowledgement edited one last
-      // time — the rule ADR-0003 makes unconditional, and the one Discord's
-      // search and its quote-reply both depend on: neither reaches anything that
-      // is not the content of a message somebody can point at.
+      // Enforced by `fence:discord-result-is-its-own-message`.
       const messages = split(instruction.text, MAX_TEXT)
       // Its own message rather than appended to the answer, because the answer
       // is what gets quoted later and a price tag inside it is quoted with it
@@ -148,8 +139,7 @@ function blockedText(resetsAt: number): string {
 
 /** What an Overflow Turn spent, to the cent it was billed in. */
 function overflowSpentText(costUsd: number | null): string {
-  // Never "$0.00" for a null: that reports money as free, which is the one claim
-  // the Audit Record refuses to make about a Turn nothing priced.
+  // Enforced by `fence:discord-null-cost-not-free`.
   if (costUsd === null) return 'Ran on metered billing. What it cost was never reported.'
   return `Ran on metered billing: $${money(costUsd)}.`
 }
@@ -219,8 +209,7 @@ function split(text: string, budget: number): string[] {
 function breakPoint(window: string, budget: number): number {
   for (const boundary of ['\n\n', '\n', ' ']) {
     const at = window.lastIndexOf(boundary)
-    // Not right at the start: a boundary in the first few characters would make
-    // messages of two words each out of text that simply has no break in it.
+    // Enforced by `fence:discord-split-no-tiny-pieces`.
     if (at > budget / 2) return at + boundary.length
   }
   return budget

@@ -31,32 +31,32 @@
   },
   "src/channels/discord/discord-adapter.ts": {
     "roma/comment-whitelist": {
-      "count": 68
+      "count": 48
     }
   },
   "src/channels/discord/discord-events.ts": {
     "roma/comment-whitelist": {
-      "count": 49
+      "count": 38
     }
   },
   "src/channels/discord/env-config.ts": {
     "roma/comment-whitelist": {
-      "count": 2
+      "count": 1
     }
   },
   "src/channels/discord/gateway-transport.ts": {
     "roma/comment-whitelist": {
-      "count": 66
+      "count": 43
     }
   },
   "src/channels/discord/http-discord-api.ts": {
     "roma/comment-whitelist": {
-      "count": 25
+      "count": 8
     }
   },
   "src/channels/discord/render.ts": {
     "roma/comment-whitelist": {
-      "count": 43
+      "count": 34
     }
   },
   "src/channels/google-chat/binding.ts": {

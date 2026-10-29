@@ -68,9 +68,10 @@ export interface DiscordPress {
   /**
    * Whoever pressed it, which is never the card's author.
    *
-   * The card is roma's, so reading the person off `message.author` would credit
-   * every choice to roma. Discord puts them on `member` in a guild and on `user`
-   * in a direct message, and `readInteraction` reads both.
+   * Discord puts them on `member` in a guild and on `user` in a direct message,
+   * and `readInteraction` reads both.
+   *
+   * Enforced by `fence:discord-presser-off-the-event`.
    */
   readonly caller: string
   readonly callerName: string | null
@@ -89,10 +90,7 @@ export interface Interaction {
   /**
    * What names this Delivery — the interaction's own id, never the card's.
    *
-   * **Never the message's.** Two presses on one card are two events, and a
-   * Delivery named by the card would make the second one look like the first
-   * arriving twice — which `Ingress.take` drops on the floor while the first is
-   * still running.
+   * Enforced by `fence:discord-delivery-named-by-press`.
    */
   readonly id: string
   /** What the acknowledgement is sent with, and it is good for three seconds. */
@@ -111,11 +109,9 @@ const MESSAGE_COMPONENT = 3
  * What roma spends is about forty — a tag, a Conversation Key, and a name off a
  * Menu — and nothing here enforces the rest, because there is nothing good to do
  * with one that would not fit: dropped, the button is gone, and truncated, it
- * comes back meaning something else. So the budget is held by the assertion in
- * `discord-channel.test.ts` instead, which fails where prose would go quietly
- * stale. Being over it is a message Discord refuses whole: a Menu nobody is
- * shown, and on the blocked path an Overflow offer that never reaches the person
- * waiting on it.
+ * comes back meaning something else.
+ *
+ * Enforced by `fence:discord-custom-id-fits`.
  */
 export const MAX_CUSTOM_ID = 100
 
@@ -150,17 +146,12 @@ export type Pressed =
 /**
  * What a Menu button carries, which is the Command and the Conversation both.
  *
- * The Conversation Key is on the button because reading it off `channel_id`
- * would be wrong exactly where it matters: a card posted by the thread fallback
- * sits in a parent channel whose id is not the key, and a press there would
- * answer in a Conversation nobody was in (ADR-0029). It also costs nothing —
- * ADR-0023's best property is that the Adapter remembers **nothing** between
- * posting a card and its being pressed, and a self-describing button is what
- * keeps that true.
+ * A self-describing button is what keeps ADR-0023's best property true: the
+ * Adapter remembers **nothing** between posting a card and its being pressed.
+ * The option goes last, and is rejoined on the way back.
  *
- * The option last and rejoined on the way back, because it is the only field
- * whose spelling is not roma's own to bound: a Menu re-audited onto a name with
- * a `:` in it would otherwise arrive cut in half.
+ * Enforced by `fence:discord-press-survives-thread-fallback`.
+ * Enforced by `fence:discord-option-rides-last`.
  */
 export function chooseId(
   chooses: Extract<Command, 'model' | 'effort' | 'caveman'>,
@@ -174,8 +165,9 @@ export function chooseId(
  * What the Overflow button carries, which is the Task and nothing else.
  *
  * A Task id roma minted and put on the offer, so a press can only ever answer an
- * offer roma actually made — and never the Conversation, which can have a second
- * Task blocked behind this one.
+ * offer roma actually made.
+ *
+ * Enforced by `fence:discord-overflow-named-by-task`.
  */
 export function overflowId(taskId: string): string {
   return pressId({ kind: TAKE_OVERFLOW, taskId })
@@ -213,14 +205,7 @@ export function readPress(customId: string): Pressed | null {
 
 /** A Menu press, or null where it names something roma never put on a Menu. */
 function chosen([chooses, conversationKey, ...rest]: readonly string[]): Pressed | null {
-  // Only the three Commands that have a Menu. A press naming anything else is one
-  // roma never put out, and synthesising `/stop` or `/clear` from it would reach
-  // a Command through a door meant for a Menu.
-  //
-  // **Never widen this without `choiceButtons`, or that without this.** Half a
-  // widening is a `custom_id` roma writes onto a button and then refuses to
-  // read: nothing fails, nothing is logged, and a Caller presses and goes on
-  // waiting (ADR-0023).
+  // Enforced by `fence:discord-menu-door-opens-only-menus`. Enforced by `fence:discord-every-menu-name-reads-back`.
   if (chooses !== 'model' && chooses !== 'effort' && chooses !== 'caveman') return null
   if (conversationKey === undefined || conversationKey === '') return null
   const option = rest.join(FIELD)
@@ -370,10 +355,7 @@ export function readIngressMessage(
  * from three weeks ago safe to press, and why nothing has to be remembered
  * between posting one and its being pressed.
  *
- * **Never route this through `readIngressMessage`.** The message on a press
- * event is roma's *own* card, whose author is an application: that reader's bot
- * guard would swallow it, and relaxing the guard to let it through would both
- * re-open the two-apps-answering-each-other fault and credit the choice to roma.
+ * Enforced by `fence:discord-press-has-its-own-reader`.
  */
 export function readChosenOption(event: DiscordEvent): IngressMessage | null {
   const { press } = event
@@ -382,7 +364,7 @@ export function readChosenOption(event: DiscordEvent): IngressMessage | null {
   if (pressed?.kind !== CHOOSE) return null
 
   return {
-    // The button's own, never the channel the card sits in — see `chooseId`.
+    // Enforced by `fence:discord-press-survives-thread-fallback`.
     conversationKey: pressed.conversationKey,
     caller: press.caller,
     callerName: press.callerName,
@@ -465,14 +447,7 @@ export interface CompleteOptions {
   readonly log?: OperatorLog<DiscordEventLogRecord>
 }
 
-/**
- * Whether this message addressed roma.
- *
- * **Never read only one of the two.** `mentions` is the documented list and the
- * literal in the content is what survives a payload carrying no list, and a
- * reader that took either on its own answers nothing at all on whichever half of
- * the deliveries carries the other.
- */
+/** Enforced by `fence:discord-addressed-by-either-half`. */
 function addressed(message: DiscordMessage, self: string): boolean {
   const mentions = message['mentions']
   const named =
@@ -481,16 +456,7 @@ function addressed(message: DiscordMessage, self: string): boolean {
   return named || mentionsOf(self).some((mention) => content.includes(mention))
 }
 
-/**
- * The message with roma's own mention taken out.
- *
- * **Never leave it in.** Discord does not strip it, unlike Chat's
- * `argumentText`, and `readCommand` matches the whole message — so `<@…> /stop`
- * matches nothing and becomes a paid Task (ADR-0023).
- *
- * **Never take out anybody else's.** Those are content somebody typed, and
- * removing one edits what the model is asked about.
- */
+/** Enforced by `fence:discord-strips-only-its-own-mention`. */
 function withoutMention(content: string, self: string): string {
   return mentionsOf(self)
     .reduce((text, mention) => text.replaceAll(mention, ''), content)
