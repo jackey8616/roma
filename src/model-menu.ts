@@ -149,7 +149,7 @@ export function menuNameFor(model: string): string | null {
 export function readModelRequest(argument: string | null): ModelRequest {
   if (argument === null) return { kind: 'report' }
   if (argument === PINNED_NAME) return { kind: 'default' }
-  const model = MENU[argument]
+  const model = Object.hasOwn(MENU, argument) ? MENU[argument] : undefined
   if (model === undefined) return { kind: 'unknown', name: argument }
   return { kind: 'chosen', name: argument, model }
 }
