@@ -88,7 +88,7 @@ Three things follow, and only the first is the obvious one:
     stands at delivery, so a Quotation there drifts by construction and roma
     cannot prevent it (ADR-0029). The preference above is unaffected — it ranks
     a snapshot above a fetch where both are on offer, and says nothing about a
-    Channel where neither is.
+    Channel where neither is. *Not enforced (ADR-0031).*
 
 The third is why this is not a compromise forced by the second.
 

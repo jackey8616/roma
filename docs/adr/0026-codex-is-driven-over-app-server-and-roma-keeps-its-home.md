@@ -85,7 +85,7 @@ is, and for the same two reasons at once:
   **single-use** refresh token, so the file on disk is the credential's only
   valid copy and every refresh replaces it. Copying it elsewhere is the
   documented foot-gun — two copies race, the loser is invalidated, and the
-  operator sees an auth failure that no setting explains.
+  operator sees an auth failure that no setting explains. *Not enforced (ADR-0031).*
 
 The operator seeds `auth.json` once, per Codex's own CI guidance: log in on a
 trusted machine, place the file in the mount, and let the CLI keep it fresh

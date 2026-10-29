@@ -149,7 +149,7 @@ Queue behind others; a Task can be Parked for hours, which CONTEXT.md defines as
 "holding no concurrency slot and no process" and which an in-memory buffer would
 quietly contradict; a Task can be stopped. And the size is chosen by whoever sent
 the message, so eager buffering puts roma's memory under the control of anybody
-who can message it.
+who can message it. *Not enforced (ADR-0031).*
 
 Synchronous rather than async because making `toIngress` return a promise
 conscripts every future Channel into an async read path for one Channel's
@@ -239,7 +239,7 @@ somebody pasted it in order to be looked at.
 denylist, and the failure of a denylist is silent and total. Since the name is
 wanted for its meaning rather than for addressing anything, there is no reason
 for it to be a path — and a string that is never a path needs no sanitising to be
-safe.
+safe. *Not enforced (ADR-0031).*
 
 **Accept any attachment, not only images.** Not rejected — deferred, and it costs
 nothing to defer, which is the reason the file route was chosen over content

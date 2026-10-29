@@ -80,14 +80,14 @@ notifications, and it is still refused: it reverses ADR-0003's unconditional
 rule outright, turns an answer longer than Chat's limit into a hybrid of one
 edit and N posts, and breaks the guarantee that a Task's last instruction is its
 last, which is what lets an Adapter drop an Acknowledgement the moment a Task
-ends.
+ends. *Not enforced (ADR-0031).*
 
 **Collapse the Acknowledgement into a short sentence when the Result is
 posted** — the same end state as the decision above, with the streaming prose
 kept while the Task runs. Genuinely close, and refused only for its cost: an
 extra Channel call per Task and an Adapter that must edit a message it is
 otherwise finished with. Worth reopening if anyone misses watching the answer
-arrive; nothing else here would have to change for it.
+arrive; nothing else here would have to change for it. *Not enforced (ADR-0031).*
 
 **Show a fixed prefix of the answer instead of the tail.** Rejected before it
 was proposed, by the code it would have reverted: the renderer showed the *end*

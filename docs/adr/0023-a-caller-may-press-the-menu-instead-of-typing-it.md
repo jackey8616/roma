@@ -274,7 +274,7 @@ registered command from `argumentText`, and `readIngressMessage` reads
 `argumentText` first, so `/model opus` would arrive as the bare text `opus`, fail
 `readCommand`, and fall through to a billable Task — turning five free Commands
 into paid Turns. The registration also lives in the Chat API console rather than
-in this repository, where nothing versions it and no test can see it.
+in this repository, where nothing versions it and no test can see it. *Not enforced (ADR-0031).*
 
 **A field on `result` and on `failure` instead of a new kind.** The smaller diff.
 Rejected because it leaves `/model opsu` modelled as a Task failure, which it is

@@ -104,7 +104,7 @@ in front of `gh` must hand out a token for the whole Installation, and an agent
 that can invoke that Shim can obtain one whenever it likes. Scoping `git`'s side
 alone would bound accidental leakage on one path while the other stayed wide
 open, and would be read a year from now as a boundary it never was — the precise
-mistake the *not a boundary against the agent* paragraph below exists to prevent.
+mistake the *not a boundary against the agent* paragraph below exists to prevent. *Not enforced (ADR-0031).*
 
 So the blast radius above stands, and the reason for it is no longer ignorance.
 
@@ -158,7 +158,7 @@ credential helper.** It takes a token from `GH_TOKEN`, or from a config file it
 was logged into — the process environment this section rejects on arithmetic, and
 a file the Alternatives below reject on the same expiry. Implemented exactly as
 written, an agent could clone and push and could not open a pull request, which
-is not a shortfall anybody would accept as the design.
+is not a shortfall anybody would accept as the design. *Not enforced (ADR-0031).*
 
 The mechanism is therefore one **Minter** and **two Credential Shims**, both
 named in CONTEXT.md: `git`'s credential helper, and something ahead of `gh` on
@@ -336,7 +336,7 @@ spared.
   hook firing under the agent's actual commit commands, the system prompt
   landing — is a documented behaviour that this repository has not observed. The
   house standard is measurement (ADR-0002, ADR-0003, the transcript collision
-  work), and this ADR does not meet it yet.
+  work), and this ADR does not meet it yet. *Not enforced (ADR-0031).*
 
   **Updated by #60**, and only partly. The helper protocol *is* measured now, and
   continuously: `src/github/git-credential-shim.test.ts` drives a real `git`

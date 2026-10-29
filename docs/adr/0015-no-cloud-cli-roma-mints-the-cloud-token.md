@@ -390,7 +390,7 @@ plane — the topic, the subscription, the identity roma runs on. Creating the
 Cloud Reach there would put it one IAM binding from the ingress it must never
 touch, and would imply the agent's Google Cloud is roma's. Often it will not be:
 roma may not run on Google Cloud at all, and the project the agent works in may
-belong to somebody else.
+belong to somebody else. *Not enforced (ADR-0031).*
 
 `infra/README.md` gains a section instead, written like the one already refusing
 to create service account keys: the manual steps, the recommendation that the

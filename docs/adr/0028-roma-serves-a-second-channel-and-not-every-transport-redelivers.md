@@ -200,7 +200,7 @@ enforced twice, so twice the ceiling is spendable with no configuration looking
 wrong. ADR-0027's `/usage` would answer for one Channel about a subscription both
 share. Pointing the two processes at one root instead trades those for two
 writers on one JSONL and two resident pools on one `auth.json`, which is #155
-made worse rather than a fix.
+made worse rather than a fix. *Not enforced (ADR-0031).*
 
 **Discord's Gateway publishing onward into Pub/Sub.** ADR-0003 explicitly
 sanctions the shape — *"a channel without native delivery needs an HTTPS receiver
