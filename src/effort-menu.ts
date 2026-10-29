@@ -124,7 +124,7 @@ export const EFFORT_MATRIX: Readonly<Record<string, boolean>> = {
  * every caller here treats it as "say nothing extra".
  */
 export function takesEffort(model: string): boolean | null {
-  return EFFORT_MATRIX[model] ?? null
+  return Object.hasOwn(EFFORT_MATRIX, model) ? (EFFORT_MATRIX[model] ?? null) : null
 }
 
 /**

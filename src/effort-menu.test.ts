@@ -115,6 +115,7 @@ describe('which models take an effort', () => {
   it('says nothing at all about a model it has not been read about', () => {
     expect(takesEffort('claude-mythos-5')).toBeNull()
     expect(takesEffort('claude-opus-5[1m]')).toBeNull()
+    expect(takesEffort('constructor')).toBeNull()
   })
 
   // The Matrix covers the Menu and nothing else: it exists to say what a Session

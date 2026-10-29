@@ -48,6 +48,15 @@ describe('reading a /model message', () => {
     expect(read('/model gpt-5')).toEqual({ kind: 'unknown', name: 'gpt-5' })
   })
 
+  // `MENU` is an object literal, so a bare lookup answers these with whatever
+  // `Object.prototype` holds, and `/model constructor` was "chosen" as a model
+  // that is a function.
+  it('refuses a name only Object.prototype carries', () => {
+    for (const name of ['constructor', 'tostring', 'hasownproperty']) {
+      expect(read(`/model ${name}`)).toEqual({ kind: 'unknown', name })
+    }
+  })
+
   // The Menu is an offer rather than a filter: Claude Code takes "a full model
   // ID" and the `[1m]` variants, so no list roma held could ever be a complete
   // check. What it decides is what roma is willing to put the shared window
