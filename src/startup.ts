@@ -6,7 +6,7 @@ import { buildEnv, type Credential } from './build-env.js'
 import { CAVEMAN_OFF } from './caveman.js'
 import { PINNED_EFFORT, PINNED_MODEL } from './claude-session.js'
 import type { CredentialEnvs } from './session-pool.js'
-import type { SpawnClaudeProcess } from './claude-process.js'
+import type { SpawnRuntimeProcess } from './runtime-process.js'
 import type { RetryBudget } from './config.js'
 import { ReachUse } from './reach-use.js'
 import { Core, type CoreLogRecord, type CoreOptions } from './core.js'
@@ -220,7 +220,7 @@ export interface StartRomaOptions {
   readonly caveman?: string
   readonly maxConcurrentTasks?: number
   readonly retryBudget?: RetryBudget
-  readonly spawn?: SpawnClaudeProcess
+  readonly spawn?: SpawnRuntimeProcess
   /**
    * Where everything roma does that is an operator's business goes — the pool's
    * and the Core's alike.

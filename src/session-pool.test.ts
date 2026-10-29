@@ -11,7 +11,7 @@ import {
 import type { CredentialKind } from './build-env.js'
 import { cavemanRuleset } from './caveman.js'
 import type { Turn } from './claude-session.js'
-import { FakeClaude, flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
+import { FakeRuntime, flush, type FakeRuntimeProcess } from '../test/support/fake-runtime.js'
 import {
   feed,
   OK,
@@ -60,7 +60,7 @@ let workRoots: string[] = []
 function newPool(
   options: Partial<Omit<SessionPoolOptions, 'workRoot'>> & { readonly workRoot?: string } = {},
 ) {
-  const claude = new FakeClaude({ exitOnKill: true })
+  const claude = new FakeRuntime({ exitOnKill: true })
   const workRoot = options.workRoot ?? mkdtempSync(join(tmpdir(), 'roma-pool-'))
   workRoots.push(workRoot)
   const log: PoolLogRecord[] = []
@@ -88,7 +88,7 @@ function newPool(
   })
   pools.push(pool)
 
-  const processFor = (id: string): FakeClaudeProcess => claude.processFor(join(workRoot, id))
+  const processFor = (id: string): FakeRuntimeProcess => claude.processFor(join(workRoot, id))
 
   /** Send a message and serve the Turn it drives from a recorded stream. */
   const send = async (
@@ -1027,7 +1027,7 @@ describe('giving up on a retry storm', () => {
 /** Drive one more Turn on a Session, to show the pool still serves it. */
 async function newTurnOn(
   pool: SessionPool,
-  processFor: (id: string) => FakeClaudeProcess,
+  processFor: (id: string) => FakeRuntimeProcess,
   id: string,
 ): Promise<Turn> {
   const turn = pool.send(id, 'and now something that works')

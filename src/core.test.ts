@@ -29,7 +29,7 @@ import { SessionPool, type PoolLogRecord } from './session-pool.js'
 import { WorkRoot } from './work-root.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { TaskQueue } from './task-queue.js'
-import { flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
+import { flush, type FakeRuntimeProcess } from '../test/support/fake-runtime.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
 import { romaFixture, teardownRoma, type RomaFixture } from '../test/support/roma-fixture.js'
 import {
@@ -262,7 +262,7 @@ function newCore({
   const start = async (
     text: string,
     key = KEY,
-  ): Promise<{ task: Promise<void>; proc: FakeClaudeProcess }> => {
+  ): Promise<{ task: Promise<void>; proc: FakeRuntimeProcess }> => {
     const task = core.handle(ingress(text, key))
     task.catch(() => {})
     await flush()
@@ -4936,7 +4936,7 @@ describe('what somebody sent along with a message', () => {
    * in the suite. `node:timers/promises` is used because `vi.useFakeTimers`
    * above fakes the global `setTimeout` and this has to be a real wait.
    */
-  const spawned = async (procFor: (key: string) => FakeClaudeProcess) => {
+  const spawned = async (procFor: (key: string) => FakeRuntimeProcess) => {
     for (let waited = 0; waited < 5_000; waited += 5) {
       await flush()
       try {

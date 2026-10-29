@@ -18,7 +18,7 @@ import { socketPathIn } from './shim-protocol.js'
 import { bind } from './serve.js'
 import { startRoma, type Roma } from './startup.js'
 import { StartupSelfCheckFailed } from './startup-self-check.js'
-import { flush } from '../test/support/fake-claude.js'
+import { flush } from '../test/support/fake-runtime.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
 import { FakeTransport } from '../test/support/fake-transport.js'
 import {

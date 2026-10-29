@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { buildEnv } from './build-env.js'
-import { spawnClaudeProcess } from './claude-process.js'
+import { spawnRuntimeProcess } from './runtime-process.js'
 import { ClaudeSession } from './claude-session.js'
 import { startupSelfCheck, StartupSelfCheckFailed } from './startup-self-check.js'
 import { liveSessionDirs, sharedWindowCredential } from '../test/support/live-claude.js'
@@ -91,7 +91,7 @@ describe('system/init', () => {
       sessionId: randomUUID(),
       cwd,
       env: buildEnv({ credential, configDir, inherit: process.env }),
-      spawn: spawnClaudeProcess,
+      spawn: spawnRuntimeProcess,
     })
 
     const inits: unknown[] = []

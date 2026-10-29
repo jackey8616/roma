@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TaskProgress } from './channel-adapter.js'
 import { ProgressReporter, type ProgressReporterOptions } from './progress-reporter.js'
 import type { ClaudeEvent } from './stream-events.js'
-import { flush } from '../test/support/fake-claude.js'
+import { flush } from '../test/support/fake-runtime.js'
 import {
   COMPACTED_MANUALLY,
   GENERATING,

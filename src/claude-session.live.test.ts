@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { relayed } from './attribution.js'
 import { buildEnv } from './build-env.js'
-import { spawnClaudeProcess } from './claude-process.js'
+import { spawnRuntimeProcess } from './runtime-process.js'
 import { ClaudeSession, type Turn } from './claude-session.js'
 import { readToolNames, type ClaudeEvent } from './stream-events.js'
 import { liveSessionDirs, sharedWindowCredential } from '../test/support/live-claude.js'
@@ -342,7 +342,7 @@ async function runClaude(args: string[]): Promise<{ code: number | null; stderr:
   const { configDir, cwd } = liveSessionDirs(`flags-${args.join('-').replace(/\W+/g, '')}`)
   const stderr: string[] = []
   return await new Promise((resolve) => {
-    const proc = spawnClaudeProcess({
+    const proc = spawnRuntimeProcess({
       command: 'claude',
       args,
       cwd,

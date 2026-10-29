@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { CAVEMAN_OFF, cavemanRuleset } from './caveman.js'
-import { spawnClaudeProcess, type SpawnClaudeProcess } from './claude-process.js'
+import { spawnRuntimeProcess, type SpawnRuntimeProcess } from './runtime-process.js'
 import {
   ClaudeExitedError,
   ClaudeSession,
@@ -444,7 +444,7 @@ export interface SessionPoolOptions {
   readonly reclaimIntervalMs?: number
   /** How much retrying a Turn may do before it is abandoned. */
   readonly retryBudget?: RetryBudget
-  readonly spawn?: SpawnClaudeProcess
+  readonly spawn?: SpawnRuntimeProcess
   readonly log?: PoolLog
 }
 
@@ -574,7 +574,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   readonly #announcements: readonly string[]
   readonly #maxResident: number
   readonly #retryBudget: RetryBudget
-  readonly #spawnProcess: SpawnClaudeProcess
+  readonly #spawnProcess: SpawnRuntimeProcess
   readonly #log: PoolLog
 
   /** Insertion-ordered, so the first entry is the least recently used. */
@@ -603,7 +603,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     this.#announcements = options.announcements ?? []
     this.#maxResident = options.maxResident ?? MAX_RESIDENT
     this.#retryBudget = options.retryBudget ?? defaultConfig.retryBudget
-    this.#spawnProcess = options.spawn ?? spawnClaudeProcess
+    this.#spawnProcess = options.spawn ?? spawnRuntimeProcess
     this.#log = options.log ?? logToStderr
 
     this.#reclaimTimer = setInterval(
