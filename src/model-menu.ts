@@ -108,13 +108,8 @@ export type ModelRequest =
     }
   | {
       /**
-       * A name roma does not offer.
-       *
-       * Refused rather than passed on as work, because falling through is
-       * precisely the fault this feature exists to fix: the Caller Marker goes
-       * above the message, so Claude Code never sees a command at all, and
-       * somebody is billed for a Turn that answers a plausible sentence about
-       * their typo.
+       * A name roma does not offer, refused rather than passed on as work.
+       * Enforced by `fence:menu-model-unknown-is-refused`.
        */
       readonly kind: 'unknown'
       readonly name: string

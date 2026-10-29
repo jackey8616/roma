@@ -55,8 +55,13 @@ describe('reading an /effort message', () => {
   // `--effort auto` is rejected by the CLI's own parser, so the only way roma
   // could offer it is by omitting `--effort` — which reopens the shared settings
   // file that passing it on every spawn closes.
-  it('does not offer auto, which cannot be pinned', () => {
-    expect(read('/effort auto')).toEqual({ kind: 'unknown', name: 'auto' })
+  it('does not offer auto, which cannot be pinned [fence:menu-effort-offers-no-auto]', () => {
+    const why =
+      '`auto` must stay off the Effort Menu (ADR-0016). `--effort auto` is rejected by the ' +
+      "CLI's own parser, so the only way to offer it is to omit --effort, which reopens the " +
+      'settings file every Session shares and that passing --effort on every spawn closes.'
+    expect(read('/effort auto'), why).toEqual({ kind: 'unknown', name: 'auto' })
+    expect(EFFORT_MENU, why).not.toContain('auto')
   })
 
   // The build has one alias, `med`. roma does not, and that is deliberate:
@@ -66,8 +71,13 @@ describe('reading an /effort message', () => {
     expect(read('/effort med')).toEqual({ kind: 'unknown', name: 'med' })
   })
 
-  it('refuses a level roma does not offer, and says which', () => {
-    expect(read('/effort maximum')).toEqual({ kind: 'unknown', name: 'maximum' })
+  it('refuses a level roma does not offer, and says which [fence:menu-effort-unknown-is-refused]', () => {
+    const why =
+      'An /effort argument that is not on the Effort Menu must be read as unknown and refused, ' +
+      'never passed on as work (ADR-0016, as ADR-0014 for /model). The Caller Marker goes ' +
+      'above the message, so Claude Code never sees a command and somebody is billed for a ' +
+      'Turn that answers a plausible sentence about their typo.'
+    expect(read('/effort maximum'), why).toEqual({ kind: 'unknown', name: 'maximum' })
   })
 
   it('reads no argument as a request to report', () => {
@@ -102,20 +112,30 @@ describe('which models take an effort', () => {
 
   // Literals for the same reason haiku is one: the loop below only asks that
   // every Menu model has *an* answer, which `false` would satisfy.
-  it('says the other three Menu models take one', () => {
-    expect(takesEffort('claude-fable-5')).toBe(true)
-    expect(takesEffort('claude-opus-5')).toBe(true)
-    expect(takesEffort('claude-sonnet-5')).toBe(true)
+  it('says the other three Menu models take one [fence:menu-fable-takes-effort]', () => {
+    const why =
+      'fable, opus and sonnet must read as taking an effort (ADR-0016). The extractor reports ' +
+      'all three as unnamed on every gate, and fable most easily flips to false on a re-audit; ' +
+      'flipped, roma tells every Caller on fable their /effort does not apply, and nothing ' +
+      'else would catch it.'
+    expect(takesEffort('claude-fable-5'), why).toBe(true)
+    expect(takesEffort('claude-opus-5'), why).toBe(true)
+    expect(takesEffort('claude-sonnet-5'), why).toBe(true)
   })
 
   // Three answers rather than two, and this is the third. A deployment that
   // pinned a model off the Model Menu has one the Matrix has never been read
   // about — and roma says nothing about it rather than asserting either way,
   // because both defaults would be roma stating a fact it has not established.
-  it('says nothing at all about a model it has not been read about', () => {
-    expect(takesEffort('claude-mythos-5')).toBeNull()
-    expect(takesEffort('claude-opus-5[1m]')).toBeNull()
-    expect(takesEffort('constructor')).toBeNull()
+  it('says nothing at all about a model it has not been read about [fence:menu-effort-unread-model-says-nothing]', () => {
+    const why =
+      'takesEffort must answer null for a model the Matrix has not been read about, never ' +
+      'true or false (ADR-0016). Yes asserts a fact roma has not established; no tells a ' +
+      'Caller their setting is inert when it may well not be. That includes a name only ' +
+      'Object.prototype carries.'
+    expect(takesEffort('claude-mythos-5'), why).toBeNull()
+    expect(takesEffort('claude-opus-5[1m]'), why).toBeNull()
+    expect(takesEffort('constructor'), why).toBeNull()
   })
 
   // The Matrix covers the Menu and nothing else: it exists to say what a Session
@@ -153,9 +173,14 @@ describe('what an operator may pin', () => {
   // The measurement this whole check exists for: an unrecognised `--effort`
   // warns on stderr and starts on the build's own default, so nothing
   // downstream would ever refuse this.
-  it('does not take a level the build would silently ignore', () => {
-    expect(isPinnableEffort('bananas')).toBe(false)
-    expect(isPinnableEffort('auto')).toBe(false)
-    expect(isPinnableEffort('HIGH')).toBe(false)
+  it('does not take a level the build would silently ignore [fence:menu-effort-pin-refused-at-boot]', () => {
+    const why =
+      'isPinnableEffort must refuse at boot anything but the Menu and ultracode (ADR-0016). ' +
+      'An unrecognised --effort does not fail the spawn: it warns on stderr and runs on the ' +
+      "build's own default, so roma would be wrong about the effort of every Session it " +
+      'serves and nothing would stop.'
+    expect(isPinnableEffort('bananas'), why).toBe(false)
+    expect(isPinnableEffort('auto'), why).toBe(false)
+    expect(isPinnableEffort('HIGH'), why).toBe(false)
   })
 })

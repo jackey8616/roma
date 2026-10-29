@@ -12,11 +12,8 @@ export type ClaudeEvent = { readonly type: string } & Readonly<Record<string, un
 export interface TerminalResult {
   readonly subtype: string
   /**
-   * Whether the Turn failed.
-   *
-   * This, never `subtype`. `is_error: true` co-occurs with `subtype: "success"`
-   * on every auth failure the prototype observed, so a reader keying on
-   * `subtype` reports failures as successes.
+   * Whether the Turn failed: `is_error`, never `subtype`.
+   * Enforced by `fence:session-failure-is-a-rejection`.
    */
   readonly isError: boolean
   readonly text: string | null
@@ -71,14 +68,9 @@ export interface TerminalResult {
    * The field that tells a Turn which *failed* apart from one that never ran. A
    * 401 arrives as `is_error: true` with the message in `result` and no `errors`
    * at all; a `--resume` pointed at a Transcript that is not there arrives with
-   * the reason here and no `result` beside it — which is the whole of how
-   * `TranscriptNotFound` is recognised, and why reading it is not optional
-   * detail. `resume-lost.jsonl` and `auth-failure.jsonl` are the two captures,
-   * one each way.
-   *
-   * An array rather than the first entry, because it is an array in the stream
-   * and roma has seen exactly one length of it. Whoever meets a longer one
-   * should see all of it.
+   * the reason here and no `result` beside it. `resume-lost.jsonl` and
+   * `auth-failure.jsonl` are the two captures, one each way.
+   * Enforced by `fence:session-refused-resume-read-off-errors`.
    */
   readonly errors: readonly string[]
 }
@@ -220,12 +212,8 @@ export interface Compaction {
 /**
  * Read a `system/compact_boundary`, or null if this is not one.
  *
- * **`compact_metadata`, snake_case.** The camelCase `compactMetadata` that #98
- * was written against is Claude Code's *transcript* spelling; the stream carries
- * it through a mapper on the way out. A reader written from the transcript finds
- * `undefined`, reports every Compaction as no Compaction, and looks like it
- * works — which is the whole reason #100 measured this before anything was built
- * on it. `compaction-auto.jsonl` is the capture.
+ * **`compact_metadata`, snake_case**, not the transcript's `compactMetadata`.
+ * Enforced by `fence:stream-compaction-snake-case`.
  *
  * `cumulative_dropped_tokens` is deliberately not read. It is cumulative for the
  * process the way `total_cost_usd` is, so a Task that reported it would be
@@ -287,9 +275,7 @@ export function readCompactionFailure(event: ClaudeEvent): CompactionFailure | n
  * `readToolStarted` exists for, and the failure ADR-0003 named when it argued the
  * concurrency cap: "unacknowledged waiting causes users to resend".
  *
- * The same event carries `compact_result` when a Compaction has *finished*, so
- * this reads the `status` field rather than the subtype: a `status: null` event
- * announcing a result is not an announcement that work is starting.
+ * Read off `status`, not the subtype. Enforced by `fence:stream-compacting-read-off-status`.
  */
 export function readCompacting(event: ClaudeEvent): boolean {
   return (
@@ -334,18 +320,7 @@ export function readTerminalResult(event: ClaudeEvent): TerminalResult | null {
   }
 }
 
-/**
- * Output tokens across every model in one `modelUsage` object, or null if there
- * is no such object.
- *
- * Summed, never read per model: the drift check asks whether *any* model did
- * work, and a `/compact` charges the summarisation to whichever model Claude
- * Code picked — the measured capture has a `claude-haiku-4-5` entry beside the
- * Session's own `claude-sonnet-5`.
- *
- * An entry with no `outputTokens` contributes nothing rather than nulling the
- * sum: an unreadable entry may hide work it did, never work another entry did.
- */
+/** Enforced by `fence:stream-output-tokens-summed-across-models`. */
 function outputTokensIn(value: unknown): number | null {
   if (typeof value !== 'object' || value === null) return null
   let total = 0
@@ -358,8 +333,7 @@ function outputTokensIn(value: unknown): number | null {
 /**
  * The text an `assistant` event carries, concatenated across its text blocks.
  *
- * Complete messages only. With `--include-partial-messages` the same prose also
- * arrives as `stream_event` deltas; reading both would double it.
+ * Complete messages only. Enforced by `fence:stream-assistant-text-once`.
  */
 export function readAssistantText(event: ClaudeEvent): string {
   return contentBlocks(event)

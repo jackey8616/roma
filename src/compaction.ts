@@ -1,23 +1,13 @@
 /**
  * What one failed Compaction means, and the only place that judgement is made.
  *
- * `shared-window.ts`'s opposite number, and written after reading how that one
- * went wrong: the rule below is stated as a list of the codes roma has a reason
- * to believe are harmless, and everything else is treated as something an
- * operator should see. The other way round — enumerate the serious ones, assume
- * the rest are fine — is the shape that fails silently on the release that adds
- * a code, which is exactly what "anything that is not `allowed` is spent" did
- * one file over.
+ * The codes roma believes harmless are listed, and everything else is something
+ * an operator should see. Enforced by `fence:stream-unknown-compaction-code-is-unexplained`.
  *
- * **This judges the Compaction nobody asked for, and only that one.** The whole
- * file reads a *code*, which is what the automatic path sends; a `/compact`
- * somebody typed carries a **sentence** in the same field on the pinned build —
- * `"Not enough messages to compact."` — so putting it through here would sort
- * the commonest failure of that path into `unexplained` and write an operator
- * line about a Turn that was fine. Reconciled in the Core rather than here, and
- * not by adding sentences to the lists below: a Compaction that failed inside a
- * Relay roma sent is that Relay's own answer, so the Caller gets Claude Code's
- * words and nothing reaches this function (ADR-0018).
+ * **This judges the Compaction nobody asked for, and only that one.** It reads
+ * the *code* the automatic path sends; a `/compact` somebody typed carries a
+ * **sentence** in the same field, and its failure is that Relay's own answer
+ * (ADR-0018).
  */
 
 /**

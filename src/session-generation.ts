@@ -24,39 +24,13 @@ import type { WorkRoot } from './work-root.js'
 /** A generation as it is written down: a whole count and nothing else. */
 const COUNT = /^\d+$/
 
-/**
- * Every model a record may name: the Menu's own, and nothing else.
- *
- * A membership test, never a pattern: what it catches is a name roma has
- * *stopped* offering. Removing a Menu entry should be noticed, and a record
- * passed through to `--model` would let a Session go on running on something the
- * Menu no longer stands behind.
- */
+/** Enforced by `fence:session-record-names-only-the-menu`. */
 const OFFERED = new Set(Object.values(MENU))
 
-/**
- * Every effort a record may name: the Effort Menu's own, and nothing else.
- *
- * `OFFERED`'s reasoning exactly, and it holds the same way round: the only thing
- * that writes a record is an `/effort` whose argument was on the Menu, so
- * `ultracode` cannot get in here — a deployment that pinned it did so through
- * `ROMA_EFFORT`, which writes nothing and is not read here.
- */
+/** Enforced by `fence:session-record-names-only-the-menu`. */
 const OFFERED_EFFORTS = new Set(EFFORT_MENU)
 
-/**
- * Every Caveman a record may name: the Caveman Menu's own, and nothing else.
- *
- * `OFFERED_EFFORTS`' reasoning, and it holds the same way round twice over:
- * `wenyan-lite` and `wenyan-ultra` reach roma through `ROMA_CAVEMAN` alone, so a
- * record naming either is one nothing in roma wrote.
- *
- * **Never drop `off` from here on the grounds that it means "no record".** It is
- * a level a Caller may choose and so a value a record may name; `default` is the
- * one that is written down as nothing at all. Dropped, a Caller who asked to be
- * left alone on a deployment that pinned a Caveman would have every message they
- * sent afterwards refused.
- */
+/** Enforced by `fence:session-caveman-off-is-a-level`. */
 const OFFERED_CAVEMEN = new Set(CAVEMAN_MENU)
 
 export interface SessionGenerationsOptions {
@@ -80,12 +54,7 @@ export interface SessionGenerationsOptions {
  * the Session id is a pure derivation from the key — which leaves exactly one
  * thing that can change, the generation, and one question: where it is kept.
  *
- * It is kept on disk, next to the working directories, because the alternative
- * is worse in a way nobody would see. Held in memory, a `/clear` survives until
- * the next deploy and is then silently undone: the Conversation resumes the
- * transcript it asked to be rid of, and the only evidence is Claude Code
- * remembering things that were supposed to be gone. One small file per
- * Conversation buys the property `/clear` is for.
+ * On disk, next to the working directories. Enforced by `fence:session-generation-kept-on-disk`.
  *
  * This is not the database roma does without. Nothing is looked *up* here: the
  * Session id is still derived from the Conversation Key, a Conversation that has
@@ -123,15 +92,7 @@ export class SessionGenerations {
     return sessionId
   }
 
-  /**
-   * How many times this Conversation has been given a fresh Session.
-   *
-   * Zero is not written down: a Conversation that never used `/clear` leaves no
-   * record.
-   *
-   * An unreadable record must throw, never fall back — falling back means
-   * generation zero, which is the context this Conversation asked to be rid of.
-   */
+  /** Enforced by `fence:session-generation-refuses-to-guess`. */
   #generationOf(conversationKey: string): number {
     const written = this.#workRoot.readRecord(this.#recordFor(conversationKey))
     // No record is generation zero, and only no record. Every other way a read
@@ -147,14 +108,7 @@ export class SessionGenerations {
     return Number(written)
   }
 
-  /**
-   * Which Session's name a Conversation's generation record is filed under.
-   *
-   * The first generation's id, never the current one: the record has to be
-   * findable knowing only the Conversation Key, and the current generation is
-   * the thing being looked for. See `WorkRoot.generationRecord` for why nothing
-   * derived from a Conversation Key may reach a filename.
-   */
+  /** Enforced by `fence:session-generation-filed-under-first-id`. */
   #recordFor(conversationKey: string): string {
     return this.#workRoot.generationRecord(sessionIdFor(conversationKey))
   }
@@ -227,11 +181,8 @@ export interface ChosenRecordOptions<K extends ChosenKind> {
   /** Where this kind of record is filed, which is the Work Root's to decide. */
   readonly recordFor: (sessionId: string) => string
   /**
-   * Every value a record may name.
-   *
-   * Gates the *record* and never `pinned`: an operator may pin something off the
-   * Menu — `ROMA_EFFORT=ultracode` is the live case — and that must go on running
-   * while a record naming it is still refused.
+   * Every value a record may name. Gates the *record* and never `pinned`.
+   * Enforced by `fence:session-pinned-is-not-gated`.
    */
   readonly offered: ReadonlySet<string>
   /**
@@ -261,33 +212,17 @@ export interface ChosenRecordOptions<K extends ChosenKind> {
  * as unobservable to the person using the Session. Kept there, a choice would be
  * a setting that reverts at a moment nobody can see.
  *
- * **Keyed by the Session id, never by the Conversation Key.** The Session id
- * derives from the Conversation Key and the Session Generation, and the reset
- * Command moves the generation — so a cleared Conversation asks about a Session
- * id with no record and is back on the pinned value, without anything being
- * deleted. Reverting is arithmetic rather than an action somebody has to
- * remember, and forgetting that action is the failure this exists to prevent:
- * the context cleared and the model still Opus.
+ * **Keyed by the Session id, in the Work Root**, so the reset Command reverts it
+ * by moving the generation. Enforced by `fence:session-choice-keyed-by-session-id`.
  *
  * The price is litter. Every reset leaves a record under a Session id nothing
  * will use again, and records are never reclaimed — which is what keeps
  * generations safe — so this accumulates at tens of bytes per reset forever.
- *
- * Never in the Working Directory: the agent clones into it and runs `git add -A`
- * there (ADR-0008), and it is reclaimed after seven idle days.
  */
 export class ChosenRecord<K extends ChosenKind> {
   /**
-   * Which of the three this is.
-   *
-   * **Never remove this, and never replace it with an empty named subclass.** `K`
-   * has to appear on a member of the class: without it `ChosenRecord<'model'>`,
-   * `ChosenRecord<'effort'>` and `ChosenRecord<'caveman'>` are structurally
-   * identical, and `CoreOptions` holds them in adjacent fields — swapping any two
-   * compiles clean, and a Conversation is then told the effort it runs at as the
-   * model it runs on. Measured both ways: with this field the swap is a TS2322,
-   * and empty named subclasses do *not* fix it, because they share this class's
-   * `#private` and add nothing structural.
+   * Which of the three this is, and what keeps the three apart as types.
+   * Enforced by `fence:session-chosen-kinds-do-not-swap`.
    */
   readonly kind: K
 
@@ -318,10 +253,8 @@ export class ChosenRecord<K extends ChosenKind> {
    * Session nobody moved has left no record, so the answer stands on its own for
    * everybody who never asked for anything else.
    *
-   * Anything else on disk is an error rather than a reason to fall back: falling
-   * back means running on something nobody chose and billing the Shared Window
-   * for it, with the only evidence being answers that read as if they came from
-   * somewhere else.
+   * Anything else on disk is an error rather than a reason to fall back.
+   * Enforced by `fence:session-choice-refuses-to-guess`.
    */
   inForce(sessionId: string): string {
     return this.chosenFor(sessionId) ?? this.#pinned
@@ -332,16 +265,11 @@ export class ChosenRecord<K extends ChosenKind> {
    *
    * The distinction `inForce` collapses, kept because saying what a Session is on
    * needs it and running a Turn does not. A Session with no record *follows* the
-   * pinned value; one whose record names that same value follows nothing. They
-   * are one string today and two the moment an operator moves `ROMA_MODEL` or
-   * `ROMA_EFFORT`, and a report calling both "default" would tell somebody who
-   * typed `/model sonnet` that they are on whatever the deployment picks next.
+   * pinned value; one whose record names that same value follows nothing.
+   * Enforced by `fence:session-chosen-pinned-is-still-chosen`.
    */
   chosenFor(sessionId: string): string | null {
-    // Null is "there is no record", which is almost every Session, and only
-    // that: `readRecord` throws for every other way a read can fail. So the
-    // pinned value `inForce` falls back to can never be a choice that existed
-    // and could not be read.
+    // Enforced by `fence:session-choice-refuses-to-guess`.
     const written = this.#workRoot.readRecord(this.#recordFor(sessionId))
     if (written === null) return null
     if (!this.#offered.has(written)) throw this.#notOffered(written)
@@ -363,12 +291,8 @@ export class ChosenRecord<K extends ChosenKind> {
   }
 
   /**
-   * Put this Session back on the pinned value.
-   *
-   * Forgetting the record, never writing the pinned value into it: a Session that
-   * asked for "default" must follow a deployment that moves `ROMA_MODEL` or
-   * `ROMA_EFFORT`, and one carrying a literal would be stranded on what roma used
-   * to run.
+   * Put this Session back on the pinned value, by forgetting the record.
+   * Enforced by `fence:session-default-forgets`.
    *
    * The same state a fresh Session is in, which is the point — `default` and the
    * reset Command leave a Conversation in exactly one place.

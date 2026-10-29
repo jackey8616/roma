@@ -21,7 +21,7 @@
   },
   "src/caveman.ts": {
     "roma/comment-whitelist": {
-      "count": 2
+      "count": 1
     }
   },
   "src/channels/discord/binding.ts": {
@@ -101,7 +101,7 @@
   },
   "src/claude-session.ts": {
     "roma/comment-whitelist": {
-      "count": 27
+      "count": 21
     }
   },
   "src/cloud/cloud-token.ts": {
@@ -211,12 +211,12 @@
   },
   "src/progress-phrase.ts": {
     "roma/comment-whitelist": {
-      "count": 20
+      "count": 17
     }
   },
   "src/progress-reporter.ts": {
     "roma/comment-whitelist": {
-      "count": 26
+      "count": 23
     }
   },
   "src/reach.ts": {
@@ -236,12 +236,12 @@
   },
   "src/session-generation.ts": {
     "roma/comment-whitelist": {
-      "count": 19
+      "count": 10
     }
   },
   "src/session-id.ts": {
     "roma/comment-whitelist": {
-      "count": 5
+      "count": 4
     }
   },
   "src/session-pool.ts": {
@@ -281,7 +281,7 @@
   },
   "src/stream-events.ts": {
     "roma/comment-whitelist": {
-      "count": 8
+      "count": 7
     }
   },
   "src/task-queue.ts": {

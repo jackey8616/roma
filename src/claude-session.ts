@@ -18,19 +18,12 @@ export interface Turn {
   readonly text: string
   /**
    * What this Turn cost — the delta, not the running total.
-   *
-   * `total_cost_usd` on the terminal event is cumulative for the process, so
-   * logging it raw records the fifth Task served by a process at the sum of
-   * Tasks one through five.
+   * Enforced by `fence:session-cost-is-a-delta`.
    *
    * Null where the terminal event carried no total at all, which no capture we
-   * hold does — it is what a future version that stopped reporting cost would
-   * look like. Null rather than zero because the difference is the difference
-   * between a Turn that was free and a Turn nobody can price, and a version that
-   * quietly stopped reporting would otherwise record every Task in roma as free.
-   * The baseline does not move for one of these, so the next Turn that does
-   * report a total is billed from the last known one and covers both: the month
-   * still adds up, and only the split between two Tasks is lost.
+   * hold does. The next Turn that does report a total is billed from the last
+   * known one and covers both: the month still adds up, and only the split
+   * between two Tasks is lost. Enforced by `fence:session-unreported-is-null-not-zero`.
    */
   readonly costUsd: number | null
   /** Measured from `send` to the terminal event, as roma observed it. */
@@ -47,11 +40,7 @@ export interface Turn {
    * spends money. That is why the drift check no longer reads it; see
    * `outputTokens` below and ADR-0018.
    *
-   * **Nothing in the Core reads this any more**, and it is kept rather than
-   * deleted for one reason: it is the field the seam 2 tests assert *is* zero on
-   * a paid Relay, which is the measurement the drift check's new key exists
-   * because of. A reading nothing depends on and a reading nothing records are
-   * different things, and deleting it would lose the second.
+   * Nothing in the Core reads this. Enforced by `fence:session-compact-reports-no-turns`.
    */
   readonly turns: number | null
   /**
@@ -62,32 +51,19 @@ export interface Turn {
    * check reads: an entry the list declares free that produces output tokens is
    * doing model work, whatever `num_turns` says about it.
    *
-   * **Never negative**, unlike `costUsd`, and `#outputTokenMark` is where that is
-   * argued — the per-model breakdown is not stable across a process's life, and
-   * one capture roma holds walks it backwards. This is one side of a
-   * one-directional alarm rather than a figure anything is billed from, so it is
-   * floored rather than reported faithfully.
+   * **Never negative**, unlike `costUsd`: a backwards reading reports zero.
+   * Enforced by `fence:session-output-tokens-never-negative`.
    *
    * Null where the terminal event carried no `modelUsage` at all, which no
    * capture roma holds does — a free Relay reports an empty object and therefore
-   * zero. Null rather than zero for the reason `costUsd` is: a build that stopped
-   * reporting is a different fact from a Turn that produced nothing, and only one
-   * of them should be able to retire a check.
+   * zero. Enforced by `fence:session-unreported-is-null-not-zero`.
    */
   readonly outputTokens: number | null
   /** The raw terminal event, for anything this interface does not name. */
   readonly result: ClaudeEvent
 }
 
-/**
- * What Claude Code calls a Turn that was interrupted.
- *
- * Measured, not assumed — `interrupted-turn.jsonl`, ADR-0003's run.
- *
- * Read from `terminal_reason`, never `subtype`: `error_during_execution` is what
- * any error during execution says, and only this field tells the ending somebody
- * asked for from the ones nobody did.
- */
+/** Enforced by `fence:session-interrupted-read-off-terminal-reason`. */
 const ABORTED = 'aborted_streaming'
 
 /**
@@ -103,12 +79,11 @@ export function wasInterrupted(turn: Turn): boolean {
 }
 
 /**
- * A Turn that ended in failure.
+ * A Turn that ended in failure, thrown rather than returned.
+ * Enforced by `fence:session-failure-is-a-rejection`.
  *
- * Thrown rather than returned so that no caller can mistake a failed Turn for a
- * successful one — the failure mode ADR-0003 records is a wrapper reading
- * `subtype: "success"` and reporting an auth failure as a success. The Turn
- * rides along because a failed Turn still costs money and still needs auditing.
+ * The Turn rides along because a failed Turn still costs money and still needs
+ * auditing.
  */
 export class TurnFailedError extends Error {
   readonly turn: Turn
@@ -158,11 +133,9 @@ export const NO_CONVERSATION = /no conversation found/i
  *
  * A `TurnFailedError` rather than a sibling of one: a terminal event really did
  * arrive and the Turn really did end in failure, so everything that audits a
- * failed Turn goes on auditing this one. What it adds is the reason, and the
- * reason is *carried* rather than looked up — the terminal event settles the
- * Turn the moment it is parsed, and whether the process's stderr has been
- * delivered by then is not guaranteed. A recovery that reads the buffer is a
- * race; one that reads this is not.
+ * failed Turn goes on auditing this one. What it adds is the reason, carried
+ * off the terminal event rather than looked up on stderr.
+ * Enforced by `fence:session-refused-resume-read-off-errors`.
  */
 export class TranscriptNotFound extends TurnFailedError {
   /** Claude Code's own sentence, out of the terminal event rather than stderr. */
@@ -196,25 +169,17 @@ export interface ClaudeSessionOptions {
   /**
    * Whether this Session already exists on disk.
    *
-   * One boolean, two flags, and no way to ask for both: `--session-id` names a
-   * new Session and `--resume` reaches an existing one. Measured, not assumed —
-   * the CLI rejects the pair with "--session-id can only be used with --continue
-   * or --resume if --fork-session is also specified". roma never forks, so the
-   * exclusion holds for every invocation roma makes.
+   * One boolean, two flags: `--session-id` names a new Session and `--resume`
+   * reaches an existing one. Enforced by `fence:session-one-flag-never-both`.
    */
   readonly resume?: boolean
   readonly model?: string
   /**
    * How hard the model is asked to think, passed on every spawn including the
-   * Sessions nobody has touched.
+   * Sessions nobody has touched. Enforced by `fence:session-effort-always-passed`.
    *
-   * Always sent, and that is what closes the shared settings file: the config dir
-   * is one per deployment, and precedence was measured as
-   * `CLAUDE_CODE_EFFORT_LEVEL` > `--effort` > `settings.effortLevel` — so an
-   * `effortLevel` left in that file would otherwise set the effort for every
-   * Session in roma, invisibly. The environment variable above it is closed by
-   * `buildEnv`'s allowlist, which is why that allowlist is now load-bearing for
-   * something other than credentials (ADR-0016).
+   * `CLAUDE_CODE_EFFORT_LEVEL`, which outranks `--effort`, is closed by
+   * `buildEnv`'s allowlist (ADR-0016).
    */
   readonly effort?: string
   /**
@@ -224,10 +189,8 @@ export interface ClaudeSessionOptions {
    * empty directory has no reason to believe it can clone anything, and will
    * explain that it has no access rather than trying.
    *
-   * `--append-system-prompt` rather than a file in the working directory,
-   * because that directory is the agent's own — it clones into it and runs
-   * `git add -A` in it, and anything roma left there would eventually be
-   * committed into somebody's repository (ADR-0008).
+   * Passed as `--append-system-prompt`, never as a file in the working directory.
+   * Enforced by `fence:session-prompt-rides-the-flag`.
    */
   readonly appendSystemPrompt?: string
   readonly spawn?: SpawnClaudeProcess
@@ -323,24 +286,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
    * resuming, so the total is the *process's* and there is nothing to carry.
    */
   #cumulativeCostUsd = 0
-  /**
-   * The high-water mark of `modelUsage`'s output-token total, summed across
-   * models. Turn output is what a terminal event reports above it.
-   *
-   * Zero for every process, for `#cumulativeCostUsd`'s reason.
-   *
-   * **A high-water mark, never a plain delta** — unlike `total_cost_usd`.
-   * `modelUsage` is a breakdown that is not stable across a process's life: in
-   * `three-turns-one-process.jsonl` the third Turn drops a model entry and
-   * reports fewer `outputTokens` than the Turn before, while `total_cost_usd`
-   * climbs as it should. A plain delta reads that as negative, and the baseline
-   * it leaves makes the *next* normal Turn a large positive delta that the drift
-   * check would blame on an innocent entry.
-   *
-   * So a backwards reading is one roma cannot use: the mark holds and that
-   * Turn reports zero. Work immediately after is under-counted, which is the
-   * right way round for a one-directional alarm.
-   */
+  /** Enforced by `fence:session-output-tokens-never-negative`. */
   #outputTokenMark = 0
 
   constructor(options: ClaudeSessionOptions) {
@@ -431,10 +377,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
    * than by queueing: two concurrent Turns in one Session is a caller bug, and
    * the pool is where waiting belongs.
    *
-   * `async` so that every way this can fail is a rejection. A method that
-   * returns a promise for one class of failure and throws synchronously for
-   * another cannot be handled in one place, and the caller who wrote `.catch()`
-   * finds out at runtime.
+   * Every way this can fail is a rejection. Enforced by `fence:session-send-only-rejects`.
    */
   async send(text: string): Promise<Turn> {
     if (this.#process === null) throw new Error(`Session ${this.sessionId} has not been started`)
@@ -470,12 +413,8 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
    * normally. The Turn still ends — as a failure, with whatever it had already
    * spent.
    *
-   * False means nothing was interrupted, and the caller has to be able to tell:
-   * `/stop` a second after sending is a real thing for a person to do, and in
-   * that second the process may still be starting. Sending the control request
-   * anyway would leave the Turn to run to completion while the Conversation had
-   * been told it was stopped, which is worse than saying there was nothing to
-   * stop — that at least is true, and can be acted on by asking again.
+   * False means nothing was interrupted and nothing was sent.
+   * Enforced by `fence:session-interrupt-needs-a-turn`.
    */
   interrupt(): boolean {
     if (this.#process === null || this.#exit !== null || this.#pending === null) return false
@@ -504,12 +443,10 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
 
   /**
    * End the process for certain — SIGTERM, then SIGKILL if it is ignored.
+   * Enforced by `fence:session-kill-when-term-is-ignored`.
    *
    * `terminate` on its own waits for an exit that a wedged process never
-   * produces, so every caller that *awaits* the ending needs this rather than
-   * that: eviction, which holds up the next message, and the startup self-check,
-   * whose whole purpose is that a boot cannot hang. The distinction is easy to
-   * miss precisely because the process nearly always goes on the first signal.
+   * produces, so a caller that awaits the ending wants this one.
    *
    * `onGraceExpired` fires only when the escalation was needed, which is the
    * moment worth recording — a process that had to be killed is a fact about
@@ -606,10 +543,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
       pending.settle(turn)
       return
     }
-    // Which failure this is, decided here and once. `errors` is the field that
-    // separates a Turn that failed from one that never started: a 401 puts its
-    // sentence in `result` and carries no `errors`, and a refused resume carries
-    // `errors` and no `result` text.
+    // Enforced by `fence:session-refused-resume-read-off-errors`.
     const lost = result.errors.find((entry) => NO_CONVERSATION.test(entry))
     pending.fail(
       lost === undefined ? new TurnFailedError(turn) : new TranscriptNotFound(turn, lost),

@@ -33,9 +33,8 @@ export const RUNTIMES: readonly Runtime[] = ['claude-code']
  * How a Runtime is spelled to whoever is reading a figure.
  *
  * Beside the list rather than in the report that prints it, because the name is
- * the Runtime's own — ADR-0025 has the Opening and `/config` naming one too —
- * and because `Record<Runtime, string>` makes a Runtime added without a name a
- * compile error rather than a line that reads `claude-code`.
+ * the Runtime's own — ADR-0025 has the Opening and `/config` naming one too.
+ * Enforced by `fence:session-runtime-has-a-name`.
  */
 export const RUNTIME_NAMES: Readonly<Record<Runtime, string>> = {
   'claude-code': 'Claude Code',

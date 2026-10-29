@@ -2,25 +2,13 @@ import { createHash } from 'node:crypto'
 
 /**
  * roma's uuidv5 namespace. Minted once with `crypto.randomUUID()` and frozen.
- *
- * Every Session id in existence is derived under it, so changing it is not a
- * refactor: it renames every Session at once, orphaning every transcript Claude
- * Code holds on disk and losing the context of every live Conversation. There is
- * no migration, because roma keeps no record mapping the two.
+ * Enforced by `fence:session-id-namespace-is-frozen`.
  */
 export const ROMA_NAMESPACE = 'd34e4bf8-6828-4829-9f5b-a6f0ce25205f'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-/**
- * Joins a Conversation Key to a Session generation without either being able to
- * spell the other.
- *
- * Never a printable separator: with `#`, a Channel that minted the key `a#1`
- * derives the same id as generation 1 of the key `a` — one Conversation reading
- * and writing another's Session with nothing saying so. NUL is the one byte a
- * Channel's own identifiers cannot carry.
- */
+/** Enforced by `fence:session-id-separator-is-unspellable`. */
 const GENERATION_SEPARATOR = '\u0000'
 
 /**

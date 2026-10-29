@@ -158,20 +158,8 @@ export class FreshTokens {
   /**
    * Drop a token the forge has rejected, so the next request mints instead.
    *
-   * Two things stop one rejection from becoming a mint on every request, and
-   * they guard different mistakes.
-   *
-   * **Matched on the token itself**, rather than dropping whatever is held. A
-   * Shim can hand back a credential that has already been replaced — the erase
-   * arrives after a refresh, or a second Session is still using the one it was
-   * given — and throwing away the *current* token because an old one failed
-   * would be roma re-minting on somebody else's stale news.
-   *
-   * **And at most once a minute**, because the rejection is not always about the
-   * credential. One token serves every Session, and a repository the Installation
-   * does not reach authenticates perfectly well and then 404s — so an agent
-   * looping on a name that does not exist would otherwise discard everybody's
-   * token once per attempt. See `DISCARD_COOLDOWN_MS` for what that gives up.
+   * Only the token named, and at most once a minute; see `DISCARD_COOLDOWN_MS`
+   * for what that gives up. Enforced by `fence:session-token-discard-is-narrow`.
    */
   discard(token: string): void {
     if (this.#cached?.token !== token) return
