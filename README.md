@@ -12,6 +12,7 @@ channel-agnostic core) and ADR-0004 (Google Chat) before changing anything here.
 - **Claude Code v2.1.220** on `PATH`, for the seam 2 tests. Behaviour is version-specific
   and every measurement in `docs/` is against that build — which is why the image pins the
   same version exactly, and why moving it is a re-verification event (ADR-0007).
+- **Codex 0.165.0** on `PATH`, for the Codex live tests, on the same terms (ADR-0026).
 - **Docker**, only to build or run the image.
 
 ```bash
@@ -28,6 +29,7 @@ npm install
 | `npm run typecheck` | `tsc --noEmit`, over `src` **and** `test`. |
 | `npm run build` | `src` alone to `dist/`, which is what the image runs. |
 | `npm run test:seam2` | **Spends money.** Drives a real `claude -p`. |
+| `npm run test:codex-live` | **Spends Codex's Shared Window.** Drives a real `codex app-server`. |
 | `npm run check:claude-code-drift` | Is the pinned Claude Code still the published one? Reports; changes nothing. |
 | `npm run check:claude-code-effort-matrix` | Which models does the pinned Claude Code strip the effort from? Reads it out of the binary and prints the gates it read, for a person to check `EFFORT_MATRIX` against. Nothing consumes the output and nothing fails on it (ADR-0016). |
 | `npm run check:adr-collision` | Would merging this branch put two ADRs on one number? Reads the pull request's base branch, so it does nothing outside CI. |
@@ -45,6 +47,12 @@ It needs a Shared Window token — `CLAUDE_CODE_OAUTH_TOKEN` in a `.env` at the 
 (get one with `claude setup-token`), or exported. Without it the run **fails** rather than
 skipping: a silently skipped seam 2 reports green while the one contract the whole
 architecture rests on goes unchecked.
+
+### The Codex live tests spend Codex's Shared Window
+
+`npm run test:codex-live` drives a real `codex app-server` (ADR-0026) and has its own
+`vitest.codex.config.ts`, so neither `npm test` nor seam 2 can reach it. It needs
+`ROMA_CODEX_HOME` in `.env`, seeded as the environment table below says.
 
 ## Running it
 
@@ -234,6 +242,7 @@ Terraform cannot do, in the order they have to happen.
 | `ROMA_WORK_ROOT` | **Required.** Where Sessions get their working directories. Reclaimed after a week untouched. |
 | `ROMA_AUDIT_ROOT` | **Required.** Where Audit Records go, one file per calendar month. Refused under `ROMA_WORK_ROOT`, which is reclaimed. |
 | `ROMA_CLAUDE_CONFIG_DIR` | **Required**, and it decides two separate things. `CLAUDE_SECURESTORAGE_CONFIG_DIR` is what keeps a host keychain login out of a Claude Code process; `CLAUDE_CONFIG_DIR` is where that process writes the Transcript — the only account there is of what an agent did (ADR-0005). **Give it durable storage that only grows**: roma deletes nothing from here (ADR-0006), so unlike `ROMA_WORK_ROOT` it is never reclaimed. About **1 GB a year** at a hundred Tasks a day, plus 7.7 kB for every Session ever started (`/clear` starts another) — measured on the pinned build, two tool-using Turns on one Session (`docs/transcript-growth-verification.md`). One Task shape, so size the disk for the magnitude rather than the number (#41). **Both figures are stale on any deployment that sets `ROMA_CAVEMAN`**: they were measured with nothing asking the model to be short, and asking moves them in a direction nobody has quantified (ADR-0030). |
+| `ROMA_CODEX_HOME` | The **second Runtime**, Codex, and the whole of its state (ADR-0026). Unset — today, every deployment — and nothing about roma changes. Set, it is an absolute path to a **writable**, durable mount holding an operator-seeded `auth.json`. It cannot be read-only: Codex rewrites `auth.json` on every refresh of a single-use refresh token, so the file is the credential's only valid copy, and it also writes its own state databases there on every start. **Seed it by logging in straight into the mount — `CODEX_HOME=<mount> codex login` — or by moving, never copying, an `auth.json` in** — two copies race and the loser is invalidated. Never defaulted, because `sessions/` under it holds the rollout files, which are a Codex Session's Transcript (ADR-0005, ADR-0006). The image carries Codex but nothing serves Sessions on it yet: only `npm run test:codex-live` reads this today. |
 | `ROMA_GITHUB_APP_ID` | **Required.** roma's GitHub App. There is no installation id to set: roma lists the App's installations and refuses to start if there is anything but one, naming all of them. |
 | `ROMA_GITHUB_PRIVATE_KEY_FILE` | **Required.** A path to the App's private key, PEM. A path rather than the key inline, following `GOOGLE_APPLICATION_CREDENTIALS`: multi-line secrets belong in mounts. **Mount it read-only, and know what it is not:** roma is the only thing that reads it, but the agent runs in the same container under the same uid, so a shell can read it too. ADR-0008 claims otherwise and is wrong about that — `docs/github-app-verification.md` records the gap. |
 | `ROMA_SHIM_DIR` | **Required**, and **defaulted in the image** to `/run/roma`. Where the Credential Shim socket and the gitconfig every Session runs under live. Holds nothing that outlives a boot, which is why it has a default at all — and it is deliberately not under `ROMA_WORK_ROOT`, whose weekly reclaim would take the socket with it. Set it when running from source; `/run` is not writable on a developer's machine. |

@@ -5,13 +5,25 @@ Date: 2026-08-04
 ## Status
 
 Proposed — ADR-0025 decides that a second Runtime exists and how it is chosen;
-this one decides how roma drives it. Nothing below has been measured in this
-repository yet. The facts about Codex come from its protocol documentation and
-from hermes-agent, a working integration whose scars are documented in its
-sources; the verification agenda at the end is the list of claims that must be
-re-established against roma's own pinned build before any of this ships.
-Where a measurement later disagrees, the measurement wins and this file gets
-amended.
+this one decides how roma drives it. The facts about Codex came from its
+protocol documentation and from hermes-agent, a working integration whose scars
+are documented in its sources; the verification agenda at the end is the list
+of claims that must be re-established against roma's own pinned build before
+any of this ships. Where a measurement later disagrees, the measurement wins and
+this file gets amended.
+
+**Amended 2026-10-29** by #149 (`docs/codex-app-server-verification.md`,
+Codex 0.165.0). The decisions are unchanged. Statements of fact that were
+wrong for the pinned build are corrected inline, and each says what it rests
+on, because they rest on different things. **Measured**: usage arrives on
+`thread/tokenUsage/updated`, the home holds the build's own state, and a
+thread started with no effort reports none. **Read off the build's own
+schema**, and each still the named agenda item's to measure: the effort goes
+on `turn/start`, compaction is an item, the two thread-id keys are two ids,
+and the posture has a stable per-thread setting. **Read off hermes-agent's
+source**: it now resumes threads. The seeding step gains a form that makes no
+copy, item 3's scope is narrowed to what #149 measured, and the agenda gains
+the item ADR-0030 added to it.
 
 The spike that the design this pull request previously proposed gated
 construction on survives here as that agenda, extended by one item the review
@@ -45,22 +57,32 @@ lost on roma's own conventions rather than on taste:
 - **`thread/resume` exists** — reopen an existing thread by id, subsequent
   turns append. That is what makes Eviction, Reaping and a restart work
   roma's way: the Pool records the thread id and resumes it, and nothing the
-  person using the Session can observe changes. This is also where roma
-  deliberately diverges from the reference implementation: hermes never
-  resumes, because it keeps its own message history and can rebuild a thread
-  from it. roma keeps no history by design — the memory is the Runtime's —
-  so roma resumes.
+  person using the Session can observe changes. **Amended — hermes now
+  resumes too.** It stores the thread id and calls `thread/resume`; where
+  the thread cannot be handed back (an unknown id, a rollout still locked by a
+  killed app-server) it says so once and starts a fresh thread seeded from its
+  own message history. That fallback is where roma still diverges: roma keeps
+  no history by design — the memory is the Runtime's — so it has nothing to
+  seed from, and a resume that fails is a Session lost rather than rebuilt.
 - Interruption is a protocol method (`turn/interrupt`), the analog of the
   in-band interrupt ADR-0003 measured for Claude Code. exec-per-Turn's only
   stop is a signal, with unverified consequences for a rollout file cut off
   mid-write.
-- `turn/completed` carries token usage and a compaction flag, which is what
-  the Audit Record needs.
+- The protocol reports token usage and compaction, which is what the Audit
+  Record needs. **Amended — not on `turn/completed`.** On the pinned build
+  usage arrives on `thread/tokenUsage/updated` as a running total and a last
+  call, and a compaction is a `contextCompaction` item on `item/completed` —
+  the `thread/compacted` notification still exists, and the build marks it
+  deprecated in the item's favour.
 
 The costs, named: a JSON-RPC client, a wedge watchdog, and a protocol whose
 documented quirks include thread ids serialised under two different keys
 across versions and turns that end in a raw `<turn_aborted>` marker instead
-of a completion event. hermes carries handling for all three; roma's port of
+of a completion event. **Amended — on the pinned build the two keys are two
+different ids:** a `Thread` carries both `id` and `sessionId`, and `sessionId`
+is shared by every thread in one session tree, so a port that tolerated
+either would read the wrong one; roma reads `id`. hermes carries handling for
+all three; roma's port of
 that handling is what the live tests below exist to prove. A wedged process —
 CPU-spinning, auth-broken, or timed out — is **retired**: ended so the next
 Turn respawns and resumes. Retirement is Eviction with a different prompt,
@@ -68,12 +90,16 @@ and the Session survives it by construction.
 
 ## The home
 
-One new durable, **writable** mount is the entire Codex state: `CODEX_HOME` —
-`auth.json` beside `sessions/`. It is what configuring Codex *means*: a
-deployment that wants the second Runtime must have it, and a deployment that
-does not needs nothing new and is not asked for anything (ADR-0025). Where
-Codex is configured it is required exactly the way `ROMA_CLAUDE_CONFIG_DIR`
-is, and for the same two reasons at once:
+One new durable, **writable** mount is the entire Codex state: `CODEX_HOME`.
+**Amended — it holds more than `auth.json` beside `sessions/`.** The pinned
+build writes versioned SQLite state databases there on every start, and a
+`thread-writer-locks/` directory once a thread has run, so the mount's
+contents are a format that belongs to the build, and a second reason, beside
+the refresh below, it cannot be read-only. It is what configuring Codex
+*means*: a deployment that wants the second Runtime must have it, and a
+deployment that does not needs nothing new and is not asked for anything
+(ADR-0025). Where Codex is configured it is required exactly the way
+`ROMA_CLAUDE_CONFIG_DIR` is, and for the same two reasons at once:
 
 - `sessions/` holds the rollout files, which are **the Transcript of a Codex
   Session** — the only account there is of what the agent did. Everything
@@ -89,7 +115,11 @@ is, and for the same two reasons at once:
 
 The operator seeds `auth.json` once, per Codex's own CI guidance: log in on a
 trusted machine, place the file in the mount, and let the CLI keep it fresh
-from then on. roma builds no OAuth flow of its own — the convention is
+from then on. **Amended — the simplest placing makes no copy at all:** where
+the mount is reachable from a machine that can log in, `CODEX_HOME=<mount>
+codex login` writes the login straight into it. Elsewhere the file is moved,
+never copied, and the machine it came from treats its login as spent. roma
+builds no OAuth flow of its own — the convention is
 `CLAUDE_CODE_OAUTH_TOKEN`'s: the operator obtains the Runtime's own
 credential, and roma carries it without ever interpreting it. The Minter is
 unchanged: it holds the three keys it already held — the App's private key and
@@ -116,16 +146,21 @@ argument transfers:
 - **The build.** The image carries a pinned Codex, the app-server protocol
   requires a floor in any case, and moving the pin is a re-verification
   event. ADR-0007's reasoning, second instance; the drift watch extends to
-  the second pin.
+  the second pin. The first pin is 0.165.0, the latest stable build on the day
+  it was measured.
 - **The model.** `gpt-5.6-sol`, one per deployment, sent on every
   `thread/start` — the protocol takes `model` per call — with the roma-written
   `config.toml` in `CODEX_HOME` as the backstop. Not Codex's own default,
   which never runs: this is what roma insists on, ADR-0003's sentence
   verbatim.
 - **The effort.** Pinned beside the model, because on this protocol `effort`
-  is a first-class parameter on the same call — pinning it costs nothing and
-  buys ADR-0016's property: it does not change what happens, it makes roma
-  able to say what happens. The default is the pinned build's own default,
+  is a first-class parameter — pinning it costs nothing and buys ADR-0016's
+  property: it does not change what happens, it makes roma able to say what
+  happens. **Amended — on `turn/start`, not `thread/start`,** which takes no
+  effort on the pinned build; `turn/start`'s sticks to the thread. Sent
+  nowhere, the server reports the thread's effort as `null` and the Turn runs
+  at a level roma cannot state — measured, and the outcome this pin exists to
+  rule out. The default is the pinned build's own default,
   measured at pin time; the env override is validated at startup as
   `ROMA_EFFORT` is.
 - **The Startup Self-Check.** Blocking on every Runtime the deployment
@@ -171,7 +206,9 @@ Codex face of the same decision is a full-access permission profile, written
 by roma into `CODEX_HOME/config.toml` — via the config file rather than the
 protocol's per-thread `permissions` parameter, because the reference
 implementation live-tested that parameter as experimental-gated and rejected
-without matching config. Same posture, same caveat, one more process it is
+without matching config. (**Amended** — the pinned build's stable `sandbox` on
+`thread/start` is a candidate fallback where the config file does not land,
+unmeasured; agenda item 7.) Same posture, same caveat, one more process it is
 true of.
 
 ## Verification agenda
@@ -186,7 +223,7 @@ in, and it says in advance whether a "no" is a repair these two ADRs have
 already authorised or a decision somebody has to make again. The numbering is
 the order the items were written in and is left alone — item 8 cites item 3 by
 number and so does the review that asked for it. The order by how much falls is
-**2, 3, 7, 1, 5, 6, 4, 8, 9**, and item 2 is the load-bearing wall: items 4, 5
+**2, 3, 7, 1, 5, 6, 4, 8, 9, 10**, and item 2 is the load-bearing wall: items 4, 5
 and 7 describe a resident process and none of them reads the same way once that
 answer is no. Item 6 is the one that survives it, in changed form — concurrent
 processes sharing one credential is a live question under either process model,
@@ -210,25 +247,32 @@ already has, so it runs first in wall-clock whatever its rank.
    above for introducing a Session that is never Resident. So a "no" is not an
    amendment to this file but a decision made again from the top, and Eviction,
    Reaping and restart lose the account of themselves given here.
-3. `thread/start` accepts `model` and `effort` on the pinned build, and what
-   answers is the pinned model — the self-check's foundation. A negative answer
-   splits. If the per-call parameters fail but the `config.toml` backstop holds,
-   the pin survives and loses its second belt. If neither can make the pinned
-   model the one that answers, *The pins* has no mechanism and the Startup
-   Self-Check has nothing to probe for — and what goes with it is ADR-0003's
-   sentence, that roma runs the model it insists on rather than the vendor's
+3. `thread/start` accepts `model` and `turn/start` accepts `effort` on the
+   pinned build (**amended** — `thread/start` takes no effort), and what
+   answers is the pinned model — the self-check's foundation. #149 measured
+   only that `thread/start` accepts `model` and reports it back; the effort
+   on `turn/start`, and which model actually answers, remain. A negative
+   answer splits. If the per-call parameters fail but the `config.toml`
+   backstop holds, the pin survives and loses its second belt. If neither can
+   make the pinned model the one that answers, *The pins* has no mechanism and
+   the Startup Self-Check has nothing to probe for — and what goes with it is
+   ADR-0003's sentence, that roma runs the model it insists on rather than the vendor's
    default, which this Runtime may not ship without. ADR-0025's Opening would
    be naming a model on somebody's word.
-4. Thread id key tolerance (`id` vs `sessionId`), `<turn_aborted>` as a
-   terminal marker, and the wedge watchdog's thresholds. A negative answer is
+4. Thread id key tolerance (**amended** — on the pinned build `id` and
+   `sessionId` are different ids, so what is left to check is that `id` is
+   the one every method takes), `<turn_aborted>` as a terminal marker, and
+   the wedge watchdog's thresholds. A negative answer is
    a port that needs its own handling rather than a decision that needs
    remaking — the quirks are hermes's scars and roma's pin may not carry the
    same ones. The watchdog is the exception: if no threshold tells a wedged
    process from a slow Turn, **Retirement** has no trigger, and "the Session
    survives it by construction" is a claim with nothing behind it.
-5. Token usage and the compaction flag on `turn/completed`, differenced the
-   way Claude Code's cumulative totals are. A negative answer costs the Audit
-   Record. Dollars are already conceded as unpriced; tokens are what is left,
+5. Token usage on `thread/tokenUsage/updated` and compaction as a
+   `contextCompaction` item (**amended** — neither is on `turn/completed`, and
+   `thread/compacted` is deprecated), differenced the way Claude Code's
+   cumulative totals are. A negative answer costs the Audit Record. Dollars
+   are already conceded as unpriced; tokens are what is left,
    and a Codex Task that reports neither is unaccounted — which ADR-0014 and
    ADR-0018 both forbid, resting as they do on a Record that says what a Task
    spent. The compaction flag is ADR-0019's, and a Turn that compacts without
@@ -249,7 +293,12 @@ already has, so it runs first in wall-clock whatever its rank.
    implementation's live test, so if `config.toml` does not land either, roma
    has no way to set the posture and Codex runs at whatever its own default is
    — a security decision nobody made, arrived at by omission. This item blocks
-   shipping rather than reshaping a section.
+   shipping rather than reshaping a section. **Amended — with one candidate
+   repair, unmeasured.** The pinned build's schema has a stable `sandbox` on
+   `thread/start` (`read-only`, `workspace-write`, `danger-full-access`) and
+   `sandboxPolicy` on `turn/start`, outside the experimental surface
+   `permissions` sits behind. This item measures it beside `config.toml`; until
+   it has, the sentence above stands.
 8. The pinned build's own reasoning-effort levels, read the way Claude Code's
    were: `scripts/claude-code-effort-matrix.ts` extracted them and a person
    reviewed the table before it became a constant. This Runtime's pinnable set
@@ -270,3 +319,9 @@ already has, so it runs first in wall-clock whatever its rank.
    be describing something else. It ranks last because least falls, not
    because least is read — the repair is wording, plus whatever handling the
    dead-letter path turns out to need.
+10. Whether the app-server takes a system-prompt append, and whether any of
+    the Caveman is measurable on Codex — the item ADR-0030 added to this
+    agenda. The pinned build's `thread/start` has `developerInstructions` and
+    `baseInstructions`, which is where an append would go. A negative answer
+    falsifies nothing here: the Caveman stays Claude Code's alone, said as
+    scope, and nothing in ADR-0030 is blocked on it.

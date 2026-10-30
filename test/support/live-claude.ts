@@ -9,7 +9,8 @@ const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url))
 
 /**
  * Where every throwaway directory seam 2 hands out lives — outside the checkout,
- * on purpose.
+ * on purpose. The Codex live tests' working directories live here too, for the
+ * per-checkout reason below.
  *
  * These used to sit at `${REPO_ROOT}.tmp/seam2/`, which is gitignored but still
  * *inside* the repository, so Claude Code walked up from the working directory
@@ -26,7 +27,7 @@ const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url))
  * mid-Turn, and on a shared machine a fixed `/tmp` name is somebody else's
  * directory and an `EACCES` that reads like an isolation failure.
  */
-const SEAM2_ROOT = join(
+export const SEAM2_ROOT = join(
   tmpdir(),
   `roma-seam2-${createHash('sha256').update(REPO_ROOT).digest('hex').slice(0, 12)}`,
 )
@@ -111,7 +112,8 @@ function liveConfigDir(): string {
   return configDir
 }
 
-function readDotEnv(): Record<string, string> {
+/** `.env` at the repo root, where a developer keeps the live tests' credentials. */
+export function readDotEnv(): Record<string, string> {
   let contents: string
   try {
     contents = readFileSync(`${REPO_ROOT}.env`, 'utf8')

@@ -13,8 +13,9 @@ export interface SpawnRequest {
 }
 
 /**
- * The whole of the operating system as far as ClaudeSession is concerned:
- * a process it writes lines to and reads lines from.
+ * The whole of the operating system as far as a Runtime's driver is concerned —
+ * `ClaudeSession` and `CodexAppServer` alike: a process it writes lines to and
+ * reads lines from.
  *
  * Deliberately narrower than a Node ChildProcess. It is the seam a test
  * substitutes at, and every stream detail it hides — encodings, nullable stdio,
@@ -34,7 +35,7 @@ export interface ClaudeProcess {
 
 export type SpawnClaudeProcess = (request: SpawnRequest) => ClaudeProcess
 
-/** Spawn a real `claude` process. */
+/** Spawn a real process — `claude` or `codex`, whichever `command` names. */
 export const spawnClaudeProcess: SpawnClaudeProcess = ({ command, args, cwd, env }) => {
   const child = spawn(command, [...args], {
     cwd,

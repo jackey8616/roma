@@ -13,7 +13,9 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     include: ['src/**/*.live.test.ts'],
-    exclude: ['**/node_modules/**'],
+    // The Codex live tests spend a different subscription and have their own
+    // config (`vitest.codex.config.ts`).
+    exclude: ['**/node_modules/**', '**/*.codex.live.test.ts'],
     testTimeout: 300_000,
     hookTimeout: 60_000,
     fileParallelism: false,
