@@ -302,10 +302,6 @@ export interface CoreOptions {
   readonly log?: CoreLog
 }
 
-/**
- * How a parked Task came to be running again, or not: the window comes back,
- * somebody buys their way past it, or somebody gives up. There is no fourth.
- */
 type Resumption = 'reset' | 'overflow' | 'stopped'
 
 /**
@@ -337,7 +333,6 @@ interface RunningTask extends TaskAddress {
   effort: string
   /** Enforced by `fence:core-ledger-names-what-ran`. */
   caveman: string | null
-  /** Set by `/stop`, and read at each point the Task can still be stopped. */
   stopped: boolean
   /** Enforced by `fence:core-context-full-once-per-task`. */
   toldContextFull: boolean
@@ -366,11 +361,9 @@ interface RunningTask extends TaskAddress {
   parked: Parked | null
 }
 
-/** A Task waiting for the Shared Window to come back. */
 interface Parked {
   readonly wake: (resumption: Resumption) => void
   readonly timer: NodeJS.Timeout
-  /** Whether an offer of Overflow is outstanding, and so whether one can be taken. */
   readonly offered: boolean
 }
 
@@ -1121,7 +1114,6 @@ export class Core {
     return named(chosen === null ? PINNED_NAME : menuNameFor(chosen), chosen ?? this.#models.pinned)
   }
 
-  /** Do what the Command asks, and say whether there was anything to do. */
   #carryOut(command: Extract<Command, 'stop' | 'clear'>, conversationKey: string): boolean {
     // Enforced by `fence:core-carry-out-names-its-two`.
     switch (command) {
@@ -1430,16 +1422,12 @@ export class Core {
           kind: 'result',
           ...address,
           text: turn.text,
-          // Only where somebody chose to spend money, and only what was spent
-          // on that choice.
           ...(paidBy === 'overflow'
             ? { overflowCostUsd: attempts.spentOn('overflow').costUsd }
             : {}),
         }
       }
 
-      // Parked rather than ended, if the window is what stopped it and nobody
-      // has said to stop waiting.
       if (!task.stopped && (await this.#park(task))) continue
 
       // `task.stopped` as well as the Turn's own ending, because a Task stopped
@@ -1454,7 +1442,6 @@ export class Core {
 
   /** Enforced by `fence:core-park-only-on-a-known-reset`. */
   async #park(task: RunningTask): Promise<boolean> {
-    // Whether a wait is owed at all, and on what terms.
     const park = task.attempts.takePark()
     if (park === null) return false
 
@@ -1540,7 +1527,6 @@ export class Core {
     return true
   }
 
-  /** Wake a parked Task, if it is still parked. */
   #wake(task: RunningTask, resumption: Resumption): void {
     const parked = task.parked
     if (parked === null) return
@@ -1548,7 +1534,6 @@ export class Core {
     parked.wake(resumption)
   }
 
-  /** Stop holding a Task, whichever way its wait ended. */
   #unpark(task: RunningTask): void {
     if (task.parked !== null) clearTimeout(task.parked.timer)
     task.parked = null
@@ -1706,7 +1691,6 @@ const EFFORT_LIST = EFFORT_NAMES.join(', ')
 /** The Caveman Menu as a sentence names it, held once for `MENU_LIST`'s reason. */
 const CAVEMAN_LIST = CAVEMAN_NAMES.join(', ')
 
-/** A `/model` answer that carries the Model Menu to be chosen from. */
 function modelChoice(
   address: TaskAddress,
   text: string,
@@ -1715,7 +1699,6 @@ function modelChoice(
   return { kind: 'choice', ...address, text, chooses: 'model', options: MENU_NAMES, refused }
 }
 
-/** An `/effort` answer that carries the Effort Menu to be chosen from. */
 function effortChoice(
   address: TaskAddress,
   text: string,
@@ -1724,7 +1707,6 @@ function effortChoice(
   return { kind: 'choice', ...address, text, chooses: 'effort', options: EFFORT_NAMES, refused }
 }
 
-/** A `/caveman` answer that carries the Caveman Menu to be chosen from. */
 function cavemanChoice(
   address: TaskAddress,
   text: string,
@@ -1832,7 +1814,6 @@ function monthReport({ month, spend, unreadable }: AuditBreakdown): string {
   return [`${named}.`, ...spend.map(spendLine)].join('\n')
 }
 
-/** One credential's line on one Runtime, in the register that credential is read in. */
 function spendLine({ runtime, credential, costUsd, unpriced }: CredentialSpend): string {
   const figure = `${unpriced === 0 ? '' : 'at least '}$${money(costUsd)}`
   // Enforced by `fence:core-usage-never-one-figure`.
@@ -1845,7 +1826,6 @@ function spendLine({ runtime, credential, costUsd, unpriced }: CredentialSpend):
   }
 }
 
-/** Money as people read it, which is two decimal places and no more. */
 function money(usd: number): string {
   return usd.toFixed(2)
 }
@@ -1973,7 +1953,6 @@ function reasonFor(error: unknown): string {
   return ROMA_FAILED
 }
 
-/** The same, for a Command, whose generic failure is its own sentence. */
 function commandReasonFor(error: unknown): string {
   if (error instanceof ChosenModelNotOffered) return chosenModelGoneReason(error)
   if (error instanceof ChosenEffortNotOffered) return chosenEffortGoneReason(error)

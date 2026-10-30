@@ -131,7 +131,7 @@
   },
   "src/core.ts": {
     "roma/comment-whitelist": {
-      "count": 330
+      "count": 312
     }
   },
   "src/documents/document-token.ts": {
