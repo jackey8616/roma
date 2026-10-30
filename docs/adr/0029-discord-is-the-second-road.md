@@ -343,7 +343,10 @@ a REST API roma cannot reach at all, whose every other symptom arrives minutes
 later as an answer nobody was told.
 
 **`custom_id` carries the Conversation Key as well as the Command.** It holds
-*"1-100 characters"*; a snowflake and `/effort high` come to about thirty. Two
+*"1-100 characters"*; a tag, a Command, a snowflake and a name off a Menu come to
+about forty. Nothing at runtime enforces the rest, because there is nothing good
+to do with an id that would not fit: dropped, the button is gone, and truncated,
+it comes back meaning something else. Two
 things are bought. ADR-0023's stated failure mode — *"If a press does not carry
 the message it was pressed on, no Conversation Key can be derived"* — cannot
 arise, and neither can its Discord-specific cousin, where a card posted by the
@@ -435,7 +438,10 @@ it is the one unverified reading a decision here actually rests on.
   429s count toward the *"10,000 per 10 minutes"* invalid-request limit, whose
   penalty is not scoped to the channel that caused it. ADR-0028 moved the retry
   into `deliver()`; this is the constraint that retry inherits, and it has no
-  counterpart on Chat, whose Adapter retries nothing. Enforced by
+  counterpart on Chat, whose Adapter retries nothing. Three attempts, because
+  what the retry repairs is a blip — a 503 while Discord moves something, or a
+  bucket roma shares with itself during a split answer — and a fault that
+  survives three, spread over a wait Discord named, is not transient. Enforced by
   `fence:discord-waits-what-discord-asked`. Enforced by `fence:discord-attempts-bounded`.
   Enforced by `fence:discord-no-sleeping-through-a-ban`.
 

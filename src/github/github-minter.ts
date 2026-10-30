@@ -9,14 +9,7 @@ const API_VERSION = '2022-11-28'
 /** The most repositories one page will carry. GitHub's maximum. */
 const PER_PAGE = 100
 
-/**
- * The App is installed more than once, and roma refuses rather than guesses.
- *
- * Every Installation is named, because the operator's next move is to decide
- * which one roma is for and remove the others — and a refusal that named one at
- * a time would turn that into a sequence of boots, the same way an incomplete
- * configuration would.
- */
+/** The App is installed more than once, and roma refuses rather than guesses. Names every one. */
 export class InstallationAmbiguous extends Error {
   readonly accounts: readonly string[]
 
@@ -58,7 +51,7 @@ export class GitHubRefused extends Error {
 
 export interface GitHubMinterOptions {
   readonly appId: string
-  /** The App's private key, PEM. Read from a file by `readMinterEnv`. */
+  /** The App's private key as PEM text, as `readMinterEnv` read it. */
   readonly privateKey: string
   readonly api?: string
   /** Injected so that every decision here can be asserted without a network. */
@@ -67,34 +60,10 @@ export interface GitHubMinterOptions {
 }
 
 /**
- * The only thing in roma that holds the App's private key.
- *
- * Everything it does is two documented GitHub calls with a JWT in front of them,
- * and it caches exactly one thing — which Installation roma is acting for, since
- * that is settled at boot and cannot change without a restart. It deliberately
- * does *not* cache tokens: refreshing before expiry, serving concurrent askers
- * from one mint and discarding a rejected token are `FreshTokens`', which
- * is arithmetic rather than product knowledge and is tested against a fake of
- * this.
- *
- * **The private key never leaves this object**, and no credential roma derives
- * from it outlives an hour. A key that reached a Transcript would turn a
- * one-hour exposure into a permanent, indefinitely renewable one, which is worse
- * than the personal access token the whole arrangement exists to avoid.
- *
- * It is **not** out of the agent's reach, and ADR-0008 claims otherwise. The key
- * is a file mounted into the container roma runs in, the agent's Claude Code
- * process is a child of roma's, and they share a uid — so a shell can read it.
- * Nothing here can change that: roma spawning the agent is what puts them in one
- * container. It is the same kind of thing as a Credential Shim — a shape that
- * makes the ordinary path correct, and not a boundary. `docs/github-app-verification.md`
- * records the gap rather than letting the ADR's sentence stand unchallenged.
- *
- * Nothing here has been measured. Every behaviour it relies on — that listing
- * installations works this way, that a minted token clones and pushes, that `gh`
- * authenticates with one — is GitHub's documentation and not this repository's
- * observation. `docs/github-app-verification.md` is the list, and it is honest
- * about being unrun.
+ * The only thing in roma that holds the App's private key, and it never leaves
+ * this object. It caches only which Installation roma acts for, settled by
+ * `installation()`; it does *not* cache tokens, which is `FreshTokens`' job in
+ * front of it.
  */
 export class GitHubMinter implements InstallationMinter {
   readonly #appId: string
@@ -121,10 +90,9 @@ export class GitHubMinter implements InstallationMinter {
   }
 
   /**
-   * Which Installation roma is acting for, and everything it reaches.
-   *
-   * Called at boot, before anything that could accept an Ingress Message exists.
-   * A failure here blocks the boot, which is the point of asking at all.
+   * Which Installation roma is acting for, and everything it reaches. Called at
+   * boot, before anything that could accept an Ingress Message exists; a failure
+   * here blocks the boot.
    */
   async installation(): Promise<Installation> {
     const { id, account } = await this.#onlyInstallation()

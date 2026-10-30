@@ -12,7 +12,10 @@ Runtime that served it: absent reads as Claude Code, a value roma cannot name
 makes the line unreadable, and the month is split by Runtime as well as by
 credential, so the report gives both registers per Runtime — two lines today. The
 `Runtime` type *The Runtime goes on the Audit Record now* found nowhere in `src/`
-is `src/runtime.ts`, beside the closed list of them. Nobody has yet asked whether
+is `src/runtime.ts`, beside the closed list of them — a module of its own, not a
+field of the ledger nor a second export of `build-env.ts`, because the Opening and
+`/config` name a Runtime too and `build-env.ts` builds one Runtime's environment
+rather than standing above both. Nobody has yet asked whether
 `/context` is Eviction-invariant, which is where the *Verification agenda* below
 still stands.
 

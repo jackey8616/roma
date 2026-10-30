@@ -20,10 +20,10 @@ export interface Turn {
    * What this Turn cost — the delta, not the running total.
    * Enforced by `fence:session-cost-is-a-delta`.
    *
-   * Null where the terminal event carried no total at all, which no capture we
-   * hold does. The next Turn that does report a total is billed from the last
-   * known one and covers both: the month still adds up, and only the split
-   * between two Tasks is lost. Enforced by `fence:session-unreported-is-null-not-zero`.
+   * Null where the terminal event carried no total at all. The next Turn that
+   * does report one is billed from the last known total and covers both: the
+   * month still adds up, and only the split between two Tasks is lost.
+   * Enforced by `fence:session-unreported-is-null-not-zero`.
    */
   readonly costUsd: number | null
   /** Measured from `send` to the terminal event, as roma observed it. */
@@ -33,30 +33,24 @@ export interface Turn {
   readonly stopReason: string | null
   readonly terminalReason: string | null
   /**
-   * How many model Turns this drove, or null where the event did not say.
-   *
-   * Zero for a message Claude Code answered locally, which is what every entry
-   * on the Relay list reports on the pinned build — including the one that
-   * spends money. That is why the drift check no longer reads it; see
-   * `outputTokens` below and ADR-0018.
+   * How many model Turns this drove, or null where the event did not say. Zero
+   * for a message Claude Code answered locally, including a Relay that spends
+   * money; `outputTokens` is what tells those apart.
    *
    * Nothing in the Core reads this. Enforced by `fence:session-compact-reports-no-turns`.
    */
   readonly turns: number | null
   /**
-   * The output tokens this Turn produced — what it added, not the running total.
-   *
-   * `modelUsage` is cumulative for the process the way `total_cost_usd` is, so
-   * this is differenced here for the same reason. It is what the Relay drift
-   * check reads: an entry the list declares free that produces output tokens is
-   * doing model work, whatever `num_turns` says about it.
+   * The output tokens this Turn produced — what it added, not the running total,
+   * since `modelUsage` is cumulative for the process. What the Relay drift check
+   * reads.
    *
    * **Never negative**, unlike `costUsd`: a backwards reading reports zero.
    * Enforced by `fence:session-output-tokens-never-negative`.
    *
-   * Null where the terminal event carried no `modelUsage` at all, which no
-   * capture roma holds does — a free Relay reports an empty object and therefore
-   * zero. Enforced by `fence:session-unreported-is-null-not-zero`.
+   * Null where the terminal event carried no `modelUsage` at all; a free Relay
+   * reports an empty object and therefore zero.
+   * Enforced by `fence:session-unreported-is-null-not-zero`.
    */
   readonly outputTokens: number | null
   /** The raw terminal event, for anything this interface does not name. */
@@ -66,14 +60,7 @@ export interface Turn {
 /** Enforced by `fence:session-interrupted-read-off-terminal-reason`. */
 const ABORTED = 'aborted_streaming'
 
-/**
- * Whether this Turn ended because it was interrupted rather than because it
- * failed.
- *
- * The difference matters exactly once, at the end, where a Task somebody stopped
- * is reported as stopped rather than as a failure — the `stopped` outbound
- * instruction is where that is argued.
- */
+/** Whether this Turn ended because it was interrupted rather than because it failed. */
 export function wasInterrupted(turn: Turn): boolean {
   return turn.terminalReason === ABORTED
 }
@@ -101,40 +88,19 @@ export class TurnFailedError extends Error {
 
 /**
  * What Claude Code says when `--resume` is pointed at a Transcript that is not
- * there.
- *
- * Measured, not assumed, and measured twice: seam 2 runs `--resume` at an
- * unknown id under plain `claude -p` and gets it on stderr
- * (`claude-session.live.test.ts`), and `resume-lost.jsonl` is the same refusal
- * under the invocation roma really spawns, where it arrives in the terminal
- * event's `errors` instead.
- *
- * Exported because both readings of the same refusal have to agree on it: this
- * module reads it off the terminal event, and the pool still reads it off
- * stderr for a process that died without emitting one. One string, so they
- * cannot drift apart.
+ * there. It arrives in the terminal event's `errors` under the invocation roma
+ * spawns, and on stderr from a process that died without one; both readings use
+ * this one pattern.
  */
 export const NO_CONVERSATION = /no conversation found/i
 
 /**
- * A `--resume` refused because the Session it named has no Transcript.
+ * A `--resume` refused because the Session it named has no Transcript: nothing
+ * ran and nothing was spent. The pool reads it to respawn with `--session-id`,
+ * and `reasonFor` to tell the Conversation what happened.
  *
- * The fourth thing a stream can end as, and the one that is barely an ending at
- * all: nothing ran, nothing was spent, and the CLI exited before it called
- * anything. Named for the Transcript rather than for the flag, because what is
- * missing is the Transcript — the flag is only how roma found out.
- *
- * Named here rather than derived downstream because two callers want it and
- * neither can be the one that knows. The pool wants it to respawn under the
- * other flag; `reasonFor` wants it so a Conversation is told what happened
- * instead of "roma could not run this Task." Knowledge buried in the pool's
- * correction is unavailable to the second, and a second reader would have to
- * learn the stream's shape to get at it.
- *
- * A `TurnFailedError` rather than a sibling of one: a terminal event really did
- * arrive and the Turn really did end in failure, so everything that audits a
- * failed Turn goes on auditing this one. What it adds is the reason, carried
- * off the terminal event rather than looked up on stderr.
+ * A `TurnFailedError`, so everything that audits a failed Turn audits this one.
+ * The reason is carried off the terminal event, not looked up on stderr.
  * Enforced by `fence:session-refused-resume-read-off-errors`.
  */
 export class TranscriptNotFound extends TurnFailedError {
@@ -177,18 +143,10 @@ export interface ClaudeSessionOptions {
   /**
    * How hard the model is asked to think, passed on every spawn including the
    * Sessions nobody has touched. Enforced by `fence:session-effort-always-passed`.
-   *
-   * `CLAUDE_CODE_EFFORT_LEVEL`, which outranks `--effort`, is closed by
-   * `buildEnv`'s allowlist (ADR-0016).
    */
   readonly effort?: string
   /**
    * What this Session is told about itself on top of Claude Code's own prompt.
-   *
-   * A capability nobody knows about is a capability nobody has: an agent in an
-   * empty directory has no reason to believe it can clone anything, and will
-   * explain that it has no access rather than trying.
-   *
    * Passed as `--append-system-prompt`, never as a file in the working directory.
    * Enforced by `fence:session-prompt-rides-the-flag`.
    */
@@ -211,33 +169,13 @@ interface PendingTurn {
   readonly fail: (error: Error) => void
 }
 
-/**
- * The model every Session runs on, pinned rather than left to default.
- *
- * It is the dominant cost and capability variable and it is not stable by
- * default: it follows the credential, and the prototype watched a stray
- * `ANTHROPIC_API_KEY` move it from `claude-sonnet-5` to `claude-opus-5[1m]`
- * without a word. Pinning changes nothing that was already correct — it turns a
- * silent drift into a mismatch the startup self-check can assert on, which is
- * why that check and this constant have to name the same model.
- */
+/** The Pinned Model where `ROMA_MODEL` names none. The startup self-check asserts it. */
 export const PINNED_MODEL = 'claude-sonnet-5'
 
 /**
- * The effort every Session runs at, pinned rather than left to a settings file.
- *
- * `high` rather than anything else because the point of pinning is **visibility,
- * not change**: `high` was measured as what this build already falls back to when
- * nothing says otherwise, so a deployment that adopts this runs exactly as it ran
- * yesterday and gains the ability to say so. Choosing `medium` would have
- * smuggled a quiet downgrade into the same commit, at a moment when the Audit
- * Record has no effort history to notice it with. If a deployment should think
- * less, that is an operator reading their own ledger and moving `ROMA_EFFORT`
- * (ADR-0016).
- *
- * Unlike the model, nothing downstream can assert this: `system/init` carries no
- * effort field, so the startup self-check has to ask the process in prose. See
- * `startup-self-check.ts`.
+ * The Pinned Effort where `ROMA_EFFORT` names none. Unlike the model,
+ * `system/init` carries no effort field, so the startup self-check has to ask
+ * the process in prose.
  */
 export const PINNED_EFFORT = 'high'
 const COMMAND = 'claude'
@@ -432,9 +370,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
    * `fence:pool-eviction-kills-what-ignores-sigterm` and
    * `fence:startup-self-check-always-ends-the-probe`.
    *
-   * `onGraceExpired` fires only when the escalation was needed, which is the
-   * moment worth recording — a process that had to be killed is a fact about
-   * that process, not about the eviction that asked it to go.
+   * `onGraceExpired` fires only when the escalation was needed.
    */
   async terminateOrKill(
     graceMs: number = TERMINATE_GRACE_MS,

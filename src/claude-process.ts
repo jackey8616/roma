@@ -13,13 +13,11 @@ export interface SpawnRequest {
 }
 
 /**
- * The whole of the operating system as far as ClaudeSession is concerned:
- * a process it writes lines to and reads lines from.
- *
- * Deliberately narrower than a Node ChildProcess. It is the seam a test
- * substitutes at, and every stream detail it hides — encodings, nullable stdio,
- * backpressure — is a detail a fake would otherwise have to imitate correctly to
- * be worth anything.
+ * The whole of the operating system as far as ClaudeSession is concerned: a
+ * process it writes lines to and reads lines from. It is the seam a test
+ * substitutes at, so it is deliberately narrower than a Node ChildProcess: every
+ * stream detail it hides (encodings, nullable stdio, backpressure) is one a fake
+ * would otherwise have to imitate.
  */
 export interface ClaudeProcess {
   readonly pid: number | undefined
