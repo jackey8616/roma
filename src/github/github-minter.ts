@@ -186,7 +186,6 @@ export class GitHubMinter implements InstallationMinter {
     return { id: only.id, account: named[0] ?? '' }
   }
 
-  /** Every repository the Installation reaches, following GitHub's paging. */
   async #repositories(token: string): Promise<string[]> {
     const found: string[] = []
     for (let page = 1; ; page += 1) {
@@ -201,7 +200,6 @@ export class GitHubMinter implements InstallationMinter {
     }
   }
 
-  /** One call authenticated as the App itself, with a JWT signed per request. */
   async #asApp<T>(path: string, what: string, method: 'GET' | 'POST' = 'GET'): Promise<T> {
     const jwt = appJwt({ appId: this.#appId, privateKey: this.#privateKey, now: this.#now() })
     return await this.#call<T>(path, what, method, `Bearer ${jwt}`)

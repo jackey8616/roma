@@ -16,7 +16,6 @@ import type { Compaction } from './stream-events.js'
 /** How a Task ended, in the three ways a Conversation is ever told about. */
 export type TaskOutcome = 'result' | 'failure' | 'stopped'
 
-/** The same three, for reading a record back off disk. */
 const OUTCOMES: readonly TaskOutcome[] = ['result', 'failure', 'stopped']
 
 /**
@@ -54,7 +53,6 @@ function isCompaction(value: unknown): boolean {
  */
 export type AuditKind = 'task' | 'relay'
 
-/** The same, for reading a record back off disk. */
 const KINDS: readonly AuditKind[] = ['task', 'relay']
 
 /** One Task — or one Relay — written down. */
@@ -459,7 +457,6 @@ export interface AuditBreakdown {
   readonly unreadable: number
 }
 
-/** One column of a month's buckets, added up. */
 function sumOf(
   spend: readonly CredentialSpend[],
   field: keyof Omit<CredentialSpend, 'runtime' | 'credential'>,
@@ -467,7 +464,6 @@ function sumOf(
   return spend.reduce((total, entry) => total + entry[field], 0)
 }
 
-/** What one bucket has drawn so far, while the walk is still going. */
 interface Tally {
   tasks: number
   relays: number
@@ -476,12 +472,10 @@ interface Tally {
   mismatched: number
 }
 
-/** A bucket before the walk has put anything in it. */
 function nothingDrawn(): Tally {
   return { tasks: 0, relays: 0, costUsd: 0, unpriced: 0, mismatched: 0 }
 }
 
-/** Which Runtime served a Task, where a record written before the field names none. */
 function runtimeOf({ runtime }: AuditRecord): Runtime {
   return runtime ?? 'claude-code'
 }

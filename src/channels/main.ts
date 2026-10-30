@@ -43,12 +43,9 @@ import { readChatEnv } from './google-chat/env-config.js'
  * itself can do: exit, and answer a signal.
  */
 
-/** What roma exits with when a signal, rather than a failure, ended it. */
 const EXIT_SIGNALLED = 0
-/** What roma exits with when it could not start, or could not stop cleanly. */
 const EXIT_FAILED = 1
 
-/** The two things only the whole program can say. */
 type ProcessLogRecord =
   | { readonly event: 'serving'; readonly selfCheck: StartupSelfCheckReport }
   | { readonly event: 'stopping'; readonly signal: NodeJS.Signals }

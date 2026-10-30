@@ -62,9 +62,7 @@ export class ProgressReporter {
   readonly #deliver: (progress: TaskProgress) => void | Promise<void>
   readonly #updates: boolean
 
-  /** What the Task is doing, as of the last event read. */
   #current: TaskProgress | null = null
-  /** What the Channel was last told, and null until it has been told anything. */
   #sent: TaskProgress | null = null
   #sentAt = 0
   #timer: NodeJS.Timeout | null = null
@@ -165,7 +163,6 @@ export class ProgressReporter {
     return null
   }
 
-  /** Send at the next moment the throttle allows, which may be now. */
   #arm(): void {
     if (this.#timer !== null) return
     const dueIn = this.#sentAt + PROGRESS_INTERVAL_MS - Date.now()

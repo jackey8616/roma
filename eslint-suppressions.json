@@ -1,7 +1,7 @@
 {
   "src/attempts.ts": {
     "roma/comment-whitelist": {
-      "count": 8
+      "count": 5
     }
   },
   "src/attribution.ts": {
@@ -11,7 +11,7 @@
   },
   "src/audit-log.ts": {
     "roma/comment-whitelist": {
-      "count": 26
+      "count": 20
     }
   },
   "src/build-env.ts": {
@@ -71,12 +71,12 @@
   },
   "src/channels/google-chat/render.ts": {
     "roma/comment-whitelist": {
-      "count": 40
+      "count": 37
     }
   },
   "src/channels/main.ts": {
     "roma/comment-whitelist": {
-      "count": 33
+      "count": 30
     }
   },
   "src/claude-session.ts": {
@@ -102,11 +102,6 @@
   "src/core.ts": {
     "roma/comment-whitelist": {
       "count": 283
-    }
-  },
-  "src/documents/document-token.ts": {
-    "roma/comment-whitelist": {
-      "count": 1
     }
   },
   "src/documents/env-config.ts": {
@@ -161,7 +156,7 @@
   },
   "src/github/github-minter.ts": {
     "roma/comment-whitelist": {
-      "count": 15
+      "count": 13
     }
   },
   "src/github/reach.ts": {
@@ -181,7 +176,7 @@
   },
   "src/progress-reporter.ts": {
     "roma/comment-whitelist": {
-      "count": 23
+      "count": 20
     }
   },
   "src/relays.ts": {
@@ -226,7 +221,7 @@
   },
   "src/shortcut.ts": {
     "roma/comment-whitelist": {
-      "count": 20
+      "count": 18
     }
   },
   "src/startup-self-check.ts": {
@@ -241,12 +236,12 @@
   },
   "src/stream-events.ts": {
     "roma/comment-whitelist": {
-      "count": 7
+      "count": 5
     }
   },
   "src/task-queue.ts": {
     "roma/comment-whitelist": {
-      "count": 12
+      "count": 10
     }
   },
   "src/work-root.ts": {

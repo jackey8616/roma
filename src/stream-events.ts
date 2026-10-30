@@ -397,7 +397,6 @@ export function readToolNames(event: ClaudeEvent): string[] {
     .filter((name): name is string => name !== null)
 }
 
-/** The content blocks of an `assistant` event's message, or `[]` if it has none. */
 function contentBlocks(event: ClaudeEvent): Record<string, unknown>[] {
   if (event.type !== 'assistant') return []
   const message = event['message']
@@ -410,7 +409,6 @@ function contentBlocks(event: ClaudeEvent): Record<string, unknown>[] {
   )
 }
 
-/** The `delta` of a `content_block_delta` stream event, or null if it is not one. */
 function streamDelta(event: ClaudeEvent): Record<string, unknown> | null {
   if (event.type !== 'stream_event') return null
   const inner = event['event']

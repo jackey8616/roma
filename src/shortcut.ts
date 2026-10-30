@@ -40,9 +40,7 @@ import type { CredentialWanted, ShimResponse } from './shim-protocol.js'
  * way: minting needs the key and the key is the Minter's.
  */
 
-/** What a shell reads when a Shortcut could not produce a token. */
 const FAILED = 1
-/** What a shell reads when a Shortcut was asked for something it has no idea about. */
 const MISUSED = 2
 
 export interface ShortcutOptions {

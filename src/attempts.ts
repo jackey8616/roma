@@ -58,7 +58,6 @@ export interface Spend {
   readonly compaction: Compaction | null
 }
 
-/** A Task that spent nothing yet, or spent nothing at all. */
 const NOTHING_SPENT: Spend = {
   costUsd: null,
   turnMs: null,
@@ -103,13 +102,11 @@ export function waitMsUntil(resetsAt: number, now: number): number {
   return Math.max(MIN_PARK_MS, resetsAt * 1000 - now)
 }
 
-/** One try at serving a Task, and what it turned into. */
 interface Attempt {
   readonly credential: CredentialKind
   turn: Turn | null
   /** Whether Claude Code was ever given the Task's message on this try. */
   sent: boolean
-  /** The Compaction that happened inside this try's Turn, if one did. */
   compaction: Compaction | null
 }
 
