@@ -76,17 +76,6 @@ function enclosed(enclosures: readonly WrittenEnclosure[]): string {
     .join('')
 }
 
-/**
- * Who somebody else's contribution is from, on the tag that carries it.
- *
- * Absent on nearly all of them and load-bearing on the rest: a forwarded
- * message's attachments land in the same Working Directory on the same kind of
- * tag as the Caller's own, so without this "the screenshot Ada sent" and "the
- * screenshot Ada forwarded from Bob" are one sentence — the misattribution the
- * Caller Marker exists to prevent, one level down (ADR-0021).
- *
- * Nothing is written for the Caller's own; the marker above already says who.
- */
 function fromAttribute(from: string | null): string {
   return from === null ? '' : ` from="${attribute(from)}"`
 }

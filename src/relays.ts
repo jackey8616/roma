@@ -110,34 +110,10 @@ interface RelayEntry {
   readonly takesArgument: boolean
 }
 
-/**
- * Every string roma relays, what each is expected to cost, and what may follow
- * it.
- *
- * The cost class is a claim about the pinned build, and both checks on it are
- * needed: a seam 2 case per entry before a deploy, and the Core's drift check on
- * every free Relay after. `/autocompact`'s gate is a remote experiment flag, so
- * behaviour can move under a fixed binary and a pin-move ritual alone assumes
- * the binary is the whole contract.
- *
- * The table never grows on its own, which is the whole of the guarantee.
- */
 const RELAYS: ReadonlyMap<string, RelayEntry> = new Map(
   Object.entries({
     // Show current context usage: how full this Session's context window is.
     '/context': { cost: 'free', takesArgument: false },
-    // Replace this Session's conversation with a summary, keeping what the Caller
-    // asked to keep. The first entry that costs money, and the whole of ADR-0018.
-    //
-    // The only entry that takes an argument, because dropping it would leave
-    // `/compact` differing from auto-compaction only in *timing* — and "what gets
-    // kept" is the other half of the want, the half upstream's own warning
-    // advertises: "Autocompact will trigger soon, which discards older messages.
-    // Use `/compact` now to control what gets kept."
-    //
-    // One spelling: the pinned build's descriptor declares no aliases, so
-    // ADR-0013's fault — a spelling roma leaves unclaimed is one somebody is
-    // billed for — has nothing to bite on here.
     '/compact': { cost: 'paid', takesArgument: true },
   }),
 )

@@ -101,6 +101,11 @@ version control. Enforced by `fence:buildenv-no-stray-key`.
 A consequence worth noting: the overflow valve stops being a special mode and
 becomes just a different environment map.
 
+**Amended — one map per credential, chosen per Turn.** The Session Pool holds
+both maps and picks between them for each Turn. Both reach the same Credential
+Shim socket: a credential for reaching the code has nothing to do with which bill
+a Turn lands on.
+
 ### Quota exhaustion
 
 The shared token means one shared 5-hour rolling window and one shared weekly

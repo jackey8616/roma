@@ -366,11 +366,6 @@ export async function startRoma({
     ...(log === undefined ? {} : { log }),
   })
 
-  // One environment per credential a Turn can be paid for by. Overflow is not a
-  // mode roma is put into — ADR-0002 makes it exactly this, a different map —
-  // and the pool picks between them per Turn. Both reach the same socket: a
-  // credential for reaching the code has nothing to do with which bill a Turn
-  // lands on.
   const sessionEnv = (from: Credential) => (sessionId: string) =>
     buildEnv({
       credential: from,
@@ -490,11 +485,6 @@ function servedReaches(
       account,
       tokens: new FreshTokens({
         minter: reach.minter,
-        // What makes a mint storm visible. The credential line beside this one is
-        // written per *request*, and things in the agent's userland ask on every
-        // invocation by design — so without this an operator counting the log
-        // cannot tell a loop that is minting from a loop that is being served the
-        // token roma already holds.
         onMint: () => log?.({ event: 'reach-token-minted', credential: reach.credential, account }),
       }),
     }

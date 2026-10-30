@@ -6,7 +6,7 @@
   },
   "src/attribution.ts": {
     "roma/comment-whitelist": {
-      "count": 5
+      "count": 4
     }
   },
   "src/audit-log.ts": {
@@ -191,7 +191,7 @@
   },
   "src/relays.ts": {
     "roma/comment-whitelist": {
-      "count": 19
+      "count": 6
     }
   },
   "src/serve.ts": {
@@ -241,7 +241,7 @@
   },
   "src/startup.ts": {
     "roma/comment-whitelist": {
-      "count": 75
+      "count": 65
     }
   },
   "src/stream-events.ts": {
