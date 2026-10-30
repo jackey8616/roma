@@ -184,9 +184,7 @@ export class FreshTokens {
       this.#onMint()
       return minted
     } finally {
-      // Cleared whichever way it went, and only if this is still the mint in
-      // flight. A failed mint that stayed here would be handed to every later
-      // caller as a rejection they could do nothing about.
+      // Enforced by `fence:session-token-failed-mint-is-forgotten`.
       if (this.#minting === minting) this.#minting = null
     }
   }

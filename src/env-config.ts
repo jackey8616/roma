@@ -324,10 +324,7 @@ function readOverflow(
  */
 export function envValue(env: Environment, name: string): string | null {
   const found = env[name]
-  // An empty string is what a shell leaves behind when a variable was set from
-  // something that turned out to be empty. Treated as a value it boots roma on
-  // an empty token, which then fails as a credential problem rather than as the
-  // deployment mistake it is.
+  // Enforced by `fence:env-empty-is-unset`.
   return found === undefined || found === '' ? null : found
 }
 

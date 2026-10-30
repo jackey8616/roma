@@ -6,7 +6,7 @@
   },
   "src/attribution.ts": {
     "roma/comment-whitelist": {
-      "count": 6
+      "count": 5
     }
   },
   "src/audit-log.ts": {
@@ -136,12 +136,12 @@
   },
   "src/env-config.ts": {
     "roma/comment-whitelist": {
-      "count": 18
+      "count": 14
     }
   },
   "src/fresh-tokens.ts": {
     "roma/comment-whitelist": {
-      "count": 11
+      "count": 8
     }
   },
   "src/github/announce.ts": {
@@ -211,7 +211,7 @@
   },
   "src/session-generation.ts": {
     "roma/comment-whitelist": {
-      "count": 10
+      "count": 4
     }
   },
   "src/session-id.ts": {
@@ -251,7 +251,7 @@
   },
   "src/startup.ts": {
     "roma/comment-whitelist": {
-      "count": 93
+      "count": 75
     }
   },
   "src/stream-events.ts": {

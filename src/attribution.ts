@@ -91,18 +91,7 @@ function fromAttribute(from: string | null): string {
   return from === null ? '' : ` from="${attribute(from)}"`
 }
 
-/**
- * The Quotation on a message, framed and escaped, under roma's other tags.
- *
- * **The one string roma escapes rather than merely carries**, and it must stay
- * escaped. Everything else the model reads as content is last in the message, so
- * it can say anything and still sit behind roma's tags. This one has roma's text
- * after it, so an unescaped `</quoted>` would end roma's frame early and leave
- * the rest of the quotation reading as though roma had written it.
- *
- * The author is on the tag rather than absent, because a quotation with no
- * author named reads as the Caller saying it themselves.
- */
+// Enforced by `fence:attribution-quotation-escaped`.
 function quoted(quotation: Quotation | null): string {
   if (quotation === null) return ''
   const { text, author } = quotation

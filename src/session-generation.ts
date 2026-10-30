@@ -95,12 +95,6 @@ export class SessionGenerations {
   /** Enforced by `fence:session-generation-refuses-to-guess`. */
   #generationOf(conversationKey: string): number {
     const written = this.#workRoot.readRecord(this.#recordFor(conversationKey))
-    // No record is generation zero, and only no record. Every other way a read
-    // can fail — a permission, an I/O error, a directory where the file should
-    // be — describes a record that may well exist and cannot be read, and
-    // answering zero to those is handing back the context `/clear` was used to
-    // drop. `readRecord` is what keeps those two apart: it answers null for the
-    // first and throws for the rest.
     if (written === null) return 0
     if (!COUNT.test(written)) {
       throw new Error(`Session generation for this Conversation is unreadable: ${written}`)

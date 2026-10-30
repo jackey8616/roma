@@ -169,13 +169,17 @@ describe('when the Minter cannot mint', () => {
 
   // A failed mint left in flight would be handed to every later caller as a
   // rejection they could do nothing about — including after the App came back.
-  it('lets the next request try again', async () => {
+  it('lets the next request try again [fence:session-token-failed-mint-is-forgotten]', async () => {
+    const why =
+      'A mint that failed must be cleared from in-flight whichever way it went (#62): kept, it ' +
+      'is handed to every later caller as a rejection they can do nothing about, even after ' +
+      'the App comes back.'
     const { tokens, minter } = tokensAt()
     minter.failsWith = new Error('the App is unreachable')
     await expect(tokens.current()).rejects.toThrow()
 
     minter.failsWith = null
 
-    expect(await tokens.current()).toBe('token-1')
+    expect(await tokens.current(), why).toBe('token-1')
   })
 })

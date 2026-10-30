@@ -184,7 +184,8 @@ all. `await Promise.all(…)` over the record compiles, reads as the natural gen
 form, and silently loses both — the refusal an operator sees becomes whichever
 provider lost the race, and a doomed boot now reaches a second provider it had no
 business reaching. There is no test in the tree that would catch it, so this ADR
-says it and the change adds one.
+says it and the change adds one. Enforced by
+`fence:startup-reaches-proved-one-at-a-time`.
 
 ### 5. The Operator Log is reach-generic, and GitHub gains a boot line
 
