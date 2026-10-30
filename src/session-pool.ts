@@ -442,48 +442,10 @@ interface RetryWatch {
 interface Resident {
   readonly sessionId: string
   readonly cwd: string
-  /**
-   * Which credential this process was spawned on, and therefore which one its
-   * Turns are billed to.
-   *
-   * Kept because it is the process that carries a credential, not the Session:
-   * a Session's next Turn can be paid for by the other one, and the only way to
-   * serve it is a different process — two on one transcript is the corruption
-   * the whole serialisation rule exists to prevent.
-   */
   readonly credential: CredentialKind
   readonly model: string
-  /**
-   * What effort this process was spawned at, and therefore what its Turns run
-   * at.
-   *
-   * Kept for the model's reason — `--effort` is fixed at spawn, so a Session
-   * whose next Turn is to run at a different effort needs a different process —
-   * and it is the only place the answer exists at all: nothing in the stream
-   * echoes the effort back, so a Resident that did not write this down could not
-   * be asked afterwards what it was started at.
-   */
   readonly effort: string
-  /**
-   * How short this process was asked to be, and therefore how short its Turns
-   * answer.
-   *
-   * Kept for the effort's reason and with the same edge: nothing in the stream
-   * echoes it, and here not even the argv names it — what the argv carries is the
-   * ruleset this word renders to. It is also the `from` half of the swap that
-   * ends this process, which is the only place the move is written as a word.
-   */
   readonly caveman: string
-  /**
-   * What this process was told about itself on top of Claude Code's own prompt.
-   *
-   * Kept, and since ADR-0030 for two reasons rather than one. `#turn`'s retry
-   * respawn hands a Resident straight back as its own `SpawnTerms`, so one that
-   * had not written this down would re-start a Turn on whatever the pool holds by
-   * then rather than on what the Turn began under — and `sameTerms` compares it,
-   * because a Chosen Caveman is what makes two spawns of one deployment able to
-   * disagree about it.
-   */
   readonly appendSystemPrompt: string | undefined
   readonly session: ClaudeSession
   readonly resumed: boolean
@@ -716,15 +678,6 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     }
   }
 
-  /**
-   * Take a Session for a Turn on these terms, on a process started for them.
-   *
-   * The invariant rather than an effect somebody performs: a Turn runs on the
-   * credential it is to be paid for by and on the model its Session is on, and
-   * this is the one place that is made true. Stated here, it cannot be forgotten
-   * by a later caller and it re-establishes itself after a restart — which is why
-   * `/model` writes a record and tears nothing down.
-   */
   async #acquire(sessionId: string, credential: CredentialKind): Promise<Resident> {
     // Enforced by `fence:pool-caveman-read-once`.
     const caveman = this.#cavemanFor(sessionId)
@@ -741,13 +694,6 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
         this.#markUsed(resident)
         return resident
       }
-      // The Session is resident on terms this Turn is not to run on — the
-      // credential it is not to be paid for by, the model it is not to run on, or
-      // the effort it is not to run at. The process goes before the next one
-      // starts, not because the old one is in the way but because two processes
-      // on one transcript corrupt it, and "alive but idle" is not a state
-      // anybody has measured as safe. The Session itself survives, as it does
-      // through any eviction.
       await this.#swap(resident, terms)
     } else if (resident !== undefined) {
       this.#forget(resident)
@@ -755,13 +701,6 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     return await this.#spawn(sessionId, terms)
   }
 
-  /**
-   * The model this Session's next process runs on.
-   *
-   * Read at the moment of spawning rather than held, so that a Chosen Model
-   * written while roma was somewhere else — or before it last restarted — is in
-   * force without anybody telling the pool about it.
-   */
   #modelFor(sessionId: string): string {
     return this.#models?.inForce(sessionId) ?? this.#model ?? PINNED_MODEL
   }
@@ -907,15 +846,6 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     await this.#terminate(resident)
   }
 
-  /**
-   * End a resident's process because the next Turn is not on the terms it was
-   * started for.
-   *
-   * Its own path rather than a third kind of eviction: an eviction is roma
-   * managing processes and this is money moving — between two bills, between two
-   * models, or between two lengths of answer — and the two are read by different
-   * people looking for different things.
-   */
   async #swap(
     resident: Resident,
     { credential, model, effort, caveman }: SpawnTerms,

@@ -180,7 +180,11 @@ Three reasons, in order of weight:
 
 **The price.** In a Discord thread every message must @-mention roma again. That
 is identical to Chat and contrary to Discord habit, where most bots hold the
-intent. Direct messages are unaffected.
+intent. Direct messages are unaffected: being sent one *is* the address.
+
+The Adapter drops a guild message roma was not addressed in itself, rather than
+leaving the decision to a side effect of the intents, under which such a message
+arrives empty anyway.
 
 **The trap this creates.** Discord does *not* strip the mention. The Adapter must
 remove it before the text reaches the Core, or `readCommand` sees `<@…> /stop`,

@@ -223,7 +223,12 @@ context.
 `ChatMessage` carries a list of actions rather than one, and the Overflow offer
 becomes a list of one. The Chat API port renders them as a single card holding a
 single `buttonList`, so a `/model` card is four buttons and an `/effort` card is
-six.
+six. One `buttonList` rather than a widget per button because that is Chat's own
+grouping: it wraps a row across lines, which is what a six-level Effort Menu needs
+on a phone. The round trip is `action.function` and `action.parameters`; going out
+the parameters must be `{key, value}` pairs, and a press may come back in that
+shape or as an object, so `chat-events.ts` reads both
+(<https://developers.google.com/workspace/chat/read-form-data>).
 
 **`ChannelAdapter` gains no method.** No `toAction`, no generalisation of
 `toOverflowTaken`. That interface documents itself as provisional, designed

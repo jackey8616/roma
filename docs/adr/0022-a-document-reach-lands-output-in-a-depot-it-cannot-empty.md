@@ -288,7 +288,9 @@ boot:
 
 1. the key mints a token — which is thrown away, ADR-0015 §8's proof exactly;
 2. `GET /drive/v3/files/{depot}?fields=id,name,capabilities&supportsAllDrives=true`
-   answers, so the Depot exists and the account can see it;
+   answers, so the Depot exists and the account can see it — `fields` because
+   `capabilities` is not in Drive's default projection, and `supportsAllDrives`
+   because without it the call is a My Drive call;
 3. that answer's `capabilities.canAddChildren` is true, so the account can actually put
    something there.
 

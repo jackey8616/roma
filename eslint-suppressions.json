@@ -31,7 +31,7 @@
   },
   "src/channels/discord/discord-events.ts": {
     "roma/comment-whitelist": {
-      "count": 23
+      "count": 17
     }
   },
   "src/channels/discord/env-config.ts": {
@@ -67,11 +67,6 @@
   "src/channels/google-chat/google-chat-adapter.ts": {
     "roma/comment-whitelist": {
       "count": 21
-    }
-  },
-  "src/channels/google-chat/http-chat-api.ts": {
-    "roma/comment-whitelist": {
-      "count": 1
     }
   },
   "src/channels/google-chat/pubsub-transport.ts": {
@@ -114,11 +109,6 @@
       "count": 2
     }
   },
-  "src/compaction.ts": {
-    "roma/comment-whitelist": {
-      "count": 6
-    }
-  },
   "src/core.ts": {
     "roma/comment-whitelist": {
       "count": 283
@@ -136,7 +126,7 @@
   },
   "src/documents/google-document-minter.ts": {
     "roma/comment-whitelist": {
-      "count": 19
+      "count": 6
     }
   },
   "src/documents/reach.ts": {
@@ -231,7 +221,7 @@
   },
   "src/session-pool.ts": {
     "roma/comment-whitelist": {
-      "count": 71
+      "count": 57
     }
   },
   "src/shared-window.ts": {

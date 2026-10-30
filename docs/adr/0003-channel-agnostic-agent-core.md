@@ -408,7 +408,9 @@ roughly how much, never what.
       it knew. Filed as #40, whose fix is to reach the session with `--resume`
       instead; measured to recover it having forgotten nothing. **The clause
       "not ours to delete" stands** — ADR-0006 upheld it deliberately rather
-      than by inheritance.
+      than by inheritance. A refusal that arrives as a terminal event leaves
+      the refused process for roma to end; measured to exit in 1–3s on its own
+      (#105). Enforced by `fence:pool-one-process-per-transcript`.
 - A local mirror of frequently used repositories, cloned from locally at session
   start — faster, and avoids repeated use of git credentials.
 - Egress allowlist: the Anthropic API, our git remote, and package registries

@@ -119,8 +119,9 @@ Tracked separately rather than here.
 Messages are **plain text**. Nothing in the core's outbound instructions needs a
 card yet, and a long answer inside a card is worse than a plain one at the two
 things the separate-result rule exists for: being searched for and being quoted.
-Cards arrive with Overflow, which needs a button anyone can press; until then
-they would be decoration with a schema attached.
+Cards arrive with Overflow, which needs a button anyone can press, and Chat has no
+way to put a button on plain text; until then they would be decoration with a
+schema attached.
 
 **Chat's text limit is 4096 characters, and it is the ordinary case rather than
 an edge** — the recorded generating turn in `test/fixtures/claude-stream/` is

@@ -225,7 +225,10 @@ the working directory because ADR-0008 has the agent committing its contents.
 `session-pool.ts` maintains the invariant on the swap it already has. A Resident
 records the effort it was spawned on as well as the model; acquiring a Session for
 a Turn whose effort differs ends the process and spawns a new one, resumed. No new
-failure mode is taken on, and `swap`'s `reason` gains a third value.
+failure mode is taken on, and `swap`'s `reason` gains a third value. The Resident
+is the only place that answer exists at all: nothing in the stream echoes the
+effort back, so a process that did not write it down could not be asked afterwards
+what it was started at.
 
 ### The Effort Menu holds every level, and `ultracode` is not one
 

@@ -304,11 +304,6 @@ export function readIngressMessage(
   const messageId = asString(message['id'])
   if (channelId === null || messageId === null) return null
 
-  // A guild message roma was not addressed in is not roma's to answer, and
-  // without the message-content intent it arrives empty anyway — so this is the
-  // decision ADR-0029 made said out loud rather than left to a side effect of
-  // the intents. A direct message needs no mention: being sent one *is* the
-  // address.
   const guildId = asString(message['guild_id'])
   if (guildId !== null && !addressed(message, self)) return null
 
@@ -457,7 +452,6 @@ function mentionsOf(id: string): readonly string[] {
   return [`<@${id}>`, `<@!${id}>`]
 }
 
-/** What was sent alongside the text, with `from` null on every one (ADR-0029). */
 function readEnclosures(
   message: DiscordMessage,
   download: DownloadAttachment | undefined,

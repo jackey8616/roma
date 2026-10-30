@@ -307,9 +307,11 @@ from disk at spawn the way it already reads `resuming` from `existsSync(cwd)`.
 
 **The Operator Log's `swap` gains a reason.** It already exists for the
 credential, and already explains itself as "money moving" rather than as roma
-making room. A model change is money moving by the same argument, and the two
-differ only in what prompted them — which is exactly how `evict` and `reap`
-already share one shape:
+making room — which is also why it is its own path rather than a kind of
+eviction: the two are read by different people looking for different things. A
+model change is money moving by the same argument, and the two differ only in
+what prompted them — which is exactly how `evict` and `reap` already share one
+shape:
 
 ```
 readonly event: 'swap'

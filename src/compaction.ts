@@ -50,39 +50,9 @@ export type CompactionSeverity =
    */
   | 'unexplained'
 
-/**
- * The codes roma treats as harmless, and the reason each one is on the list.
- *
- * Read off a single switch in the pinned build (2.1.220, ADR-0007), quoted in
- * #98's second comment. The split follows a line the build draws for itself:
- * these throw a plain `Error`, the unreducible ones throw the class reserved for
- * what it shows a user.
- *
- * **A person's judgement about one build**, like the Relay list, re-applied when
- * the pin moves. A release that adds a code lands it in `unexplained`, where the
- * operator sees it and nobody is told a wrong story about their thread.
- */
-const BENIGN: readonly string[] = [
-  'too_few_groups',
-  // Somebody stopped it. Nothing has gone wrong that they do not already know
-  // about, and the reply they are owed is the one `/stop` produces.
-  'aborted',
-]
+const BENIGN: readonly string[] = ['too_few_groups', 'aborted']
 
-/**
- * The codes that mean the context cannot be reduced below the limit.
- *
- * Read off the same switch and **not measured**: provoking either means filling
- * a real context, and the reward would be confirming an explicit `case`. Said
- * here rather than in a commit message because it is the one thing a later
- * reader cannot recover.
- */
-const UNREDUCIBLE: readonly string[] = [
-  'exhausted',
-  // "attached media exceeds size limits" — unreducible for a different reason
-  // and with the same consequence.
-  'media_unstrippable',
-]
+const UNREDUCIBLE: readonly string[] = ['exhausted', 'media_unstrippable']
 
 /**
  * What roma should do about one failed Compaction, from its code.
