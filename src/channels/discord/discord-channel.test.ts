@@ -31,6 +31,7 @@ import {
   RECONNECT_FLOOR_MS,
 } from './gateway-transport.js'
 import { MAX_TEXT, OVERFLOW_BUTTON } from './render.js'
+import { OVERFLOW_BUTTON as CHAT_OVERFLOW_BUTTON } from '../google-chat/render.js'
 import { FakeGatewayNetwork } from '../../../test/support/fake-gateway.js'
 import { recordedStream } from '../../../test/support/recorded-stream.js'
 import {
@@ -2159,6 +2160,14 @@ describe('the Overflow offer, out as a button and back as a press', () => {
     )
 
     expect(channel.buttons.map(({ label }) => label)).toEqual([OVERFLOW_BUTTON])
+  })
+
+  it('words the offer as Chat does [fence:discord-overflow-worded-as-chat]', () => {
+    const why =
+      'Taking Overflow is one decision, whichever Channel draws the button: what it costs must ' +
+      'read the same everywhere (ADR-0002). Two Channels wording it differently would be two ' +
+      'decisions, and the label is the only place a Caller is told that pressing it spends money.'
+    expect(OVERFLOW_BUTTON, why).toBe(CHAT_OVERFLOW_BUTTON)
   })
 
   // False where the provider says overage is unavailable or roma holds no
