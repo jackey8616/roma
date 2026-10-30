@@ -43,11 +43,6 @@ export async function main(
   const answer = await credentialFor(
     {
       operation: 'get',
-      // `gh` announces no repository: `gh api graphql` and `gh search` have none
-      // to announce, and inferring one from argv or the working directory is a
-      // guess whose failures surface as unexplained 404s inside somebody's Turn.
-      // ADR-0008's amendment is where this decides the whole down-scoping
-      // question.
       path: null,
     },
     env,

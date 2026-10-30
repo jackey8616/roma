@@ -3,17 +3,7 @@ import type { MintedToken } from '../reach.js'
 import { DOCUMENT_DEPOT_VAR } from './env-config.js'
 import type { Depot, DocumentMinter } from './depot.js'
 
-/**
- * What a Document Token is scoped to, every time, for everybody.
- *
- * Constants, never a setting (ADR-0022 §3, ADR-0015 §5): a scope a deployment
- * could widen is a second boundary, invisible from where the first is
- * administered. Nothing here takes a scope from outside.
- *
- * `drive.file` is per-file — what this app created and nothing else — which is
- * what makes the write side immune to somebody sharing a document with this
- * identity. Enforced by `fence:documents-both-drive-scopes`.
- */
+/** Enforced by `fence:documents-both-drive-scopes`. */
 const SCOPES = [
   'https://www.googleapis.com/auth/drive.file',
   'https://www.googleapis.com/auth/drive.readonly',

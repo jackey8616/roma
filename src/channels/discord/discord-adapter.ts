@@ -213,9 +213,6 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
       // an app said rather than being taught an exception to it.
       readChosenOption(event) ??
       readIngressMessage(event, {
-        // Bound rather than called: `toIngress` stays synchronous, and what an
-        // Enclosure costs is paid once the Core knows the Session and knows the
-        // bytes are wanted (ADR-0011).
         download: (url) => this.#api.download(url),
       })
     if (message !== null) this.#remember(event, message)
@@ -329,10 +326,6 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
 
   /** Which channel this Conversation is answered in, opening its thread if it has none. */
   #place(conversationKey: string, answered: Answered | undefined): Promise<string> {
-    // Rows one and two of ADR-0029's table: a key that names the channel its
-    // message arrived in is already somewhere roma can speak. Row three is the
-    // one with work in it — the key is a message's id, and the thread that will
-    // carry that id does not exist until roma opens it.
     if (answered === undefined || answered.channel === conversationKey) {
       return Promise.resolve(conversationKey)
     }

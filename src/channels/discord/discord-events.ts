@@ -318,11 +318,6 @@ export function readIngressMessage(
   const guildId = asString(message['guild_id'])
   if (guildId !== null && !addressed(message, self)) return null
 
-  // The whole of the table in ADR-0029: a message in one of the guild's own
-  // channels is keyed on **its own id**, because that is the id the thread roma
-  // opens from it will have — "The created thread and the message it was started
-  // from will share the same id". Everything else is already a place roma can
-  // reply in, and is keyed on the place.
   const conversationKey = guildChannel ? messageId : channelId
 
   const text = withoutMention(asString(message['content']) ?? '', self)

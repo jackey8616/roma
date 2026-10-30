@@ -10,7 +10,6 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 
-/** ADR-0003: one working directory per Session, reclaimed after seven days idle. */
 const WORK_DIR_TTL_MS = 7 * 24 * 60 * 60_000
 
 /** Enforced by `fence:workroot-records-survive-the-sweep`. */

@@ -310,12 +310,6 @@ export class ShimServer {
       // credential is one that was actually handed one.
       this.#onCredential(taskId, credential, path)
       this.#log({ event: 'credential', ...where })
-      // Everything roma knows about the answer, to every asker. Withholding the
-      // expiry and the account from the two Credential Shims was minimalism
-      // rather than protection — neither has a field to put them in and both
-      // collapse the response to a token before anything reads it — and the
-      // branch that did it was where a Reach could be paired with the wrong
-      // tokens (ADR-0020 §9).
       return { token, expiresAt, account: reach.account }
     } catch (error) {
       const reason = reasonOf(error)
