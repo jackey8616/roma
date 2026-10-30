@@ -219,7 +219,9 @@ Opening's promise, so a rejection would reject the Task's own delivery, hand the
 Delivery back to the Transport, and redeliver a Turn that has already been paid
 for. The write is therefore absorbed like the delivery — and unlike the delivery it
 stays claimed, because by then the Opening has been said and only the note of it
-was lost. Enforced by `fence:core-opening-never-fails-outwards`.
+was lost. A restart says it again, once, which is the cheaper of the two ways to be
+wrong about a Work Root that cannot be written to. Enforced by
+`fence:core-opening-never-fails-outwards`.
 
 ## Consequences
 

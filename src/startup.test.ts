@@ -431,16 +431,20 @@ describe('proving roma can reach the code, before anything can ask it to', () =>
   // compiles and reads as the natural generic form, and this is the only thing
   // that would notice: a boot with a bad App key must not reach a second provider
   // at all (ADR-0020 §4).
-  it('never touches another provider once the free check has refused', async () => {
+  it('never touches another provider once the free check has refused [fence:startup-reaches-proved-one-at-a-time]', async () => {
+    const why =
+      'startRoma must prove the Reaches one at a time, code first, never with Promise.all ' +
+      '(ADR-0020 §4, #119): a boot with a bad App key must make no network call to another ' +
+      'provider, and a deployment broken both ways must be told about the free check first.'
     const cloudMinter = new FakeCloudMinter()
     const roma = boot({
       minter: new FakeMinter({ failsWith: new Error('a bad private key') }),
       cloudMinter,
     })
 
-    await expect(roma.starting).rejects.toThrow('a bad private key')
+    await expect(roma.starting, why).rejects.toThrow('a bad private key')
 
-    expect(cloudMinter.minted).toEqual([])
+    expect(cloudMinter.minted, why).toEqual([])
   })
 })
 
@@ -1495,6 +1499,31 @@ describe('what a roma serving several Channels is made of', () => {
       askMinter(socketPathIn(roma.shims.dir), { session: 'anyone', operation: 'get' }),
       why,
     ).rejects.toThrow()
+  })
+
+  it('serves credentials until the processes have stopped [fence:startup-socket-closed-after-the-processes]', async () => {
+    const why =
+      'Shutdown must close the Shim socket after the pool has stopped its processes, never ' +
+      'before (#62, ADR-0008): a Session being killed can still have a `git` mid-operation, and ' +
+      'taking the credential away first turns a clean shutdown into authentication failures in ' +
+      'somebody’s Transcript.'
+    const roma = bootChannels({ channels: 1 })
+    await roma.fixture.answerProbe()
+    const running = await roma.starting
+    const shutdown = running.pool.shutdown.bind(running.pool)
+    let askedWhileStopping: Promise<unknown> | undefined
+    running.pool.shutdown = async () => {
+      askedWhileStopping = askMinter(socketPathIn(roma.shims.dir), {
+        session: 'anyone',
+        operation: 'get',
+      })
+      await askedWhileStopping.catch(() => undefined)
+      await shutdown()
+    }
+
+    await running.shutdown()
+
+    await expect(askedWhileStopping, why).resolves.toBeDefined()
   })
 })
 

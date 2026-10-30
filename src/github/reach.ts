@@ -13,10 +13,6 @@ import type { Installation, InstallationMinter } from './installation.js'
  * the forge credential and now no way to spell one.
  */
 export function githubReach(minter: InstallationMinter): AvailableReach<'code'> {
-  // What `prove` found, held for `announce`. The two used to be one expression in
-  // `startRoma` — the announcement took the Installation as an argument, so
-  // announcing before proving was unspellable. It is spellable now, which is why
-  // the throw below exists.
   let installation: Installation | null = null
 
   return {
@@ -30,13 +26,7 @@ export function githubReach(minter: InstallationMinter): AvailableReach<'code'> 
     },
 
     announce(): string {
-      // Thrown rather than defaulted, and this is the reason: `announce` renders
-      // an empty repository list as "the App is installed on <account> but
-      // reaches no repositories, so a clone will fail until somebody grants it
-      // one". An agent told that has been told it has no access when it has all
-      // of it, and an agent that explains it has no access instead of trying is
-      // the failure that whole text exists to prevent. A wrong order used to be
-      // impossible; without this it would be a plausible, wrong sentence.
+      // Enforced by `fence:reach-announces-only-what-it-proved`.
       if (installation === null) {
         throw new Error('roma announced its Installation before proving it')
       }

@@ -60,7 +60,6 @@ interface Waiting {
   readonly key: string
   /** What to record as running under this key once it is admitted. */
   readonly taskId: string | null
-  /** Whether admitting this one is allowed to exceed the cap. */
   readonly uncapped: boolean
   /**
    * Called once the slot has already been claimed on this Task's behalf, or
@@ -205,7 +204,6 @@ export class TaskQueue {
     }
   }
 
-  /** Take a Task out of the queue without running it. */
   #drop(entry: Waiting): void {
     const at = this.#waiting.indexOf(entry)
     if (at !== -1) this.#waiting.splice(at, 1)

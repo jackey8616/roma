@@ -108,8 +108,16 @@ describe('uuidv5', () => {
     )
   })
 
-  it('reads the namespace as bytes, not as the text it is written in', () => {
-    expect(uuidv5('x', DNS_NAMESPACE.toUpperCase())).toBe(uuidv5('x', DNS_NAMESPACE))
+  it('reads the namespace as bytes, not as the text it is written in [fence:session-id-namespace-hashed-as-bytes]', () => {
+    const why =
+      'uuidv5 must hash the sixteen bytes a namespace uuid stands for, never its text (RFC 9562, ' +
+      'ADR-0003). Hashed as text, the same namespace written in upper case derives a different ' +
+      'id — a difference no reader would suspect, and one that silently orphans every Session ' +
+      'derived under the other spelling (#22).'
+    expect(uuidv5('x', DNS_NAMESPACE.toUpperCase()), why).toBe(uuidv5('x', DNS_NAMESPACE))
+    expect(uuidv5('www.example.com', DNS_NAMESPACE), why).toBe(
+      '2ed6657d-e927-568b-95e1-2665a8aea6a2',
+    )
   })
 
   it('rejects a namespace that is not a uuid', () => {

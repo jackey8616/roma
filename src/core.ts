@@ -302,10 +302,6 @@ export interface CoreOptions {
   readonly log?: CoreLog
 }
 
-/**
- * How a parked Task came to be running again, or not: the window comes back,
- * somebody buys their way past it, or somebody gives up. There is no fourth.
- */
 type Resumption = 'reset' | 'overflow' | 'stopped'
 
 /**
@@ -337,7 +333,6 @@ interface RunningTask extends TaskAddress {
   effort: string
   /** Enforced by `fence:core-ledger-names-what-ran`. */
   caveman: string | null
-  /** Set by `/stop`, and read at each point the Task can still be stopped. */
   stopped: boolean
   /** Enforced by `fence:core-context-full-once-per-task`. */
   toldContextFull: boolean
@@ -366,11 +361,9 @@ interface RunningTask extends TaskAddress {
   parked: Parked | null
 }
 
-/** A Task waiting for the Shared Window to come back. */
 interface Parked {
   readonly wake: (resumption: Resumption) => void
   readonly timer: NodeJS.Timeout
-  /** Whether an offer of Overflow is outstanding, and so whether one can be taken. */
   readonly offered: boolean
 }
 
@@ -627,52 +620,10 @@ export class Core {
     try {
       this.#workRoot.writeRecord(record, '')
     } catch {
-      // The Opening was said and only the note of it was lost. Kept claimed
-      // rather than withdrawn, so this Core does not say it twice; a restart
-      // will, once, which is the cheaper of the two ways to be wrong about a
-      // Work Root that cannot be written to.
-      //
-      // Never propagated, and that is the whole reason this is caught at all:
-      // this promise is awaited by everything the message goes on to produce, so
-      // a throw here would reject the Task's own delivery, hand the Delivery
-      // back, and redeliver a Turn that has already been paid for.
+      // Enforced by `fence:core-opening-never-fails-outwards`.
     }
   }
 
-  /**
-   * Relay one of Claude Code's own commands that answers locally, and post what
-   * it said.
-   *
-   * The free half of the Relay list, governed exactly as ADR-0012 left it.
-   * Deliberately not `#runTask`, and the difference is not tidiness: a free
-   * Relay drives no Turn, so none of what makes a Task a Task applies to it —
-   * there are no Attempts, because there is no credential decision to make and
-   * nothing to park; there is no Shared Window reading, because no API call is
-   * made; there is no Overflow, because there is nothing to spend. Reusing
-   * `#runTask` would mean carrying all of that machinery through a path where
-   * every branch of it is dead, and the dead branches are where a later reader
-   * looks for meaning that is not there.
-   *
-   * A **paid** Relay is the other way round: every one of those branches is live,
-   * so it goes down `#runTask` and shares them rather than growing copies. That
-   * is why this method is the free path by name rather than the Relay path — the
-   * split is by cost, which is what ADR-0018 decided governance follows.
-   *
-   * What this does share with work is the two things a free Relay genuinely has
-   * in common with it: it is serialised against its Session, because two
-   * processes on one transcript corrupt it, and it is written down, because the
-   * list it came from is a person's judgement and can be wrong.
-   *
-   * **`/stop` does not reach one, and that is a gap rather than a decision.** A
-   * free Relay is not in `#running`, so `#stop` neither marks it nor counts it —
-   * which means `/stop` in a Conversation whose only work in flight is one of
-   * these answers "nothing to stop" and then the Relay answers anyway. It costs
-   * nothing and cannot be interrupted usefully once it runs, so what is actually
-   * lost is a stale context reading arriving after the Task it queued behind.
-   * Left alone because closing it means giving this the shape of a `RunningTask`
-   * — Attempts it has none of, a park it can never take. ADR-0018 closed the same
-   * gap for the paid half by putting it on the path that already has both.
-   */
   async #runFreeRelay(
     relay: RelayRequest,
     message: IngressMessage,
@@ -734,10 +685,6 @@ export class Core {
           taskId,
         },
       )
-      // Relayed as a `result`, which is what it is: text to be posted as its own
-      // message in the Conversation. No instruction kind of its own, because an
-      // Adapter has nothing to do differently with one — and a fifth kind would
-      // be a concept every Channel had to learn for no change in behaviour.
       instruction = { kind: 'result', ...address, text: turn.text }
     } catch (error) {
       // A Relay that failed carries whatever the Turn said, exactly as a Task
@@ -872,9 +819,6 @@ export class Core {
         // where somebody has just shown they do not know it (ADR-0023).
         return modelChoice(address, unknownModelReason(request.name), request.name)
       case 'report':
-        // No process, no Turn, no money, and no interruption of whatever this
-        // Conversation is waiting on: roma owns the answer, so asking is never
-        // the slow thing.
         return modelChoice(address, this.#modelReport(sessionId), null)
       case 'default':
         this.#models.usePinned(sessionId)
@@ -908,17 +852,6 @@ export class Core {
     return chosen === null ? '' : ` ${takesNoEffort(model, chosen)}`
   }
 
-  /**
-   * Say what effort this Conversation runs at, or move it, and say so.
-   *
-   * `#answerModel`'s twin, never relayed for the same reason (ADR-0016) — the
-   * build calls it `this session only`, and a session is a process.
-   *
-   * `--effort` is echoed nowhere in the stream, where `--model` comes back in
-   * `system/init`. So this reply is roma saying what it will send rather than
-   * reporting what it saw, which is why the Audit Record spells the effort as
-   * weaker evidence than the model beside it.
-   */
   #answerEffort(
     request: EffortRequest,
     conversationKey: string,
@@ -1018,9 +951,6 @@ export class Core {
         // just shown they do not know it (ADR-0023).
         return cavemanChoice(address, unknownCavemanReason(request.name), request.name)
       case 'report':
-        // No process, no Turn, no money, and no interruption of whatever this
-        // Conversation is waiting on: roma owns the answer, so asking is never
-        // the slow thing.
         return cavemanChoice(address, this.#cavemanReport(sessionId), null)
       case 'default':
         this.#cavemen.usePinned(sessionId)
@@ -1121,18 +1051,10 @@ export class Core {
     return named(chosen === null ? PINNED_NAME : menuNameFor(chosen), chosen ?? this.#models.pinned)
   }
 
-  /** Do what the Command asks, and say whether there was anything to do. */
   #carryOut(command: Extract<Command, 'stop' | 'clear'>, conversationKey: string): boolean {
     // Enforced by `fence:core-carry-out-names-its-two`.
     switch (command) {
       case 'clear':
-        // Nothing is torn down. `/clear` is aimed at what the *next* message
-        // reaches: a Task already running in the old Session finishes and still
-        // answers the person who asked, and the process behind it is left to
-        // the pool, which reaps or evicts it like any other Session nobody is
-        // talking to any more. Always true — a Conversation can always be given
-        // a Session with nothing in it, including one that has never had a
-        // Session at all.
         this.#sessions.freshSession(conversationKey)
         return true
       case 'stop':
@@ -1361,20 +1283,6 @@ export class Core {
     return !this.#cavemanPinned && level === CAVEMAN_OFF ? CAVEMAN_NOT_PINNED : level
   }
 
-  /**
-   * Take a Task as far as an ending, however many Attempts that takes.
-   *
-   * More than one only when the Shared Window is spent. A blocked Task is not
-   * over: ADR-0002 has roma say so, quote the reset time, and keep the Task — so
-   * it waits, holding no concurrency slot and no process, and runs again when
-   * the window comes back or when somebody takes Overflow.
-   *
-   * Every Attempt is its own decision about which credential pays. Overflow is
-   * taken for one Attempt rather than for the Task, so a Task that takes it and
-   * then fails again is back on the Shared Window and has to be offered it
-   * afresh — which is also what keeps the monthly cap in front of every metered
-   * Attempt rather than only the first.
-   */
   async #drive(
     task: RunningTask,
     text: string,
@@ -1430,16 +1338,12 @@ export class Core {
           kind: 'result',
           ...address,
           text: turn.text,
-          // Only where somebody chose to spend money, and only what was spent
-          // on that choice.
           ...(paidBy === 'overflow'
             ? { overflowCostUsd: attempts.spentOn('overflow').costUsd }
             : {}),
         }
       }
 
-      // Parked rather than ended, if the window is what stopped it and nobody
-      // has said to stop waiting.
       if (!task.stopped && (await this.#park(task))) continue
 
       // `task.stopped` as well as the Turn's own ending, because a Task stopped
@@ -1454,7 +1358,6 @@ export class Core {
 
   /** Enforced by `fence:core-park-only-on-a-known-reset`. */
   async #park(task: RunningTask): Promise<boolean> {
-    // Whether a wait is owed at all, and on what terms.
     const park = task.attempts.takePark()
     if (park === null) return false
 
@@ -1540,7 +1443,6 @@ export class Core {
     return true
   }
 
-  /** Wake a parked Task, if it is still parked. */
   #wake(task: RunningTask, resumption: Resumption): void {
     const parked = task.parked
     if (parked === null) return
@@ -1548,7 +1450,6 @@ export class Core {
     parked.wake(resumption)
   }
 
-  /** Stop holding a Task, whichever way its wait ended. */
   #unpark(task: RunningTask): void {
     if (task.parked !== null) clearTimeout(task.parked.timer)
     task.parked = null
@@ -1664,15 +1565,7 @@ export class Core {
   }
 }
 
-/**
- * The Runtime every Session runs on, while a deployment has one to give
- * (ADR-0025).
- *
- * **Never go on writing this once a Session has a Runtime of its own** — the
- * point at which ADR-0027 has the record read it from there instead. A Codex
- * Task recorded as Claude Code's is filed against the wrong Shared Window, and
- * telling two windows apart is the only thing the field is for.
- */
+/** Enforced by `fence:core-runtime-is-the-only-one`. */
 const EVERY_SESSION_RUNS_ON: Runtime = 'claude-code'
 
 /** Enforced by `fence:core-failure-in-romas-words`. */
@@ -1714,7 +1607,6 @@ const EFFORT_LIST = EFFORT_NAMES.join(', ')
 /** The Caveman Menu as a sentence names it, held once for `MENU_LIST`'s reason. */
 const CAVEMAN_LIST = CAVEMAN_NAMES.join(', ')
 
-/** A `/model` answer that carries the Model Menu to be chosen from. */
 function modelChoice(
   address: TaskAddress,
   text: string,
@@ -1723,7 +1615,6 @@ function modelChoice(
   return { kind: 'choice', ...address, text, chooses: 'model', options: MENU_NAMES, refused }
 }
 
-/** An `/effort` answer that carries the Effort Menu to be chosen from. */
 function effortChoice(
   address: TaskAddress,
   text: string,
@@ -1732,7 +1623,6 @@ function effortChoice(
   return { kind: 'choice', ...address, text, chooses: 'effort', options: EFFORT_NAMES, refused }
 }
 
-/** A `/caveman` answer that carries the Caveman Menu to be chosen from. */
 function cavemanChoice(
   address: TaskAddress,
   text: string,
@@ -1778,16 +1668,7 @@ function atNextCaveman(name: string, caveman: string): string {
   )
 }
 
-/**
- * What roma says where the Effort Matrix says this model takes no effort.
- *
- * Says so and refuses nothing — the harm is a false belief, not a cost.
- *
- * Claims only what roma *read*, never what roma watched: the build echoes every
- * level on every model identically, so the only account of this is a reading of
- * a minified binary that has already been wrong once. Do not strengthen the
- * sentence past that.
- */
+/** Enforced by `fence:core-takes-no-effort-says-only-what-was-read`. */
 function takesNoEffort(model: string, chosen?: string): string {
   const setting = chosen === undefined ? 'Effort' : `The effort this conversation is at (${chosen})`
   return (
@@ -1796,14 +1677,7 @@ function takesNoEffort(model: string, chosen?: string): string {
   )
 }
 
-/**
- * What roma says about a level it does not offer.
- *
- * `unknownModelReason`'s shape and its reasons.
- *
- * `ultracode` arrives here like any other unknown name and must stay that way —
- * naming it would advertise something no Caller can have.
- */
+/** Enforced by `fence:core-ultracode-refused-as-a-typo`. */
 function unknownEffortReason(name: string): string {
   return (
     `roma does not offer an effort called “${name}”. ` +
@@ -1811,14 +1685,7 @@ function unknownEffortReason(name: string): string {
   )
 }
 
-/**
- * What roma says about a Caveman it does not offer.
- *
- * `unknownEffortReason`'s shape and its reasons, and `ultracode`'s rule applies
- * to two names here rather than one: `wenyan-lite` and `wenyan-ultra` arrive like
- * any other unknown name and must stay that way, because naming them would
- * advertise something no Caller can have.
- */
+/** Enforced by `fence:core-wenyan-refused-as-a-typo`. */
 function unknownCavemanReason(name: string): string {
   return (
     `roma does not offer a caveman called “${name}”. ` +
@@ -1863,7 +1730,6 @@ function monthReport({ month, spend, unreadable }: AuditBreakdown): string {
   return [`${named}.`, ...spend.map(spendLine)].join('\n')
 }
 
-/** One credential's line on one Runtime, in the register that credential is read in. */
 function spendLine({ runtime, credential, costUsd, unpriced }: CredentialSpend): string {
   const figure = `${unpriced === 0 ? '' : 'at least '}$${money(costUsd)}`
   // Enforced by `fence:core-usage-never-one-figure`.
@@ -1876,7 +1742,6 @@ function spendLine({ runtime, credential, costUsd, unpriced }: CredentialSpend):
   }
 }
 
-/** Money as people read it, which is two decimal places and no more. */
 function money(usd: number): string {
   return usd.toFixed(2)
 }
@@ -2004,7 +1869,6 @@ function reasonFor(error: unknown): string {
   return ROMA_FAILED
 }
 
-/** The same, for a Command, whose generic failure is its own sentence. */
 function commandReasonFor(error: unknown): string {
   if (error instanceof ChosenModelNotOffered) return chosenModelGoneReason(error)
   if (error instanceof ChosenEffortNotOffered) return chosenEffortGoneReason(error)

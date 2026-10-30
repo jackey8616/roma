@@ -272,18 +272,7 @@ export async function startRoma({
   selfCheckCwd,
   selfCheckTimeoutMs,
 }: StartRomaOptions): Promise<Roma> {
-  // **One at a time, in this order, and `code` first.** The order used to be
-  // enforced by data flow — two statements, one after the other — and a loop is
-  // where that is lost. `await Promise.all(…)` compiles, reads as the natural
-  // generic form, and takes two properties with it: a deployment broken in both
-  // ways is told about the free check first, and a boot with a bad App key makes
-  // no network call to the *other* provider at all (ADR-0020 §4).
-  //
-  // Each proof blocks the boot for the reason the self-check does: a failure that
-  // surfaced instead as an inexplicable `git clone` inside somebody's Turn would
-  // read as "roma is broken" with no diagnosis attached. How a Reach refuses is
-  // the Reach's own — the forge names what it found, and the cloud wraps itself in
-  // `readConfiguration`'s shape (ADR-0015 §8).
+  // Enforced by `fence:startup-reaches-proved-one-at-a-time`.
   const proved = new Map<CredentialWanted, string | null>()
   for (const reach of eachReach(reaches)) {
     const { account } = await reach.prove()
@@ -377,11 +366,6 @@ export async function startRoma({
     ...(log === undefined ? {} : { log }),
   })
 
-  // One environment per credential a Turn can be paid for by. Overflow is not a
-  // mode roma is put into — ADR-0002 makes it exactly this, a different map —
-  // and the pool picks between them per Turn. Both reach the same socket: a
-  // credential for reaching the code has nothing to do with which bill a Turn
-  // lands on.
   const sessionEnv = (from: Credential) => (sessionId: string) =>
     buildEnv({
       credential: from,
@@ -436,8 +420,7 @@ export async function startRoma({
   // the environment is a map of secrets rather than an answer to that.
   const shared: Omit<CoreOptions, 'channel'> = {
     pool,
-    // The same Work Root the pool was given, which is what makes an Enclosure
-    // land where the Session that was told about it will look.
+    // Enforced by `fence:startup-core-and-pool-share-the-work-root`.
     workRoot: work,
     queue,
     sessions,
@@ -468,10 +451,7 @@ export async function startRoma({
     sessions,
     audit,
     selfCheck,
-    // The socket goes after the processes, not before: a Session being killed can
-    // still have a `git` mid-operation, and taking the credential away first
-    // turns a clean shutdown into a handful of authentication failures in
-    // somebody's Transcript.
+    // Enforced by `fence:startup-socket-closed-after-the-processes`.
     shutdown: async () => {
       try {
         await pool.shutdown()
@@ -505,11 +485,6 @@ function servedReaches(
       account,
       tokens: new FreshTokens({
         minter: reach.minter,
-        // What makes a mint storm visible. The credential line beside this one is
-        // written per *request*, and things in the agent's userland ask on every
-        // invocation by design — so without this an operator counting the log
-        // cannot tell a loop that is minting from a loop that is being served the
-        // token roma already holds.
         onMint: () => log?.({ event: 'reach-token-minted', credential: reach.credential, account }),
       }),
     }

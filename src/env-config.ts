@@ -176,7 +176,6 @@ function within(root: string, path: string): boolean {
   return step === '' || (step !== '..' && !step.startsWith(`..${sep}`) && !isAbsolute(step))
 }
 
-/** Read one part of the configuration, keeping its problems rather than throwing. */
 function attempted<T>(read: () => T, problems: string[]): T | null {
   try {
     return read()
@@ -324,10 +323,7 @@ function readOverflow(
  */
 export function envValue(env: Environment, name: string): string | null {
   const found = env[name]
-  // An empty string is what a shell leaves behind when a variable was set from
-  // something that turned out to be empty. Treated as a value it boots roma on
-  // an empty token, which then fails as a credential problem rather than as the
-  // deployment mistake it is.
+  // Enforced by `fence:env-empty-is-unset`.
   return found === undefined || found === '' ? null : found
 }
 

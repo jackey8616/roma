@@ -225,7 +225,10 @@ the working directory because ADR-0008 has the agent committing its contents.
 `session-pool.ts` maintains the invariant on the swap it already has. A Resident
 records the effort it was spawned on as well as the model; acquiring a Session for
 a Turn whose effort differs ends the process and spawns a new one, resumed. No new
-failure mode is taken on, and `swap`'s `reason` gains a third value.
+failure mode is taken on, and `swap`'s `reason` gains a third value. The Resident
+is the only place that answer exists at all: nothing in the stream echoes the
+effort back, so a process that did not write it down could not be asked afterwards
+what it was started at.
 
 ### The Effort Menu holds every level, and `ultracode` is not one
 
@@ -322,6 +325,11 @@ arguments. After the credential and model assertions, roma relays `/effort
 current` to it and compares loosely — the level word anywhere in the message,
 case-insensitively, rather than the sentence's shape. A disagreement is written to
 the Operator Log. **Boot continues.**
+
+**This is never a Relay.** A Relay goes to a Caller's Session on their behalf, and
+`/effort` is roma's own Command precisely so that it never reaches one. The probe
+has no Caller, no Session and no Task, which is why `relayCommand` describes
+itself by subtraction.
 
 Not blocking, and this is the sharpest trade in the ADR. Every other self-check
 condition reads a structured field: `apiKeySource`, `model`, `num_turns`. This one

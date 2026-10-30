@@ -69,7 +69,8 @@ zero. The cost is that real work immediately after such a reading is
 under-counted, which is the right way round for a one-directional alarm — it can
 fail to fire, and it cannot fire wrongly. `total_cost_usd` is deliberately *not*
 treated this way: it is a figure things are billed from, and it does not exhibit
-this.
+this. Both baselines move on the same terminal event, so the two figures cannot
+come to disagree about which Turn they belong to.
 
 **Amended 2026-08-01, and this one is to the decisions rather than only to the
 evidence.** It was written the same day, on facts read off the pinned build and
@@ -355,6 +356,13 @@ person, and is still re-applied when the ADR-0007 pin moves.
 > A Relay that drives a Turn is queued, counted against the concurrency cap,
 > stoppable, Parkable, Overflowable and audited — exactly as a Task is. A Relay
 > that drives none keeps ADR-0012's arrangements unchanged.
+
+The free half stays off the Task path rather than riding it with the machinery
+switched off. With no Turn there is no credential decision to make and nothing to
+park, no Shared Window reading, and nothing to spend, so carrying Attempts,
+Parking and Overflow through it would be a path on which every one of those
+branches is dead — and a dead branch is where a later reader looks for meaning that
+is not there.
 
 ADR-0012 exempted a Readout from the cap of three by arguing "no Turn, no money,
 no retry", and named the cost it was buying: three people asking what is going

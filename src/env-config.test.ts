@@ -129,8 +129,12 @@ describe('reading roma out of the environment', () => {
   // and taking it at face value would boot roma on an empty token — which the
   // self-check would then refuse in a way that names the credential rather than
   // the deployment mistake.
-  it('treats an empty variable as an absent one', () => {
-    expect(() => readRomaEnv({ ...MINIMAL, CLAUDE_CODE_OAUTH_TOKEN: '' })).toThrow(
+  it('treats an empty variable as an absent one [fence:env-empty-is-unset]', () => {
+    const why =
+      'envValue must answer null for an empty string, as for an unset variable (#31): ' +
+      'taken as a value it boots roma on an empty token, which then fails as a credential ' +
+      'problem rather than as the deployment mistake it is.'
+    expect(() => readRomaEnv({ ...MINIMAL, CLAUDE_CODE_OAUTH_TOKEN: '' }), why).toThrow(
       /CLAUDE_CODE_OAUTH_TOKEN/,
     )
   })

@@ -86,7 +86,9 @@ knowledge that there is a cloud already lives.
 The failure this prevents is the one ADR-0015 §9 was written against and could not
 express in a type: a Reach that is missing reads, to whatever consults it, as a
 Reach that does not apply — and answering nothing is the one answer that sends an
-agent off to investigate its `PATH`.
+agent off to investigate its `PATH`. So the socket answers an unavailable Reach
+with its sentence, a refusal the agent can repeat to a person, rather than with a
+hang or a crash.
 
 **The unavailable arm is reachable from a key that is absent, and from nothing
 else.** A `prove()` that fails throws and blocks the boot, exactly as
@@ -145,7 +147,8 @@ type parameter `{ code: cloudReachFrom(env), cloud: githubReachFrom(minterEnv) }
 typechecks — a record that is total, populated, and wired backwards — and a `git`
 is handed a Cloud Token. That is the failure `ShimServer`'s own comment names:
 "looks like everything working until the first API call". Totality alone was not
-enough, and finding that out is what the record shape is worth.
+enough, and finding that out is what the record shape is worth. Enforced by
+`fence:reach-typed-by-its-credential`.
 
 ### 4. `prove()` yields an account, and roma stops reporting what it proved
 
@@ -184,7 +187,8 @@ all. `await Promise.all(…)` over the record compiles, reads as the natural gen
 form, and silently loses both — the refusal an operator sees becomes whichever
 provider lost the race, and a doomed boot now reaches a second provider it had no
 business reaching. There is no test in the tree that would catch it, so this ADR
-says it and the change adds one.
+says it and the change adds one. Enforced by
+`fence:startup-reaches-proved-one-at-a-time`.
 
 ### 5. The Operator Log is reach-generic, and GitHub gains a boot line
 

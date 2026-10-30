@@ -105,7 +105,7 @@ outgrows it, which reads as a hang.
   alternative above, and that is an ADR-0003 conversation.
 - The Core no longer accumulates a Turn's prose to hand to a renderer that will
   not show it — 17706 characters in the capture this was designed against, held
-  for nobody.
+  for nobody. What it keeps is the length, summed across the Turn's deltas.
 - ~~Nothing is trimmed to Chat's limit in the Acknowledgement any more, because
   every phase is now a fixed sentence around a small number.~~ The one phase that
   can still exceed the limit is a tool named by Claude Code's own description of

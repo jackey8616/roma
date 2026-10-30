@@ -9,17 +9,8 @@ const SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
 ] as const
 
-/** The two, as one claim, which is how the exchange wants them. */
 const SCOPE = SCOPES.join(' ')
 
-/**
- * The grant that says "here is a signed assertion, give me a token".
- *
- * Google's own name for it, and an IETF one rather than a Google one — spelled
- * out here rather than shared with `src/cloud/`, because a factory in a
- * directory no containment rule binds would be a way to construct a Google
- * credential from outside one (ADR-0022's spec, and ADR-0020 §7 before it).
- */
 const GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:jwt-bearer'
 
 /** How long the signed assertion is good for. An hour, Google's documented maximum. */
@@ -171,23 +162,11 @@ export class GoogleDocumentMinter implements DocumentMinter {
    */
   async depot(): Promise<Depot> {
     const { token } = await this.mint()
-    // `supportsAllDrives` because the Depot has to be in a shared drive — the
-    // role table the whole design rests on exists only there, and a service
-    // account has no Drive storage of its own to own a file against in somebody's
-    // My Drive (ADR-0022 §5). Without the parameter the call is a My Drive call.
-    // `fields` because the answer roma needs is `capabilities`, which is not in
-    // the default projection.
     const asked = `${DRIVE_FILES}/${encodeURIComponent(this.#depot)}?fields=id,name,capabilities&supportsAllDrives=true`
     const response = await this.#fetch(asked, {
       headers: { authorization: `Bearer ${token}` },
     })
 
-    // The two mistakes Drive cannot tell apart, told apart in the refusal
-    // instead. A folder that is not there and a folder this identity was never
-    // given both answer `notFound` — a file you cannot see does not exist as far
-    // as the API is concerned — so the sentence names both fixes rather than
-    // guessing which one an operator needs. Read from Google's documentation of
-    // `files.get`; unmeasured, like everything else here.
     if (response.status === 404) {
       throw new DepotUnreachable(
         `roma could not find the Depot: ${DOCUMENT_DEPOT_VAR} is "${this.#depot}", and Drive says ` +
@@ -207,10 +186,7 @@ export class GoogleDocumentMinter implements DocumentMinter {
       name?: unknown
       capabilities?: { canAddChildren?: unknown }
     }
-    // Positive or refused: an answer with no `capabilities` in it is an answer
-    // that did not say yes, and treating "roma could not read the permission" as
-    // "the permission is there" would put the whole point of this proof behind an
-    // optional field.
+    // Enforced by `fence:documents-unread-capability-is-a-refusal`.
     if (found.capabilities?.canAddChildren !== true) {
       throw new DepotUnreachable(
         `roma can see the Depot "${this.#depot}" and cannot add anything to it as ${this.account}. ` +
@@ -251,7 +227,6 @@ export class GoogleDocumentMinter implements DocumentMinter {
   }
 }
 
-/** base64url, which is base64 with two characters swapped and the padding gone. */
 function base64url(value: string | Buffer): string {
   return Buffer.from(value).toString('base64url')
 }

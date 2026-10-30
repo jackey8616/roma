@@ -345,7 +345,7 @@ The final result is what users later search for, quote, and reply to; burying it
 inside a mutating progress message makes it hard to find. That rule is
 unconditional. Where an adapter declares no message mutation, progress degrades
 to periodic new messages or is suppressed entirely — the final result still
-arrives on its own.
+arrives on its own. Enforced by `fence:gchat-result-is-its-own-message`.
 
 **Of those two, roma suppresses** (settled when this was built, #7). The
 acknowledgement is still posted once, because a task nobody has confirmed
@@ -358,7 +358,8 @@ knowing that generation emits no events at all. The throttle has something to
 throttle only because of `--include-partial-messages`. **Verified:** with the flag
 on, the longest a renderer would have waited for new content during generation was
 **2641ms** — shorter than even the 5s floor of the 5–10s throttle above, so every
-scheduled update had fresh text to show. The prose arrives as
+scheduled update had fresh text to show. roma throttles at that floor, because the
+floor costs nothing: every tick has something to show, and none is a wasted call. The prose arrives as
 `stream_event.event.delta.text`; the complete final message still arrives as its
 own `assistant` event, 85ms before the terminal `result`, so the
 separate-final-message rule is served from that event rather than from the deltas.
@@ -408,7 +409,9 @@ roughly how much, never what.
       it knew. Filed as #40, whose fix is to reach the session with `--resume`
       instead; measured to recover it having forgotten nothing. **The clause
       "not ours to delete" stands** — ADR-0006 upheld it deliberately rather
-      than by inheritance.
+      than by inheritance. A refusal that arrives as a terminal event leaves
+      the refused process for roma to end; measured to exit in 1–3s on its own
+      (#105). Enforced by `fence:pool-one-process-per-transcript`.
 - A local mirror of frequently used repositories, cloned from locally at session
   start — faster, and avoids repeated use of git credentials.
 - Egress allowlist: the Anthropic API, our git remote, and package registries
@@ -448,13 +451,16 @@ wrapper.
 
   And stopping *at* `system/init` would reproduce the blind spot below.
   `apiKeySource` and the model are reported before the first API call, so a token
-  that 401s produces a perfectly healthy init. Only completing the Turn sees it.
+  that 401s produces a perfectly healthy init. Only completing the Turn sees it,
+  so the probe message is as small as a Turn can be and still be one.
 
   What that costs, measured: **3682ms and $0.0709632** per boot, the spend
   dominated by the cached system prompt rather than by the probe's four output
   tokens. A wrong credential is still refused at init in ~1.2s, without waiting
   for the Turn — which matters, because a wrong credential is precisely the case
-  that then retries for three minutes.
+  that then retries for three minutes. So roma waits a minute for the probe Turn
+  before refusing to start — the retry budget's minute, for its reason: a boot
+  waiting out those three minutes is one nobody can tell from a hang.
 - **Pinning `--model` narrows what the model assertion catches.** The prototype
   watched a stray `ANTHROPIC_API_KEY` move the model to `claude-opus-5[1m]`, and
   that run did not pass `--model`. With the model pinned, seam 2 measured the

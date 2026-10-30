@@ -144,29 +144,13 @@ function conversationKeyOf(
   return direct || thread === null ? spaceName : thread
 }
 
-/** What one event's quoted message came to, once roma had read it. */
 interface QuotedMessage {
   readonly quotation: Quotation | null
   readonly enclosures: readonly PendingEnclosure[]
 }
 
-/** An event that quoted nothing at all. */
 const NOTHING_QUOTED: QuotedMessage = { quotation: null, enclosures: [] }
 
-/**
- * Read the message this one quotes, as a Quotation and whatever came attached
- * to it.
- *
- * **The snapshot and never the link** (ADR-0021). `name` points at the quoted
- * message and following it costs a round trip, wants a scope beyond the
- * `chat.bot` roma has, and is *less* faithful — a message edited after it was
- * quoted must not change what roma says Bob said.
- *
- * `quoteType` stays unread: `REPLY` and `FORWARD` both populate the two fields
- * this reads, so telling them apart adds a guess about a payload nobody has seen
- * and buys nothing roma acts on.
- * https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces.messages
- */
 function readQuotation(
   message: Readonly<Record<string, unknown>>,
   download: DownloadAttachment | undefined,
@@ -187,8 +171,6 @@ function readQuotation(
   // in it, and an attachment that came with it stands on its own already.
   const quotation = text === '' ? null : { text, author }
 
-  // Something quote-shaped arrived and roma understood none of it. See
-  // `ChatEventLogRecord`.
   if (quotation === null && enclosures.length === 0) {
     log?.({
       event: 'quote-unread',
@@ -372,18 +354,7 @@ function isMenu(name: string): name is Menu {
   return Object.hasOwn(MENUS, name)
 }
 
-/**
- * One parameter off a button press, or null if this event is not that press.
- *
- * Both parameter shapes are read because Chat has two. `common.parameters` is an
- * object on the current interaction event; `action.parameters` is a list of
- * `{key, value}` pairs on the older one, and which arrives depends on how the
- * event was delivered. Reading one and not the other would make a button do
- * nothing at all, silently, for whichever half of the deliveries carries the
- * other — and a button that does nothing is worse than no button, because
- * somebody presses it and then keeps waiting.
- * https://developers.google.com/workspace/chat/read-form-data
- */
+/** Enforced by `fence:gchat-press-reads-both-shapes`. */
 function pressed(event: ChatEvent, action: string, parameter: string): string | null {
   if (asString(event['type']) !== CARD_CLICKED) return null
 

@@ -336,7 +336,9 @@ spawning the way `#modelFor` and `#effortFor` already are — so a Chosen Cavema
 written while roma was somewhere else is in force without anybody telling the
 pool about it. A Session whose Caveman changes gets the pool's existing **`swap`**
 with a fourth `reason`, and the comment on that event already says what that
-costs: *an eviction is roma making room and this is money moving.*
+costs: *an eviction is roma making room and this is money moving.* The Resident
+records the level as a word, because nothing in the stream echoes it and the argv
+carries only the ruleset it renders to; that word is the swap's `from`.
 
 ### roma owns the text, because three of its lines describe a machine that is
 not there
@@ -382,8 +384,13 @@ runtime stage copies `dist/` — so a `.md` under `src/` would silently not ship
 and a `.md` anywhere else needs a `COPY` this image does not otherwise want.
 Enforced by `fence:src-ships-only-typescript`. The
 derived ruleset is therefore a constant in `src/`, one template plus roma's own
-copy of caveman's fifteen-line level filter. One template rather than six
-finished strings for the reason `ChosenRecord` is one class: the same idea
+copy of caveman's fifteen-line level filter, line for line from
+`caveman-activate.js`. Neither of its patterns may widen to the whole row or the
+whole bullet. Enforced by `fence:caveman-filter-keeps-the-table` for the row; the
+example pattern's `(\S+?):` keeps the Auto-Clarity bullets only because it wants
+a colon after a single token, and a loosening to `(.+?):` changes nothing on the
+pinned text, so that half is *Not enforced (ADR-0031).* One template rather than
+six finished strings for the reason `ChosenRecord` is one class: the same idea
 written once. Also because the rewritten `Default:` line has to name the Pinned
 Caveman, which is a runtime value and cannot be a static string.
 
@@ -443,7 +450,11 @@ not change what happens, it makes roma able to say what happens.*
 - **`appendSystemPrompt` moves.** It leaves the `SessionPool` constructor for
   `SpawnTerms`. Nothing else reads it, and the Reach announcements it already
   carries are unaffected — a Caveman is appended after them, on the blank-line
-  rule `startup.ts` already applies.
+  rule `startup.ts` already applies. The Resident records it too: `#turn`'s retry
+  respawn hands a Resident back as its own `SpawnTerms`, so the retried Turn runs
+  on what it began under rather than on whatever the pool holds by then, and
+  `sameTerms` compares it, because a Chosen Caveman is what lets two spawns of one
+  deployment disagree about it.
 - **A fourth `swap` reason.** `'caveman'` beside `'credential'`, `'model'` and
   `'effort'`. Its `from`/`to` are strings, so it joins the arm that already
   carries two — and an operator reading an unexplained respawn gets a fourth

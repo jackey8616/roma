@@ -395,11 +395,20 @@ describe('a Depot roma cannot write into', () => {
   // Positive or refused. An answer roma could not read the permission out of is
   // an answer that did not say yes, and treating it as one would put the whole
   // point of this proof behind an optional field.
-  it('refuses an answer that says nothing about capabilities at all', async () => {
+  it('refuses an answer that says nothing about capabilities at all [fence:documents-unread-capability-is-a-refusal]', async () => {
+    const why =
+      'The Depot proof must pass only on canAddChildren === true (ADR-0022 §6). An answer ' +
+      'with no capabilities in it did not say yes, and reading it as one puts the whole ' +
+      'point of the proof behind an optional field (4c71de6, #132).'
     const { minter } = googleAnswering({
       depot: () => ({ body: { id: DEPOT, name: 'Team documents' } }),
     })
 
-    await expect(minter.depot()).rejects.toThrow(DepotUnreachable)
+    const refused: unknown = await minter.depot().then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(refused, why).toBeInstanceOf(DepotUnreachable)
   })
 })

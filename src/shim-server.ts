@@ -238,7 +238,6 @@ export class ShimServer {
     rmSync(this.socketPath, { force: true })
   }
 
-  /** One connection: one line in, one line out, then closed. */
   #serve(socket: Socket): void {
     this.#open.add(socket)
     socket.on('close', () => this.#open.delete(socket))
@@ -260,7 +259,6 @@ export class ShimServer {
     socket.on('error', () => socket.destroy())
   }
 
-  /** What one request is answered with, and what it is written down as. */
   async #answer(line: string): Promise<ShimResponse> {
     let request: ShimRequest
     try {
@@ -275,14 +273,7 @@ export class ShimServer {
     const path = request.path ?? null
     const credential = request.credential ?? 'code'
     const where = { sessionId, taskId, path, credential } as const
-    // Looked up once. Which credential a request is about is the only question
-    // that branches here, and asking it in each of the three places below would
-    // be three chances to answer it differently — the worst of which hands a
-    // Cloud Shortcut an Installation Token, and looks like everything working
-    // until the first API call.
-    //
-    // Total, so there is no missing entry to answer for: a Reach a deployment has
-    // no key for is present and carries its own refusal.
+    // Enforced by `fence:shim-each-credential-from-its-own-reach`. Enforced by `fence:shim-credential-wanted-is-closed`.
     const reach = this.#reaches[credential]
 
     if (request.operation === 'erase') {
@@ -294,11 +285,6 @@ export class ShimServer {
       return { token: null }
     }
 
-    // Said rather than failed. A deployment with no Cloud Reach is the ordinary
-    // case, and the Cloud Shortcut is installed on every image so that this
-    // sentence is what an agent reads — a refusal it can repeat to a person,
-    // rather than a hang, a crash, or a `PATH` it would go and investigate. The
-    // sentence is the Reach's; roma reads it rather than holding it.
     if (!('tokens' in reach)) {
       this.#log({ event: 'credential-failed', ...where, reason: reach.unavailable })
       return { token: null, reason: reach.unavailable }

@@ -58,7 +58,6 @@ export interface ChatEnv {
   readonly maxLeaseMinutes: number
 }
 
-/** Every variable this Channel reads, required and optional alike. See `unconfigured`. */
 const CHAT_VARIABLES = [
   'ROMA_PUBSUB_PROJECT_ID',
   'ROMA_PUBSUB_SUBSCRIPTION',

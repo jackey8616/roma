@@ -20,7 +20,6 @@ import {
 import type { OperatorLog } from '../../operator-log.js'
 import { OVERFLOW_BUTTON, outcomeMessages, progressText } from './render.js'
 
-/** Chat's own name for the option that makes a reply establish a thread. */
 const REPLY_OR_START_THREAD = 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD'
 
 /**
@@ -32,7 +31,6 @@ const REPLY_OR_START_THREAD = 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD'
  */
 const ENDS_THE_TASK = new Set(['result', 'failure', 'stopped', 'command-outcome', 'choice'])
 
-/** Whether a path segment names something, rather than being absent or empty. */
 function named(segment: string | undefined): segment is string {
   return segment !== undefined && segment !== ''
 }
@@ -203,7 +201,6 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
     }))
   }
 
-  /** Post the acknowledgement, or edit the one this Task already has. */
   async #acknowledge(taskId: string, conversationKey: string, text: string): Promise<void> {
     const posted = this.#acknowledgements.get(taskId)
     if (posted !== undefined) {

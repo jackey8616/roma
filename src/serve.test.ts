@@ -591,6 +591,38 @@ describe('shutting down', () => {
     expect(roma.transport.acked, why).toEqual([])
   })
 
+  it('stops every Channel before it closes any of them [fence:serve-every-channel-stopped-first]', async () => {
+    const why =
+      'Shutdown must stop every Channel before it closes any Transport (ADR-0028). Closing ' +
+      'takes as long as it takes, and a Task that finishes meanwhile on a Channel not yet ' +
+      'stopped is settled as done just before roma kills the work it belonged to (82d6ab6).'
+    const roma = await booted({ channels: 2 })
+    const [first, second] = roma.channels
+    let release = (): void => {}
+    const closing = first!.transport.close.bind(first!.transport)
+    // Held once, by the shutdown under test; the teardown's own closes go through.
+    first!.transport.close = () => {
+      first!.transport.close = closing
+      return new Promise<void>((resolve) => {
+        release = () => void closing().then(resolve)
+      })
+    }
+
+    const one = first!.transport.deliver(said('hello', 'on-the-first'), 'm-1')
+    const two = second!.transport.deliver(said('hello', 'on-the-second'), 'm-2')
+    await flush()
+    const stopped = (await roma.serving).shutdown()
+    await flush()
+    feed(roma.procFor('on-the-first'), OK)
+    feed(roma.procFor('on-the-second'), OK)
+    await Promise.all([one, two])
+    release()
+    await stopped
+
+    expect(first!.transport.acked, why).toEqual([])
+    expect(second!.transport.acked, why).toEqual([])
+  })
+
   // Every Transport, and the pool once. Once is the half worth asserting: the
   // pool, the queue and the Audit Log are roma's rather than a Channel's, so a
   // shutdown that ended them per Channel would end them again under whatever the

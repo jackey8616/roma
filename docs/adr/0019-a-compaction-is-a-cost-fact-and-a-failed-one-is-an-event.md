@@ -165,6 +165,13 @@ a false alarm on the one channel ADR-0010 sets a high bar for.
 | `unreducible` | `exhausted`, `media_unstrippable` | **yes** | **yes** |
 | `unexplained` | `error`, and anything roma has not seen | **yes** | no |
 
+`aborted` is benign because somebody stopped it: nothing has gone wrong that they
+do not already know about, and the reply they are owed is the one `/stop`
+produces. `media_unstrippable` is unreducible for a different reason from
+`exhausted` — the attached media exceeds size limits — and with the same
+consequence. Both lists are a person's judgement about one build, like the Relay
+list, and are re-applied when the pin moves.
+
 **Three rather than two, because roma is told a code and not a consequence**, and
 its two possible responses have different bars. Telling an operator costs a line
 in a stream they read when something looks wrong. Telling a Caller their thread

@@ -134,22 +134,6 @@ export class HttpChatApi implements ChatApi {
   }
 }
 
-/**
- * Some actions as the smallest card that can carry them.
- *
- * The one place ADR-0004's "messages are plain text" gives way: Chat has no way
- * to put a button on plain text.
- *
- * One `buttonList` holding all of them rather than one widget each, because that
- * is Chat's own grouping — it wraps a row across lines, which is what a
- * six-level Effort Menu needs on a phone.
- *
- * `action.function` and `action.parameters` are the round trip, which is why
- * roma remembers nothing between offering something and its being taken. Going
- * out they must be `{key, value}` pairs; the click may return either that shape
- * or an object, and `chat-events.ts` reads both.
- * https://developers.google.com/workspace/chat/read-form-data
- */
 function cardFor(actions: readonly ChatAction[]): unknown {
   return {
     cardId: 'roma-action',
@@ -180,7 +164,6 @@ function cardFor(actions: readonly ChatAction[]): unknown {
   }
 }
 
-/** The resource name off a Message the API sent back, if it sent one. */
 function nameOf(answer: unknown): string | null {
   if (typeof answer !== 'object' || answer === null) return null
   const name = (answer as { name?: unknown }).name

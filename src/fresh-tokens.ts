@@ -105,7 +105,6 @@ export class FreshTokens {
    * asked for by several Shims in the same tick. Without this they each mint.
    */
   #minting: Promise<MintedToken> | null = null
-  /** When roma last threw a token away because it was told to. */
   #discardedAt = Number.NEGATIVE_INFINITY
 
   constructor({
@@ -168,7 +167,6 @@ export class FreshTokens {
     this.#cached = null
   }
 
-  /** Mint once, however many callers are waiting for it. */
   async #mint(): Promise<MintedToken> {
     const inFlight = this.#minting
     if (inFlight !== null) return await inFlight
@@ -184,9 +182,7 @@ export class FreshTokens {
       this.#onMint()
       return minted
     } finally {
-      // Cleared whichever way it went, and only if this is still the mint in
-      // flight. A failed mint that stayed here would be handed to every later
-      // caller as a rejection they could do nothing about.
+      // Enforced by `fence:session-token-failed-mint-is-forgotten`.
       if (this.#minting === minting) this.#minting = null
     }
   }

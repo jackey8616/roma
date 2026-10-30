@@ -55,31 +55,19 @@ export const RETRY_CEILING_MS = 30_000
  */
 export const REMEMBERED = 1_000
 
-/**
- * The instructions after which a Task has no acknowledgement left to keep.
- *
- * Named as a set rather than asked as "not progress", because that is no longer
- * the same question: a blocked Task has been told something and is still
- * running, and its acknowledgement is still the message it will keep editing.
- */
+/** Enforced by `fence:discord-acknowledgement-kept-until-the-end`. */
 const ENDS_THE_TASK = new Set(['result', 'failure', 'stopped', 'command-outcome', 'choice'])
 
-/** Where one instruction's messages go, and the message the first of them answers. */
 interface Answering {
   readonly channel: string
   readonly replyTo: string | null
 }
 
-/** The message roma is answering in one Conversation, and where it arrived. */
 interface Answered {
   readonly channel: string
   readonly message: string
   readonly name: string
-  /**
-   * **Not the channel: the promise of it.** The entry has to exist from the
-   * instant the thread is first asked for, or two instructions arriving together
-   * both open one — and a message can only ever have the one.
-   */
+  /** Enforced by `fence:discord-thread-asked-for-once`. */
   place: Promise<string> | null
 }
 
@@ -205,12 +193,6 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
    */
   toIngress(event: DiscordEvent): IngressMessage | null {
     const message =
-      // A press on a Menu button is a message the Caller did not have to type, so
-      // it arrives here rather than through a reader of its own on this
-      // interface — pressing is typing (ADR-0023). Asked first because it
-      // answers about a different kind of event entirely: the message on a press
-      // is roma's *own* card, and the reader below must go on refusing anything
-      // an app said rather than being taught an exception to it.
       readChosenOption(event) ??
       readIngressMessage(event, {
         download: (url) => this.#api.download(url),
@@ -259,20 +241,9 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
       return
     }
 
-    // Only where the Task is actually over. `blocked`, `overflow-refused` and
-    // `context-full` are messages about a Task that is still going: forgetting
-    // its acknowledgement there would strand the one the person is watching and
-    // post a second one when the Task started again. Dropped before the messages
-    // are posted rather than after, so that a post that throws still leaves
-    // nothing behind.
+    // Enforced by `fence:discord-acknowledgement-kept-until-the-end`.
     if (ENDS_THE_TASK.has(instruction.kind)) this.#acknowledgements.delete(taskId)
 
-    // Two messages can carry buttons and they are never the same message: the
-    // block that offers Overflow (ADR-0002 puts the valve at the moment of
-    // blocking rather than in a setting), and the Menu somebody may choose from
-    // (ADR-0023). Which Menus are drawn at all is the Core's — an `/effort` on a
-    // model the Effort Matrix says takes none arrives as a `result` rather than
-    // a `choice`, so there is nothing here to suppress.
     const buttons =
       instruction.kind === 'blocked' && instruction.overflowOffered
         ? [offerButton(taskId)]
@@ -297,7 +268,6 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     }
   }
 
-  /** Where this instruction is said and what it replies to, out of one `#answering` entry. */
   async #answeringFor({ conversationKey, caller }: OutboundInstruction): Promise<Answering> {
     const answered = this.#answering.get(addressOf(conversationKey, caller))
     return {
@@ -313,9 +283,7 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     if (channel === null || id === null) return
 
     const at = addressOf(message.conversationKey, message.caller)
-    // Deleted before it is set, because a `Map` keeps the order things were
-    // *first* put in it: without this, a Conversation somebody has been talking
-    // in all day is evicted ahead of one nobody has touched since this morning.
+    // Enforced by `fence:discord-answering-evicts-the-least-recent`.
     this.#answering.delete(at)
     if (this.#answering.size >= REMEMBERED) {
       const oldest = this.#answering.keys().next().value
@@ -324,7 +292,6 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     this.#answering.set(at, { channel, message: id, name: threadName(message.text), place: null })
   }
 
-  /** Which channel this Conversation is answered in, opening its thread if it has none. */
   #place(conversationKey: string, answered: Answered | undefined): Promise<string> {
     if (answered === undefined || answered.channel === conversationKey) {
       return Promise.resolve(conversationKey)
@@ -334,9 +301,7 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     const opening = this.#openThread(conversationKey, answered)
     answered.place = opening
     return opening.catch((error: unknown) => {
-      // Forgotten so that the next instruction tries again, exactly as a failed
-      // acknowledgement is. Kept, one bad minute would leave every later message
-      // in this Conversation waiting on a promise that had already rejected.
+      // Enforced by `fence:discord-failed-thread-forgotten`.
       if (answered.place === opening) answered.place = null
       throw error
     })
@@ -355,7 +320,6 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     }
   }
 
-  /** Post the acknowledgement, or edit the one this Task already has. */
   async #acknowledge(taskId: string, { channel, replyTo }: Answering, text: string): Promise<void> {
     const posted = this.#acknowledgements.get(taskId)
     if (posted !== undefined) {
@@ -380,7 +344,6 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     }
   }
 
-  /** One call, tried again where trying again could work. ADR-0028's remedy, bounded. */
   async #retrying<T>(call: () => Promise<T>): Promise<T> {
     for (let attempt = 1; ; attempt += 1) {
       try {
@@ -417,7 +380,6 @@ function choiceButtons(
   }))
 }
 
-/** Whether Discord refused this on its own terms, rather than failing to serve it. */
 function refused(error: unknown): error is DiscordRefusal {
   return error instanceof DiscordRefusal && error.status !== 429 && error.status < 500
 }
@@ -430,7 +392,6 @@ function waitBefore(error: unknown, attempt: number): number | null {
   return asked > RETRY_CEILING_MS ? null : asked
 }
 
-/** Waiting, as everything but a test does it. */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     // Unreferenced for `ProgressReporter`'s reason: a wait roma is sitting

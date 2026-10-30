@@ -65,8 +65,10 @@ who quoted them to ask what they meant rather than to endorse them.
 
 ### 1. A Quotation is the snapshot, and roma never fetches the quoted message
 
-Chat's `quotedMessageMetadata` carries both a link — `name`, the quoted message's
-resource name — and `quotedMessageSnapshot`, the words as they stood when they
+Chat's `quotedMessageMetadata`
+(https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces.messages)
+carries both a link — `name`, the quoted message's resource name — and
+`quotedMessageSnapshot`, the words as they stood when they
 were quoted plus who wrote them. **roma reads the snapshot and ignores the link.**
 
 Three things follow, and only the first is the obvious one:

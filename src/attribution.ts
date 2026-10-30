@@ -76,33 +76,11 @@ function enclosed(enclosures: readonly WrittenEnclosure[]): string {
     .join('')
 }
 
-/**
- * Who somebody else's contribution is from, on the tag that carries it.
- *
- * Absent on nearly all of them and load-bearing on the rest: a forwarded
- * message's attachments land in the same Working Directory on the same kind of
- * tag as the Caller's own, so without this "the screenshot Ada sent" and "the
- * screenshot Ada forwarded from Bob" are one sentence — the misattribution the
- * Caller Marker exists to prevent, one level down (ADR-0021).
- *
- * Nothing is written for the Caller's own; the marker above already says who.
- */
 function fromAttribute(from: string | null): string {
   return from === null ? '' : ` from="${attribute(from)}"`
 }
 
-/**
- * The Quotation on a message, framed and escaped, under roma's other tags.
- *
- * **The one string roma escapes rather than merely carries**, and it must stay
- * escaped. Everything else the model reads as content is last in the message, so
- * it can say anything and still sit behind roma's tags. This one has roma's text
- * after it, so an unescaped `</quoted>` would end roma's frame early and leave
- * the rest of the quotation reading as though roma had written it.
- *
- * The author is on the tag rather than absent, because a quotation with no
- * author named reads as the Caller saying it themselves.
- */
+// Enforced by `fence:attribution-quotation-escaped`.
 function quoted(quotation: Quotation | null): string {
   if (quotation === null) return ''
   const { text, author } = quotation

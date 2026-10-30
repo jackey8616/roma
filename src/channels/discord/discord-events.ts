@@ -100,7 +100,6 @@ export interface Interaction {
   readonly press: DiscordPress
 }
 
-/** Discord's kind for a press on something roma posted, and the only one roma reads. */
 const MESSAGE_COMPONENT = 3
 
 /**
@@ -115,11 +114,9 @@ const MESSAGE_COMPONENT = 3
  */
 export const MAX_CUSTOM_ID = 100
 
-/** The two tags a `custom_id` begins with, which are `Pressed`'s two kinds. */
 const CHOOSE = 'choose'
 const TAKE_OVERFLOW = 'overflow'
 
-/** Between the fields of a `custom_id`. See `chooseId` for why the option is last. */
 const FIELD = ':'
 
 /**
@@ -173,7 +170,6 @@ export function overflowId(taskId: string): string {
   return pressId({ kind: TAKE_OVERFLOW, taskId })
 }
 
-/** One meaning as the id that carries it, and the only place one is written. */
 function pressId(pressed: Pressed): string {
   return pressed.kind === CHOOSE
     ? [CHOOSE, pressed.chooses, pressed.conversationKey, pressed.option].join(FIELD)
@@ -203,7 +199,6 @@ export function readPress(customId: string): Pressed | null {
   }
 }
 
-/** A Menu press, or null where it names something roma never put on a Menu. */
 function chosen([chooses, conversationKey, ...rest]: readonly string[]): Pressed | null {
   // Enforced by `fence:discord-menu-door-opens-only-menus`. Enforced by `fence:discord-every-menu-name-reads-back`.
   if (chooses !== 'model' && chooses !== 'effort' && chooses !== 'caveman') return null
@@ -212,7 +207,6 @@ function chosen([chooses, conversationKey, ...rest]: readonly string[]): Pressed
   return option === '' ? null : { kind: CHOOSE, chooses, conversationKey, option }
 }
 
-/** An Overflow press, or null where it names no Task. */
 function taken(rest: readonly string[]): Pressed | null {
   const taskId = rest.join(FIELD)
   return taskId === '' ? null : { kind: TAKE_OVERFLOW, taskId }
@@ -310,11 +304,6 @@ export function readIngressMessage(
   const messageId = asString(message['id'])
   if (channelId === null || messageId === null) return null
 
-  // A guild message roma was not addressed in is not roma's to answer, and
-  // without the message-content intent it arrives empty anyway — so this is the
-  // decision ADR-0029 made said out loud rather than left to a side effect of
-  // the intents. A direct message needs no mention: being sent one *is* the
-  // address.
   const guildId = asString(message['guild_id'])
   if (guildId !== null && !addressed(message, self)) return null
 
@@ -463,7 +452,6 @@ function mentionsOf(id: string): readonly string[] {
   return [`<@${id}>`, `<@!${id}>`]
 }
 
-/** What was sent alongside the text, with `from` null on every one (ADR-0029). */
 function readEnclosures(
   message: DiscordMessage,
   download: DownloadAttachment | undefined,
@@ -483,18 +471,15 @@ function readEnclosures(
   return enclosures
 }
 
-/** Whoever Discord says this is, as a person reads them, or null. */
 function displayName(user: Readonly<Record<string, unknown>> | null | undefined): string | null {
   return asString(user?.['global_name']) ?? asString(user?.['username'])
 }
 
-/** Some text with something in it, or null for a field that is empty or absent. */
 function words(value: unknown): string | null {
   const text = (asString(value) ?? '').trim()
   return text === '' ? null : text
 }
 
-/** The first entry of something that may not be a list at all. */
 function first(value: unknown): unknown {
   return Array.isArray(value) ? value[0] : null
 }

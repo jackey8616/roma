@@ -400,6 +400,32 @@ describe('naming a Session versus reaching it again', () => {
     expect(log).not.toContainEqual(expect.objectContaining({ event: 'exit' }))
   })
 
+  it('starts the replacement only once the refused process has gone [fence:pool-one-process-per-transcript]', async () => {
+    const why =
+      'A refused process must be ended, and its ending awaited, before the replacement is ' +
+      'spawned (ADR-0003). A refusal that arrives as a terminal event leaves the process ' +
+      'running, so dropping it puts two processes on one transcript, which corrupts it, and ' +
+      'leaves the first with no reap timer to ever end it (1fdd4d0, #105).'
+    const { claude, pool, workRoot, processFor } = newPool()
+    spawnedBefore(workRoot, A)
+
+    const turn = pool.send(A, 'hello')
+    await flush()
+    const refused = processFor(A)
+    refused.ignore('SIGTERM')
+    feed(refused, RESUME_LOST)
+    await flush()
+
+    expect(refused.signals, why).toEqual(['SIGTERM'])
+    expect(claude.spawns, why).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(refused.signals, why).toEqual(['SIGTERM', 'SIGKILL'])
+    expect(claude.spawns, why).toHaveLength(2)
+    feed(processFor(A), OK)
+    await turn
+  })
+
   // Defect A of #105, at the seam that decides it. Anything may create a Working
   // Directory — ADR-0011 has an Enclosure written into one before the Turn — and
   // a pool that reads the directory as the Session's record answers a first
@@ -513,7 +539,12 @@ describe('naming a Session versus reaching it again', () => {
   // dead resident goes back over the live one that supplanted it — leaving the
   // working process orphaned, invisible to eviction, reaping and shutdown, and
   // the next message recovering all over again.
-  it('leaves the recovered process resident, not the one it replaced', async () => {
+  it('leaves the recovered process resident, not the one it replaced [fence:pool-mark-used-checks-identity]', async () => {
+    const why =
+      'markUsed must re-insert a resident only if it is still the one in the slot (ADR-0003). ' +
+      'A recovery replaces the resident under a running Turn, and re-inserting on presence ' +
+      'puts the dead one back over the live one: the working process is orphaned from ' +
+      'eviction, reaping and shutdown, and the next message recovers again (c2d7ce0, #51).'
     const { claude, pool, workRoot, processFor } = newPool()
     spawnedBefore(workRoot, A)
 
@@ -532,7 +563,7 @@ describe('naming a Session versus reaching it again', () => {
     feed(processFor(A), OK)
     await second
 
-    expect(claude.spawns).toHaveLength(2)
+    expect(claude.spawns, why).toHaveLength(2)
   })
 
   it('does not mistake a failing Turn for a lost transcript', async () => {
@@ -579,7 +610,11 @@ describe('staying under the resident cap', () => {
   // Two Tasks can be in flight at once, so two Sessions can want a slot at the
   // same moment. Each seeing the pool one short of full and taking the last slot
   // is how a cap of ten quietly becomes eleven.
-  it('holds the cap when two Sessions arrive at the same moment', async () => {
+  it('holds the cap when two Sessions arrive at the same moment [fence:pool-spawns-one-at-a-time]', async () => {
+    const why =
+      'Spawns must run one at a time, so that making room and taking the slot are one step ' +
+      '(ADR-0003). Two Sessions arriving at a pool one short of full each see a free slot ' +
+      'and each take it, and a cap of ten quietly holds eleven processes (79eed0a, #21).'
     const { pool, processFor, send } = newPool({ maxResident: 2 })
     await send(A, 'hello', OK)
 
@@ -590,7 +625,7 @@ describe('staying under the resident cap', () => {
     feed(processFor(sessionId(3)), OK)
     await Promise.all([second, third])
 
-    expect(pool.residents).toHaveLength(2)
+    expect(pool.residents, why).toHaveLength(2)
   })
 
   it('evicts with SIGTERM, which is what makes a later --resume possible', async () => {
@@ -877,6 +912,21 @@ describe('what an operator can see', () => {
     await vi.advanceTimersByTimeAsync(5_000)
     feed(processFor(B), OK)
     await second
+  })
+
+  it('does not report as news a process it ended itself [fence:pool-own-ending-is-not-news]', async () => {
+    const why =
+      'A resident the pool is ending must be marked as leaving before the signal is sent ' +
+      '(ADR-0005: the Operator Log is what roma decided). A process can exit on the signal ' +
+      'before terminate returns, and marked any later its exit is logged as though it had ' +
+      'died on its own (1156509, #27).'
+    const { pool, log, send } = newPool()
+    await send(A, 'hello', OK)
+
+    await pool.evict(A)
+
+    expect(log, why).toContainEqual(expect.objectContaining({ event: 'evict', sessionId: A }))
+    expect(log, why).not.toContainEqual(expect.objectContaining({ event: 'exit' }))
   })
 
   it('records an eviction, so a slow Turn has an explanation', async () => {

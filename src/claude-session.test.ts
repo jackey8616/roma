@@ -674,18 +674,23 @@ describe('when the process misbehaves', () => {
   // A terminal result with nothing waiting for it still moved the running total.
   // Left out of the running total, its spend is folded into the next Turn — the
   // cumulative-total bug arriving by a different route.
-  it('keeps the cost baseline current when a result arrives with no Turn in flight', async () => {
+  it('keeps the cost baseline current when a result arrives with no Turn in flight [fence:session-unrequested-result-moves-the-baseline]', async () => {
+    const why =
+      'The cost baseline must be rebased on every terminal event, whether or not a Turn was ' +
+      'waiting for it (ADR-0003, observability). A result nobody asked for still moved ' +
+      '`total_cost_usd`, and a baseline left behind folds that spend into the next Turn’s ' +
+      'delta — the cumulative-total bug arriving by a different route (#19).'
     const { claude, session } = newSession()
     const stream = recordedStream('three-turns-one-process')
     session.start()
 
     feed(claude.process, stream.turn(1))
-    expect(session.cumulativeCostUsd).toBeCloseTo(0.0103129, 7)
+    expect(session.cumulativeCostUsd, why).toBeCloseTo(0.0103129, 7)
 
     const turn = session.send('and now a real one')
     feed(claude.process, stream.turn(3))
 
-    expect((await turn).costUsd).toBeCloseTo(0.0019952, 7)
+    expect((await turn).costUsd, why).toBeCloseTo(0.0019952, 7)
   })
 })
 

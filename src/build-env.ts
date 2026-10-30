@@ -71,10 +71,6 @@ export interface BuildEnvOptions {
   readonly inherit?: Readonly<Record<string, string | undefined>>
 }
 
-/**
- * The only host variables a Claude Code process gets. Everything else — every
- * other credential, every unrelated secret — stays behind.
- */
 const PASSTHROUGH = ['PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'TMPDIR'] as const
 
 /**

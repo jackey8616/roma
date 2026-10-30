@@ -1,87 +1,67 @@
 {
   "src/attempts.ts": {
     "roma/comment-whitelist": {
-      "count": 8
+      "count": 5
     }
   },
   "src/attribution.ts": {
     "roma/comment-whitelist": {
-      "count": 6
+      "count": 4
     }
   },
   "src/audit-log.ts": {
     "roma/comment-whitelist": {
-      "count": 73
+      "count": 20
     }
   },
   "src/build-env.ts": {
     "roma/comment-whitelist": {
-      "count": 10
-    }
-  },
-  "src/caveman.ts": {
-    "roma/comment-whitelist": {
-      "count": 1
+      "count": 9
     }
   },
   "src/channels/discord/binding.ts": {
     "roma/comment-whitelist": {
-      "count": 5
+      "count": 4
     }
   },
   "src/channels/discord/discord-adapter.ts": {
     "roma/comment-whitelist": {
-      "count": 41
+      "count": 7
     }
   },
   "src/channels/discord/discord-events.ts": {
     "roma/comment-whitelist": {
-      "count": 32
-    }
-  },
-  "src/channels/discord/env-config.ts": {
-    "roma/comment-whitelist": {
-      "count": 1
+      "count": 17
     }
   },
   "src/channels/discord/gateway-transport.ts": {
     "roma/comment-whitelist": {
-      "count": 40
+      "count": 15
     }
   },
   "src/channels/discord/http-discord-api.ts": {
     "roma/comment-whitelist": {
-      "count": 8
+      "count": 3
     }
   },
   "src/channels/discord/render.ts": {
     "roma/comment-whitelist": {
-      "count": 34
+      "count": 28
     }
   },
   "src/channels/google-chat/binding.ts": {
     "roma/comment-whitelist": {
-      "count": 16
+      "count": 9
     }
   },
   "src/channels/google-chat/chat-events.ts": {
     "roma/comment-whitelist": {
-      "count": 34
-    }
-  },
-  "src/channels/google-chat/env-config.ts": {
-    "roma/comment-whitelist": {
-      "count": 1
+      "count": 28
     }
   },
   "src/channels/google-chat/google-chat-adapter.ts": {
     "roma/comment-whitelist": {
-      "count": 21
-    }
-  },
-  "src/channels/google-chat/http-chat-api.ts": {
-    "roma/comment-whitelist": {
-      "count": 2
+      "count": 18
     }
   },
   "src/channels/google-chat/pubsub-transport.ts": {
@@ -91,22 +71,17 @@
   },
   "src/channels/google-chat/render.ts": {
     "roma/comment-whitelist": {
-      "count": 43
+      "count": 30
     }
   },
   "src/channels/main.ts": {
     "roma/comment-whitelist": {
-      "count": 33
+      "count": 30
     }
   },
   "src/claude-session.ts": {
     "roma/comment-whitelist": {
-      "count": 17
-    }
-  },
-  "src/cloud/cloud-token.ts": {
-    "roma/comment-whitelist": {
-      "count": 1
+      "count": 3
     }
   },
   "src/cloud/env-config.ts": {
@@ -116,7 +91,7 @@
   },
   "src/cloud/google-cloud-minter.ts": {
     "roma/comment-whitelist": {
-      "count": 4
+      "count": 3
     }
   },
   "src/cloud/reach.ts": {
@@ -124,19 +99,9 @@
       "count": 2
     }
   },
-  "src/compaction.ts": {
-    "roma/comment-whitelist": {
-      "count": 6
-    }
-  },
   "src/core.ts": {
     "roma/comment-whitelist": {
-      "count": 334
-    }
-  },
-  "src/documents/document-token.ts": {
-    "roma/comment-whitelist": {
-      "count": 1
+      "count": 283
     }
   },
   "src/documents/env-config.ts": {
@@ -146,7 +111,7 @@
   },
   "src/documents/google-document-minter.ts": {
     "roma/comment-whitelist": {
-      "count": 25
+      "count": 6
     }
   },
   "src/documents/reach.ts": {
@@ -156,12 +121,12 @@
   },
   "src/env-config.ts": {
     "roma/comment-whitelist": {
-      "count": 18
+      "count": 13
     }
   },
   "src/fresh-tokens.ts": {
     "roma/comment-whitelist": {
-      "count": 11
+      "count": 6
     }
   },
   "src/github/announce.ts": {
@@ -171,7 +136,7 @@
   },
   "src/github/app-jwt.ts": {
     "roma/comment-whitelist": {
-      "count": 2
+      "count": 1
     }
   },
   "src/github/env-config.ts": {
@@ -181,22 +146,17 @@
   },
   "src/github/gh-shim.ts": {
     "roma/comment-whitelist": {
-      "count": 9
+      "count": 7
     }
   },
   "src/github/git-credential-shim.ts": {
     "roma/comment-whitelist": {
-      "count": 11
+      "count": 8
     }
   },
   "src/github/github-minter.ts": {
     "roma/comment-whitelist": {
-      "count": 15
-    }
-  },
-  "src/github/reach.ts": {
-    "roma/comment-whitelist": {
-      "count": 11
+      "count": 13
     }
   },
   "src/github/shims.ts": {
@@ -206,42 +166,37 @@
   },
   "src/progress-phrase.ts": {
     "roma/comment-whitelist": {
-      "count": 17
+      "count": 16
     }
   },
   "src/progress-reporter.ts": {
     "roma/comment-whitelist": {
-      "count": 23
-    }
-  },
-  "src/reach.ts": {
-    "roma/comment-whitelist": {
-      "count": 2
+      "count": 18
     }
   },
   "src/relays.ts": {
     "roma/comment-whitelist": {
-      "count": 20
+      "count": 6
     }
   },
   "src/serve.ts": {
     "roma/comment-whitelist": {
-      "count": 21
+      "count": 15
     }
   },
   "src/session-generation.ts": {
     "roma/comment-whitelist": {
-      "count": 10
+      "count": 3
     }
   },
   "src/session-id.ts": {
     "roma/comment-whitelist": {
-      "count": 4
+      "count": 3
     }
   },
   "src/session-pool.ts": {
     "roma/comment-whitelist": {
-      "count": 96
+      "count": 57
     }
   },
   "src/shared-window.ts": {
@@ -256,32 +211,32 @@
   },
   "src/shim-server.ts": {
     "roma/comment-whitelist": {
-      "count": 24
+      "count": 9
     }
   },
   "src/shortcut.ts": {
     "roma/comment-whitelist": {
-      "count": 20
+      "count": 9
     }
   },
   "src/startup-self-check.ts": {
     "roma/comment-whitelist": {
-      "count": 13
+      "count": 9
     }
   },
   "src/startup.ts": {
     "roma/comment-whitelist": {
-      "count": 93
+      "count": 65
     }
   },
   "src/stream-events.ts": {
     "roma/comment-whitelist": {
-      "count": 7
+      "count": 5
     }
   },
   "src/task-queue.ts": {
     "roma/comment-whitelist": {
-      "count": 12
+      "count": 10
     }
   },
   "src/work-root.ts": {

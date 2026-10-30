@@ -1,33 +1,6 @@
 import { fileURLToPath } from 'node:url'
 import { credentialFor } from '../shim-client.js'
 
-/**
- * The `git` half of the Credential Shim: a git credential helper that holds
- * nothing.
- *
- * git's protocol, as it is actually spoken: the helper is run as
- * `helper <operation>`, is given `key=value` lines on stdin terminated by a
- * blank line or EOF, and answers `get` by printing `key=value` lines of its own.
- * Three operations exist and roma treats them as three different things:
- *
- * - **`get`** is answered with `username=x-access-token` and an Installation
- *   Token, which is GitHub's spelling for "this credential is an App's".
- * - **`erase`** is git saying the credential it was given was rejected. It hands
- *   the credential back, which is roma's only signal that a token it believes in
- *   has stopped working. Measured: git 2.43.0 calls a helper twice on an
- *   authentication failure, the second time with `erase` and the dead password
- *   (ADR-0008's amendment).
- * - **`store`** is answered by doing nothing at all. roma has nowhere to store a
- *   credential and wants none: the whole design is that nothing outlives the
- *   operation that needed it.
- *
- * **This is not a boundary against the agent.** The agent has a shell under
- * `bypassPermissions` and can run `git credential fill`, or talk to the socket
- * itself. What this buys is freshness against the one-hour clock, and keeping
- * the token out of any process environment or file — where `env` or a stack
- * trace would write it into a Transcript roma has promised never to delete.
- */
-
 /** GitHub's username for an Installation Token used as a password. */
 const USERNAME = 'x-access-token'
 
@@ -91,8 +64,6 @@ async function readAll(input: NodeJS.ReadableStream): Promise<string> {
   return body
 }
 
-// Run only when this file is the program. Imported — by a test — it defines
-// `main` and reads nothing.
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
   process.exitCode = await main()
 }

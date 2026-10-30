@@ -241,16 +241,7 @@ Example — destructive op:
 Persisted outside chat: write normal prose — code, comments, commits, docs, issue/PR/MR text, memory files, third-party messages. Level persist until changed or session end.`
 }
 
-/**
- * roma's copy of caveman's level filter, line for line from `caveman-activate.js`.
- *
- * **Never widen either pattern to match the whole row or the whole bullet.** The
- * intensity table's header and separator are kept by matching *neither*, so a
- * pattern loosened to `^\|` drops them and leaves the surviving row as a stray
- * line of pipes; and every bullet under `Drop caveman when:` is kept because
- * `(\S+?):` wants a colon after a single token, so one loosened to `(.+?):`
- * starts eating prose that is not an example of anything.
- */
+/** Enforced by `fence:caveman-filter-keeps-the-table`. */
 function onlyAtLevel(rules: string, level: string): string {
   return rules
     .split('\n')

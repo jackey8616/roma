@@ -67,14 +67,8 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
   const to = addressedTo(instruction.caller)
   switch (instruction.kind) {
     case 'result': {
-      // Its own message or messages, never the acknowledgement edited one last
-      // time — the rule ADR-0003 makes unconditional, because the result is what
-      // people search for and quote months later.
+      // Enforced by `fence:gchat-result-is-its-own-message`.
       const messages = split(to, instruction.text)
-      // ADR-0002 requires the spend shown in the reply, and only where somebody
-      // chose to spend it. Its own message rather than appended to the answer:
-      // the answer is what gets quoted later, and a price tag inside it would be
-      // quoted along with it.
       if (instruction.overflowCostUsd !== undefined) {
         messages.push(overflowSpentText(instruction.overflowCostUsd))
       }
@@ -87,9 +81,6 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
       // told nothing at all about a Task that is already dead.
       return split(to, instruction.reason)
     case 'choice':
-      // Only the text. The buttons are the Adapter's, because they are a Chat
-      // card rather than words — and the text already names the Menu, so a
-      // message that lost them would still be the whole answer (ADR-0023).
       return split(to, instruction.text)
     case 'stopped':
       return [`${to}Stopped.`]
@@ -132,14 +123,12 @@ function blockedText(resetsAt: number): string {
   return `The shared Claude quota is spent. It comes back at ${at} UTC — I have kept your task and will run it then.`
 }
 
-/** What an Overflow Turn spent, to the cent it was billed in. */
 function overflowSpentText(costUsd: number | null): string {
   // Enforced by `fence:gchat-unpriced-is-not-free`.
   if (costUsd === null) return 'Ran on metered billing. What it cost was never reported.'
   return `Ran on metered billing: $${money(costUsd)}.`
 }
 
-/** Money as people read it, which is two decimal places and no more. */
 function money(usd: number): string {
   return usd.toFixed(2)
 }
@@ -203,7 +192,6 @@ function split(prefix: string, text: string): string[] {
   return messages
 }
 
-/** Where to cut a full window: the last paragraph, line, or word boundary in it. */
 function breakPoint(window: string): number {
   for (const boundary of ['\n\n', '\n', ' ']) {
     const at = window.lastIndexOf(boundary)

@@ -214,9 +214,16 @@ describe('the intensity the ruleset asks for', () => {
 
   // The header and the separator match neither of the filter's two patterns, so
   // the surviving row arrives inside a table rather than as a loose line.
-  it('leaves the table it is a row of standing', () => {
+  it('leaves the table it is a row of standing [fence:caveman-filter-keeps-the-table]', () => {
+    const why =
+      'The level filter must match only a level’s row, never the whole table (ADR-0030: roma ' +
+      'copies caveman’s filter line for line). The header and the separator are kept by ' +
+      'matching neither pattern, so a row pattern loosened to ^\\| drops them and leaves the ' +
+      'surviving row as a stray line of pipes (ab48d09, #192).'
     for (const level of LEVELS_WITH_RULES) {
-      expect(cavemanRuleset(level)).toContain('| Level | What change |\n|-------|------------|\n')
+      expect(cavemanRuleset(level), why).toContain(
+        '| Level | What change |\n|-------|------------|\n',
+      )
     }
   })
 

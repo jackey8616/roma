@@ -65,27 +65,11 @@ export interface ReachProof {
 }
 
 interface Reaching<C extends CredentialWanted> {
-  /**
-   * Which credential this Reach answers requests for.
-   *
-   * A type parameter rather than the bare union, so that the slot a Reach fills
-   * and the credential it answers for cannot disagree. Without it
-   * `{ code: cloudReachFrom(env), cloud: githubReachFrom(env) }` typechecks, and
-   * a `git` would be handed a Cloud Token — the failure that looks like
-   * everything working right up to the first API call.
-   */
+  /** Enforced by `fence:reach-typed-by-its-credential`. */
   readonly credential: C
   /** Prove this Reach works, or block the boot. Enforced by `fence:reach-a-broken-key-blocks-the-boot`. */
   prove(): Promise<ReachProof>
-  /**
-   * What every Session is told it can reach, or `''` where there is nothing to
-   * say.
-   *
-   * **Call it after `prove`.** It reads what the proof found — a Reach that
-   * announces before proving throws rather than announcing a capability it has
-   * not checked, because the empty version of most announcements reads as "you
-   * have no access" and an agent told that stops trying (ADR-0020).
-   */
+  /** Enforced by `fence:reach-announces-only-what-it-proved`. */
   announce(): string
 }
 

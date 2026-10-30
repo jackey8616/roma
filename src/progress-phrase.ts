@@ -60,5 +60,4 @@ export function progressPhrase(progress: TaskProgress): string {
   }
 }
 
-/** How much of a tool's command an acknowledgement quotes. See `progressPhrase`. */
 const MAX_TOOL_CHARS = 120

@@ -101,6 +101,11 @@ version control. Enforced by `fence:buildenv-no-stray-key`.
 A consequence worth noting: the overflow valve stops being a special mode and
 becomes just a different environment map.
 
+**Amended — one map per credential, chosen per Turn.** The Session Pool holds
+both maps and picks between them for each Turn. Both reach the same Credential
+Shim socket: a credential for reaching the code has nothing to do with which bill
+a Turn lands on.
+
 ### Quota exhaustion
 
 The shared token means one shared 5-hour rolling window and one shared weekly
@@ -110,6 +115,10 @@ at once.
 On exhaustion the bot states plainly that quota is spent, gives the expected
 reset time, and queues the task. It also offers an **overflow valve**: a button
 that reruns the task on a metered API key.
+
+**Amended — a blocked task waits holding nothing.** It keeps no concurrency slot
+and no process while it waits, and runs again when the window comes back or when
+somebody takes the valve.
 
 **Amended — the expected reset time has a real source.** It is `resetsAt` on the
 `rate_limit_event` above, not an estimate. `overageStatus` and `isUsingOverage`
@@ -134,6 +143,9 @@ is now the statement of the rule. A window that is spent but carries no
 - Spend is shown in the reply, and a **monthly overflow cap** is enforced;
   beyond it, overflow is refused outright and the owner is notified. Without a
   cap, "off by default" would be ceremony rather than protection.
+  - **The spend is shown only where somebody chose to spend it, and as a
+    message of its own** rather than appended to the answer: the answer is what
+    gets quoted later, and a price tag inside it would be quoted along with it.
   - **The cap is a required part of configuring overflow at all**, not a setting
     with a default: a default would be roma deciding how much of somebody's money
     to spend on their behalf. A metered key and a cap are configured as one
