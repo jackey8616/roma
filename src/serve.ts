@@ -235,11 +235,7 @@ export async function serve(options: ServeOptions): Promise<Serving> {
   return {
     ...roma,
     shutdown: async () => {
-      // Before any Transport is closed, not after: from here on every Delivery
-      // roma is holding is one it is about to kill the Task for, and settling
-      // one as done would throw that work away. Every Channel before any close
-      // rather than each in turn, because closing takes as long as it takes and
-      // the other Channels' Tasks are settling throughout it.
+      // Enforced by `fence:serve-every-channel-stopped-first`.
       for (const channel of receiving) channel.stop()
       const closed = await Promise.allSettled(receiving.map((channel) => channel.close()))
       // Whatever any of them did, and once rather than once per Channel. A

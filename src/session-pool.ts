@@ -540,14 +540,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
 
   /** Insertion-ordered, so the first entry is the least recently used. */
   readonly #residents = new Map<string, Resident>()
-  /**
-   * Spawns run one at a time.
-   *
-   * Making room and taking the slot have to be a single step. Two Sessions
-   * arriving together at a pool one short of full would each look, each see a
-   * free slot, and each take it — and a cap of ten would quietly hold eleven
-   * processes. The wait is bounded by one eviction.
-   */
+  /** Enforced by `fence:pool-spawns-one-at-a-time`. */
   #spawning: Promise<unknown> = Promise.resolve()
   readonly #reclaimTimer: NodeJS.Timeout
 
@@ -701,14 +694,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
         refusal: refusalOf(resident.stderr, correction.reason),
         retryWith: correction.resume ? '--resume' : '--session-id',
       })
-      // Ended rather than merely dropped, and awaited before the replacement is
-      // named. A refusal that arrives as a terminal event leaves the process
-      // running as far as the pool knows — where a `ClaudeExitedError` is by
-      // definition a process that has already gone — and two processes on one
-      // transcript is the corruption the whole serialisation rule exists to
-      // prevent. It is also the only thing that would ever end this one: a
-      // resident nobody holds gets no reap timer. Measured to exit in 1–3s on
-      // its own (#105), so this is nearly always a process that is already gone.
+      // Enforced by `fence:pool-one-process-per-transcript`.
       this.#leave(resident)
       await this.#terminate(resident)
       return await this.#turn(
@@ -977,7 +963,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    */
   async #terminate(resident: Resident): Promise<void> {
     if (!resident.session.alive) return
-    // Set before the signal, so that the exit this causes is not logged as news.
+    // Enforced by `fence:pool-own-ending-is-not-news`.
     resident.leaving = true
     await resident.session.terminateOrKill(TERMINATE_GRACE_MS, () =>
       this.#log({ event: 'kill', sessionId: resident.sessionId, graceMs: TERMINATE_GRACE_MS }),
@@ -1075,11 +1061,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
    * Session eviction takes.
    */
   #markUsed(resident: Resident): void {
-    // Identity, not presence — the same check `#forget` makes, and for the same
-    // reason. A recovery replaces the resident under a Turn that is still
-    // running, so this can be reached for one that has already been supplanted;
-    // re-inserting on presence alone would put the dead one back over the live
-    // one and orphan a working process.
+    // Enforced by `fence:pool-mark-used-checks-identity`.
     if (this.#residents.get(resident.sessionId) === resident) {
       this.#residents.delete(resident.sessionId)
       this.#residents.set(resident.sessionId, resident)

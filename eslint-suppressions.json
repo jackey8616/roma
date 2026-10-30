@@ -19,11 +19,6 @@
       "count": 10
     }
   },
-  "src/caveman.ts": {
-    "roma/comment-whitelist": {
-      "count": 1
-    }
-  },
   "src/channels/discord/binding.ts": {
     "roma/comment-whitelist": {
       "count": 5
@@ -61,7 +56,7 @@
   },
   "src/channels/google-chat/binding.ts": {
     "roma/comment-whitelist": {
-      "count": 16
+      "count": 9
     }
   },
   "src/channels/google-chat/chat-events.ts": {
@@ -146,7 +141,7 @@
   },
   "src/documents/google-document-minter.ts": {
     "roma/comment-whitelist": {
-      "count": 25
+      "count": 21
     }
   },
   "src/documents/reach.ts": {
@@ -226,7 +221,7 @@
   },
   "src/serve.ts": {
     "roma/comment-whitelist": {
-      "count": 21
+      "count": 16
     }
   },
   "src/session-generation.ts": {
@@ -241,7 +236,7 @@
   },
   "src/session-pool.ts": {
     "roma/comment-whitelist": {
-      "count": 96
+      "count": 81
     }
   },
   "src/shared-window.ts": {

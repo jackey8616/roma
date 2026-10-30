@@ -207,10 +207,7 @@ export class GoogleDocumentMinter implements DocumentMinter {
       name?: unknown
       capabilities?: { canAddChildren?: unknown }
     }
-    // Positive or refused: an answer with no `capabilities` in it is an answer
-    // that did not say yes, and treating "roma could not read the permission" as
-    // "the permission is there" would put the whole point of this proof behind an
-    // optional field.
+    // Enforced by `fence:documents-unread-capability-is-a-refusal`.
     if (found.capabilities?.canAddChildren !== true) {
       throw new DepotUnreachable(
         `roma can see the Depot "${this.#depot}" and cannot add anything to it as ${this.account}. ` +

@@ -46,9 +46,7 @@ export async function googleChatBinding(chat: ChatEnv, log: ChatLog): Promise<Ch
     const response = await client.request({ url, method, data: body })
     return response.data
   }
-  // `arraybuffer` because the response is a file rather than JSON, and the
-  // default would have the library parse it as one — which for a PNG means a
-  // throw at best and a mangled string at worst.
+  // Enforced by `fence:gchat-download-is-bytes`.
   const download: DownloadChatMedia = async (url) => {
     const response = await client.request({ url, method: 'GET', responseType: 'arraybuffer' })
     return new Uint8Array(response.data as ArrayBuffer)
@@ -59,10 +57,7 @@ export async function googleChatBinding(chat: ChatEnv, log: ChatLog): Promise<Ch
   // `readChatEnv`, and the ticket that says provisioning is out of scope.
   const subscription = new PubSub({ projectId: chat.projectId }).subscription(chat.subscription, {
     flowControl: { maxMessages: chat.maxMessages },
-    // How long a message may stay un-acknowledged while its Task runs. Set
-    // rather than left to the library, because roma holds a message for the
-    // whole of a Task and that is minutes — the default would give up on one
-    // mid-Turn and have it delivered again alongside the run still going.
+    // Enforced by `fence:gchat-lease-is-set`.
     maxExtensionTime: Duration.from({ minutes: chat.maxLeaseMinutes }),
   })
 
