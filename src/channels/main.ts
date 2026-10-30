@@ -75,11 +75,9 @@ type RomaLog = OperatorLog<
  * Build roma over the Channels this environment names, prove the credential, and
  * start receiving.
  *
- * Resolves once roma is receiving on all of them. Everything that can refuse to
- * start has refused by then: the configuration is read whole — one refusal
- * naming every Channel and every Reach that is wrong, rather than a boot per
- * problem — and the startup self-check has driven a real Turn and agreed that
- * auth resolves to the credential roma means to run on.
+ * Resolves once roma is receiving on all of them, and everything that can
+ * refuse to start has refused by then: one refusal naming every Channel and
+ * Reach that is misconfigured, or the Startup Self-Check's.
  */
 export async function startConfiguredRoma(
   env: Environment = process.env,
@@ -131,12 +129,9 @@ export async function startConfiguredRoma(
 }
 
 /**
- * Run roma until something asks it to stop.
- *
- * The signal handling is here rather than inside `serve` because it is the
- * process's, not roma's: a roma embedded in something else would have its own
- * idea of when to shut down, and a library that installed handlers on
- * `process` would take that decision away from it.
+ * Run roma until SIGTERM or SIGINT, installing handlers on `process` and
+ * exiting it; a second signal leaves at once. Embedders use
+ * `startConfiguredRoma` instead and keep their own idea of when to stop.
  */
 export async function main(): Promise<void> {
   const log = writeToStderr

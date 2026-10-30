@@ -1,10 +1,7 @@
 import { defaultConfig } from './config.js'
 
 export interface TaskQueueOptions {
-  /**
-   * Tasks that may run at once across every Session. Defaults to the
-   * configured cap.
-   */
+  /** Tasks that may run at once across every Session. Defaults to the configured cap. */
   readonly maxConcurrent?: number
 }
 
@@ -12,46 +9,28 @@ export interface TaskQueueOptions {
  * Told to a caller that has to wait, once, with how many Tasks are waiting —
  * this one included, so 1 means it is the only one.
  *
- * A measure of the backlog rather than a place in a running order. Admission
- * steps over a Task whose Session is busy, so a Task told it is one of one can
- * still be overtaken by a Task that arrives later and is free to run. Nothing
- * schedules on this number; it exists so that waiting is not silent.
+ * A measure of the backlog, not a place in a running order: admission steps
+ * over a Task whose Session is busy, so a later Task can overtake it.
  *
- * Awaited, and a rejection abandons the Task rather than leaving it in a queue
- * it can never be admitted from. Whether failing to tell a caller is worth
- * abandoning its Task over is the caller's judgement, not the queue's — roma's
- * Core absorbs it and runs the Task regardless, on the grounds that a Channel
+ * Awaited, and a rejection abandons the Task. A caller that would rather run
+ * the Task anyway must absorb its own failure, as roma's Core does: a Channel
  * too broken to carry this is too broken to carry the failure either.
  */
 export type WaitNotice = (position: number) => void | Promise<void>
 
-/**
- * What a caller can tell the queue about a Task beyond how to run it.
- *
- * Neither is needed to schedule anything, which is why they are together and
- * apart from the two arguments that are: `notice` is how the caller is told it
- * is waiting, and `taskId` is what `taskFor` answers with while it runs.
- */
+/** What a caller can tell the queue about a Task beyond how to run it. All optional. */
 export interface About {
   /** Called only if the Task has to wait, and only once. */
   readonly notice?: WaitNotice
-  /**
-   * Which Task this is, for `taskFor`.
-   *
-   * Optional because nothing about admission reads it. It is here so that
-   * something outside the queue can ask whose work a Session is doing, which is
-   * a question only the queue can answer honestly.
-   */
+  /** Which Task this is, for `taskFor`. Admission never reads it. */
   readonly taskId?: string
   /**
-   * Serialise this against its key, but do not count it against the cap.
-   *
-   * For a free Relay (ADR-0012). It still queues behind its Session's work:
+   * Serialise this against its key, but do not count it against the cap. For a
+   * free Relay. It still queues behind its Session's work:
    * enforced by `fence:queue-relay-still-serialised`. It is not counted against
    * the cap: enforced by `fence:queue-free-relay-uncapped`.
    *
-   * It does not let processes multiply either: what bounds those is the Session
-   * Pool's `MAX_RESIDENT`, whatever this says.
+   * It does not bound processes: the Session Pool's `MAX_RESIDENT` does.
    */
   readonly uncapped?: boolean
 }
@@ -74,19 +53,10 @@ interface Waiting {
 }
 
 /**
- * Which Tasks are allowed to run right now.
+ * The Task Queue. It takes a key and a function and knows nothing about
+ * Sessions, Turns or Conversations.
  *
- * Two rules, and it exists because they are not the same rule. Tasks of one
- * Session are **serialised** — forced, not chosen, because two processes writing
- * one Session file corrupt it. And **three Tasks run at once** across all
- * Sessions, because the machine and the Shared Window are shared.
- *
- * One queue for the whole of roma, not one per Channel, shared exactly the way
- * the Session Pool is. Enforced by `fence:queue-one-for-all-channels`.
- *
- * What it deliberately does not own is what a Task *is*. It takes a key and a
- * function, so nothing here knows about Sessions, Turns, or Conversations —
- * which is what keeps the ordering rules readable on their own.
+ * One for the whole of roma. Enforced by `fence:queue-one-for-all-channels`.
  */
 export class TaskQueue {
   readonly #maxConcurrent: number
@@ -113,12 +83,8 @@ export class TaskQueue {
   }
 
   /**
-   * Tasks running right now — what the cap counts, so free Relays are not in it.
-   *
-   * Derived rather than kept as a counter beside the map. The map holds at most
-   * the cap plus however many free Relays are in flight, so counting it is free,
-   * and a counter is one more thing that can drift out of step with the truth it
-   * is describing.
+   * Tasks running right now: what the cap counts, so free Relays are not in it.
+   * Derived from the busy keys rather than kept as a counter that could drift.
    */
   get running(): number {
     return [...this.#busy.values()].filter((busy) => busy.capped).length
@@ -130,11 +96,8 @@ export class TaskQueue {
   }
 
   /**
-   * Which Task is running under this key right now, or null.
-   *
-   * Null covers two different things on purpose, because the answer is the same
-   * either way and inventing a distinction would invite somebody to act on it: a
-   * key with nothing running, and a Task whose caller named none. Never a guess.
+   * Which Task is running under this key right now, or null: nothing is
+   * running, or its caller named none. Never a guess.
    * Enforced by `fence:queue-task-for-never-guesses`.
    */
   taskFor(key: string): string | null {
@@ -142,15 +105,10 @@ export class TaskQueue {
   }
 
   /**
-   * Run one Task when its Session is free and a slot is available.
+   * Run one Task when its key is free and a slot is available.
    *
    * `key` is what is serialised against — the Session id, in roma. Resolves or
-   * rejects with whatever `task` did, and releases the slot either way: a Task
-   * that failed is a Task that is over.
-   *
-   * Everything else is optional and goes in `about`, one object rather than a
-   * row of positional maybes — a caller that wants only the second of them
-   * should not have to write `undefined` for the first.
+   * rejects with whatever `task` did, and releases the slot either way.
    */
   async run<T>(key: string, task: () => Promise<T>, about: About = {}): Promise<T> {
     const { notice, taskId = null, uncapped = false } = about

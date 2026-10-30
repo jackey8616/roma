@@ -18,23 +18,11 @@ const DEFAULT_TIMEOUT_MS = 60_000
 export type SelfCheckCondition = 'credential' | 'model' | 'turn' | 'init' | 'timeout'
 
 /**
- * The one thing this check notices and does not refuse over.
+ * The one thing this check notices and does not refuse over: the effort the
+ * probe reports disagreeing with the one roma pinned. Boot continues.
  *
- * Every other condition here reads a structured field — `apiKeySource`, `model`,
- * `num_turns`. This one reads English prose in at least three shapes, one of
- * which embeds a description table, and none of it is in `system/init` because
- * `system/init` carries no effort field at all. Making a deployment refuse to
- * start on a sentence a release could reword is paying with an outage to catch a
- * fault whose worst outcome is thinking at the wrong depth (ADR-0016).
- *
- * So it goes to the Operator Log, which is where an anomaly goes — ADR-0012's
- * drift check already writes a misbehaving Relay there for the same reason. And
- * the match is loose so the line fires on a changed *level* rather than on
- * changed *prose*, because a check people learn to ignore has stopped watching.
- *
- * `reported` is what the process said, whole, and null where it said nothing at
- * all — a relay that failed is a disagreement roma cannot resolve rather than an
- * agreement it may assume.
+ * `reported` is what the process said, whole, and null where it said nothing
+ * at all, which counts as a disagreement.
  */
 export type SelfCheckLogRecord = {
   readonly event: 'effort-unverified'
@@ -44,14 +32,7 @@ export type SelfCheckLogRecord = {
 
 export type SelfCheckLog = OperatorLog<SelfCheckLogRecord>
 
-/**
- * One condition that failed, and what to go and look at.
- *
- * Both halves, always. A boot that stops with "self-check failed" tells whoever
- * is standing up roma that something is wrong and nothing about which of three
- * unrelated causes it was — and this check exists precisely because those
- * causes are otherwise silent.
- */
+/** One condition that failed, and what to go and look at. Both halves, always. */
 export interface SelfCheckFailure {
   readonly condition: SelfCheckCondition
   /** What was expected, and what the process actually reported. */
@@ -86,43 +67,27 @@ export class StartupSelfCheckFailed extends Error {
 
 export interface StartupSelfCheckOptions {
   /**
-   * The credential roma means to run on.
-   *
-   * The *intent*, and the whole of what the check is measured against: a
-   * Shared Window credential must resolve to `apiKeySource: "none"`, and an
-   * Overflow one to `"ANTHROPIC_API_KEY"`.
+   * The credential roma means to run on, and what the check is measured
+   * against: a Shared Window credential must resolve to `apiKeySource: "none"`,
+   * an Overflow one to `"ANTHROPIC_API_KEY"`.
    */
   readonly credential: Credential
   /**
-   * The environment roma will actually run on, built by `buildEnv`.
-   *
-   * Passed rather than derived from the credential, so that the check verifies
-   * the two agree instead of assuming it. An env built from a different
-   * credential, or one a deployment has quietly added to, is caught here as the
-   * mismatch it is.
+   * The environment roma will actually run on, built by `buildEnv`. Pass the
+   * same object the pool will use: the check verifies it agrees with
+   * `credential`, and catches one built differently or quietly added to.
    */
   readonly env: Readonly<Record<string, string>>
   /**
-   * Where the probe Session runs.
-   *
-   * Throwaway and its own: a working directory carrying project settings could
-   * change the model out from under the very assertion being made here, and
-   * roma's own Sessions run in empty directories.
+   * Where the probe runs. Throwaway and its own: project settings in it could
+   * change the model out from under the assertion.
    */
   readonly cwd: string
-  /** The model roma pins. Defaults to the one every Session runs on. */
+  /** The Pinned Model. Defaults to `PINNED_MODEL`. */
   readonly model?: string
   /**
-   * The effort roma pins. Defaults to the one every Session runs at.
-   *
-   * Spawned with, and then asked about — which is the whole of what this proves.
-   * It is **roma's own wiring** under test rather than Claude Code's: that
-   * `--effort` really is in the spawn arguments, and that `ROMA_EFFORT` really
-   * resolved to what roma thinks. Per-spawn verification was decided and then
-   * withdrawn once the precedence measurements came in, since `--effort` beats
-   * the settings file and `buildEnv` blocks the environment variable, leaving a
-   * per-spawn echo nothing to catch but a server-side ceiling nobody has ever
-   * observed (ADR-0016).
+   * The Pinned Effort. Defaults to `PINNED_EFFORT`. The probe is spawned with
+   * it and then asked `/effort current`.
    */
   readonly effort?: string
   readonly spawn?: SpawnClaudeProcess
@@ -134,29 +99,18 @@ export interface StartupSelfCheckOptions {
 /**
  * What the check found, for the boot log.
  *
- * `apiKeySource` and `model` are typed as the stream reports them — nullable —
- * rather than as what a passing check implies. They cannot be null in a report
- * that was returned, since a null fails the comparison against a non-null
- * expectation, and substituting a stand-in for a value that cannot occur is how
- * an impossible case acquires a plausible-looking log line.
+ * `apiKeySource` and `model` are typed as the stream reports them, but are
+ * never null in a returned report: a null fails the check.
  */
 export interface StartupSelfCheckReport {
   readonly apiKeySource: string | null
   readonly model: string | null
-  /**
-   * Recorded rather than asserted. Everything the check knows is
-   * version-specific, so the day it starts failing, the first question is what
-   * changed underneath it.
-   */
+  /** Recorded, not asserted: the first question when the check starts failing. */
   readonly claudeCodeVersion: string | null
   /**
    * What the process said when asked what effort it is at, and whether roma
-   * believes it.
-   *
-   * Reported rather than asserted, and typed as the two facts rather than as one
-   * boolean, because a boot log that said only "disagreed" would send an operator
-   * to read a sentence that is no longer anywhere. `reported` is null where the
-   * relay itself did not answer.
+   * believes it. Reported, not asserted. `reported` is null where the relay
+   * itself did not answer.
    */
   readonly effort: {
     readonly pinned: string
@@ -165,39 +119,22 @@ export interface StartupSelfCheckReport {
   }
   readonly durationMs: number
   /**
-   * What proving this cost. Small, and it is spent on every boot.
-   *
-   * Null if the probe's terminal event carried no total, which would itself be
-   * news — every capture we hold has one — and is reported rather than smoothed
-   * to zero for the same reason an Audit Record is: a boot that says it cost
-   * nothing and a boot that could not tell are different things to read.
+   * What proving this cost, spent on every boot. Null, never zero, if the
+   * probe's terminal event carried no total.
    */
   readonly costUsd: number | null
 }
 
 /**
- * Refuse to start unless auth really resolves to the intended credential on the
- * pinned model.
- *
- * A live `-p` invocation, made exactly the way roma makes them, driven to a
- * completed Turn. It catches three silent degradations, and the reason it is a
- * real invocation rather than a status query is that each of them is invisible
- * to anything cheaper:
- *
- * - **A stray `ANTHROPIC_API_KEY`.** Metered billing instead of the Shared
- *   Window, learned about from an invoice.
- * - **A model swap.** The model follows the credential, and the invoice from the
- *   first mode is larger than metered billing alone implies.
- * - **A `-p` default change to `--bare`**, which upstream intends: it requires an
- *   API key and would break subscription auth outright.
+ * The Startup Self-Check: refuse to start unless auth really resolves to the
+ * intended credential on the pinned model. A live `-p` Turn, spawned exactly as
+ * roma spawns, costing `costUsd` on every boot.
  *
  * Never `claude auth status`. Enforced by `fence:startup-self-check-probes-with-p`.
  *
- * Fails fast where it can. `system/init` carries both assertions and arrives
- * about half a second in, before the first API call, so a wrong credential is
- * refused without waiting for the Turn — seam 2 measured a stray key refused in
- * 1189ms. That matters because a wrong credential is exactly the case that would
- * otherwise retry for three minutes.
+ * Every failure throws `StartupSelfCheckFailed`; a wrong credential or model
+ * throws at `system/init`, without waiting for the Turn. Always ends the probe
+ * process.
  */
 export async function startupSelfCheck({
   credential,
@@ -288,18 +225,11 @@ export async function startupSelfCheck({
 
 /**
  * Relay one of Claude Code's own commands to a process and hand back what it
- * said, or null if it did not say anything.
+ * said, or null if it said nothing. A failed Turn's text is returned where it
+ * has one.
  *
- * The gesture `Core.#runFreeRelay` makes, with everything that makes a Relay a
- * Relay taken away: no Caller, so no Caller Marker; no Task, so no queue, no
- * concurrency slot and no acknowledgement; no Audit Record, because nobody was
- * billed and nobody asked. What is left is the primitive itself — one command
- * onto stdin as itself, one Turn's worth of waiting, and the text back.
- *
- * A named function rather than four lines inline, so that the second caller —
- * whenever there is one — finds this rather than reinventing it beside it. There
- * is no second caller today, and that is worth saying out loud: it is written as
- * a primitive on the strength of what it is, not on the strength of a plan.
+ * Not a Relay: no Caller Marker, no Task, no queue slot, no Acknowledgement and
+ * no Audit Record. One command onto stdin, one Turn's wait, the text back.
  *
  * Null rather than a throw. Enforced by `fence:startup-self-check-relay-never-throws`.
  */
@@ -319,26 +249,13 @@ export async function relayCommand(
 }
 
 /**
- * Whether an answer names the effort roma pinned, read loosely.
- *
- * The level word anywhere in the message, case-insensitively, rather than the
- * sentence's shape — which is the point: the build answers this in at least
- * three shapes (`Current effort level: high`, `Effort level: auto (currently
- * high)`, and `ultracode`'s, which embeds a parenthetical description), and a
- * check that matched one of them would fire on a release that reworded it. What
- * it must fire on is a changed *level*.
+ * Whether an answer names the effort roma pinned: the level word anywhere in
+ * the message, case-insensitively, whatever the sentence's shape.
  *
  * As a whole word. Enforced by `fence:startup-self-check-effort-word-boundaries`.
  *
- * **`auto` disagrees with everything, and that is stricter than ADR-0016 wrote
- * down.** Enforced by `fence:startup-self-check-auto-vetoes`.
- *
- * The cost is a false disagreement if a release ever writes something like
- * `Current effort level: high (auto-selected)`, which is the prose-brittleness
- * the loose match was chosen to avoid. Taken deliberately, because the two
- * mistakes are not the same size: a false disagreement is one line in the
- * Operator Log on a boot that continues, and a false agreement is roma believing
- * it verified its own wiring when it verified nothing.
+ * **`auto` anywhere disagrees with everything.** Enforced by
+ * `fence:startup-self-check-auto-vetoes`.
  */
 export function reportsEffort(message: string, effort: string): boolean {
   if (names(message, UNPINNED)) return false

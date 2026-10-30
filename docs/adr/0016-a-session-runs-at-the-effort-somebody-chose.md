@@ -341,6 +341,15 @@ already writes a misbehaving Readout there for the same reason, and the loose
 match exists so the line fires on a changed *level* rather than on changed
 *prose*, because a check people learn to ignore has stopped watching.
 
+**`auto` anywhere in the answer is a disagreement**, whatever else it names —
+stricter than the loose match alone. The cost is a false disagreement if a
+release ever writes something like `Current effort level: high (auto-selected)`,
+which is the prose-brittleness the loose match was chosen to avoid. It is taken
+deliberately, because the two mistakes are not the same size: a false
+disagreement is one line in the Operator Log on a boot that continues, and a
+false agreement is roma believing it verified its own wiring when it verified
+nothing. Enforced by `fence:startup-self-check-auto-vetoes`.
+
 **Once, at boot, and not on every spawn.** Per-spawn verification was decided and
 then withdrawn when the precedence measurements came in: with `--effort` beating
 the settings file and `buildEnv` blocking the environment variable, a per-spawn

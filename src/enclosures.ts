@@ -6,44 +6,23 @@ import type { PendingEnclosure } from './channel-adapter.js'
 /** Enforced by `fence:enclosures-out-of-the-agents-way`. */
 const DIRECTORY = '.enclosures'
 
-/**
- * An Enclosure once roma has written it down.
- *
- * The pair the agent is given: where roma put it, and what the person who sent
- * it called it. Two fields rather than one because they have opposite
- * provenance — the path is roma's and can be trusted to be a path, the name is
- * the sender's and is only ever printed (ADR-0011).
- */
+/** An Enclosure once roma has written it down: what the agent is given. */
 export interface WrittenEnclosure {
   /** Relative to the Working Directory, and minted here. */
   readonly path: string
   /** What the Channel said the sender called it. Never a path. */
   readonly name: string
-  /**
-   * Whoever sent it along, where that is not the Caller. Carried across from
-   * `PendingEnclosure` unchanged, and printed for the same reason the name is.
-   */
+  /** Whoever sent it along, where that is not the Caller. Carried from `PendingEnclosure` unchanged. */
   readonly from: string | null
 }
 
 /**
- * Redeem every Enclosure on a message and write it into the Working Directory.
+ * Redeem every Enclosure on a message and write it into the Working Directory,
+ * under `.enclosures/` with a name roma mints. Call it once the Session is
+ * known. Each is held in memory once, briefly, for the length of its write.
  *
- * Called once the Session is known and immediately before the Turn — which is
- * the whole of ADR-0011's argument for a `PendingEnclosure`: the bytes are
- * sized by whoever sent the message, so they are held for the length of a write
- * rather than across queueing, Parking and a possible `/stop`.
- *
- * Held, not streamed. `redeem` yields a `Uint8Array`, so an Enclosure is in
- * memory once, briefly, here. A streaming redemption would be faithful to the
- * word ADR-0011 used and would cost every Adapter a stream to produce; the
- * decision that ADR actually argued was *when*, and this is that. Worth
- * revisiting if a Channel ever carries something big enough for the difference
- * to matter, which is the same moment the deferred size policy comes due.
- *
- * Rejects on the first Enclosure that cannot be fetched. The Task then ends as
- * a failure with the reason, which for a Channel with an unreachable class of
- * attachment — Chat's `driveDataRef` — is the normal path and not an edge case.
+ * Rejects with `EnclosureUnreadable` on the first Enclosure that cannot be
+ * fetched.
  */
 export async function writeEnclosures(
   enclosures: readonly PendingEnclosure[],
@@ -69,14 +48,9 @@ export async function writeEnclosures(
 }
 
 /**
- * An Enclosure roma was told about and could not fetch.
- *
- * A type of its own because the Core says nothing to a Conversation about an
- * error it cannot name: `reasonFor` answers everything else with one sentence
- * about roma having failed, which is right for a fault inside roma and wrong
- * here. What failed is *their* attachment, they are the only person who can do
- * anything about it, and for a Channel with an unreachable class of attachment
- * this is the ordinary outcome rather than a fault at all.
+ * An Enclosure roma was told about and could not fetch. Its own type so the
+ * Core can tell the Caller its reason, where any other error gets `reasonFor`'s
+ * one sentence about roma having failed.
  *
  * Carries the sender's own name for it, so a message with two says which one.
  */

@@ -295,7 +295,8 @@ Rejected. It is more honest in one narrow sense — it does not describe a press
 a message somebody sent — and it costs a Core entrance, a change to a provisional
 interface, and fresh answers to the three questions the synthesis makes
 disappear. `toOverflowTaken` needed its own method because a Task id is not a
-message; a Command *is* one.
+message; a Command *is* one. (A third Command for taking Overflow would have
+been one anybody could type at any moment, including when nothing is blocked.)
 
 **A dropdown rather than buttons.** Rejected on the feature's own purpose. A
 `selectionInput` is two taps before anything happens, against one, and reading

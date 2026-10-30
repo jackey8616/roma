@@ -36,15 +36,7 @@ import {
 import { TaskQueue } from './task-queue.js'
 import { WorkRoot } from './work-root.js'
 
-/**
- * roma's own directory, and what roma writes into it.
- *
- * One option rather than two loose ones, because they are one decision: a roma
- * with a socket to answer on and no gitconfig pointing at it is a roma whose
- * agent cannot reach a line of anybody's code. Not a Reach's — the socket serves
- * every credential there is, and the gitconfig is how `git`'s Credential Shim is
- * installed rather than anything about minting (ADR-0020 §3).
- */
+/** roma's own directory, and what roma writes into it. */
 export interface ShimsOptions {
   /**
    * roma's own directory: the Credential Shim socket, and the gitconfig every
@@ -55,12 +47,8 @@ export interface ShimsOptions {
    */
   readonly dir: string
   /**
-   * The gitconfig `GIT_CONFIG_GLOBAL` points every Session at, as text.
-   *
-   * Written here rather than composed here: what it has to say — which helper,
-   * and that the helper is told the repository path — is knowledge about `git`
-   * and about a forge, and roma's job is to put the file somewhere that is not
-   * a Working Directory and to name it in the environment.
+   * The gitconfig `GIT_CONFIG_GLOBAL` points every Session at, as text. Written
+   * as given; the caller composes it.
    */
   readonly gitConfig: string
 }
@@ -82,18 +70,8 @@ export type ReachLogRecord =
     }
   | {
       /**
-       * A credential was minted — not merely asked for.
-       *
-       * The distinction is the whole reason this is a record rather than a field
-       * on the credential line beside it. Something in the agent's userland asks
-       * on every invocation by design, and almost every ask is served from the
-       * token roma already holds; a mint is a signed assertion and a round trip to
-       * the provider. An operator watching for a mint storm needs the count that
-       * can actually storm.
-       *
-       * Written for every Reach, which for the forge is new: `git` asks far more
-       * often than a Cloud Shortcut does, so the argument that produced this
-       * record applies there harder than where it was written (ADR-0020 §5).
+       * A credential was minted — not merely asked for, which is usually served
+       * from the token roma holds. Written for every Reach.
        */
       readonly event: 'reach-token-minted'
       readonly credential: CredentialWanted
@@ -111,35 +89,20 @@ export interface StartRomaOptions {
    * The credential and the cap together, never one without the other. Enforced
    * by `fence:env-overflow-whole-and-roma-own`.
    *
-   * **The self-check does not verify this credential.** It drives a real Turn,
-   * which on a metered key costs metered money at every boot — so the first
-   * thing to find out whether the key works is the first Task somebody takes
-   * Overflow on. Worth knowing when one fails.
+   * **The self-check does not verify this credential**, since a real Turn on it
+   * would cost metered money at every boot. The first Task somebody takes
+   * Overflow on is the first to find out whether the key works.
    */
   readonly overflow?: {
     readonly credential: Credential
     readonly monthlyCapUsd: number
   }
   /**
-   * The Channels roma answers on, each bound to the Transport its events arrive
-   * over.
+   * The Channels roma answers on, each bound to its Transport by `bind`.
    *
-   * **One Core per Channel, over one of everything else here.** The queue, the
+   * One Core per Channel, over one of everything else here: the queue, the
    * pool, the Work Root, the Audit Log and the three Chosen Records are built
-   * once below and handed to every Core; what that buys the Core is
-   * `CoreOptions.channel`, which has said it since there was one Channel.
-   *
-   * **One process, and that is the half this adds.** Every cap roma has is a
-   * process's: the concurrency cap is three against one Shared Window rather
-   * than three per Channel, and the Overflow monthly cap is enforced against the
-   * sum of one month's Audit Records under one root. A process per Channel would
-   * double both with no configuration looking wrong, which is the alternative
-   * ADR-0028 rejected.
-   *
-   * Passed in rather than built here: constructing a Channel Adapter needs that
-   * Channel's own API client and its own credentials, which is the deployment's
-   * business and not roma's. `bind` is the only way to make one of these, and
-   * why is written there.
+   * once and handed to every Core, so every cap is the process's.
    */
   readonly channels: readonly ChannelBinding[]
   /** Where Sessions get their working directories, one each. */
@@ -157,65 +120,42 @@ export interface StartRomaOptions {
    */
   readonly configDir: string
   /**
-   * One Reach per credential a Session's tools can ask for.
+   * One Reach per credential a Session's tools can ask for, each proved live
+   * before anything that could accept an Ingress Message exists. None can be
+   * left out. Enforced by `fence:startup-every-reach-is-named`.
    *
-   * Every one of them is proved live before anything that could accept an Ingress
-   * Message exists. A record rather than a list, so that none can be left out.
-   * Enforced by `fence:startup-every-reach-is-named`.
-   *
-   * A deployment with no cloud key has a Cloud Reach all the same — the
-   * unavailable one, which announces nothing and answers the Cloud Shortcut that
-   * there is none (ADR-0015 §9). The same is true of the Document Reach, and for
-   * most deployments both of them are that arm (ADR-0022 §8).
+   * A deployment with no key for one passes its unavailable arm.
    */
   readonly reaches: Reaches
   /** roma's own directory, and the gitconfig every Session runs under. */
   readonly shims: ShimsOptions
-  /** The pinned model. Defaults to the one every Session runs on. */
+  /** The Pinned Model. Defaults to `PINNED_MODEL`. */
   readonly model?: string
   /**
-   * The Pinned Effort. Defaults to the one every Session runs at.
-   *
-   * Optional where the Overflow cap is required, and the difference is what each
-   * authorises: the cap opens a new way to spend money, and effort is money
-   * already being spent under another name (ADR-0016). It may name `ultracode`,
-   * which is off the Effort Menu — the Menu bounds Callers and never the
-   * operator, exactly as `model` may already name a model off the Model Menu.
+   * The Pinned Effort. Defaults to `PINNED_EFFORT`. May name `ultracode`, which
+   * is off the Effort Menu, as `model` may name a model off the Model Menu.
    */
   readonly effort?: string
   /**
-   * The Pinned Caveman. Defaults to `off`, which appends no text at all.
-   *
-   * Optional in a stronger sense than the two above, and this is the half of that
-   * a caller has to know: they default to what a Session would have run on
-   * anyway, where omitting this leaves the spawn arguments byte for byte what
-   * they were before ADR-0030 — so a deployment that names nothing is not
-   * changed, rather than changed to a default.
-   *
-   * It may name `wenyan-lite` or `wenyan-ultra`, which are off the Caveman Menu,
-   * on the rule `effort` above already carries.
+   * The Pinned Caveman. Defaults to `off`, which appends no text at all, so
+   * omitting it leaves the spawn arguments byte for byte unchanged. May name
+   * `wenyan-lite` or `wenyan-ultra`, which are off the Caveman Menu.
    */
   readonly caveman?: string
   readonly maxConcurrentTasks?: number
   readonly retryBudget?: RetryBudget
   readonly spawn?: SpawnClaudeProcess
   /**
-   * Where everything roma does that is an operator's business goes — the pool's
-   * and the Core's alike.
-   *
-   * One log rather than one per component: they describe the same running
-   * system, and an operator reading a credential swap wants the refusal that
-   * prompted it on the same lines.
+   * The Operator Log, one for every component: an operator reading a credential
+   * swap wants the refusal that prompted it on the same lines.
    */
   readonly log?: OperatorLog<
     PoolLogRecord | CoreLogRecord | ShimLogRecord | ReachLogRecord | SelfCheckLogRecord
   >
   /**
-   * Where the self-check's probe Session runs. A throwaway directory by default,
-   * removed once the check is done.
-   *
-   * Deliberately not under `workRoot`: everything there is a Session's, and the
-   * probe is not a Session roma serves.
+   * Where the self-check's probe runs: a throwaway directory by default,
+   * removed once the check is done. Not under `workRoot`, which holds only
+   * Sessions roma serves.
    */
   readonly selfCheckCwd?: string
   readonly selfCheckTimeoutMs?: number
@@ -232,13 +172,7 @@ export interface Roma {
   readonly audit: AuditLog
   /** What the self-check found, for the boot log. */
   readonly selfCheck: StartupSelfCheckReport
-  /**
-   * End every resident process. Sessions keep their context on disk.
-   *
-   * What roma proved about each Reach is deliberately not here. It was reported
-   * to nobody — no production caller read either field — and what an operator
-   * wants is on the boot log, which now carries a line per Reach (ADR-0020 §4).
-   */
+  /** End every resident process. Sessions keep their context on disk. */
   shutdown(): Promise<void>
 }
 
@@ -248,8 +182,8 @@ export interface Roma {
  * Nothing that can accept an ingress message exists until the self-check has
  * passed. Enforced by `fence:startup-nothing-before-the-self-check`.
  *
- * Its only other decision is *ownership*: the pool, the queue and the generation
- * record are built here, once, for every Core. Enforced by
+ * The pool, the queue and the generation record are built once, for every
+ * Core. Enforced by
  * `fence:startup-one-queue-for-every-channel` and
  * `fence:startup-one-session-record-for-every-channel`.
  */

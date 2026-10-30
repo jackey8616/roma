@@ -2,14 +2,7 @@ import { readFileSync } from 'node:fs'
 import { ConfigurationMissing, envValue, type Environment } from '../env-config.js'
 import { reasonOf } from '../operator-log.js'
 
-/**
- * The one variable that gives a deployment a Cloud Reach.
- *
- * A path to a file rather than the key inline, following
- * `ROMA_GITHUB_PRIVATE_KEY_FILE` and `GOOGLE_APPLICATION_CREDENTIALS`:
- * multi-line secrets belong in mounts (ADR-0015 §3). Exported so that the
- * refusals below and the README's table cannot come to spell it differently.
- */
+/** The one variable that gives a deployment a Cloud Reach: a path to the key file. */
 export const CLOUD_KEY_FILE_VAR = 'ROMA_CLOUD_KEY_FILE'
 
 /** Where the exchange happens when the key file does not say. */
@@ -29,12 +22,10 @@ export interface CloudEnv {
 }
 
 /**
- * Read the Cloud Reach's key, or find there is none.
+ * Read the Cloud Reach's key, or find there is none (null).
  *
- * Its own reader in its own directory, exactly as the forge's is, and for the
- * same reason: the Core is not allowed to know which cloud roma mints against.
- * It throws the Core's own `ConfigurationMissing`, so its problems land in the
- * one refusal `readConfiguration` makes rather than in a second one.
+ * Throws `ConfigurationMissing`, so its problems land in `readConfiguration`'s
+ * one refusal.
  *
  * **Absent is not a problem**, and neither is a variable set to the empty
  * string: both are no Cloud Reach. A variable that names a file and does not

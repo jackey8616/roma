@@ -455,7 +455,10 @@ wrapper.
   And stopping *at* `system/init` would reproduce the blind spot below.
   `apiKeySource` and the model are reported before the first API call, so a token
   that 401s produces a perfectly healthy init. Only completing the Turn sees it,
-  so the probe message is as small as a Turn can be and still be one.
+  so the probe message is as small as a Turn can be and still be one. The other
+  half is that a wrong credential is refused *at* init without waiting for the
+  Turn, which would otherwise retry for three minutes: seam 2 measured a stray
+  key refused in **1189ms**.
 
   What that costs, measured: **3682ms and $0.0709632** per boot, the spend
   dominated by the cached system prompt rather than by the probe's four output

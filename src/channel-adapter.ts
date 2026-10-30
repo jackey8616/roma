@@ -1,40 +1,22 @@
 import type { Command } from './commands.js'
 
 /**
- * Something sent along with a message, before anybody has fetched it.
+ * An Enclosure before anybody has fetched it: the one member of the inbound
+ * contract that is not yet a value.
  *
- * The one member of the inbound contract that is not yet a value: `redeem` is
- * called once, by the Core, after the Session is known and immediately before
- * the bytes are written to disk (ADR-0011).
+ * `redeem` is called once, by the Core, after the Session is known and
+ * immediately before the bytes are written to disk.
  * Enforced by `fence:core-enclosures-redeemed-late`.
- *
- * A named type rather than a bare `() => Promise<…>` on `IngressMessage`, so
- * that a reader can see that something here has not happened yet: everything
- * else on that interface is a value, and a function hidden among strings reads
- * as one until it throws.
  */
 export interface PendingEnclosure {
   /**
-   * What the Channel says the sender called it.
-   *
-   * Printed and never interpreted: it is put in front of the agent so a log can
-   * be told from a screenshot, and roma mints the path instead (ADR-0011).
+   * What the Channel says the sender called it. Printed, never interpreted.
    * Enforced by `fence:core-enclosure-path-is-minted`.
    */
   readonly name: string
   /**
-   * Who sent this along, where that is somebody other than the Caller, and null
-   * where the Caller attached it themselves.
-   *
-   * The Caller's own is the ordinary case and says nothing here: the Caller
-   * Marker above the message already names them, and repeating it on every
-   * Enclosure would be roma answering a question nobody asked. What this
-   * answers is the question a Quotation makes askable — a forwarded message
-   * brings its own attachments, and an Enclosure that arrived that way sits in
-   * the same list as one the Caller picked out of their own file browser
-   * (ADR-0021).
-   *
-   * Named the same way a Quotation's author is, because it is the same person.
+   * Who sent this along where that is somebody other than the Caller, as a
+   * Quotation's author is named; null where the Caller attached it themselves.
    * Enforced by `fence:adapter-ingress-says-everything`.
    */
   readonly from: string | null
@@ -42,243 +24,134 @@ export interface PendingEnclosure {
    * Obtain the bytes.
    *
    * Called at most once per Task, and allowed to reject: a Channel that cannot
-   * reach what it was told about — Chat's `driveDataRef` points into the
-   * *sender's* Drive, which roma has no scope for — says so here, and the Task
-   * ends as a failure with the reason. That is the whole of the failure path,
-   * and for a Channel where a whole class of attachment is unreachable it is
-   * the normal one rather than an edge case.
+   * reach what it was told about says so here, and the Task ends as a failure
+   * with the reason. That is the whole failure path, and for some Channels
+   * (Chat's `driveDataRef`) it is the normal one.
    */
   redeem(): Promise<Uint8Array>
 }
 
 /**
- * Somebody else's words, carried into a message rather than typed into it.
+ * A Quotation, as the Channel snapshotted it. Never a handle to be followed.
  *
- * The other half of what a person can put in front of the agent without writing
- * it: an Enclosure is bytes, and this is a passage somebody else wrote and the
- * Caller pointed at. A Channel that lets one message quote another produces
- * these — Chat's quoted reply and its forward are both one — and what roma takes
- * is the **snapshot**: the words as they stood when they were quoted, and who
- * the Channel says wrote them. Never a handle to be followed. Chat hands over a
- * link as well and roma does not take it, which is what keeps this free, keeps
- * roma's credentials where they are, and keeps a quotation of an edited message
- * saying what was actually quoted (ADR-0021).
- *
- * Untrusted in a way nothing before it was. Everything else the model reads as
- * content was typed by the person who sent it, so it arrives last with nothing
- * of roma's after it; a Quotation is content roma **frames**, and it is
- * therefore the one string roma escapes before writing it down. See
+ * Untrusted: it is the one string roma escapes before writing it down. See
  * `attributed`.
  */
 export interface Quotation {
-  /** The passage itself, exactly as the Channel snapshotted it. */
   readonly text: string
   /**
-   * Whoever the Channel says wrote it, or null where it said nothing.
-   *
-   * Read as a Caller is read and printed as a Caller is printed: nothing parses
-   * it, compares it, or decides anything by it. Chat's is a bare string of
-   * undocumented shape — an id in one reading and a display name in the other —
-   * and roma is correct either way precisely because it only ever prints it.
-   *
-   * Null rather than a stand-in, because a Quotation whose author roma invented
-   * is worse than one with no author named: the whole reason to carry this is
-   * that unattributed words in front of the model are read as the Caller's own.
+   * Whoever the Channel says wrote it, or null where it said nothing. Printed
+   * as a Caller is printed; nothing parses or compares it, so its shape may be
+   * an id or a display name. Never a stand-in where the Channel named nobody.
    */
   readonly author: string | null
 }
 
-/**
- * One message from one person, on its way into the Core.
- *
- * The Channel it came from is gone by this point: whatever the Adapter knew
- * about spaces, rooms, threads, or users has been reduced to a key, an identity,
- * some text, and whatever was sent alongside it. That reduction is the whole of
- * the inbound contract.
- */
+/** An Ingress Message, on its way into the Core. */
 export interface IngressMessage {
-  /**
-   * The stable string naming the Conversation this message belongs to. The
-   * Session id derives from it, which is why roma needs no database.
-   */
+  /** The Session id derives from it. */
   readonly conversationKey: string
   /**
-   * Whoever sent it, named however the Channel names people.
-   *
-   * The Core does read it: it goes on the Audit Record, which is the only place
-   * per-user attribution exists at all (ADR-0002), it is named above the message
-   * Claude Code is given, and it comes back to the Adapter on every instruction
-   * so a reply can be addressed. ADR-0009 is why it stopped being opaque —
-   * everyone in a Chat thread shares one Session, so a Session that cannot tell
-   * its Callers apart is one long message from nobody in particular.
-   *
-   * Still not *interpreted*: nothing in the Core parses it, compares it, or
-   * decides anything by it. A Channel that names people by email and one that
-   * names them by opaque id both work, because everything here does with it is
-   * carry it and print it.
+   * The Channel's stable name for the Caller. Carried and printed, never
+   * parsed, compared or decided by.
    */
   readonly caller: string
   /**
-   * The same person as a human would read them, or null where the Channel had no
-   * name to give.
-   *
-   * Beside `caller` rather than instead of it: the id is what a reply is
-   * addressed with and what tells two people of the same name apart, and the
-   * name is the half worth reading.
+   * The Caller's readable name, or null where the Channel had none.
    * Enforced by `fence:adapter-ingress-says-everything`.
    */
   readonly callerName: string | null
   readonly text: string
   /**
-   * What was sent alongside the text, in the order the Channel gave them.
-   *
-   * Empty where there are none.
+   * In the order the Channel gave them; empty where there are none.
    * Enforced by `fence:adapter-ingress-says-everything`.
    */
   readonly enclosures: readonly PendingEnclosure[]
   /**
-   * The passage this message quotes, or null where it quotes none.
-   *
-   * Beside the text rather than folded into it: composing what the model reads
-   * is the Core's (ADR-0021). Enforced by `fence:core-command-ignores-the-quotation`.
+   * Null where the message quotes none. Kept beside the text, never folded
+   * into it. Enforced by `fence:core-command-ignores-the-quotation`.
    * Required and nullable. Enforced by `fence:adapter-ingress-says-everything`.
    */
   readonly quotation: Quotation | null
 }
 
 /**
- * What a Task is doing right now, as much of it as the stream will say.
- *
- * Facts rather than prose, the same as every instruction: whether a phase is
- * worth showing at all, and in what words, belongs to the Adapter.
+ * What a Task is doing right now, as much of it as the stream will say. Facts,
+ * not prose: whether and how to show a phase belongs to the Adapter.
  */
 export type TaskProgress =
   | {
       /**
-       * Waiting its turn, with how much is ahead of it.
-       *
-       * How much is ahead, not when it will run. A Task waiting on its own
-       * Conversation is stepped over by one that is free to run, so this is not
-       * a promise about order and an Adapter should not render it as one.
+       * Waiting its turn. Not a promise about order: a Task waiting on its own
+       * Conversation is stepped over by one free to run, so an Adapter should
+       * not render this as one.
        */
       readonly phase: 'queued'
-      /**
-       * How many Tasks were waiting, this one included — so 1 means it is the
-       * only one.
-       */
+      /** How many Tasks were waiting, this one included; 1 means it is the only one. */
       readonly position: number
     }
   | {
       /**
-       * Running, with nothing more specific to say.
-       *
-       * Both the moment a Task starts and the moment a tool finishes and
-       * nothing has replaced it yet.
+       * Running, with nothing more specific to say: at the start, and after a
+       * tool finishes until something replaces it.
        */
       readonly phase: 'working'
     }
   | {
       /**
-       * A Compaction is under way, and the stream will say nothing else until it
-       * finishes — 28,517ms, in the longest capture roma holds.
-       *
-       * The `tool` phase's problem with a different cause, and it arrives two
-       * ways: inside somebody's ordinary Turn, where auto-compaction crossed the
-       * threshold, and as the whole of a `/compact` somebody asked for. An
-       * Adapter has no reason to tell those apart — what a person watching needs
-       * is that the silence is work rather than a hang.
-       *
-       * Carries nothing. `compact_metadata`'s figures arrive with the *boundary*,
-       * which is the moment it is over, so there is no progress to report while
-       * it runs — and an Acknowledgement saying how much has been discarded so
-       * far would be saying what the reply is about to say.
+       * A Compaction is under way, auto or asked for with `/compact`, and the
+       * stream says nothing else until it finishes. Carries nothing: its
+       * figures arrive only when it is over.
        */
       readonly phase: 'compacting'
     }
   | {
       /**
-       * Thinking, with Claude Code's running estimate of how much.
-       *
-       * Never what about. `thinking_delta` carries `"thinking": ""` and a token
-       * count, so the content is not in the stream to be shown.
+       * Thinking, with Claude Code's running token estimate. Never what about:
+       * the content is not in the stream.
        */
       readonly phase: 'thinking'
       readonly estimatedTokens: number
     }
   | {
-      /**
-       * A tool is running, and the stream will say nothing at all until it
-       * finishes — 25 seconds, in the capture this was designed against.
-       */
+      /** A tool is running, and the stream says nothing at all until it finishes. */
       readonly phase: 'tool'
       /**
-       * What is running: the tool's name, or Claude Code's own description of
-       * the running task once the stream carries one, which is the command
-       * itself.
+       * The tool's name, or Claude Code's own description of the running task
+       * once the stream carries one, which is the command itself.
        */
       readonly tool: string
     }
   | {
       /**
-       * Writing the answer, with how much of it exists so far.
-       *
-       * How much, never what. The prose is in the stream — `--include-partial-messages`
-       * puts it there — and an Acknowledgement that showed it would be saying
-       * what the Result is about to say, in the same Conversation, seconds
-       * apart. ADR-0010 is where that was decided and what it cost.
-       *
-       * A number rather than nothing. Enforced by `fence:core-writing-progress-moves`.
+       * Writing the answer: how much of it exists so far, never what.
+       * Enforced by `fence:core-writing-progress-moves`.
        */
       readonly phase: 'writing'
       readonly characters: number
     }
 
 /**
- * Which Task an outbound instruction is about.
- *
- * The Conversation says where it goes; the Task id says which piece of work it
- * belongs to, and an Adapter needs both. One Conversation can have two Tasks in
- * flight — one running and one waiting behind it — each with an acknowledgement
- * of its own to keep up to date, so the Conversation alone does not identify a
- * message to edit.
+ * Which Task an Outbound Instruction is about. One Conversation can have two
+ * Tasks in flight, each with its own Acknowledgement, so an Adapter needs both
+ * halves to find a message to edit.
  */
 export interface TaskAddress {
   /**
-   * Unique to one Task, and the same on every instruction that Task produces.
-   *
-   * A Command gets one too, though it is not a Task and produces exactly one
-   * instruction. An Adapter that had to ask which kind of thing it was looking
-   * at before it knew how to address the message it posts would be carrying a
-   * distinction that belongs to the Core.
+   * Unique to one Task, and the same on every instruction it produces. A
+   * Command gets one too, though it produces exactly one instruction.
    */
   readonly taskId: string
   readonly conversationKey: string
-  /**
-   * Whose Task this is, exactly as the ingress message named them.
-   *
-   * Here because an Adapter cannot work it out for itself. The Task id is minted
-   * in the Core, after `toIngress` has returned, so an Adapter holds no link
-   * between the event it read and the instruction it is later handed; and the
-   * Conversation Key is not that link either, since one Conversation can have
-   * two Tasks in flight — and where a Channel lets several people share one, the
-   * two belong to two different people.
-   *
-   * On every instruction rather than only the ones that end a Task, so that an
-   * Adapter never has to ask what kind of thing it is looking at before it knows
-   * who it is for. That is the same reason `taskId` is here.
-   */
+  /** Whose Task this is, exactly as the Ingress Message named them. On every instruction. */
   readonly caller: string
   /** The readable half of the same person, or null. See `IngressMessage`. */
   readonly callerName: string | null
 }
 
 /**
- * One thing the Core asks a Channel to do.
- *
- * Deliberately short. It says what happened and who it is for, never how either
- * should look: an Adapter decides how a failure is rendered on its Channel and
- * how a person is addressed on it, and the Core never writes prose it cannot see
- * the result of.
+ * One thing the Core asks a Channel to do: what happened and whose it is,
+ * never how it should look.
  */
 export type OutboundInstruction = TaskAddress &
   (
@@ -286,72 +159,44 @@ export type OutboundInstruction = TaskAddress &
         /**
          * Say what a Task is doing, in the same message every time.
          *
-         * The first one is the acknowledgement — post it. Every one after it is
-         * an edit of that message rather than a new one, which is why they
-         * carry the Task id. Where the Channel cannot edit, only the first
-         * arrives, so an Adapter never has to decide whether to post again.
+         * The first one is the Acknowledgement: post it. Every one after it
+         * edits that message. Where the Channel cannot edit, only the first
+         * arrives, so an Adapter never decides whether to post again.
          */
         readonly kind: 'progress'
         readonly progress: TaskProgress
       }
     | {
-        /**
-         * Post the result of a Task as a new message in the Conversation.
-         *
-         * Always its own message, on every Channel, never the acknowledgement
-         * edited one last time. It is what people search for, quote, and reply
-         * to months later, and burying it inside a progress message that was
-         * mutating for the last five minutes makes it hard to find. Nothing in
-         * the Core makes this conditional.
-         */
+        /** Post the result as a new message, on every Channel: never an edit of the Acknowledgement. */
         readonly kind: 'result'
         readonly text: string
         /**
-         * What this Task cost, present only where it ran on metered billing.
-         *
-         * ADR-0002 requires the spend to be shown in the reply, and only for
-         * Overflow: a Shared Window Task costs quota rather than money, and
-         * pricing every reply would turn every answer into an invoice. Null
-         * where the Turn was never priced — see the Audit Record for what that
-         * means.
+         * What this Task cost, present only where it ran on Overflow. Null
+         * where the Turn was never priced; see the Audit Record.
          */
         readonly overflowCostUsd?: number | null
       }
     | {
         /**
          * Say that the Shared Window is spent, when it comes back, and whether
-         * Overflow can be taken.
+         * Overflow can be taken. Its own message, never an edit of the
+         * Acknowledgement, since the offer must survive the next update.
          *
-         * Its own message rather than an edit of the acknowledgement, because it
-         * may carry an offer someone has to act on, and an acknowledgement is
-         * mutating — the offer would be overwritten by the next update. The Task
-         * is not over: it runs when the window returns, and this is what stops
-         * the wait being silent.
+         * Not an ending: the Task runs when the window returns.
          */
         readonly kind: 'blocked'
-        /**
-         * When the window comes back, in unix seconds.
-         *
-         * Off the stream's own `rate_limit_event` rather than estimated, which
-         * is the only reason it is worth quoting to anybody.
-         */
+        /** When the window comes back, in unix seconds, off the stream's `rate_limit_event`. */
         readonly resetsAt: number
         /**
-         * Whether the Adapter should offer Overflow at all.
-         *
-         * False where the provider says overage is unavailable, or where roma
-         * has no metered credential. An Adapter that offered it anyway would
-         * spend somebody's attention on a button that cannot work.
+         * Whether to offer Overflow at all. False where the provider says
+         * overage is unavailable or roma has no metered credential.
          */
         readonly overflowOffered: boolean
       }
     | {
         /**
-         * Say that Overflow was asked for and refused by the monthly cap.
-         *
-         * Not a failure: the Task is still waiting for the window, and the
-         * person can still stop it. The numbers are here so the refusal can be
-         * stated rather than merely asserted.
+         * Say that Overflow was asked for and refused by the monthly cap. Not a
+         * failure: the Task still waits for the window and can still be stopped.
          */
         readonly kind: 'overflow-refused'
         readonly capUsd: number
@@ -359,29 +204,12 @@ export type OutboundInstruction = TaskAddress &
       }
     | {
         /**
-         * Say that this Conversation's Session cannot be reduced any further, so
-         * it will serve no more Turns, and that `/clear` is the way out.
+         * Say that this Conversation's Session cannot be reduced any further,
+         * so it will serve no more Turns, and that `/clear` is the way out.
          *
-         * The one place roma knows an exit the person cannot guess. Claude Code
-         * tried to compact the context and reported that it could not be brought
-         * below the limit; every message after this fails, roma's repair is a new
-         * Session Generation, and nothing else would ever tell them to ask for
-         * one. Staying silent wastes the only useful thing roma knows here.
-         *
-         * **Not an ending.** It arrives mid-Task, the way `blocked` does, and the
-         * Task goes on to whatever ending it has — usually a failure, since a
-         * Session that cannot be reduced is one that cannot answer. An Adapter
-         * posts it as its own message and keeps the acknowledgement it was
-         * mutating.
-         *
-         * Carries nothing, like `stopped`. There is one fact and one remedy, and
-         * neither the code Claude Code named nor how full the context got is
-         * something the person can act on — those go to the operator.
-         *
-         * Nothing is said about a Compaction that *worked*: the context is
-         * already gone by the time roma could speak, there is nothing to do with
-         * the news, and ADR-0010 sets a high bar for another message in a
-         * Conversation. It goes on the Audit Record instead, where the money is.
+         * **Not an ending.** It arrives mid-Task, the way `blocked` does, and
+         * the Task goes on to whatever ending it has, usually a failure. Post
+         * it as its own message and keep the Acknowledgement. Carries nothing.
          */
         readonly kind: 'context-full'
       }
@@ -392,143 +220,75 @@ export type OutboundInstruction = TaskAddress &
       }
     | {
         /**
-         * Say that a Task ended because someone stopped it.
-         *
-         * Its own outcome rather than a failure, because it is the one ending
-         * that was asked for. Rendered as a failure it reads as roma breaking,
-         * and it would carry the half-written answer the interrupt cut off as
-         * its reason — the Turn's own text is all a failure has to explain
-         * itself with, and an interrupted Turn's text is whatever it had got
-         * through.
-         *
-         * Carries nothing. What was written before it stopped is already in the
-         * acknowledgement, and there is no result: that is what stopping is.
+         * Say that a Task ended because someone stopped it. Its own outcome, not
+         * a failure. Carries nothing: what was written is already in the
+         * Acknowledgement, and there is no result.
          */
         readonly kind: 'stopped'
       }
     | {
-        /**
-         * Say what a Command did.
-         *
-         * A Command is not a Task — it drives no Turn, waits for nothing, and
-         * has no result — so this is the whole of what one emits.
-         */
+        /** Say what a Command did. The whole of what one emits. */
         readonly kind: 'command-outcome'
         /**
-         * Which Command, and never `/model`.
-         *
-         * The two whose whole outcome is "there was something to do, or there
-         * was not". `/model` has an answer rather than an outcome — which model,
-         * which ones are on offer, why a name was refused — so it comes back as
-         * a `result` or a `failure`, the way a Relay's output does, and an
-         * Adapter needs to learn nothing new to post it.
+         * Never `/model`, which answers as a `result` or `failure` the way a
+         * Relay's output does.
          */
         readonly command: Exclude<Command, 'model'>
         /**
-         * Whether it had anything to do.
-         *
-         * False only for `/stop` in a Conversation with no work in it. It is not
-         * an error and an Adapter should not render it as one — the person asked
-         * for something that had already happened — but it is not the same
-         * message as "stopped" either: told a Task was stopped when none was
-         * running, they stop watching one that is still going.
+         * Whether it had anything to do. False only for `/stop` in a
+         * Conversation with no work in it: not an error, and not the same
+         * message as `stopped` either.
          */
         readonly carriedOut: boolean
       }
     | {
         /**
-         * Say what a Conversation may choose, and offer the choices themselves.
+         * Say what a Conversation may choose, and offer the choices: `/model`,
+         * `/effort` or `/caveman` asked what is on offer, or naming something
+         * that is not. A name on the Menu, or `default`, is a `result`.
          *
-         * What `/model`, `/effort` and `/caveman` answer with when somebody asked
-         * what is on offer, or named something that is not. The other two things
-         * each can mean — a name on the Menu, and `default` — are a `result`,
-         * because somebody who has just chosen is not being asked to choose again.
-         *
-         * **The text is the whole answer already.** It names the Menu in words,
-         * so a Channel that cannot render a choice posts the text and is
-         * *correct* rather than degraded — which is what lets this exist without
-         * a `ChannelCapabilities` flag, and what a second Channel inherits by
-         * doing nothing.
-         *
-         * Its own kind rather than a field on `result` and another on `failure`,
-         * because a name roma does not offer is not a Task failing (ADR-0023).
+         * **The text is the whole answer already.** A Channel that cannot
+         * render a choice posts the text and is correct, not degraded.
          */
         readonly kind: 'choice'
         /** The answer in words, Menu included. Posted as a `result`'s text is. */
         readonly text: string
         /**
-         * Which Command a choice would be made with.
-         *
-         * An Adapter that offers a choice has to say what taking it means, and
-         * the whole of that is this plus one of `options` — `/model opus`. There
-         * is no third vocabulary: taking a choice is sending the Command the
-         * Caller would otherwise have typed, which is what makes it need no new
-         * authority, no expiry and nothing remembered (ADR-0023).
+         * Which Command a choice would be made with. Taking a choice is sending
+         * this Command with one of `options`, as the Caller would have typed it:
+         * `/model opus`.
          */
         readonly chooses: Extract<Command, 'model' | 'effort' | 'caveman'>
-        /**
-         * Every name that may be chosen, in the order the Menu lists them.
-         *
-         * Never empty: where roma has nothing to offer it sends a `result` or a
-         * `failure` instead, so an Adapter never has to render an offer of
-         * nothing.
-         */
+        /** Every name that may be chosen, in Menu order. Never empty. */
         readonly options: readonly string[]
         /**
-         * The name roma was asked for and does not offer, or null where nothing
-         * was refused.
-         *
-         * Here because the two messages that carry choices answer different
-         * questions — *what is on offer*, and *the thing you asked for is not* —
-         * and this is the only thing that tells them apart. Without it an Adapter
-         * would be reading the Core's own sentence to find out.
+         * The name asked for and not offered, or null where nothing was
+         * refused. The only thing that tells *what is on offer* from *that is
+         * not on offer*.
          */
         readonly refused: string | null
       }
   )
 
-/**
- * The two things about a Channel that the Core bends around.
- *
- * Declared rather than detected: a Channel knows what it can do, and the Core
- * has no way to find out by trying.
- */
+/** The two things about a Channel that the Core bends around. Declared, not detected. */
 export interface ChannelCapabilities {
   /**
-   * Whether a message this Channel has posted can be edited afterwards.
-   *
-   * Progress reporting runs in its full form — one acknowledgement, mutated in
-   * place as the Task runs — only where this is true. Where it is false the
-   * Core sends the acknowledgement and nothing after it: ADR-0003 allows either
-   * periodic new messages or suppression, and an update every 5–10 seconds of a
-   * five-minute Task is thirty to sixty messages burying the Conversation it is
-   * reporting into. The separate final result is unaffected either way.
+   * Whether a posted message can be edited. Where false, the Core sends the
+   * Acknowledgement and no progress after it; the result is unaffected.
    */
   readonly messageMutation: boolean
   /**
-   * Whether this Channel supplies a Conversation Key that stays the same for
-   * the life of a Conversation.
-   *
-   * A Channel that cannot mints and persists one inside its own Adapter. The
-   * Core derives Session ids and stores nothing, so it has no way to make an
-   * unstable key stable, and a Conversation whose key moves is a Conversation
-   * that loses its context every time it does.
+   * Whether this Channel supplies a Conversation Key stable for the life of a
+   * Conversation. A Channel that cannot must mint and persist one in its own
+   * Adapter: the Core stores nothing and cannot stabilise it.
    */
   readonly stableConversationKey: boolean
 }
 
 /**
- * The interface every Channel implements: two translations and two declarations.
- *
- * **Provisional.** It was designed against one Channel and cannot be validated
- * until a second exists, so it is deliberately the smallest thing that serves
- * the Channel roma actually has. Expect the second Channel to change it, and
- * prefer changing it then to guessing now — Channel-abstraction machinery that
- * nothing exercises is how an interface ends up wrong in a way nobody can see.
- *
- * Only the outbound half faces the Core. Inbound translation happens before the
- * Core is involved at all, and `Event` — whatever this Channel delivers — is a
- * type the Core never names.
+ * The interface every Channel implements: two translations and two
+ * declarations. Only the outbound half faces the Core; `Event` is a type the
+ * Core never names.
  */
 export interface ChannelAdapter<Event = unknown> {
   readonly capabilities: ChannelCapabilities
@@ -539,34 +299,22 @@ export interface ChannelAdapter<Event = unknown> {
   toIngress(event: Event): IngressMessage | null
   /**
    * Turn one of this Channel's events into the id of the Task whose offer of
-   * Overflow is being taken, or null if it is not one.
-   *
-   * Optional, because a Channel with no way to present an offer needs no way to
-   * read one being taken — and because the offer is the only thing in roma
-   * anybody can answer with anything but a message.
-   *
-   * Its own reader rather than a third Command or a field on an ingress message.
-   * A Command would be one anybody could type at any moment, including when
-   * nothing is blocked, and ADR-0003 is explicit that there are two; a field on
-   * the ingress message would make every Channel carry a concept for the sake of
-   * one. What comes back here is a Task id roma minted and put on the offer, so
-   * it can only ever answer an offer roma actually made.
+   * Overflow is being taken, or null if it is not one. Optional: a Channel that
+   * cannot present an offer needs no way to read one. The id is one roma minted
+   * onto the offer, so this can only answer an offer roma made.
    */
   toOverflowTaken?(event: Event): string | null
   /**
    * Carry out one instruction. Rejecting means it reached nobody.
    *
-   * **A Task's last instruction is its last.** Four kinds end a Task — `result`,
-   * `failure`, `stopped` and `command-outcome` — and no `progress` for that Task
-   * follows one of them, however slow this Channel is about taking what it was
-   * given. So an Adapter keeping an acknowledgement may drop it on one of those
-   * four and does not have to defend against an update arriving afterwards.
-   *
-   * A guarantee rather than an obligation, and the Core is what keeps it.
+   * **A Task's last instruction is its last.** Four kinds end a Task —
+   * `result`, `failure`, `stopped` and `command-outcome` — and no `progress`
+   * for that Task follows one, however slow this Channel is. An Adapter may
+   * drop its Acknowledgement on one of those four.
    * Enforced by `fence:core-no-update-after-the-answer`.
    *
-   * `blocked`, `overflow-refused` and `context-full` are **not** endings: they
-   * are messages about a Task that is still going, and updates follow them.
+   * `blocked`, `overflow-refused` and `context-full` are **not** endings:
+   * updates follow them.
    */
   deliver(instruction: OutboundInstruction): void | Promise<void>
 }
