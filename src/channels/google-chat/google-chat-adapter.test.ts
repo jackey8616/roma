@@ -894,6 +894,14 @@ describe('what a Conversation is told', () => {
   })
 })
 
+const BOTH_SHAPES =
+  'A button press must be read off both of Chat’s parameter shapes: `common.parameters`, an ' +
+  'object, and the older `action.parameters`, a list of key/value pairs — which one arrives ' +
+  'depends on how the event was delivered (ADR-0002, ADR-0004, ' +
+  'https://developers.google.com/workspace/chat/read-form-data). Reading one makes the button ' +
+  'do nothing, silently, for every delivery carrying the other, and somebody presses it and ' +
+  'keeps waiting (#29).'
+
 describe('a Task the Shared Window has blocked', () => {
   // Plainly that quota is spent, with the reset time the event gave — and that
   // the Task is kept, because told only that quota is spent people send the
@@ -953,7 +961,7 @@ describe('a Task the Shared Window has blocked', () => {
 
   // The round trip: what went out as a parameter on the button comes back as one
   // on the click, so roma remembers nothing between offering and its being taken.
-  it('reads a click on it as the Task it was offered for', () => {
+  it('reads a click on it as the Task it was offered for [fence:gchat-press-reads-both-shapes]', () => {
     const { adapter } = newAdapter()
 
     expect(
@@ -961,13 +969,14 @@ describe('a Task the Shared Window has blocked', () => {
         type: 'CARD_CLICKED',
         common: { invokedFunction: 'takeOverflow', parameters: { taskId: 'task-77' } },
       }),
+      BOTH_SHAPES,
     ).toBe('task-77')
   })
 
   // Chat has two parameter shapes and which one arrives depends on how the event
   // was delivered. Reading one and not the other would make the button do
   // nothing for half of them, silently.
-  it('reads the older parameter shape too', () => {
+  it('reads the older parameter shape too [fence:gchat-press-reads-both-shapes]', () => {
     const { adapter } = newAdapter()
 
     expect(
@@ -978,6 +987,7 @@ describe('a Task the Shared Window has blocked', () => {
           parameters: [{ key: 'taskId', value: 'task-77' }],
         },
       }),
+      BOTH_SHAPES,
     ).toBe('task-77')
   })
 

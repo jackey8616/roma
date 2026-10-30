@@ -493,10 +493,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     const result = readTerminalResult(event)
     if (result === null) return
 
-    // Rebase the running total on every terminal event, whether or not a Turn was
-    // waiting for it. A `result` nobody asked for still moved the total, and a
-    // baseline left behind folds that spend into the next Turn's delta — which
-    // is the cumulative-total bug wearing a different hat.
+    // Enforced by `fence:session-unrequested-result-moves-the-baseline`.
     const previousTotalUsd = this.#cumulativeCostUsd
     if (result.cumulativeCostUsd !== null) this.#cumulativeCostUsd = result.cumulativeCostUsd
     // Moved on the same terminal event, so the two figures cannot come to

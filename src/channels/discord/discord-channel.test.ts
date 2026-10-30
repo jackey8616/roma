@@ -964,14 +964,21 @@ describe('the connection roma holds open', () => {
   // Both no-ops, and #178 is what makes that a supported shape rather than a
   // lie. A socket has nowhere to hand a Delivery back to, so roma says nothing
   // on the wire either way (ADR-0028).
-  it('settles a Delivery by saying nothing at all', async () => {
+  it('settles a Delivery by saying nothing at all [fence:discord-settling-does-nothing]', async () => {
+    const why =
+      'A Gateway Delivery’s ack and nack must do nothing (ADR-0028). A socket has nowhere to hand ' +
+      'a Delivery back to: a nack that closed to resume, or sent anything, would promise a ' +
+      'redelivery that never comes — a resume replays what roma missed, never what it was handed — ' +
+      'and an ack on a Gateway event is a sentence with no listener (#178, #191).'
     const channel = await messaged(addressed())
     const before = channel.network.socket.sent.length
     const delivery = channel.deliveries.at(-1)
 
-    expect(() => delivery?.ack()).not.toThrow()
-    expect(() => delivery?.nack()).not.toThrow()
-    expect(channel.network.socket.sent).toHaveLength(before)
+    expect(() => delivery?.ack(), why).not.toThrow()
+    expect(() => delivery?.nack(), why).not.toThrow()
+    expect(channel.network.socket.sent, why).toHaveLength(before)
+    expect(channel.network.socket.closedWith, why).toBeNull()
+    expect(channel.network.sockets, why).toHaveLength(1)
   })
 
   // Dropped, because there is nowhere to hand it back to — so this line is the
@@ -1173,6 +1180,46 @@ describe('where an answer goes', () => {
     expect(channel.api.messages.map(({ posted }) => posted.channel)).toEqual([CHANNEL, CHANNEL])
   })
 
+  it('opens one thread for two instructions that arrive together [fence:discord-thread-asked-for-once]', async () => {
+    const why =
+      'The thread a Conversation is answered in must be remembered as a promise from the moment ' +
+      'it is first asked for, not as a channel once Discord answers (ADR-0029). In between, a ' +
+      'second instruction finds nothing and asks again — and a message can only ever start one ' +
+      'thread, so the second request is a refusal spent on nothing (#191).'
+    const channel = await messaged(addressed())
+
+    await Promise.all([
+      channel.adapter.deliver(to(MESSAGE, { kind: 'progress', progress: { phase: 'working' } })),
+      channel.adapter.deliver(to(MESSAGE, { kind: 'result', text: 'the answer' })),
+    ])
+
+    expect(channel.api.threads, why).toHaveLength(1)
+  })
+
+  it('asks for the thread again after an attempt that failed outright [fence:discord-failed-thread-forgotten]', async () => {
+    const why =
+      'A thread request that rejected must be forgotten, so the next instruction asks again ' +
+      '(ADR-0028, ADR-0029). Kept, one bad minute leaves every later message in the ' +
+      'Conversation waiting on a promise that has already rejected (#191).'
+    const channel = await messaged(addressed())
+    // A wait longer than roma will sit through, so the first attempt rejects outright.
+    channel.api.failNext('startThread', refusal(429, RETRY_CEILING_MS + 1))
+
+    await expect(
+      channel.adapter.deliver(to(MESSAGE, { kind: 'result', text: 'the answer' })),
+    ).rejects.toThrow(/429/)
+    await expect(
+      channel.adapter.deliver(to(MESSAGE, { kind: 'result', text: 'the answer' }, 'task-2')),
+      why,
+    ).resolves.toBeUndefined()
+
+    expect(channel.api.threads, why).toHaveLength(2)
+    expect(
+      channel.api.messages.map(({ posted }) => posted.channel),
+      why,
+    ).toEqual([MESSAGE])
+  })
+
   /**
    * **The claim ADR-0029 says this design would fail on, made visible.** The
    * reply arrives, so nothing in the Conversation looks wrong; what is wrong is
@@ -1364,6 +1411,30 @@ describe('what the Adapter remembers about a message', () => {
     ).toEqual([null, `m-${REMEMBERED - 1}`])
   })
 
+  it('keeps a Conversation somebody spoke in again ahead of one nobody has touched [fence:discord-answering-evicts-the-least-recent]', async () => {
+    const why =
+      '#answering must evict the Conversation least recently spoken in, not the one first seen ' +
+      '(ADR-0029). A Map keeps the order keys were first set, so an entry has to be deleted ' +
+      'before it is set again; otherwise a Conversation somebody has been talking in all day ' +
+      'is evicted ahead of one nobody has touched since the morning, and loses its reply (#191).'
+    const channel = await messaged(inDm())
+    for (let n = 1; n < REMEMBERED - 1; n += 1) {
+      await channel.take(dispatch('MESSAGE_CREATE', inDm({ id: `m-${n}`, channel_id: `dm-${n}` })))
+    }
+    await channel.take(dispatch('MESSAGE_CREATE', inDm({ id: NEXT_MESSAGE })))
+    for (const n of ['new', 'newer']) {
+      await channel.take(dispatch('MESSAGE_CREATE', inDm({ id: `m-${n}`, channel_id: `dm-${n}` })))
+    }
+
+    await channel.adapter.deliver(to(DM, { kind: 'result', text: 'to the first' }))
+    await channel.adapter.deliver(to('dm-1', { kind: 'result', text: 'to the next' }, 'task-2'))
+
+    expect(
+      channel.api.messages.map(({ posted }) => posted.replyTo),
+      why,
+    ).toEqual([NEXT_MESSAGE, null])
+  })
+
   // Concurrent rather than one after the other: the second update arrives while
   // Discord has not yet answered the first post.
   it('keeps one acknowledgement for two updates sent together [fence:discord-acknowledgement-is-a-promise]', async () => {
@@ -1505,6 +1576,13 @@ describe('an answer longer than Discord will take', () => {
   })
 })
 
+const ACKNOWLEDGEMENT_KEPT =
+  'A Task’s acknowledgement must be forgotten only on an instruction that ends the Task, and ' +
+  'before that instruction is posted (ADR-0003, ADR-0029). Forgotten on `blocked`, ' +
+  '`overflow-refused` or `context-full`, the message the person is watching is stranded and a ' +
+  'second one is posted when the Task goes on; forgotten after the post, a post that throws ' +
+  'leaves it behind for good (#29, #191).'
+
 describe('the acknowledgement', () => {
   // One message, edited. ADR-0029 declares message mutation, so progress
   // reporting runs in its full ADR-0003 form — and a renderer that posted per
@@ -1568,7 +1646,7 @@ describe('the acknowledgement', () => {
   // Not an ending, the way a block is not: it arrives mid-Task and the Task goes
   // on to whatever ending it has. Forgetting the acknowledgement here would
   // strand the message the person is watching and post a second one under it.
-  it('keeps the one it was mutating for a message that is not an ending', async () => {
+  it('keeps the one it was mutating for a message that is not an ending [fence:discord-acknowledgement-kept-until-the-end]', async () => {
     const channel = await messaged(inDm())
 
     await channel.adapter.deliver(to(DM, { kind: 'progress', progress: { phase: 'working' } }))
@@ -1577,7 +1655,18 @@ describe('the acknowledgement', () => {
       to(DM, { kind: 'progress', progress: { phase: 'writing', characters: 14 } }),
     )
 
-    expect(channel.api.calls).toEqual(['post', 'post', 'edit'])
+    expect(channel.api.calls, ACKNOWLEDGEMENT_KEPT).toEqual(['post', 'post', 'edit'])
+  })
+
+  it('forgets it at the end even where the ending could not be posted [fence:discord-acknowledgement-kept-until-the-end]', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, { kind: 'progress', progress: { phase: 'working' } }))
+    channel.api.failNext('post', refusal(403))
+    await expect(channel.adapter.deliver(to(DM, { kind: 'stopped' }))).rejects.toThrow(/403/)
+    await channel.adapter.deliver(to(DM, { kind: 'progress', progress: { phase: 'working' } }))
+
+    expect(channel.api.calls, ACKNOWLEDGEMENT_KEPT).toEqual(['post', 'post', 'post'])
   })
 
   // A post that failed left no message to edit. Remembered anyway, every later

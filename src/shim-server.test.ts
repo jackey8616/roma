@@ -229,7 +229,13 @@ describe('answering the Cloud Shortcut', () => {
   // Reach configured must not be handed a Cloud Token, and the Shortcut must not
   // be handed an Installation Token — which is the failure that would look like
   // everything working right up to the first API call.
-  it('leaves a request for the other credential completely alone', async () => {
+  it('leaves a request for the other credential completely alone [fence:shim-each-credential-from-its-own-reach]', async () => {
+    const why =
+      'Every answer to a request must come from the one Reach the request names, looked up once ' +
+      '(ADR-0020 §9). Which credential a request is about is the only question that branches ' +
+      'there, and asked in several places it can be answered differently in one of them — the ' +
+      'worst of which hands the Cloud Shortcut an Installation Token, and looks like everything ' +
+      'working until the first API call (#119).'
     const { server } = await listening({ cloudMinter: new FakeCloudMinter() })
 
     const code = await askMinter(server.socketPath, { session: SESSION, operation: 'get' })
@@ -239,15 +245,15 @@ describe('answering the Cloud Shortcut', () => {
       credential: 'cloud',
     })
 
-    expect(code.token).toBe('token-1')
-    expect(cloud.token).toBe('cloud-token-1')
+    expect(code.token, why).toBe('token-1')
+    expect(cloud.token, why).toBe('cloud-token-1')
     // Each answer carries *its own* Reach's account. Stronger than the assertion
     // this replaces, which only said the forge's answer had none: the mis-pairing
     // worth catching is a Reach served from another Reach's tokens, and after
     // ADR-0020 §9 built this record by mapping over the Reaches, nothing else in
     // the suite stands where the old ternary did.
-    expect(code.account).toBe('a-team')
-    expect(cloud.account).toBe('agent@a-project.iam.gserviceaccount.com')
+    expect(code.account, why).toBe('a-team')
+    expect(cloud.account, why).toBe('agent@a-project.iam.gserviceaccount.com')
   })
 
   it('carries the reason when the Cloud Reach’s key has stopped working', async () => {

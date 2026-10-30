@@ -553,10 +553,7 @@ export class GatewayTransport implements Transport<DiscordEvent> {
       // Enforced by `fence:discord-delivery-named-by-snowflake`.
       id,
       event: { message, self, guildChannel, quotation, press },
-      // **Never make either of these do anything.** A socket has nowhere to hand
-      // a Delivery back to, so a `nack` that pretended otherwise would promise a
-      // redelivery that never comes — and an `ack` on a Gateway event is a
-      // sentence with no listener (ADR-0028).
+      // Enforced by `fence:discord-settling-does-nothing`.
       ack: () => {},
       nack: () => {},
     }

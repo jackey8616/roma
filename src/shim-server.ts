@@ -275,14 +275,7 @@ export class ShimServer {
     const path = request.path ?? null
     const credential = request.credential ?? 'code'
     const where = { sessionId, taskId, path, credential } as const
-    // Looked up once. Which credential a request is about is the only question
-    // that branches here, and asking it in each of the three places below would
-    // be three chances to answer it differently — the worst of which hands a
-    // Cloud Shortcut an Installation Token, and looks like everything working
-    // until the first API call.
-    //
-    // Total, so there is no missing entry to answer for: a Reach a deployment has
-    // no key for is present and carries its own refusal.
+    // Enforced by `fence:shim-each-credential-from-its-own-reach`. Enforced by `fence:shim-credential-wanted-is-closed`.
     const reach = this.#reaches[credential]
 
     if (request.operation === 'erase') {

@@ -55,13 +55,7 @@ export const RETRY_CEILING_MS = 30_000
  */
 export const REMEMBERED = 1_000
 
-/**
- * The instructions after which a Task has no acknowledgement left to keep.
- *
- * Named as a set rather than asked as "not progress", because that is no longer
- * the same question: a blocked Task has been told something and is still
- * running, and its acknowledgement is still the message it will keep editing.
- */
+/** Enforced by `fence:discord-acknowledgement-kept-until-the-end`. */
 const ENDS_THE_TASK = new Set(['result', 'failure', 'stopped', 'command-outcome', 'choice'])
 
 /** Where one instruction's messages go, and the message the first of them answers. */
@@ -75,11 +69,7 @@ interface Answered {
   readonly channel: string
   readonly message: string
   readonly name: string
-  /**
-   * **Not the channel: the promise of it.** The entry has to exist from the
-   * instant the thread is first asked for, or two instructions arriving together
-   * both open one — and a message can only ever have the one.
-   */
+  /** Enforced by `fence:discord-thread-asked-for-once`. */
   place: Promise<string> | null
 }
 
@@ -259,12 +249,7 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
       return
     }
 
-    // Only where the Task is actually over. `blocked`, `overflow-refused` and
-    // `context-full` are messages about a Task that is still going: forgetting
-    // its acknowledgement there would strand the one the person is watching and
-    // post a second one when the Task started again. Dropped before the messages
-    // are posted rather than after, so that a post that throws still leaves
-    // nothing behind.
+    // Enforced by `fence:discord-acknowledgement-kept-until-the-end`.
     if (ENDS_THE_TASK.has(instruction.kind)) this.#acknowledgements.delete(taskId)
 
     // Two messages can carry buttons and they are never the same message: the
@@ -313,9 +298,7 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     if (channel === null || id === null) return
 
     const at = addressOf(message.conversationKey, message.caller)
-    // Deleted before it is set, because a `Map` keeps the order things were
-    // *first* put in it: without this, a Conversation somebody has been talking
-    // in all day is evicted ahead of one nobody has touched since this morning.
+    // Enforced by `fence:discord-answering-evicts-the-least-recent`.
     this.#answering.delete(at)
     if (this.#answering.size >= REMEMBERED) {
       const oldest = this.#answering.keys().next().value
@@ -334,9 +317,7 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     const opening = this.#openThread(conversationKey, answered)
     answered.place = opening
     return opening.catch((error: unknown) => {
-      // Forgotten so that the next instruction tries again, exactly as a failed
-      // acknowledgement is. Kept, one bad minute would leave every later message
-      // in this Conversation waiting on a promise that had already rejected.
+      // Enforced by `fence:discord-failed-thread-forgotten`.
       if (answered.place === opening) answered.place = null
       throw error
     })

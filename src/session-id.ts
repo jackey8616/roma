@@ -62,13 +62,7 @@ export function uuidv5(name: string, namespace: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-/**
- * A namespace uuid as the sixteen bytes it stands for.
- *
- * Hashing the text would produce a different id for the same namespace written
- * in upper case — a difference no reader would ever suspect, and one that would
- * silently orphan every Session derived under the other spelling.
- */
+/** Enforced by `fence:session-id-namespace-hashed-as-bytes`. */
 function namespaceBytes(namespace: string): Buffer {
   if (!UUID.test(namespace)) {
     throw new Error(`namespace is not a uuid: ${namespace}`)

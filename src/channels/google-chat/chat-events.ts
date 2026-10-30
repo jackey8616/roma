@@ -372,18 +372,7 @@ function isMenu(name: string): name is Menu {
   return Object.hasOwn(MENUS, name)
 }
 
-/**
- * One parameter off a button press, or null if this event is not that press.
- *
- * Both parameter shapes are read because Chat has two. `common.parameters` is an
- * object on the current interaction event; `action.parameters` is a list of
- * `{key, value}` pairs on the older one, and which arrives depends on how the
- * event was delivered. Reading one and not the other would make a button do
- * nothing at all, silently, for whichever half of the deliveries carries the
- * other — and a button that does nothing is worse than no button, because
- * somebody presses it and then keeps waiting.
- * https://developers.google.com/workspace/chat/read-form-data
- */
+/** Enforced by `fence:gchat-press-reads-both-shapes`. */
 function pressed(event: ChatEvent, action: string, parameter: string): string | null {
   if (asString(event['type']) !== CARD_CLICKED) return null
 

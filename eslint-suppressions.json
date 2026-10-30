@@ -26,7 +26,7 @@
   },
   "src/channels/discord/discord-adapter.ts": {
     "roma/comment-whitelist": {
-      "count": 41
+      "count": 27
     }
   },
   "src/channels/discord/discord-events.ts": {
@@ -36,7 +36,7 @@
   },
   "src/channels/discord/gateway-transport.ts": {
     "roma/comment-whitelist": {
-      "count": 40
+      "count": 36
     }
   },
   "src/channels/discord/http-discord-api.ts": {
@@ -56,7 +56,7 @@
   },
   "src/channels/google-chat/chat-events.ts": {
     "roma/comment-whitelist": {
-      "count": 34
+      "count": 33
     }
   },
   "src/channels/google-chat/google-chat-adapter.ts": {
@@ -81,7 +81,7 @@
   },
   "src/claude-session.ts": {
     "roma/comment-whitelist": {
-      "count": 17
+      "count": 13
     }
   },
   "src/cloud/env-config.ts": {
@@ -191,7 +191,7 @@
   },
   "src/session-id.ts": {
     "roma/comment-whitelist": {
-      "count": 4
+      "count": 3
     }
   },
   "src/session-pool.ts": {
@@ -211,7 +211,7 @@
   },
   "src/shim-server.ts": {
     "roma/comment-whitelist": {
-      "count": 24
+      "count": 16
     }
   },
   "src/shortcut.ts": {
