@@ -1,5 +1,6 @@
+import { sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { containment, matching } from '../test/support/sources.js'
+import { containment, matching, sources } from '../test/support/sources.js'
 
 /**
  * Google Cloud is named under `src/cloud/`, and nowhere else — and roma never
@@ -140,13 +141,18 @@ describe('roma mints from the key it was given, never from a resolution chain', 
     ).toEqual([])
   })
 
-  /**
-   * **Nothing here binds the composition root, and that is deliberate.**
-   *
-   * Construction moved inside this containment (`cloudReachFrom`), so the rule
-   * above binds the construction site and the root no longer names the
-   * constructor. Do not add a source match back without reading ADR-0020 §7 —
-   * what went with it is the only rule that ever aimed at the composition root,
-   * which the ADR records as accepted rather than overlooked.
-   */
+  it('resolves a credential by chain only where roma names its own identity [fence:chain-only-for-romas-own-identity]', () => {
+    const offenders = matching(
+      sources().filter(({ file }) => !file.split(sep).includes('google-chat')),
+      RESOLVES_A_CREDENTIAL,
+    )
+
+    expect(
+      offenders.map(({ file }) => file),
+      'A credential resolution chain may be named only under src/channels/google-chat/, where ' +
+        'roma resolves its own identity for Chat (ADR-0020 §7, ADR-0015 §4). Anywhere else — ' +
+        'the composition roots included — it is one edit from building a Reach on roma’s own ' +
+        'service account, which on Google hosts succeeds silently.',
+    ).toEqual([])
+  })
 })
