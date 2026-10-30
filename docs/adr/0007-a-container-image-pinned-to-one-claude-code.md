@@ -244,7 +244,8 @@ It runs as a non-root user, on `node:22-slim`.
   registry lookup ends the run **red** — only a successful comparison is allowed
   to be quiet. A drift check that swallowed its own failures would pass forever
   while watching nothing, and a green tick reads as "the pin is current". Enforced by
-  `fence:drift-check-fails-loud`.
+  `fence:drift-check-fails-loud` for the parsing and by `fence:drift-io-fails-loud`
+  for the missing `Dockerfile`, the failed lookup and a failing `grep`.
 
   **This makes upgrading visible, not safe.** The re-verification this ADR asks
   for is still a human spending Shared Window money and reading a behavioural

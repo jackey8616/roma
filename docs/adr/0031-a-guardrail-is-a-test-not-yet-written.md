@@ -124,14 +124,17 @@ guardrail passed with the bug re-planted, usually because the fixture never
 reached the case. Each of those got a new test or a stronger assertion, so a
 guardrail now counts as held only when its fence has been seen to fail.
 
-What is left, each recorded where it applies:
+What the sweep left, and what became of it:
 
 - Unbuilt Decisions: ADR-0008's Requested-by trailer and ADR-0025's Runtime offer.
   *Not enforced (ADR-0031): not built.*
-- `new GoogleAuth()` in the composition root passes every test (ADR-0015, ADR-0020).
-  *Not enforced (ADR-0031).*
-- ADR-0007's drift check is held for its parsing; the I/O entry point that reads
-  the Dockerfile and the registry is not tested.
-- ADR-0011 says a Task stopped while queued never fetches its Enclosures. It
-  does: Enclosures are written before the Task is queued. Whether the ADR or the
-  code should change is an open decision, so that paragraph cites nothing.
+- `new GoogleAuth()` in the composition root used to pass every test. It is now
+  held by an allowlist (ADR-0020 §7, amended). Enforced by
+  `fence:chain-only-for-romas-own-identity`.
+- ADR-0007's drift check was held only for its parsing. Its I/O half (reading the
+  Dockerfile, the registry and `grep`) now takes its I/O as a parameter so the free
+  run can fail it. Enforced by `fence:drift-io-fails-loud`.
+- ADR-0011 said a Task stopped while queued never fetches its Enclosures. It
+  does, because Enclosures are written before the Task is queued. ADR-0011 is
+  amended to say so, and to cite the fences that hold what late fetching does
+  avoid.

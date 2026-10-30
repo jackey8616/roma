@@ -26,7 +26,7 @@ import { execFileSync } from 'node:child_process'
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { driftReport, pinnedClaudeCode, publishedClaudeCode } from './claude-code-drift.js'
 
 /**
@@ -35,23 +35,45 @@ import { driftReport, pinnedClaudeCode, publishedClaudeCode } from './claude-cod
  */
 const REGISTRY = 'https://registry.npmjs.org/@anthropic-ai/claude-code/latest'
 
-const root = fileURLToPath(new URL('..', import.meta.url))
-
-try {
-  await main()
-} catch (error) {
-  // The message alone, not a stack. Every throw on the way here was written to
-  // say what could not be established, and a workflow log is where it gets read.
-  console.error(`claude-code drift check failed: ${error instanceof Error ? error.message : error}`)
-  process.exit(1)
+/** What the check touches outside itself, so the free run can stand in for it. */
+export interface DriftIo {
+  readonly root: string
+  readonly fetch: typeof fetch
+  /** `grep -rlIF` for the pinned version from `root`; throws as `execFileSync` does. */
+  readonly grep: (pinned: string, root: string) => string
 }
 
-async function main(): Promise<void> {
+const REAL_IO: DriftIo = {
+  root: fileURLToPath(new URL('..', import.meta.url)),
+  fetch: (...args) => fetch(...args),
+  grep: (pinned, root) =>
+    execFileSync(
+      'grep',
+      ['-rlIF', '--exclude-dir=node_modules', '--exclude-dir=.git', '--', pinned, '.'],
+      { cwd: root, encoding: 'utf8' },
+    ),
+}
+
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    await checkDrift()
+  } catch (error) {
+    // The message alone, not a stack. Every throw on the way here was written to
+    // say what could not be established, and a workflow log is where it gets read.
+    console.error(
+      `claude-code drift check failed: ${error instanceof Error ? error.message : error}`,
+    )
+    process.exit(1)
+  }
+}
+
+/** One run of the check. Rejects whenever the question could not be asked. */
+export async function checkDrift(io: DriftIo = REAL_IO): Promise<void> {
   // No try/catch: a missing Dockerfile is `ENOENT` with the path in it, which is
   // the whole of what needs saying, and it must end the run rather than be
   // treated as "no pin found".
-  const pinned = pinnedClaudeCode(readFileSync(join(root, 'Dockerfile'), 'utf8'))
-  const published = publishedClaudeCode(await registryDocument())
+  const pinned = pinnedClaudeCode(readFileSync(join(io.root, 'Dockerfile'), 'utf8'))
+  const published = publishedClaudeCode(await registryDocument(io))
 
   if (pinned === published) {
     // The only quiet outcome. A log line, because a run that printed nothing
@@ -61,7 +83,7 @@ async function main(): Promise<void> {
     return
   }
 
-  const report = driftReport({ pinned, published, evidence: evidenceFor(pinned) })
+  const report = driftReport({ pinned, published, evidence: evidenceFor(pinned, io) })
 
   const path = join(process.env.RUNNER_TEMP ?? tmpdir(), 'claude-code-drift.md')
   writeFileSync(path, report.body)
@@ -75,12 +97,12 @@ async function main(): Promise<void> {
 }
 
 /** The registry's answer, with a failed lookup ending the run rather than the check. */
-async function registryDocument(): Promise<unknown> {
+async function registryDocument(io: DriftIo): Promise<unknown> {
   // A `fetch` that rejects — DNS, TLS, a proxy — throws out of here and is caught
   // above. What needs saying explicitly is the failure that does *not* reject: an
   // error status carrying a JSON body, which `publishedClaudeCode` would also
   // refuse, but with a message about a shape rather than about a 404.
-  const response = await fetch(REGISTRY)
+  const response = await io.fetch(REGISTRY)
 
   if (!response.ok) {
     throw new Error(`${REGISTRY} answered ${response.status} ${response.statusText}`)
@@ -103,15 +125,11 @@ async function registryDocument(): Promise<unknown> {
  * pattern: unescaped, `2.1.220` matches `2X1X220`, and this is the one place the
  * check makes a claim about a file it has not parsed.
  */
-function evidenceFor(pinned: string): string[] {
+function evidenceFor(pinned: string, io: DriftIo): string[] {
   let found = ''
 
   try {
-    found = execFileSync(
-      'grep',
-      ['-rlIF', '--exclude-dir=node_modules', '--exclude-dir=.git', '--', pinned, '.'],
-      { cwd: root, encoding: 'utf8' },
-    )
+    found = io.grep(pinned, io.root)
   } catch (error) {
     // grep exits 1 for "no matches", which is not an error to it and is a
     // contradiction here — the version was just read out of a file in this tree.
