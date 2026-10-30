@@ -289,7 +289,6 @@ class Ingress<Event> {
     this.#log = log
   }
 
-  /** roma is going down: hand back everything from here rather than finish it. */
   stop(): void {
     this.#stopping = true
   }

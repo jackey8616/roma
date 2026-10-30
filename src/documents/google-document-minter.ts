@@ -9,7 +9,6 @@ const SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
 ] as const
 
-/** The two, as one claim, which is how the exchange wants them. */
 const SCOPE = SCOPES.join(' ')
 
 /**
@@ -248,7 +247,6 @@ export class GoogleDocumentMinter implements DocumentMinter {
   }
 }
 
-/** base64url, which is base64 with two characters swapped and the padding gone. */
 function base64url(value: string | Buffer): string {
   return Buffer.from(value).toString('base64url')
 }

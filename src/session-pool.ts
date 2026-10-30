@@ -435,7 +435,6 @@ export interface SessionPoolEvents {
 interface RetryWatch {
   count: number
   readonly startedAt: number
-  /** The wall-clock backstop, armed on the first retry. */
   timer: NodeJS.Timeout | null
   last: ApiRetry
 }
@@ -487,13 +486,11 @@ interface Resident {
    */
   readonly appendSystemPrompt: string | undefined
   readonly session: ClaudeSession
-  /** Whether this process was started with `--resume`. */
   readonly resumed: boolean
   stderr: string
   busy: boolean
   lastUsedAt: number
   reapTimer: NodeJS.Timeout | null
-  /** Set when the pool is the one ending the process, so its exit is not news. */
   leaving: boolean
   /** Null until the running Turn's first retry, and again once it ends. */
   retry: RetryWatch | null
@@ -769,12 +766,10 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     return this.#models?.inForce(sessionId) ?? this.#model ?? PINNED_MODEL
   }
 
-  /** The effort this Session's next process runs at, read for `#modelFor`'s reason. */
   #effortFor(sessionId: string): string {
     return this.#efforts?.inForce(sessionId) ?? this.#effort ?? PINNED_EFFORT
   }
 
-  /** How short this Session's next process is asked to be, read for `#modelFor`'s reason. */
   #cavemanFor(sessionId: string): string {
     return this.#cavemen?.inForce(sessionId) ?? this.#caveman ?? CAVEMAN_OFF
   }
@@ -891,8 +886,6 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
 
   async #makeRoom(): Promise<void> {
     while (this.#residents.size >= this.#maxResident) {
-      // Map order is LRU order, so this is the least recently used Session that
-      // is not in the middle of a Turn.
       const victim = [...this.#residents.values()].find((resident) => !resident.busy)
       if (victim === undefined) {
         // Enforced by `fence:pool-busy-session-is-never-evicted`.
@@ -902,7 +895,6 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     }
   }
 
-  /** End a resident's process because roma wants its slot or its idleness back. */
   async #retire(resident: Resident, event: 'evict' | 'reap'): Promise<void> {
     this.#leave(resident)
     // Enforced by `fence:pool-eviction-logged-before-termination`.
@@ -951,7 +943,6 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     await this.#terminate(resident)
   }
 
-  /** Take a resident out of the pool, ahead of ending its process. */
   #leave(resident: Resident): void {
     this.#cancelReap(resident)
     this.#forget(resident)
@@ -1069,7 +1060,6 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     resident.lastUsedAt = Date.now()
   }
 
-  /** Drop a resident, unless the slot has already been taken by a newer process. */
   #forget(resident: Resident): void {
     if (this.#residents.get(resident.sessionId) === resident) {
       this.#residents.delete(resident.sessionId)

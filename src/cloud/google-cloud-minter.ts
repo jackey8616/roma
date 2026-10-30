@@ -161,7 +161,6 @@ export class GoogleCloudMinter implements CloudMinter {
   }
 }
 
-/** base64url, which is base64 with two characters swapped and the padding gone. */
 function base64url(value: string | Buffer): string {
   return Buffer.from(value).toString('base64url')
 }

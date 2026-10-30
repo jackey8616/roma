@@ -180,7 +180,6 @@ function cardFor(actions: readonly ChatAction[]): unknown {
   }
 }
 
-/** The resource name off a Message the API sent back, if it sent one. */
 function nameOf(answer: unknown): string | null {
   if (typeof answer !== 'object' || answer === null) return null
   const name = (answer as { name?: unknown }).name

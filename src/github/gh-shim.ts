@@ -57,7 +57,6 @@ export async function main(
   return await run(realGhPath(env), argv, child)
 }
 
-/** Run the real `gh`, wired straight through, and report what it exited with. */
 async function run(
   command: string,
   argv: readonly string[],
@@ -75,7 +74,6 @@ async function run(
   })
 }
 
-// Run only when this file is the program.
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
   process.exitCode = await main()
 }
