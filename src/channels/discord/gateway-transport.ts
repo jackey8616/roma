@@ -45,7 +45,6 @@ export interface GatewaySocket {
  */
 export type ConnectGateway = (url: string) => GatewaySocket
 
-/** The three roma asks for: the guild's own state, and messages in both places. */
 const GUILDS = 1 << 0
 const GUILD_MESSAGES = 1 << 9
 const DIRECT_MESSAGES = 1 << 12
@@ -199,7 +198,6 @@ export interface GatewayTransportOptions {
   readonly jitter?: () => number
 }
 
-/** Discord's opcodes, as many of them as roma sends or reads. */
 const OP = {
   dispatch: 0,
   heartbeat: 1,
@@ -211,7 +209,6 @@ const OP = {
   heartbeatAck: 11,
 } as const
 
-/** roma leaving on purpose, and roma leaving so that it can come back. */
 const CLOSED_FOR_GOOD = 1000
 const CLOSED_TO_RESUME = 4000
 
@@ -221,7 +218,6 @@ const REFUSED_FOR_GOOD = new Set([4004, 4010, 4011, 4012, 4013, 4014])
 /** The close codes that mean the session is gone, but the connection may return. */
 const SESSION_LOST = new Set([4007, 4009])
 
-/** One thing off the socket, on its way to the receiver: a message, or a press on one. */
 interface Pending {
   readonly id: string
   readonly message: DiscordMessage
@@ -264,10 +260,8 @@ export class GatewayTransport implements Transport<DiscordEvent> {
 
   #receiver: Receiver<DiscordEvent> | null = null
   #socket: GatewaySocket | null = null
-  /** Whether roma is on its way down, and will not be reconnecting. */
   #closing = false
 
-  /** Where a resume goes, as `READY` named it. */
   #resumeUrl: string | null = null
   /** The session a resume names, and the last event it saw. Both, or neither. */
   #session: string | null = null
@@ -279,12 +273,10 @@ export class GatewayTransport implements Transport<DiscordEvent> {
   #reconnecting: ReturnType<typeof setTimeout> | null = null
   /** Enforced by `fence:discord-dead-socket-noticed`. */
   #acknowledged = true
-  /** How many times roma has reconnected without getting back on. */
   #attempts = 0
 
   /** Enforced by `fence:discord-key-against-channel-list`. */
   readonly #channels = new Map<string, Set<string>>()
-  /** What is waiting for the state that makes it readable. See `gateway-held`. */
   #held: Pending[] = []
 
   constructor({ token, url, connect, api, log, jitter }: GatewayTransportOptions) {
@@ -338,7 +330,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     })
   }
 
-  /** One frame, read as far as an opcode. */
   #read(frame: string): void {
     let parsed: unknown
     try {
@@ -389,7 +380,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     }
   }
 
-  /** Discord has said hello: start beating, then say who roma is. */
   #hello(interval: number | null): void {
     if (interval === null) {
       this.#log({ event: 'gateway-undecodable', reason: 'hello carried no heartbeat interval' })
@@ -414,7 +404,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     })
   }
 
-  /** One dispatch, of the eight roma reads and the many it does not. */
   #dispatch(name: string | null, payload: Readonly<Record<string, unknown>> | null): void {
     if (payload === null) return
     switch (name) {
@@ -473,7 +462,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     this.#release()
   }
 
-  /** Whatever these are, they are threads: take them out of the channel list. */
   #notChannels(guildId: string | null, ids: readonly string[]): void {
     const channels = this.#channelsOf(guildId)
     if (channels === undefined) return
@@ -484,7 +472,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     return guildId === null ? undefined : this.#channels.get(guildId)
   }
 
-  /** One message, named by its own snowflake, or dropped where it has none. */
   #message(message: DiscordMessage): void {
     const id = asString(message['id'])
     if (id === null) {
@@ -504,7 +491,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     this.#take({ id, message, press })
   }
 
-  /** Take one thing off the socket, or hold it until roma can read it. */
   #take(pending: Pending): void {
     if (this.#readable(pending)) {
       void this.#deliver(pending)
@@ -514,7 +500,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     this.#held.push(pending)
   }
 
-  /** Deliver whatever roma has learned enough to read, in the order it arrived. */
   #release(): void {
     const waiting = this.#held
     this.#held = []
@@ -524,7 +509,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     }
   }
 
-  /** Whether roma holds the state this has to be read against. */
   #readable({ message, press }: Pending): boolean {
     if (this.#self === null) return false
     // Enforced by `fence:discord-press-not-held`.
@@ -564,7 +548,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     }
   }
 
-  /** Whether this message arrived in one of its guild's own channels. */
   #guildChannel(message: DiscordMessage): boolean {
     const channelId = asString(message['channel_id'])
     const channels = this.#channelsOf(asString(message['guild_id']))
@@ -582,7 +565,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     }, interval * this.#jitter())
   }
 
-  /** One heartbeat, or the end of a connection that stopped answering. See `#acknowledged`. */
   #beat(): void {
     if (!this.#acknowledged) {
       this.#reopen(CLOSED_TO_RESUME)
@@ -605,7 +587,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     this.#socket?.send(JSON.stringify(payload))
   }
 
-  /** Leave, so that the close below brings roma back. */
   #reopen(code: number): void {
     const socket = this.#socket
     this.#stopBeating()
@@ -639,14 +620,12 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     }, delay)
   }
 
-  /** Forget the session, so that the next connection identifies rather than resumes. */
   #forgetSession(): void {
     this.#session = null
     this.#sequence = null
   }
 }
 
-/** The ids of whatever is in this list, and nothing at all for what is not one. */
 function idsIn(value: unknown): readonly string[] {
   const entries: readonly unknown[] = Array.isArray(value) ? value : []
   return entries.flatMap((entry) => {

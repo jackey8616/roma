@@ -91,8 +91,6 @@ async function readAll(input: NodeJS.ReadableStream): Promise<string> {
   return body
 }
 
-// Run only when this file is the program. Imported — by a test — it defines
-// `main` and reads nothing.
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
   process.exitCode = await main()
 }

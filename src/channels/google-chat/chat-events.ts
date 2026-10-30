@@ -144,13 +144,11 @@ function conversationKeyOf(
   return direct || thread === null ? spaceName : thread
 }
 
-/** What one event's quoted message came to, once roma had read it. */
 interface QuotedMessage {
   readonly quotation: Quotation | null
   readonly enclosures: readonly PendingEnclosure[]
 }
 
-/** An event that quoted nothing at all. */
 const NOTHING_QUOTED: QuotedMessage = { quotation: null, enclosures: [] }
 
 /**
@@ -187,8 +185,6 @@ function readQuotation(
   // in it, and an attachment that came with it stands on its own already.
   const quotation = text === '' ? null : { text, author }
 
-  // Something quote-shaped arrived and roma understood none of it. See
-  // `ChatEventLogRecord`.
   if (quotation === null && enclosures.length === 0) {
     log?.({
       event: 'quote-unread',

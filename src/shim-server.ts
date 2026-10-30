@@ -238,7 +238,6 @@ export class ShimServer {
     rmSync(this.socketPath, { force: true })
   }
 
-  /** One connection: one line in, one line out, then closed. */
   #serve(socket: Socket): void {
     this.#open.add(socket)
     socket.on('close', () => this.#open.delete(socket))
@@ -260,7 +259,6 @@ export class ShimServer {
     socket.on('error', () => socket.destroy())
   }
 
-  /** What one request is answered with, and what it is written down as. */
   async #answer(line: string): Promise<ShimResponse> {
     let request: ShimRequest
     try {

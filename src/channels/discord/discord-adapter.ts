@@ -58,13 +58,11 @@ export const REMEMBERED = 1_000
 /** Enforced by `fence:discord-acknowledgement-kept-until-the-end`. */
 const ENDS_THE_TASK = new Set(['result', 'failure', 'stopped', 'command-outcome', 'choice'])
 
-/** Where one instruction's messages go, and the message the first of them answers. */
 interface Answering {
   readonly channel: string
   readonly replyTo: string | null
 }
 
-/** The message roma is answering in one Conversation, and where it arrived. */
 interface Answered {
   readonly channel: string
   readonly message: string
@@ -282,7 +280,6 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     }
   }
 
-  /** Where this instruction is said and what it replies to, out of one `#answering` entry. */
   async #answeringFor({ conversationKey, caller }: OutboundInstruction): Promise<Answering> {
     const answered = this.#answering.get(addressOf(conversationKey, caller))
     return {
@@ -307,7 +304,6 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     this.#answering.set(at, { channel, message: id, name: threadName(message.text), place: null })
   }
 
-  /** Which channel this Conversation is answered in, opening its thread if it has none. */
   #place(conversationKey: string, answered: Answered | undefined): Promise<string> {
     if (answered === undefined || answered.channel === conversationKey) {
       return Promise.resolve(conversationKey)
@@ -336,7 +332,6 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     }
   }
 
-  /** Post the acknowledgement, or edit the one this Task already has. */
   async #acknowledge(taskId: string, { channel, replyTo }: Answering, text: string): Promise<void> {
     const posted = this.#acknowledgements.get(taskId)
     if (posted !== undefined) {
@@ -361,7 +356,6 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     }
   }
 
-  /** One call, tried again where trying again could work. ADR-0028's remedy, bounded. */
   async #retrying<T>(call: () => Promise<T>): Promise<T> {
     for (let attempt = 1; ; attempt += 1) {
       try {
@@ -398,7 +392,6 @@ function choiceButtons(
   }))
 }
 
-/** Whether Discord refused this on its own terms, rather than failing to serve it. */
 function refused(error: unknown): error is DiscordRefusal {
   return error instanceof DiscordRefusal && error.status !== 429 && error.status < 500
 }
@@ -411,7 +404,6 @@ function waitBefore(error: unknown, attempt: number): number | null {
   return asked > RETRY_CEILING_MS ? null : asked
 }
 
-/** Waiting, as everything but a test does it. */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     // Unreferenced for `ProgressReporter`'s reason: a wait roma is sitting

@@ -130,13 +130,6 @@ export class HttpDiscordApi implements DiscordApi {
  */
 const DEFERRED_UPDATE_MESSAGE = 6
 
-/**
- * Discord's numbers for the two things a card is made of.
- *
- * A row is a container and a button is what goes in one; the style is the plain
- * grey. Nothing here is a decision — which buttons exist and what they say was
- * settled before this file saw them.
- */
 const ACTION_ROW = 1
 const BUTTON = 2
 const SECONDARY = 2
@@ -144,7 +137,6 @@ const SECONDARY = 2
 /** Enforced by `fence:discord-buttons-fit-one-message`. Enforced by `fence:discord-http-trims-no-menu`. */
 const PER_ROW = 5
 
-/** Buttons as Discord takes them: rows of five, in the order they were given. */
 function componentRows(buttons: readonly DiscordButton[]): unknown[] {
   const rows: unknown[] = []
   for (let at = 0; at < buttons.length; at += PER_ROW) {
@@ -164,7 +156,6 @@ function componentRows(buttons: readonly DiscordButton[]): unknown[] {
 /** Enforced by `fence:discord-text-mentions-nobody`. */
 const ALLOWED_MENTIONS = { allowed_mentions: { parse: [], replied_user: true } } as const
 
-/** Discord's own error code on a response, or null where it said none. */
 async function codeOf(response: Response): Promise<number | null> {
   try {
     return asNumber(asRecord(await response.clone().json())?.['code'])
@@ -186,7 +177,6 @@ function refuseUnless(response: Response, what: string): void {
   )
 }
 
-/** A header that should hold a number of seconds, or null for one that does not. */
 function asSeconds(header: string | null): number | null {
   if (header === null) return null
   const seconds = Number(header)

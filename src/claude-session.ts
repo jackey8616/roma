@@ -462,7 +462,6 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     await this.terminate('SIGKILL')
   }
 
-  /** One NDJSON frame onto stdin — the counterpart of the framing in `#onStdout`. */
   #writeFrame(message: Record<string, unknown>): void {
     this.#process?.write(JSON.stringify(message) + '\n')
   }

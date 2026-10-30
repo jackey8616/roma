@@ -49,7 +49,6 @@ export function discordBinding(discord: DiscordEnv, log: DiscordLog): ChannelBin
   )
 }
 
-/** One WebSocket as the Transport's port: three events renamed, and no decisions. */
 function webSocket(url: string): GatewaySocket {
   const socket = new WebSocket(url)
   return {

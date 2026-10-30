@@ -372,7 +372,6 @@ export function reportsEffort(message: string, effort: string): boolean {
   return names(message, effort)
 }
 
-/** Whether a word appears in a message, on its own and in any casing. */
 function names(message: string, word: string): boolean {
   // Escaped because a level is a plain word today and a regular expression is
   // not the place to assume that stays true.
