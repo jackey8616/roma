@@ -327,6 +327,10 @@ readonly event: 'swap'
 readonly reason: 'credential' | 'model'
 ```
 
+The `spawn` record carries the model as well, though the Audit Record also will:
+the record says what a Task was spent on, the spawn what a *process* was started
+for — a swap says the terms changed, and the spawn after it says to what.
+
 **The Audit Record gains the model.** Optional, and read as the Pinned Model when
 absent. The Q7 argument requires it: a decision whose whole justification is that
 nobody can see afterwards which model spent the shared window does not get to

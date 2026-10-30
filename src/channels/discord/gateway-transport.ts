@@ -15,16 +15,10 @@ import {
 } from './discord-events.js'
 
 /**
- * The socket roma holds open to Discord, as much of it as roma uses.
- *
- * Four members: frames out, frames in, the close roma asks for and the close it
- * is told about. Narrow for `PubSubSubscription`'s reason — what the Transport
- * needs is a duplex of strings, and a port shaped like a WebSocket
- * implementation would make the double a test needs most of one.
- *
- * The close **code** is on both halves and is the one thing here that is not
- * incidental: it is how roma says whether it means to come back, and how Discord
- * says whether it will have it back.
+ * The socket roma holds open to Discord, as much of it as roma uses: narrow, so
+ * a test double need not be most of a WebSocket. The close code on both halves
+ * is how roma says whether it means to come back, and how Discord says whether
+ * it will have it back.
  */
 export interface GatewaySocket {
   /** Send one frame, already JSON. */
@@ -37,11 +31,8 @@ export interface GatewaySocket {
 }
 
 /**
- * Open one connection to the Gateway.
- *
- * Takes the URL because resuming does not go to the same place a first
- * connection does: `READY` names a `resume_gateway_url`, and that is where a
- * resumed session lives.
+ * Open one connection to the Gateway, at `url`: a resume goes to the
+ * `resume_gateway_url` that `READY` named, not where a first connection goes.
  */
 export type ConnectGateway = (url: string) => GatewaySocket
 
@@ -50,15 +41,8 @@ const GUILD_MESSAGES = 1 << 9
 const DIRECT_MESSAGES = 1 << 12
 
 /**
- * What roma identifies as, and — as much as anything here — what it refuses.
- *
- * `GUILDS` is what carries the guild's channel list, and the two message intents
- * are what carry the messages. **`MESSAGE_CONTENT` (`1 << 15`) is deliberately
- * not here**: it is privileged, its exceptions are exactly the messages roma
- * answers — a direct message, a message mentioning the app, and the app's own —
- * and it lives in a developer portal where nothing versions it and no test can
- * see it (ADR-0029). Asking for it is not a tuning knob; it is a decision with
- * an ADR against it.
+ * What roma identifies as. No `MESSAGE_CONTENT` (`1 << 15`). Enforced by
+ * `fence:discord-no-privileged-intent`.
  */
 export const INTENTS = GUILDS | GUILD_MESSAGES | DIRECT_MESSAGES
 
@@ -75,32 +59,23 @@ export type GatewayLogRecord =
   | {
       /**
        * A frame that is not a Gateway payload, or a payload roma cannot read.
-       *
-       * Discord has changed what it sends, or something on the socket is not
-       * Discord. Dropped, so this record is the only trace it leaves — the
-       * Gateway has no dead-letter and no redelivery, so a frame roma cannot
-       * read is a frame that is simply gone (ADR-0028).
+       * Dropped, so this record is the only trace it leaves.
        */
       readonly event: 'gateway-undecodable'
       readonly reason: string
     }
   | {
       /**
-       * The socket itself faulted.
-       *
-       * Written down rather than acted on: what follows an error is a close, and
-       * the close is where reconnecting is decided.
+       * The socket itself faulted. Written down, not acted on: the close that
+       * follows is where reconnecting is decided.
        */
       readonly event: 'gateway-error'
       readonly reason: string
     }
   | {
       /**
-       * The connection ended and roma is going back.
-       *
-       * `resuming` is the difference between a session Discord will replay into
-       * and one roma has to start again, which is the difference between a
-       * missed message and a lost one.
+       * The connection ended and roma is going back. `resuming` says whether
+       * Discord will replay what roma missed, or the gap is lost.
        */
       readonly event: 'gateway-disconnected'
       readonly code: number
@@ -108,26 +83,17 @@ export type GatewayLogRecord =
     }
   | {
       /**
-       * Discord closed the connection with a code that says not to come back.
-       *
-       * A bad token, or an intent roma is not approved for, and roma has
-       * stopped reconnecting.
-       *
-       * Enforced by `fence:discord-refused-for-good-stops`.
+       * Discord closed the connection with a code that says not to come back (a
+       * bad token, or an intent roma is not approved for), and roma has stopped
+       * reconnecting. Enforced by `fence:discord-refused-for-good-stops`.
        */
       readonly event: 'gateway-refused'
       readonly code: number
     }
   | {
       /**
-       * A message arrived before roma knew enough to read it, and is being held.
-       *
-       * No Conversation Key can be derived until the guild's channel list has
-       * arrived: a channel roma has not been told about looks exactly like a
-       * thread, and a top-level message read as a thread is a Session per
-       * message for as long as it lasts. So the event waits rather than being
-       * misread — and there is no queue behind this Transport to wait in, which
-       * is why the wait is roma's own (ADR-0029).
+       * A message arrived before the channel list its Conversation Key is read
+       * against, and is held rather than guessed at.
        */
       readonly event: 'gateway-held'
       /** Which guild's state is missing, or null where what is missing is `READY`. */
@@ -135,11 +101,8 @@ export type GatewayLogRecord =
     }
   | {
       /**
-       * The receiver rejected, which it is not supposed to do.
-       *
-       * A bug on roma's side rather than a fact about the message. There is
-       * nowhere to hand the work back to, so this line is the whole of what
-       * happens next.
+       * The receiver rejected, which it must not: a bug on roma's side. There is
+       * nowhere to hand the work back to, so nothing else happens.
        */
       readonly event: 'gateway-unreceived'
       readonly messageId: string
@@ -147,53 +110,32 @@ export type GatewayLogRecord =
     }
   | {
       /**
-       * A press arrived and roma could not say so inside its three seconds.
-       *
-       * The token is invalidated, so Discord shows the person that their press
-       * failed — while roma goes on and answers it, which is the right way round
-       * and is also why nothing else would ever mention this. Worth an
-       * operator's attention because the ordinary cause is a REST API roma
-       * cannot reach at all, which every other symptom of arrives minutes later
-       * as an answer nobody was told (ADR-0029).
+       * A press roma could not acknowledge inside Discord's three seconds.
+       * Discord shows the person their press failed while roma goes on and
+       * answers it, so nothing else ever mentions this.
        */
       readonly event: 'press-unacknowledged'
       readonly reason: string
     }
 
 /**
- * What this Transport writes: its own records, and the reader's it lends its log
- * to.
- *
- * Not everything the Channel says, which is `binding.ts`'s `DiscordLogRecord`.
+ * This Transport's own records, and those of the reader it lends its log to.
+ * Not the Channel's, which are `binding.ts`'s `DiscordLogRecord`.
  */
 export type GatewayLog = OperatorLog<GatewayLogRecord | DiscordEventLogRecord>
 
 export interface GatewayTransportOptions {
-  /**
-   * The bot token, which is both the credential and the whole of the
-   * authorisation.
-   *
-   * Sent on identify and on every resume. What it reaches is the guilds roma has
-   * been added to, and that membership is the entire boundary (ADR-0029).
-   */
+  /** The bot token, sent on identify and on every resume. */
   readonly token: string
   /** Where a first connection goes. A resumed one goes where `READY` says. */
   readonly url: string
   readonly connect: ConnectGateway
-  /**
-   * How roma reads the message behind a Quotation.
-   *
-   * The Transport's rather than the Adapter's because completing one is I/O and
-   * `toIngress` does none — see `completedQuotation`.
-   */
+  /** How roma reads the message behind a Quotation. */
   readonly api: DiscordApi
   readonly log?: GatewayLog
   /**
-   * How much of the first heartbeat interval to wait, as a fraction.
-   *
-   * Discord asks for the first heartbeat after a random fraction of the interval
-   * so that a fleet of connections does not beat in unison. Injectable only so
-   * that a test can pin the moment; nothing else should pass it.
+   * How much of the first heartbeat interval to wait, as a fraction. Only for a
+   * test to pin the moment; nothing else should pass it.
    */
   readonly jitter?: () => number
 }
@@ -227,28 +169,13 @@ interface Pending {
 /**
  * Discord's inbound path: one WebSocket, held open.
  *
- * ADR-0029's whole inbound decision, and it is the opposite of Chat's in
- * everything but what it owes the Core. Discord delivers messages **only** over
- * the Gateway, so roma opens a socket outward: no inbound port, no webhook
- * deadline, and nothing published onward — the Gateway *is* the Transport.
+ * Settling does nothing in either direction, and a resumed session replays what
+ * roma missed, so a Delivery is named by the message's own snowflake. Enforced
+ * by `fence:discord-settling-does-nothing` and `fence:discord-delivery-named-by-snowflake`.
  *
- * What that costs is durability, and this is where the cost is paid. Settling is
- * a no-op in both directions because there is nowhere to hand a Delivery back
- * to; a resumed session replays what roma missed, which is why a Delivery is
- * named by the message's own snowflake and not by anything minted here
- * (ADR-0028).
- *
- * It decides three things Chat's Transport does not, and the first two for the
- * same reason — they need state that arrives over this socket. Which channels a
- * guild has, which is what tells a thread from a top-level message; and the
- * words behind a Quotation, which cost a REST call `toIngress` may not make. A
- * message that arrives before roma holds the first is **held**, never guessed
- * at.
- *
- * The third is a deadline: a press has to be acknowledged inside three seconds
- * and roma's Core takes minutes, so the acknowledgement goes out from here
- * before the press reaches anything that could answer it. This is why ADR-0029
- * made this Transport a thing that decides rather than a bare port.
+ * A message that arrives before its guild's channel list is held, never guessed
+ * at. A press is acknowledged here, before it reaches the receiver. Enforced by
+ * `fence:discord-press-acknowledged-first`.
  */
 export class GatewayTransport implements Transport<DiscordEvent> {
   readonly #token: string
@@ -289,12 +216,8 @@ export class GatewayTransport implements Transport<DiscordEvent> {
   }
 
   /**
-   * Open the socket and start delivering.
-   *
-   * Resolves once the socket is open rather than once Discord has said `READY`,
-   * which is `Transport.receive`'s own distinction: what the caller is promised
-   * is that nothing was listening before this was called. Waiting for `READY`
-   * would make roma's boot wait on a round trip it can do nothing about.
+   * Open the socket and start delivering. Resolves once the socket is open, not
+   * once Discord has said `READY`, so boot does not wait on that round trip.
    */
   receive(receiver: Receiver<DiscordEvent>): Promise<void> {
     this.#receiver = receiver

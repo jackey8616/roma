@@ -34,13 +34,9 @@ export class DocumentRefused extends Error {
 }
 
 /**
- * The Depot is not somewhere this identity can put a file, and here is which of
- * the ways that can be true.
- *
- * One class carrying three different sentences rather than three classes,
- * because nothing branches on which: what an operator needs is to be told
- * whether to fix a folder id, a share dialog, or a role (ADR-0022 §6), and the
- * sentence is the whole of that.
+ * The Depot is not somewhere this identity can put a file. The message says
+ * which of the ways that can be true, so an operator knows whether to fix a
+ * folder id, a share dialog, or a role.
  */
 export class DepotUnreachable extends Error {
   constructor(message: string) {
@@ -50,11 +46,11 @@ export class DepotUnreachable extends Error {
 }
 
 export interface GoogleDocumentMinterOptions {
-  /** The identity's own name for itself. `client_email`, off the key. */
+  /** `client_email`, off the key. */
   readonly account: string
-  /** The key's private half, PEM. Read from a file by `readDocumentEnv`. */
+  /** The key's private half, PEM. */
   readonly privateKey: string
-  /** Where the exchange happens. The key file's `token_uri`. */
+  /** The key file's `token_uri`. */
   readonly tokenEndpoint: string
   /** The Depot's folder id, as the deployment named it. */
   readonly depot: string
@@ -66,30 +62,11 @@ export interface GoogleDocumentMinterOptions {
 /**
  * The only thing in roma that holds the Document Reach's key.
  *
- * One documented exchange with a signed assertion in front of it, and one
- * documented Drive call for the boot proof. It caches nothing: refreshing before
- * expiry, serving concurrent askers from one mint and discarding a rejected
- * token are `FreshTokens`', which is arithmetic rather than product knowledge.
- *
- * **Written twice rather than shared with `GoogleCloudMinter`, deliberately**
- * (ADR-0022). Enforced by `fence:documents-shares-no-exchange-with-the-cloud`.
+ * Caches nothing: refreshing, single-flight and discarding are `FreshTokens`'.
+ * Shares no exchange with `GoogleCloudMinter`. Enforced by
+ * `fence:documents-shares-no-exchange-with-the-cloud`.
  * Enforced by `fence:cloud-google-named-only-where-bound`.
- *
- * Signed here rather than with a library, exactly as `appJwt` is.
  * Enforced by `fence:documents-never-resolves-a-credential`.
- *
- * **The key never leaves this object.** What the agent is handed expires within
- * the hour. It is **not** out of the agent's reach, and neither is the App's PEM
- * nor the cloud's key: they are files mounted into the container roma runs in,
- * the agent's Claude Code process is a child of roma's, and they share a uid.
- *
- * **Nothing here has been measured.** Every behaviour it relies on — that this
- * exchange answers, that `drive.file` covers the Docs and the Sheets API on
- * files the app created, that a folder's `capabilities` come back this way on a
- * shared drive — is read out of Google's documentation. ADR-0022's Verification
- * status says so first, for the reason ADR-0015's own history gives: that record
- * was in this exact position and was reversed twice by measurement inside one
- * session.
  */
 export class GoogleDocumentMinter implements DocumentMinter {
   readonly account: string
@@ -145,20 +122,12 @@ export class GoogleDocumentMinter implements DocumentMinter {
   }
 
   /**
-   * The Depot, if this identity can see it and add to it.
-   *
-   * The half of the boot proof that is new to roma. Every other proof roma makes
-   * says a credential is *live*; this one says a permission is there, which
-   * ADR-0015 §8 records as the gap on the cloud side — *"it does not prove the
-   * Cloud Reach has the roles a Task will need, so permission-denied still
-   * surfaces inside a Turn"*. Here it costs one call and a `fields=` parameter.
+   * The Depot, if this identity can see it and add to it, or `DepotUnreachable`.
+   * A snapshot at the moment of asking: access lost afterwards is a 403 inside
+   * somebody's Turn.
    *
    * It mints its own token rather than being handed one.
    * Enforced by `fence:documents-depot-mints-its-own-token`.
-   *
-   * **It is a snapshot and not a guarantee.** An account removed from the shared
-   * drive an hour after boot is a 403 inside somebody's Turn. This narrows the
-   * window; it does not close it.
    */
   async depot(): Promise<Depot> {
     const { token } = await this.mint()

@@ -117,6 +117,10 @@ outgrows it, which reads as a hang.
   bounds sit, how many of them there are, and which end of a command goes are
   `render.ts`'s business rather than this decision's; what belongs here is only
   that the Consequence stopped being true.
+  The tool's own bound, `MAX_TOOL_CHARS` in `progress-phrase.ts`, is a judgement
+  rather than a measurement: two recorded `task_started` descriptions are 8 and
+  56 characters, which says the ordinary case is never cut and nothing about the
+  tail.
 - A second Channel that *can* show prose cheaply no longer gets it from
   `TaskProgress`. That is the intended trade: `channel-adapter.ts` says to expect
   the second Channel to change the interface and to prefer changing it then to

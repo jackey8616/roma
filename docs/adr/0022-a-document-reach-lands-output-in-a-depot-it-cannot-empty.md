@@ -415,6 +415,8 @@ The Document Reach's announcement carries the Depot's id, what the agent may do 
 delete — and that this is Google's answer rather than roma's), the `appProperties`
 convention from §7, and one sentence of fact: **everything in the Depot is visible to every
 Conversation and to everyone who can message roma.**
+Each item answers a user story: the Shortcut and that re-running it is free (37, 38), the
+id (34), what may and may not be done (35, 36), the tagging (41).
 
 That sentence is there because of an asymmetry the agent has no way to guess. Every place
 roma has ever given it is private — the Working Directory is one per Session, seen by

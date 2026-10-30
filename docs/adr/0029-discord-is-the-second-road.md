@@ -236,6 +236,11 @@ mistakes it for a channel, and one reading the channel list gets it right.
 all are under the non-privileged `GUILDS` intent, so this costs no REST call and
 no intent.
 
+A message that arrives before its guild's channel list is **held**, not
+classified: a channel roma has not been told about looks exactly like a thread,
+and a top-level message read as one is a Session per message for as long as it
+lasts. There is no queue behind the Gateway to wait in, so the wait is roma's own.
+
 **Every way it can be wrong is the harmless direction**, which is the property
 bought here and it is ADR-0004's own test:
 
@@ -333,6 +338,9 @@ not see a loading state"*, which is exactly right for a design where pressing is
 typing and the card should not move. Every other callback type either posts
 something or shows a spinner, and both would have roma answering a Command twice.
 This is entirely inside the Adapter and presses on no interface.
+A press that misses the deadline goes to the Operator Log: its ordinary cause is
+a REST API roma cannot reach at all, whose every other symptom arrives minutes
+later as an answer nobody was told.
 
 **`custom_id` carries the Conversation Key as well as the Command.** It holds
 *"1-100 characters"*; a snowflake and `/effort high` come to about thirty. Two
@@ -342,6 +350,10 @@ arise, and neither can its Discord-specific cousin, where a card posted by the
 fallback path sits in a parent channel whose id is not the key. ADR-0023's best
 property survives intact: *"What the Adapter remembers between posting a card and
 its being pressed. Nothing."*
+
+A message carries at most twenty-five buttons, five rows of five, rather than the
+forty #181 names: that is the count under Discord's newer component set, which
+roma neither asks for nor sends. roma's own Menus are four, six and six.
 
 Both Menus and the Overflow offer are drawn. ADR-0023 says a Channel that ignores
 `options` is *"correct"* rather than degraded, so the Menus could have waited; the

@@ -315,6 +315,9 @@ depends on resolving it yet.
   reaches the "bot halted" state listed under accepted risks below — without any
   task hanging. A task is abandoned after a bounded number of `api_retry` events
   (or a fixed retry wall-clock), releasing the slot and surfacing the error.
+  roma counts the `api_retry` events it sees rather than reading the attempt
+  number on them, so the budget is its own and not a reflection of the CLI's
+  `max_retries`.
 
 ### Stopping a turn
 
@@ -360,7 +363,7 @@ ADR-0001 specified updating "as stream events arrive", which was written without
 knowing that generation emits no events at all. The throttle has something to
 throttle only because of `--include-partial-messages`. **Verified:** with the flag
 on, the longest a renderer would have waited for new content during generation was
-**2641ms** — shorter than even the 5s floor of the 5–10s throttle above, so every
+**2641ms**, with 194 `text_delta`s across the 72-second Turn — shorter than even the 5s floor of the 5–10s throttle above, so every
 scheduled update had fresh text to show. roma throttles at that floor, because the
 floor costs nothing: every tick has something to show, and none is a wasted call. The prose arrives as
 `stream_event.event.delta.text`; the complete final message still arrives as its
@@ -415,6 +418,9 @@ roughly how much, never what.
       than by inheritance. A refusal that arrives as a terminal event leaves
       the refused process for roma to end; measured to exit in 1–3s on its own
       (#105). Enforced by `fence:pool-one-process-per-transcript`.
+      That terminal event is on stdout and can settle the Turn before the
+      matching stderr chunk arrives on its own pipe, so the Operator Log's
+      `refusal` is written from both rather than named for either.
 - A local mirror of frequently used repositories, cloned from locally at session
   start — faster, and avoids repeated use of git credentials.
 - Egress allowlist: the Anthropic API, our git remote, and package registries

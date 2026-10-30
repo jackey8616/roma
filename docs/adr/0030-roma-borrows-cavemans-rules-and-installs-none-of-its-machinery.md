@@ -458,7 +458,9 @@ not change what happens, it makes roma able to say what happens.*
 - **A fourth `swap` reason.** `'caveman'` beside `'credential'`, `'model'` and
   `'effort'`. Its `from`/`to` are strings, so it joins the arm that already
   carries two — and an operator reading an unexplained respawn gets a fourth
-  answer to *which*.
+  answer to *which*. Where several terms move at once the swap names the model
+  first, the effort second and the Caveman third: the model is the larger fact,
+  and every term is on the `spawn` record that follows anyway.
 - **A third Chosen Record adapter.** `chosenCavemen` beside `chosenModels` and
   `chosenEfforts`. The entry in `CONTEXT.md` that says "used twice" is amended
   rather than left to rot.
