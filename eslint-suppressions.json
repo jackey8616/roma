@@ -36,7 +36,7 @@
   },
   "src/channels/discord/discord-events.ts": {
     "roma/comment-whitelist": {
-      "count": 37
+      "count": 32
     }
   },
   "src/channels/discord/env-config.ts": {
@@ -116,7 +116,7 @@
   },
   "src/cloud/google-cloud-minter.ts": {
     "roma/comment-whitelist": {
-      "count": 5
+      "count": 4
     }
   },
   "src/cloud/reach.ts": {
@@ -126,7 +126,7 @@
   },
   "src/compaction.ts": {
     "roma/comment-whitelist": {
-      "count": 11
+      "count": 6
     }
   },
   "src/core.ts": {
@@ -146,7 +146,7 @@
   },
   "src/documents/google-document-minter.ts": {
     "roma/comment-whitelist": {
-      "count": 26
+      "count": 25
     }
   },
   "src/documents/reach.ts": {
@@ -181,7 +181,7 @@
   },
   "src/github/gh-shim.ts": {
     "roma/comment-whitelist": {
-      "count": 14
+      "count": 9
     }
   },
   "src/github/git-credential-shim.ts": {
@@ -241,7 +241,7 @@
   },
   "src/session-pool.ts": {
     "roma/comment-whitelist": {
-      "count": 99
+      "count": 96
     }
   },
   "src/shared-window.ts": {

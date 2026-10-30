@@ -19,9 +19,7 @@ import { writeToStderr, type OperatorLog } from './operator-log.js'
 import { readApiRetry, type ApiRetry, type ClaudeEvent } from './stream-events.js'
 import type { WorkRoot } from './work-root.js'
 
-/** ADR-0003: at most ten resident processes, evicted least-recently-used. */
 const MAX_RESIDENT = 10
-/** ADR-0003: idle processes are reaped after fifteen minutes. */
 const IDLE_REAP_MS = 15 * 60_000
 const RECLAIM_INTERVAL_MS = 60 * 60_000
 /** Enforced by `fence:pool-spawned-before-is-a-file`. */
@@ -455,16 +453,6 @@ interface Resident {
    * the whole serialisation rule exists to prevent.
    */
   readonly credential: CredentialKind
-  /**
-   * Which model this process was spawned on, and therefore which one its Turns
-   * run on.
-   *
-   * Kept for the reason the credential is: `--model` is fixed at spawn, so a
-   * Session whose next Turn is to run on a different model needs a different
-   * process. It is also what makes a Task finish on the model it started under —
-   * a `/model` mid-Turn moves what the *next* acquisition compares against and
-   * cannot reach the process already serving somebody.
-   */
   readonly model: string
   /**
    * What effort this process was spawned at, and therefore what its Turns run

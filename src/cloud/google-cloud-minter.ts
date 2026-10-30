@@ -15,14 +15,6 @@ export interface CloudMinter extends MintsTokens {
   readonly account: string
 }
 
-/**
- * What a Cloud Token is scoped to, every time, for everybody.
- *
- * A constant, never a setting (ADR-0015 §5). The boundary is meant to be the IAM
- * roles, auditable in Google's own console; a configurable scope would be a
- * second boundary invisible from there, whose failures present as "roma is
- * broken" rather than as "that scope is narrow".
- */
 const SCOPE = 'https://www.googleapis.com/auth/cloud-platform'
 
 /**

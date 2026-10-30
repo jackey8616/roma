@@ -63,10 +63,6 @@ export type CompactionSeverity =
  * operator sees it and nobody is told a wrong story about their thread.
  */
 const BENIGN: readonly string[] = [
-  // Not enough conversation to summarise yet. Benign, and on the evidence the
-  // common one — both captures roma holds are this code, and on the manual path
-  // it is likely to be the most common failure there is, since somebody typing
-  // `/compact` into a short thread is exactly this.
   'too_few_groups',
   // Somebody stopped it. Nothing has gone wrong that they do not already know
   // about, and the reply they are owed is the one `/stop` produces.
@@ -82,7 +78,6 @@ const BENIGN: readonly string[] = [
  * reader cannot recover.
  */
 const UNREDUCIBLE: readonly string[] = [
-  // "conversation could not be reduced below the context limit".
   'exhausted',
   // "attached media exceeds size limits" — unreducible for a different reason
   // and with the same consequence.
