@@ -620,52 +620,10 @@ export class Core {
     try {
       this.#workRoot.writeRecord(record, '')
     } catch {
-      // The Opening was said and only the note of it was lost. Kept claimed
-      // rather than withdrawn, so this Core does not say it twice; a restart
-      // will, once, which is the cheaper of the two ways to be wrong about a
-      // Work Root that cannot be written to.
-      //
-      // Never propagated, and that is the whole reason this is caught at all:
-      // this promise is awaited by everything the message goes on to produce, so
-      // a throw here would reject the Task's own delivery, hand the Delivery
-      // back, and redeliver a Turn that has already been paid for.
+      // Enforced by `fence:core-opening-never-fails-outwards`.
     }
   }
 
-  /**
-   * Relay one of Claude Code's own commands that answers locally, and post what
-   * it said.
-   *
-   * The free half of the Relay list, governed exactly as ADR-0012 left it.
-   * Deliberately not `#runTask`, and the difference is not tidiness: a free
-   * Relay drives no Turn, so none of what makes a Task a Task applies to it —
-   * there are no Attempts, because there is no credential decision to make and
-   * nothing to park; there is no Shared Window reading, because no API call is
-   * made; there is no Overflow, because there is nothing to spend. Reusing
-   * `#runTask` would mean carrying all of that machinery through a path where
-   * every branch of it is dead, and the dead branches are where a later reader
-   * looks for meaning that is not there.
-   *
-   * A **paid** Relay is the other way round: every one of those branches is live,
-   * so it goes down `#runTask` and shares them rather than growing copies. That
-   * is why this method is the free path by name rather than the Relay path — the
-   * split is by cost, which is what ADR-0018 decided governance follows.
-   *
-   * What this does share with work is the two things a free Relay genuinely has
-   * in common with it: it is serialised against its Session, because two
-   * processes on one transcript corrupt it, and it is written down, because the
-   * list it came from is a person's judgement and can be wrong.
-   *
-   * **`/stop` does not reach one, and that is a gap rather than a decision.** A
-   * free Relay is not in `#running`, so `#stop` neither marks it nor counts it —
-   * which means `/stop` in a Conversation whose only work in flight is one of
-   * these answers "nothing to stop" and then the Relay answers anyway. It costs
-   * nothing and cannot be interrupted usefully once it runs, so what is actually
-   * lost is a stale context reading arriving after the Task it queued behind.
-   * Left alone because closing it means giving this the shape of a `RunningTask`
-   * — Attempts it has none of, a park it can never take. ADR-0018 closed the same
-   * gap for the paid half by putting it on the path that already has both.
-   */
   async #runFreeRelay(
     relay: RelayRequest,
     message: IngressMessage,
@@ -727,10 +685,6 @@ export class Core {
           taskId,
         },
       )
-      // Relayed as a `result`, which is what it is: text to be posted as its own
-      // message in the Conversation. No instruction kind of its own, because an
-      // Adapter has nothing to do differently with one — and a fifth kind would
-      // be a concept every Channel had to learn for no change in behaviour.
       instruction = { kind: 'result', ...address, text: turn.text }
     } catch (error) {
       // A Relay that failed carries whatever the Turn said, exactly as a Task
@@ -865,9 +819,6 @@ export class Core {
         // where somebody has just shown they do not know it (ADR-0023).
         return modelChoice(address, unknownModelReason(request.name), request.name)
       case 'report':
-        // No process, no Turn, no money, and no interruption of whatever this
-        // Conversation is waiting on: roma owns the answer, so asking is never
-        // the slow thing.
         return modelChoice(address, this.#modelReport(sessionId), null)
       case 'default':
         this.#models.usePinned(sessionId)
@@ -901,17 +852,6 @@ export class Core {
     return chosen === null ? '' : ` ${takesNoEffort(model, chosen)}`
   }
 
-  /**
-   * Say what effort this Conversation runs at, or move it, and say so.
-   *
-   * `#answerModel`'s twin, never relayed for the same reason (ADR-0016) — the
-   * build calls it `this session only`, and a session is a process.
-   *
-   * `--effort` is echoed nowhere in the stream, where `--model` comes back in
-   * `system/init`. So this reply is roma saying what it will send rather than
-   * reporting what it saw, which is why the Audit Record spells the effort as
-   * weaker evidence than the model beside it.
-   */
   #answerEffort(
     request: EffortRequest,
     conversationKey: string,
@@ -1011,9 +951,6 @@ export class Core {
         // just shown they do not know it (ADR-0023).
         return cavemanChoice(address, unknownCavemanReason(request.name), request.name)
       case 'report':
-        // No process, no Turn, no money, and no interruption of whatever this
-        // Conversation is waiting on: roma owns the answer, so asking is never
-        // the slow thing.
         return cavemanChoice(address, this.#cavemanReport(sessionId), null)
       case 'default':
         this.#cavemen.usePinned(sessionId)
@@ -1118,13 +1055,6 @@ export class Core {
     // Enforced by `fence:core-carry-out-names-its-two`.
     switch (command) {
       case 'clear':
-        // Nothing is torn down. `/clear` is aimed at what the *next* message
-        // reaches: a Task already running in the old Session finishes and still
-        // answers the person who asked, and the process behind it is left to
-        // the pool, which reaps or evicts it like any other Session nobody is
-        // talking to any more. Always true — a Conversation can always be given
-        // a Session with nothing in it, including one that has never had a
-        // Session at all.
         this.#sessions.freshSession(conversationKey)
         return true
       case 'stop':
@@ -1353,20 +1283,6 @@ export class Core {
     return !this.#cavemanPinned && level === CAVEMAN_OFF ? CAVEMAN_NOT_PINNED : level
   }
 
-  /**
-   * Take a Task as far as an ending, however many Attempts that takes.
-   *
-   * More than one only when the Shared Window is spent. A blocked Task is not
-   * over: ADR-0002 has roma say so, quote the reset time, and keep the Task — so
-   * it waits, holding no concurrency slot and no process, and runs again when
-   * the window comes back or when somebody takes Overflow.
-   *
-   * Every Attempt is its own decision about which credential pays. Overflow is
-   * taken for one Attempt rather than for the Task, so a Task that takes it and
-   * then fails again is back on the Shared Window and has to be offered it
-   * afresh — which is also what keeps the monthly cap in front of every metered
-   * Attempt rather than only the first.
-   */
   async #drive(
     task: RunningTask,
     text: string,

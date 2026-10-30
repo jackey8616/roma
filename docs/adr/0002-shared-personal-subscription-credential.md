@@ -111,6 +111,10 @@ On exhaustion the bot states plainly that quota is spent, gives the expected
 reset time, and queues the task. It also offers an **overflow valve**: a button
 that reruns the task on a metered API key.
 
+**Amended — a blocked task waits holding nothing.** It keeps no concurrency slot
+and no process while it waits, and runs again when the window comes back or when
+somebody takes the valve.
+
 **Amended — the expected reset time has a real source.** It is `resetsAt` on the
 `rate_limit_event` above, not an estimate. `overageStatus` and `isUsingOverage`
 on the same event tell us whether overage is even available before we offer the

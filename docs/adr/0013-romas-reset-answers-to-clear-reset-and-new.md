@@ -97,7 +97,11 @@ three to the same `Command`.
 
 The mechanism does not change by one line: the Session Generation moves, nothing
 is torn down, and a Task already running finishes in the old Session and still
-answers the person who asked (`core.ts:461`).
+answers the person who asked (`core.ts:461`). The process behind it is left to the
+pool, which reaps or evicts it like any other Session nobody is talking to any
+more. `/clear` always reports that it did something: a Conversation can always be
+given a Session with nothing in it, including one that has never had a Session at
+all.
 
 ### Why all three rather than a rename
 

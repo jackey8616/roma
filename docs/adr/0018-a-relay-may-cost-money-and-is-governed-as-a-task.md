@@ -356,6 +356,13 @@ person, and is still re-applied when the ADR-0007 pin moves.
 > stoppable, Parkable, Overflowable and audited — exactly as a Task is. A Relay
 > that drives none keeps ADR-0012's arrangements unchanged.
 
+The free half stays off the Task path rather than riding it with the machinery
+switched off. With no Turn there is no credential decision to make and nothing to
+park, no Shared Window reading, and nothing to spend, so carrying Attempts,
+Parking and Overflow through it would be a path on which every one of those
+branches is dead — and a dead branch is where a later reader looks for meaning that
+is not there.
+
 ADR-0012 exempted a Readout from the cap of three by arguing "no Turn, no money,
 no retry", and named the cost it was buying: three people asking what is going
 on should not be able to stop the work they are asking about. Not one clause of

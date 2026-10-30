@@ -231,7 +231,8 @@ model and the Menu. This is not a lesser version of Claude Code's no-argument
 `/model`: that one is `local-jsx`, a picker, and a picker has no form in a chat
 message. Reporting is what that gesture can honestly mean in a text channel, and
 roma can answer it without a process, without a Turn and without money, because
-it owns the answer.
+it owns the answer — and without interrupting whatever the Conversation is waiting
+on, so asking is never the slow thing.
 
 ### The Model Menu is roma's whitelist, not Claude Code's vocabulary
 

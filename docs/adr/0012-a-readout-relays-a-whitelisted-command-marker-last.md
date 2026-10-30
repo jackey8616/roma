@@ -317,6 +317,10 @@ marker's rejected alternative could.
   problem and is not solved here.
 - Nothing here gives roma a number of its own. What a Caller sees is Claude
   Code's own reading, relayed.
+- **No new instruction kind.** A Readout's answer reaches the Adapter as a
+  `result` — text to be posted as its own message — because an Adapter has nothing
+  to do differently with one, and a kind of its own would be a concept every
+  Channel had to learn for no change in behaviour.
 
 ## Alternatives considered
 
