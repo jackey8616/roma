@@ -5402,9 +5402,8 @@ describe('what somebody sent along with a message', () => {
     )
   })
 
-  // The whole of ADR-0011's argument for redeeming late: the bytes are fetched
-  // once, at the moment the Turn is about to run, and not when the message was
-  // read.
+  // ADR-0011: the bytes are fetched once, when the Session is known, and not when
+  // the message was read.
   it('redeems it once, and not before the Session is known', async () => {
     const { core, procFor } = newCore()
     let redemptions = 0

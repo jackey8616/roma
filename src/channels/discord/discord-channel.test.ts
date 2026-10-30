@@ -601,8 +601,7 @@ describe('what roma reads out of a message', () => {
 
 describe('what was sent alongside the message', () => {
   // Redeemed late, as every Enclosure is: the bytes are fetched once the Core
-  // knows the Session and knows they are wanted, which is after Parking and
-  // after any `/stop` (ADR-0011).
+  // knows the Session (ADR-0011), not when the Adapter reads the message.
   it('takes an attachment as an Enclosure, and fetches nothing until it is redeemed', async () => {
     const channel = await messaged(addressed({ attachments: [ATTACHED] }))
     channel.api.holdsAttachment(ATTACHED.url, 'the bytes')
