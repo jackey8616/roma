@@ -318,6 +318,13 @@ depends on resolving it yet.
   roma counts the `api_retry` events it sees rather than reading the attempt
   number on them, so the budget is its own and not a reflection of the CLI's
   `max_retries`.
+  The budget is **five retries or sixty seconds, whichever comes first**. Against
+  the observed backoff (from 580ms, retries at roughly 0.6s, 1.2s, 2.5s, 5s and
+  9s) the count fires, in under twenty seconds. The window is the backstop for a
+  backoff already at ~35s between attempts, which the count would not reach in
+  time, and bounds a wedged slot at a minute either way. Five rather than three so
+  that a genuine transient overload still gets a few attempts: a Task abandoned
+  here is one the person has to send again.
 
 ### Stopping a turn
 
@@ -372,7 +379,7 @@ separate-final-message rule is served from that event rather than from the delta
 
 **Stall detection stays declined, and the evidence for it is narrower than it
 was.** The original ground was that generation is silent, which makes "stalled"
-and "thinking" indistinguishable. That no longer holds: with the flag on, **0 of
+and "thinking" indistinguishable. That no longer holds (#2): with the flag on, **0 of
 207** mid-stream gaps in a 72-second generating turn exceeded 3s. What survives is
 tool execution. The stream marks a tool starting and then says nothing until it
 finishes — **25339ms** of silence in a turn whose largest generating gap was 208ms

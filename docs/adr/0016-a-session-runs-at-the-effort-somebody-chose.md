@@ -241,7 +241,9 @@ models because a costlier model is a bigger share of a window everybody stands i
 and roma cannot check what it hands over. Neither reason survives here: the levels
 are enumerable, they are all Claude Code's own, and a Caller asking for more
 thinking on a task they are about to wait for is the feature rather than the
-risk.
+risk. The build's one alias, `med`, is not on it: the Menu is roma's outright,
+nothing is relayed and nothing is compared against Claude Code, so an alias would
+be a spelling roma had chosen to claim rather than one it inherited.
 
 **`ultracode` is off the Menu and reachable only through `ROMA_EFFORT`.** It is
 not a level — `hBc = {ultracode:"xhigh"}` — it is `xhigh` plus dynamic workflow

@@ -404,7 +404,9 @@ exits before filtering for exactly this reason, and roma does the same.
 The **Caveman Menu** offers `off`, `lite`, `full`, `ultra`, `wenyan-full`, and
 `default` — six, the same width as the Effort Menu, and under the ten buttons on
 one message ADR-0023 declines to open. `wenyan` is not on it because it is an
-alias. `commit`, `review` and `compress` are not on it because they defer to
+alias — caveman's hook folds it into `wenyan-full`, and roma relays nothing to that
+hook, so a second accepted spelling would be one roma chose to claim rather than
+inherited, and the Audit Record would carry two spellings for one level. `commit`, `review` and `compress` are not on it because they defer to
 skills roma does not install and would point at nothing.
 
 `wenyan-lite` and `wenyan-ultra` are accepted by `ROMA_CAVEMAN` and never drawn,

@@ -5,12 +5,8 @@ import { EFFORT_MENU, isPinnableEffort, ULTRACODE } from './effort-menu.js'
 import type { StartRomaOptions } from './startup.js'
 
 /**
- * Everything a deployment tells roma about itself, short of the Channel.
- *
- * The Channel's own settings are not here and cannot be: what it takes to reach
- * one is that Channel's business, and naming any of it in the Core is the thing
- * the whole split exists to prevent. A Channel Adapter reads its own environment
- * in its own directory.
+ * Everything a deployment tells roma about itself, short of the Channel: a
+ * Channel Adapter reads its own environment in its own directory.
  */
 export type RomaEnv = Pick<
   StartRomaOptions,
@@ -25,28 +21,21 @@ export type RomaEnv = Pick<
   | 'maxConcurrentTasks'
 > & {
   /**
-   * roma's own directory: the Credential Shim socket, and the gitconfig every
-   * Session runs under.
+   * roma's own directory, `ROMA_SHIM_DIR`: the Credential Shim socket, and the
+   * gitconfig every Session runs under. Named for the Shims rather than the
+   * socket because it holds both.
    *
-   * Named for the Shims rather than for the socket, because it holds both and a
-   * name that mentioned one of them would go on being read as the whole of what
-   * is in there. `ROMA_SHIM_DIR` is the variable, and the two agree.
-   *
-   * Not part of the `Pick` above because `startRoma` takes it inside `minting`,
-   * alongside the two things only the composition root can supply — a Minter,
-   * and the text of that gitconfig. This is the half of it an environment can
-   * name.
+   * `startRoma` takes it inside `minting`, beside what only the composition root
+   * can supply (a Minter, and the text of that gitconfig).
    */
   readonly shimDir: string
 }
 
 /**
  * The environment did not say enough, or said something roma cannot use.
- *
- * Carries every problem rather than the first, for the reason
- * `StartupSelfCheckFailed` does: standing roma up means setting all of these at
- * once, and a refusal that named one at a time would turn that into a sequence
- * of boots.
+ * Carries every problem rather than the first: standing roma up means setting all
+ * of these at once, and a refusal that named one at a time would turn that into
+ * a sequence of boots.
  */
 export class ConfigurationMissing extends Error {
   readonly problems: readonly string[]
@@ -67,20 +56,17 @@ export type Environment = Readonly<Record<string, string | undefined>>
 
 /**
  * One Channel's own reader: its settings, or null where this deployment does not
- * serve that Channel at all.
- *
- * Null and a refusal are different answers (ADR-0028): null only where the
- * deployment named none of the Channel's variables, and a refusal where it named
- * some of them. Enforced by `fence:env-a-channel-named-is-served-or-refused`.
+ * serve that Channel at all. Null only where the deployment named none of the
+ * Channel's variables, and a refusal where it named some of them.
+ * Enforced by `fence:env-a-channel-named-is-served-or-refused`.
  */
 export type ReadChannelEnv<ChannelEnv> = (env: Environment) => ChannelEnv | null
 
 /**
- * Whether this deployment named nothing at all of one Channel's configuration —
- * the first of `ReadChannelEnv`'s two answers, asked in one place.
- *
- * Every variable that Channel reads goes in, optional ones included. Enforced by
- * `fence:env-a-channel-named-is-served-or-refused`.
+ * Whether this deployment named nothing at all of one Channel's configuration:
+ * the first of `ReadChannelEnv`'s two answers. Every variable that Channel reads
+ * goes in, optional ones included.
+ * Enforced by `fence:env-a-channel-named-is-served-or-refused`.
  */
 export function unconfigured(env: Environment, names: readonly string[]): boolean {
   return names.every((name) => envValue(env, name) === null)
@@ -89,22 +75,12 @@ export function unconfigured(env: Environment, names: readonly string[]): boolea
 /**
  * Read the Core's settings, every Channel's, the Minter's, the Cloud Reach's and
  * the Document Reach's, and refuse once with what is wrong with any of them.
+ * Every reader but the Core's is passed in, and the Channels are named by the
+ * keys of `readChannelEnvs`.
  *
- * One refusal rather than five, because they are one configuration: somebody
- * standing roma up sets all of it in one go, and being told about the missing
- * subscription only after fixing the missing audit root turns that into a
- * sequence of boots. Every other reader is passed in rather than named, and for
- * the same reason in each case — which Channels roma has, which forge it mints
- * against, which cloud it reaches and whose documents it writes are not things
- * the Core is allowed to know. That extends to their names: the Channels are a
- * record whose keys the composition root chose, so the refusal below can list
- * them without this file ever naming one.
- *
- * The Channels and the last two Reaches are the readers that may legitimately
- * find nothing. They differ in what nothing means. Most deployments have neither
- * Reach and that is an answer; a deployment with no Channel at all would boot,
- * subscribe to nothing and answer nobody, so **at least one is required** and
- * which one is the deployment's to pick.
+ * The Channels and the last two Reaches may find nothing. Either Reach may be
+ * absent, but **at least one Channel is required**: with none, roma would boot,
+ * subscribe to nothing and answer nobody.
  */
 export function readConfiguration<
   Channels extends Record<string, ReadChannelEnv<unknown>>,
@@ -163,7 +139,6 @@ export function readConfiguration<
 /**
  * A value that was only missing if the refusal above already fired. Throwing
  * here is a bug in the reader rather than a fact about the environment.
- *
  * Enforced by `fence:env-certain-not-a-cast`.
  */
 export function certain<T>(value: T | null): T {
@@ -188,13 +163,8 @@ function attempted<T>(read: () => T, problems: string[]): T | null {
 }
 
 /**
- * Read roma's own settings out of the environment.
- *
- * Environment variables rather than a file, because every one of these is
- * either a secret or a path that differs per host — which is what an environment
- * is for — and because a deployment already has to put the Shared Window token
- * somewhere roma can see it.
- *
+ * Read roma's own settings out of the environment: environment variables rather
+ * than a file, because every one is a secret or a path that differs per host.
  * Nothing here provisions anything or has a fallback that would quietly change
  * what roma runs on. Enforced by `fence:env-no-fallback-for-what-cannot-be-lost`.
  */
@@ -314,12 +284,9 @@ function readOverflow(
 }
 
 /**
- * One variable, or null where the environment does not really have it.
- *
- * Exported because a Channel Adapter reads its own environment in its own
- * directory and these three rules are roma's rather than any Channel's — a
- * second copy would drift, and the first thing to drift would be the empty-string
- * rule below, which is the one that is not obvious.
+ * One variable, or null where the environment does not really have it; every
+ * reader of the environment goes through it.
+ * Enforced by `fence:env-read-through-env-value`.
  */
 export function envValue(env: Environment, name: string): string | null {
   const found = env[name]

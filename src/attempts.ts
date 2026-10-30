@@ -21,39 +21,25 @@ const MIN_PARK_MS = 60_000
  * What one credential paid for, and what it bought.
  *
  * `costUsd` is the sum of the Attempts anything priced, and null only where
- * nothing priced any of them — a floor rather than a claim, which is the same
- * promise the Audit Record makes about it. `outputTokens` is the same sum of the
- * same Attempts' other figure, under the same promise. `turnMs` is the most
- * recent Attempt that produced a Turn, because it answers "how long was Claude
- * Code working" and an Attempt that produced none did none of that work.
+ * nothing priced any of them: a floor rather than a claim. `turnMs` is the most
+ * recent Attempt that produced a Turn.
  */
 export interface Spend {
   readonly costUsd: number | null
   readonly turnMs: number | null
   /**
    * What the Turns this credential paid for produced, or null where nothing
-   * measured any of them.
-   *
-   * Accumulated beside the money rather than reported once for the Task,
-   * because a Task blocked on the Shared Window and rerun on Overflow bought
-   * output on two bills — and the Audit Record puts what a Task cost and what it
-   * produced on one line per credential, which is arithmetic that only works
-   * where both halves were split the same way.
+   * measured any of them: summed like `costUsd`, and split by credential the same
+   * way, so that the two on one Audit Record describe the same Turns.
    */
   readonly outputTokens: number | null
   /**
    * The Compaction this credential paid for, or null where it paid for none.
+   * Enforced by `fence:attempts-compaction-on-its-attempt`.
    *
-   * Here rather than on the Task because a Compaction is a cost fact and this is
-   * where a Task's costs are split: a Task blocked on the Shared Window and rerun
-   * on Overflow produces two records, and the Compaction belongs on whichever of
-   * them carries the money it spent. Filed anywhere else it would say a metered
-   * bill included a Compaction the subscription paid for.
-   *
-   * The first one, where an Attempt somehow produced two. The field answers
-   * whether this Task's cost includes a Compaction and who asked for it, not how
-   * many there were — and `trigger` cannot differ between two of them within one
-   * Task, since what a Task is decides it.
+   * The first one, where an Attempt produced two: the field says whether this
+   * Task's cost includes a Compaction and who asked for it, not how many there
+   * were.
    */
   readonly compaction: Compaction | null
 }
@@ -80,21 +66,17 @@ export interface Park {
   /** When the provider says the window comes back, in seconds. */
   readonly resetsAt: number
   /**
-   * Whether the provider would sell overage on this window.
-   *
-   * What the window said, not whether roma can act on it: an Overflow credential
-   * has to be configured too, and that is the Core's to know.
+   * Whether the provider would sell overage on this window: what the window
+   * said, not whether roma has an Overflow credential to act on it.
    */
   readonly overageAllowed: boolean
 }
 
 /**
- * How long to wait for a window that comes back at `resetsAt`, from `now`.
- *
- * Separate from booking the park, and called when the timer is armed rather than
- * when the wait is decided: the Conversation is told it is blocked in between,
- * and a Channel that took a while to accept that message would otherwise push
- * the Task's wake-up out by however long it took.
+ * How long to wait for a window that comes back at `resetsAt`, from `now`. Call
+ * it when the timer is armed, not when the park is booked: the Conversation is
+ * told it is blocked in between, and however long that took would otherwise push
+ * the wake-up out.
  *
  * Never sooner than a minute. Enforced by `fence:attempts-park-floor`.
  */
@@ -111,19 +93,12 @@ interface Attempt {
 }
 
 /**
- * Every Attempt one Task has made, and what may be tried next.
- *
- * A Task is not one try at Claude Code. The Shared Window can block it, Overflow
- * can be taken on it, and the window can come back — so `CONTEXT.md`'s "one Task
- * drives one Turn" describes the path where nothing goes wrong, and up to three
- * Turns is the real bound. This is the layer that sits between the two, and it
- * exists because the alternative was eleven mutable fields on a record that
- * seven methods wrote to, with every rule between them stated in prose.
+ * Every Attempt one Task has made, and what may be tried next. It replaced
+ * eleven mutable fields on a record that seven methods wrote to.
  *
  * It decides nothing about time and performs no effect: it is asked whether a
- * park is owed and on what terms, and the Core is what owns the timer, the
- * promise, and telling the Conversation. That is what makes `MIN_PARK_MS` a
- * number a test can read rather than an interval it has to sit through.
+ * park is owed and on what terms, and the Core owns the timer, the promise, and
+ * telling the Conversation.
  */
 export class Attempts {
   readonly #made: Attempt[] = []
@@ -137,10 +112,9 @@ export class Attempts {
   }
 
   /**
-   * Start an Attempt, and say which credential is paying for it.
-   *
-   * Starting one clears the last one's reading of the Shared Window. Enforced by
-   * `fence:attempts-reading-cleared-at-start`.
+   * Start an Attempt, and say which credential is paying for it. Starting one
+   * clears the last one's reading of the Shared Window.
+   * Enforced by `fence:attempts-reading-cleared-at-start`.
    */
   begins(): CredentialKind {
     this.#window = null
@@ -149,12 +123,8 @@ export class Attempts {
   }
 
   /**
-   * Claude Code was given the Task's message on the Attempt in flight.
-   *
-   * Deliberately not named for the Turn beginning, though that is what prompts
-   * it: what this records is that the message went, which is the moment the
-   * Attempt stops being free with certainty. A Turn that begins and reports
-   * nothing still spent whatever it spent.
+   * Claude Code was given the Task's message on the Attempt in flight: from here
+   * the Attempt is no longer certainly free, even if its Turn reports nothing.
    */
   sent(): void {
     const attempt = this.#current
@@ -167,14 +137,8 @@ export class Attempts {
   }
 
   /**
-   * A Compaction happened inside the Attempt in flight.
-   *
-   * Kept rather than acted on: a successful Compaction prompts no decision at
-   * all — roma cannot prevent it, delay it, or react to it — so it is a fact
-   * about what this Attempt cost and nothing else. The Operator Log is what roma
-   * decided, and this is not that.
-   *
-   * The first one stands, for the reason `Spend.compaction` gives.
+   * A Compaction happened inside the Attempt in flight. Kept, not acted on; the
+   * first one stands.
    */
   compacted(compaction: Compaction): void {
     const attempt = this.#current
@@ -183,13 +147,9 @@ export class Attempts {
 
   /**
    * The Compaction that happened inside this Task, whichever Attempt paid for
-   * it, or null where none did.
-   *
-   * Deliberately blind to the credential, unlike `spentOn`. That one answers "who
-   * paid for this", which is a question about a bill and has to be split by
-   * credential; this one answers "did the thing the Caller asked for happen", and
-   * a `/compact` that was blocked and reran on Overflow compacted once either
-   * way. The first one stands, for the reason `Spend.compaction` gives.
+   * it, or null where none did. Blind to the credential, unlike `spentOn`: a
+   * `/compact` that was blocked and reran on Overflow compacted once. The first
+   * one stands.
    */
   compaction(): Compaction | null {
     return this.#made.find((attempt) => attempt.compaction !== null)?.compaction ?? null
@@ -197,10 +157,7 @@ export class Attempts {
 
   /**
    * What Claude Code said its credential resolved to, off a Turn's `system/init`.
-   *
-   * Nullable because the event's own field is: `"none"` under the OAuth token is
-   * a reading, but an init that carries nothing is not, and the Audit Record
-   * says so rather than inventing one.
+   * Null where the init carried nothing, which is not the reading `"none"`.
    */
   reported(apiKeySource: string | null): void {
     this.#apiKeySource = apiKeySource
@@ -213,9 +170,8 @@ export class Attempts {
   }
 
   /**
-   * Pay for the next Attempt with this credential.
-   *
-   * The next one, not the one in flight. Enforced by `fence:attempts-pay-for-the-next`.
+   * Pay for the next Attempt with this credential: the next one, not the one in
+   * flight. Enforced by `fence:attempts-pay-for-the-next`.
    *
    * Overflow applies to one Attempt, so the caller moves it back afterwards.
    * Enforced by `fence:core-overflow-is-for-one-attempt`.
@@ -226,13 +182,8 @@ export class Attempts {
 
   /**
    * The credential the Attempt that ended this Task was paid for by, or null
-   * before there has been one.
-   *
-   * The last Attempt, because the Core makes exactly one before it answers or
-   * parks — so the last one is always the Attempt the Task ended on: the answer
-   * where there is one, and the last thing tried where there is not.
-   *
-   * Enforced by `fence:answered-by-the-last-attempt`.
+   * before there has been one: the last Attempt, since the Core makes exactly one
+   * before it answers or parks. Enforced by `fence:answered-by-the-last-attempt`.
    */
   answeredOn(): CredentialKind | null {
     return this.#made.at(-1)?.credential ?? null
@@ -244,12 +195,12 @@ export class Attempts {
   }
 
   /**
-   * What one credential paid for, apart from what any other paid for. Enforced
-   * by `fence:attempts-bills-kept-apart`.
+   * What one credential paid for, apart from what any other paid for.
+   * Enforced by `fence:attempts-bills-kept-apart`.
    *
    * Zero only where no message had gone by that point in the Task; a Turn that
-   * began and reported nothing is null. Enforced by
-   * `fence:attempts-unpriced-is-not-free`.
+   * began and reported nothing is null.
+   * Enforced by `fence:attempts-unpriced-is-not-free`.
    */
   spentOn(credential: CredentialKind): Spend {
     // Enforced by `fence:attempts-unpriced-is-not-free`.
@@ -278,17 +229,13 @@ export class Attempts {
   }
 
   /**
-   * Book a wait on the Shared Window, or null where none is owed.
-   *
-   * Null where the last Attempt failed for any other reason — the reading is that
-   * Attempt's own, cleared when it started, so a failure carrying none is a
-   * failure the window had nothing to do with. Null too where the event will not
-   * say when the window comes back, and once a Task has waited `MAX_PARKS` times.
+   * Book a wait on the Shared Window, or null where none is owed: where the last
+   * Attempt saw no spent window, where the event will not say when the window
+   * comes back, and once a Task has waited `MAX_PARKS` times.
    * Enforced by `fence:attempts-park-is-bounded`.
    *
-   * Says when the window comes back rather than how long to wait for it, and
-   * touches no clock at all — `waitMsUntil` is the other half, called when the
-   * timer is armed.
+   * Says when the window comes back, not how long to wait, and touches no clock:
+   * `waitMsUntil` is the other half, called when the timer is armed.
    */
   takePark(): Park | null {
     const window = this.#window

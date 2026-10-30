@@ -78,7 +78,9 @@ read here did not. The **exceptions** to the message-content intent — DMs,
 messages mentioning the app, and the app's own messages — which come from
 Discord's developer support article rather than from the API reference, and which
 the whole of the *No privileged intent* decision below rests on. That the CDN URLs
-on attachments **expire**.
+on attachments **expire**. Of these the 2000 is the one to check against a real
+guild first: wrong *high*, it is a message Discord refuses whole, which is a long
+answer that reaches nobody.
 
 **Not stated anywhere read, and load-bearing.** Whether `referenced_message` and
 `message_snapshots` content are *also* emptied by the message-content intent — the

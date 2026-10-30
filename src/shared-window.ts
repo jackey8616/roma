@@ -22,19 +22,9 @@ export function spentUntil(window: SharedWindow): number | null {
 
 /**
  * Whether Overflow is worth offering for a Task this window has blocked.
- *
- * Asked of the event rather than assumed from configuration, because the
- * provider has the last word: offering a valve it will refuse spends somebody's
- * attention on a button and then fails, at the moment they are already waiting.
- *
- * `overageStatus` carries the same three values as `status` and they mean the
- * same things about a different pot, so `allowed_warning` is offered here too.
  * Enforced by `fence:window-overflow-offered-on-warning`.
  *
- * `rejected` is the one that means no, and `overageDisabledReason` says which
- * kind of no — `no_limits_configured` in every capture roma holds.
- *
- * False for a Turn already using overage. There is nothing left to offer, and an
+ * False for a Turn already using overage: there is nothing left to offer, and an
  * offer would read as though the metered spending had not already started.
  */
 export function overflowOffer(window: SharedWindow): boolean {
