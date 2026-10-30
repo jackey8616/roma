@@ -145,7 +145,9 @@ prevent.
 today, and those sentences already name the whole Menu. So the buttons are purely
 additive: a Channel that ignores `options` is not degraded, it is *correct*, and
 that is what keeps ADR-0003's channel-agnostic Core honest without a capability
-flag. A second Channel gains this feature by doing nothing.
+flag. A second Channel gains this feature by doing nothing. In Google Chat the
+renderer writes only the text, and the buttons are the Adapter's, because they
+are a card rather than words.
 
 ### Two of the four replies carry one
 

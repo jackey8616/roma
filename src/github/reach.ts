@@ -13,10 +13,6 @@ import type { Installation, InstallationMinter } from './installation.js'
  * the forge credential and now no way to spell one.
  */
 export function githubReach(minter: InstallationMinter): AvailableReach<'code'> {
-  // What `prove` found, held for `announce`. The two used to be one expression in
-  // `startRoma` — the announcement took the Installation as an argument, so
-  // announcing before proving was unspellable. It is spellable now, which is why
-  // the throw below exists.
   let installation: Installation | null = null
 
   return {

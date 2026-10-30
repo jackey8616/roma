@@ -358,7 +358,8 @@ knowing that generation emits no events at all. The throttle has something to
 throttle only because of `--include-partial-messages`. **Verified:** with the flag
 on, the longest a renderer would have waited for new content during generation was
 **2641ms** — shorter than even the 5s floor of the 5–10s throttle above, so every
-scheduled update had fresh text to show. The prose arrives as
+scheduled update had fresh text to show. roma throttles at that floor, because the
+floor costs nothing: every tick has something to show, and none is a wasted call. The prose arrives as
 `stream_event.event.delta.text`; the complete final message still arrives as its
 own `assistant` event, 85ms before the terminal `result`, so the
 separate-final-message rule is served from that event rather than from the deltas.

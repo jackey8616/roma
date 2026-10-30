@@ -9,13 +9,6 @@ import {
   type ClaudeEvent,
 } from './stream-events.js'
 
-/**
- * How often an acknowledgement may be updated, at most.
- *
- * The floor of ADR-0003's 5–10 second range, because the floor costs nothing:
- * with `--include-partial-messages` the longest measured wait for new content
- * was 2641ms, so every tick has something to show and none is a wasted call.
- */
 const PROGRESS_INTERVAL_MS = 5_000
 
 export interface ProgressReporterOptions {
@@ -76,14 +69,6 @@ export class ProgressReporter {
    * and removes the race entirely.
    */
   #sending: Promise<void> = Promise.resolve()
-  /**
-   * How much the Turn has written so far, summed across its deltas.
-   *
-   * The length rather than the prose. Nothing downstream shows the answer as it
-   * is written — ADR-0010 — so accumulating it would be holding a second copy of
-   * a whole Turn's output (17706 characters, in the capture this was designed
-   * against) for a reader that does not exist.
-   */
   #characters = 0
 
   constructor({ deliver, updates = true }: ProgressReporterOptions) {

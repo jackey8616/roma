@@ -69,10 +69,6 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
     case 'result': {
       // Enforced by `fence:gchat-result-is-its-own-message`.
       const messages = split(to, instruction.text)
-      // ADR-0002 requires the spend shown in the reply, and only where somebody
-      // chose to spend it. Its own message rather than appended to the answer:
-      // the answer is what gets quoted later, and a price tag inside it would be
-      // quoted along with it.
       if (instruction.overflowCostUsd !== undefined) {
         messages.push(overflowSpentText(instruction.overflowCostUsd))
       }
@@ -85,9 +81,6 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
       // told nothing at all about a Task that is already dead.
       return split(to, instruction.reason)
     case 'choice':
-      // Only the text. The buttons are the Adapter's, because they are a Chat
-      // card rather than words — and the text already names the Menu, so a
-      // message that lost them would still be the whole answer (ADR-0023).
       return split(to, instruction.text)
     case 'stopped':
       return [`${to}Stopped.`]

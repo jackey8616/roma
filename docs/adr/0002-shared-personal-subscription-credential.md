@@ -143,6 +143,9 @@ is now the statement of the rule. A window that is spent but carries no
 - Spend is shown in the reply, and a **monthly overflow cap** is enforced;
   beyond it, overflow is refused outright and the owner is notified. Without a
   cap, "off by default" would be ceremony rather than protection.
+  - **The spend is shown only where somebody chose to spend it, and as a
+    message of its own** rather than appended to the answer: the answer is what
+    gets quoted later, and a price tag inside it would be quoted along with it.
   - **The cap is a required part of configuring overflow at all**, not a setting
     with a default: a default would be roma deciding how much of somebody's money
     to spend on their behalf. A metered key and a cap are configured as one

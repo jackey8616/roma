@@ -82,10 +82,6 @@ export async function shortcut({
       session: shim.sessionId,
       operation: 'get',
       credential,
-      // Null, and there is nothing to put here. Either token reaches the whole of
-      // its own Reach, so unlike `git` naming a repository there is no
-      // destination to announce — and asking the agent to declare one would
-      // record an unverifiable self-report (ADR-0015 §10, ADR-0022 §9).
       path: null,
     })
   } catch (error) {
@@ -102,11 +98,6 @@ export async function shortcut({
     return FAILED
   }
 
-  // The bare form is the common one and is a one-liner —
-  // `curl -H "Authorization: Bearer $(roma-…-token)"` — with nothing to parse,
-  // because a tool invented to save the model's output tokens should not require
-  // the model to write a parser to use it. The trailing newline is what every
-  // command writes and what `$(…)` strips.
   out.write(
     argv.includes('--json')
       ? `${JSON.stringify({

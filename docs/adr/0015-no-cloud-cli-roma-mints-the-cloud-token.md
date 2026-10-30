@@ -274,7 +274,8 @@ with somebody waiting at the other end.
 token, its expiry and the identity's account. The bare form is the common one and
 is a one-liner — `curl -H "Authorization: Bearer $(roma-cloud-token)"` — with
 nothing to parse, because a tool invented to save the model's output tokens
-should not require the model to write a parser to use it. Expiry is in `--json`
+should not require the model to write a parser to use it. It ends in a newline, as
+every command's output does, and `$(…)` strips it. Expiry is in `--json`
 rather than the default because re-running is free and stateless: an agent does
 not need to reason about how long it has left, it needs to ask again.
 

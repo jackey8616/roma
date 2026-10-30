@@ -71,7 +71,7 @@
   },
   "src/channels/google-chat/render.ts": {
     "roma/comment-whitelist": {
-      "count": 37
+      "count": 30
     }
   },
   "src/channels/main.ts": {
@@ -159,11 +159,6 @@
       "count": 13
     }
   },
-  "src/github/reach.ts": {
-    "roma/comment-whitelist": {
-      "count": 4
-    }
-  },
   "src/github/shims.ts": {
     "roma/comment-whitelist": {
       "count": 1
@@ -176,7 +171,7 @@
   },
   "src/progress-reporter.ts": {
     "roma/comment-whitelist": {
-      "count": 20
+      "count": 18
     }
   },
   "src/relays.ts": {
@@ -221,7 +216,7 @@
   },
   "src/shortcut.ts": {
     "roma/comment-whitelist": {
-      "count": 18
+      "count": 9
     }
   },
   "src/startup-self-check.ts": {
