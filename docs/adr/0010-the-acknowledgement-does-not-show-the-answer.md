@@ -71,8 +71,8 @@ gravestone. Verified by hand against a real Workspace — a reply inside a threa
 deleted, leaves the marker — and app authentication is not going to render more
 cleanly than a person does. It also cannot fix the half of the complaint that
 was reported from a phone: a delete does not retract a push notification that
-already fired, so the two buzzes remain either way. And it would widen `ChatApi`
-from the two calls it deliberately has to three.
+already fired, so the two buzzes remain either way. And it would add a delete to
+`ChatApi`, a call nothing else needs.
 
 **Edit the Acknowledgement into the final answer** — one message, one
 notification, streaming preserved. This is the only option that reduces the

@@ -252,10 +252,12 @@ that last line — and each has its own bullet below. Enforced by
       this is the existing mechanism with one more reason to fire. *Not enforced
       (ADR-0031).*
   - **A resume that finds no transcript re-creates the session.** The pool reads
-    the existence of the session's working directory as the record that the
-    session exists, which is what makes the `--session-id`-then-`--resume` rule
-    survive a restart of roma. The directory is created before the process is,
-    so a session whose first process died before Claude Code wrote a transcript
+    a spawn file inside the session's working directory, `.roma-session`, as the
+    record that the session exists, which is what makes the `--session-id`-then-`--resume` rule
+    survive a restart of roma. *(Amended by #105, #107: it used to read the directory
+    itself, and an Enclosure written before the first process created the
+    directory and made roma resume a session it never started.)* The record is
+    written before the process starts, so a session whose first process died before Claude Code wrote a transcript
     would otherwise be resumed forever at something that is not there — the CLI
     answers `No conversation found with session ID: …` and exits. On that, and
     only that, the pool spawns again with `--session-id`. Enforced by
@@ -407,8 +409,8 @@ roughly how much, never what.
   days idle. A shared working directory would let concurrent sessions corrupt
   each other's checkouts, with symptoms that are very hard to diagnose.
   - **Reclaiming a working directory also forgets that the session exists**, and
-    that is a known hole rather than a design. The pool reads the directory as
-    the record of existence, but the transcript `--resume` needs belongs to
+    that is a known hole rather than a design. The pool reads the spawn file in
+    the directory as the record of existence, but the transcript `--resume` needs belongs to
     Claude Code and is not ours to delete — so a conversation that goes quiet for
     more than 7 days and then comes back is spawned with `--session-id` at an id
     that may still have a transcript. **What the CLI does with that is
