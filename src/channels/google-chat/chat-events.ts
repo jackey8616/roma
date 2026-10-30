@@ -182,12 +182,6 @@ function readQuotation(
   // neither: printing it is all roma ever does with a person's name.
   const author = asString(snapshot?.['sender'])
   const text = (asString(snapshot?.['text']) ?? '').trim()
-  // Attachments on the quoted message, which Chat documents on the snapshot for
-  // a forward. Fetched exactly as the Caller's own are, over the same
-  // `media.download` and the same `chat.bot` — ADR-0021's "never fetches" is
-  // about the quoted *message*, and bytes are not it. Where the ref turns out
-  // not to be roma's to redeem, the Task ends with the reason, which is the path
-  // `driveDataRef` already made ordinary.
   const enclosures = snapshot === null ? [] : readEnclosures(snapshot, author, download, log)
   // Only where there are words. A quotation with no text is a tag with nothing
   // in it, and an attachment that came with it stands on its own already.

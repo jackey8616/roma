@@ -414,13 +414,6 @@ function checkInit(init: SystemInit, credential: Credential, model: string): Sel
   return failures
 }
 
-/**
- * A Turn that began correctly and then did not work.
- *
- * The failure `claude auth status` cannot see: `apiKeySource` and the model are
- * reported before the first API call, so a dead token gets all the way to here
- * before anything goes wrong.
- */
 function probeFailed(error: unknown): SelfCheckFailure {
   const said =
     error instanceof TurnFailedError && error.turn.text !== ''

@@ -453,9 +453,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
         this.#message(payload)
         return
       case 'INTERACTION_CREATE': {
-        // Over this socket rather than an endpoint, because the two are
-        // *"mutually exclusive"* and roma registers none — so buttons cost no
-        // inbound port either (ADR-0029).
         const interaction = readInteraction(payload)
         if (interaction !== null) void this.#pressed(interaction)
         return

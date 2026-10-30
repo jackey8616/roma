@@ -318,10 +318,6 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
       'stream-json',
       '--output-format',
       'stream-json',
-      // Not optional and not ours to drop: "When using --print,
-      // --output-format=stream-json requires --verbose". A precondition of the
-      // two flags above rather than a verbosity preference — without it the
-      // process exits before a single event reaches the stream.
       '--verbose',
       '--include-partial-messages',
       '--replay-user-messages',
