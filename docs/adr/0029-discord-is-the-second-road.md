@@ -165,6 +165,7 @@ capability"* — and it is accepted here rather than repaired.
 ### No privileged intent: roma reads what is addressed to it
 
 Message content is behind a privileged intent. roma does not ask for it.
+Enforced by `fence:discord-no-privileged-intent`.
 
 It does not have to. The intent's exceptions — direct messages, messages that
 mention the app, and the app's own messages — are precisely the messages roma

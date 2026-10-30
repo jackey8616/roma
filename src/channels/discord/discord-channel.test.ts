@@ -807,7 +807,7 @@ describe('a delivery runs beside the socket rather than on it', () => {
 })
 
 describe('the connection roma holds open', () => {
-  it('identifies with the guild and message intents, and no privileged one', async () => {
+  it('identifies with the guild and message intents, and no privileged one [fence:discord-no-privileged-intent]', async () => {
     const channel = await listening()
     await channel.take(HELLO)
 
@@ -816,7 +816,10 @@ describe('the connection roma holds open', () => {
     // `MESSAGE_CONTENT`, the one roma refuses. It is a toggle in a developer
     // portal where nothing versions it and no test can see it, and its
     // exceptions are exactly the messages roma answers (ADR-0029).
-    expect(INTENTS & (1 << 15)).toBe(0)
+    expect(
+      INTENTS & (1 << 15),
+      'INTENTS asks for MESSAGE_CONTENT, the privileged intent roma refuses (ADR-0029)',
+    ).toBe(0)
   })
 
   it('heartbeats on the interval Discord named, carrying the last event it saw', async () => {
