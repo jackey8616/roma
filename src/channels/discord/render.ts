@@ -131,20 +131,17 @@ export function threadName(text: string): string {
   return first.trim() === '' ? 'roma' : fitted(first.trim(), MAX_THREAD_NAME)
 }
 
-/** What a blocked Task's message says: the event's own reset time, and that the Task is kept. */
 function blockedText(resetsAt: number): string {
   const at = new Date(resetsAt * 1000).toISOString().replace('T', ' ').slice(0, 16)
   return `The shared Claude quota is spent. It comes back at ${at} UTC — I have kept your task and will run it then.`
 }
 
-/** What an Overflow Turn spent, to the cent it was billed in. */
 function overflowSpentText(costUsd: number | null): string {
   // Enforced by `fence:discord-null-cost-not-free`.
   if (costUsd === null) return 'Ran on metered billing. What it cost was never reported.'
   return `Ran on metered billing: $${money(costUsd)}.`
 }
 
-/** Money as people read it, which is two decimal places and no more. */
 function money(usd: number): string {
   return usd.toFixed(2)
 }
@@ -160,7 +157,6 @@ export function progressText(progress: TaskProgress): string {
   return fitted(progressPhrase(progress), MAX_TEXT)
 }
 
-/** Some text inside a budget, with the end taken off where it does not fit. Chat's `fitted`. */
 function fitted(text: string, budget: number): string {
   if (text.length <= budget) return text
   if (budget < 1) return ''
@@ -169,7 +165,6 @@ function fitted(text: string, budget: number): string {
   return `${text.slice(0, Math.max(0, budget - 1))}…`
 }
 
-/** What a Command did, in the two words a person can act on. */
 function commandText(command: Command, carriedOut: boolean): string {
   if (command === 'clear') return 'Started a fresh session. Nothing from before this is in it.'
   // Two messages for one `/stop` and both earn their place: this answers whoever
@@ -205,7 +200,6 @@ function split(text: string, budget: number): string[] {
   return messages
 }
 
-/** Where to cut a full window: the last paragraph, line, or word boundary in it. */
 function breakPoint(window: string, budget: number): number {
   for (const boundary of ['\n\n', '\n', ' ']) {
     const at = window.lastIndexOf(boundary)

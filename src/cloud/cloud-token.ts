@@ -26,7 +26,6 @@ export async function main(
   return await shortcut({ name: CLOUD_SHORTCUT, credential: 'cloud', argv, env, out, err })
 }
 
-// Run only when this file is the program.
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
   process.exitCode = await main()
 }

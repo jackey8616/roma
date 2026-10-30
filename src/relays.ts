@@ -91,7 +91,6 @@ export type RelayCost =
    */
   | 'paid'
 
-/** One entry of the table: what it costs, and whether anything may follow it. */
 interface RelayEntry {
   readonly cost: RelayCost
   /**

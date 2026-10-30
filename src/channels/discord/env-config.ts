@@ -40,7 +40,6 @@ export interface DiscordEnv {
   readonly apiBase: string
 }
 
-/** Every variable this Channel reads, required and optional alike. See `unconfigured`. */
 const DISCORD_VARIABLES = [
   'ROMA_DISCORD_BOT_TOKEN',
   'ROMA_DISCORD_GATEWAY_URL',

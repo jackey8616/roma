@@ -176,7 +176,6 @@ function within(root: string, path: string): boolean {
   return step === '' || (step !== '..' && !step.startsWith(`..${sep}`) && !isAbsolute(step))
 }
 
-/** Read one part of the configuration, keeping its problems rather than throwing. */
 function attempted<T>(read: () => T, problems: string[]): T | null {
   try {
     return read()

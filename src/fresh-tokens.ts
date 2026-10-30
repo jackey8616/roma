@@ -105,7 +105,6 @@ export class FreshTokens {
    * asked for by several Shims in the same tick. Without this they each mint.
    */
   #minting: Promise<MintedToken> | null = null
-  /** When roma last threw a token away because it was told to. */
   #discardedAt = Number.NEGATIVE_INFINITY
 
   constructor({
@@ -168,7 +167,6 @@ export class FreshTokens {
     this.#cached = null
   }
 
-  /** Mint once, however many callers are waiting for it. */
   async #mint(): Promise<MintedToken> {
     const inFlight = this.#minting
     if (inFlight !== null) return await inFlight

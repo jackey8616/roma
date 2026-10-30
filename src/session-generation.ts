@@ -21,7 +21,6 @@ import type { WorkRoot } from './work-root.js'
  * the pinned one.
  */
 
-/** A generation as it is written down: a whole count and nothing else. */
 const COUNT = /^\d+$/
 
 /** Enforced by `fence:session-record-names-only-the-menu`. */
