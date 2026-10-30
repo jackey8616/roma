@@ -3,6 +3,7 @@ import type { MintedToken } from '../reach.js'
 import { DOCUMENT_DEPOT_VAR } from './env-config.js'
 import type { Depot, DocumentMinter } from './depot.js'
 
+/** Enforced by `fence:documents-both-drive-scopes`. */
 const SCOPES = [
   'https://www.googleapis.com/auth/drive.file',
   'https://www.googleapis.com/auth/drive.readonly',
