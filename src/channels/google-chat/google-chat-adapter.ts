@@ -103,18 +103,9 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
   toIngress(event: ChatEvent): IngressMessage | null {
     return (
       readIngressMessage(event, {
-        // Bound rather than called: `toIngress` stays synchronous, and what an
-        // Enclosure costs is paid once the Core knows the Session and knows the
-        // bytes are wanted (ADR-0011).
         download: (resourceName) => this.#api.download(resourceName),
         ...(this.#log === undefined ? {} : { log: this.#log }),
-      }) ??
-      // A press on a Menu button is a message the Caller did not have to type, so
-      // it arrives here rather than through a reader of its own on this interface
-      // — pressing is typing (ADR-0023). A second reader rather than a branch
-      // inside the first: the message on a press event is roma's own card, and
-      // that reader must go on refusing anything an app said.
-      readChosenOption(event)
+      }) ?? readChosenOption(event)
     )
   }
 

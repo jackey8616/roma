@@ -6,7 +6,7 @@
   },
   "src/attribution.ts": {
     "roma/comment-whitelist": {
-      "count": 7
+      "count": 6
     }
   },
   "src/audit-log.ts": {
@@ -76,7 +76,7 @@
   },
   "src/channels/google-chat/google-chat-adapter.ts": {
     "roma/comment-whitelist": {
-      "count": 29
+      "count": 21
     }
   },
   "src/channels/google-chat/http-chat-api.ts": {
@@ -271,7 +271,7 @@
   },
   "src/startup.ts": {
     "roma/comment-whitelist": {
-      "count": 99
+      "count": 93
     }
   },
   "src/stream-events.ts": {

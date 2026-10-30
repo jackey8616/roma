@@ -2,10 +2,6 @@ import type { IngressMessage, Quotation } from './channel-adapter.js'
 import type { WrittenEnclosure } from './enclosures.js'
 import type { RelayRequest } from './relays.js'
 
-/**
- * The marker's two halves. Bounded rather than bare, because `[Ada]` would be
- * indistinguishable from something somebody typed.
- */
 const OPEN = '<from>'
 const CLOSE = '</from>'
 

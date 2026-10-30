@@ -324,9 +324,6 @@ export async function startRoma({
       credential,
       env,
       cwd: probeCwd,
-      // Unchanged by ADR-0014, and deliberately: no Chosen Model can reach the
-      // probe, which is not a Session roma serves. What this proves is that the
-      // deployment boots on what it pinned.
       ...(model === undefined ? {} : { model }),
       // The Pinned Effort rather than the option, because unlike the model this
       // one is *asked about* — the probe is spawned with it and then relayed
@@ -335,9 +332,6 @@ export async function startRoma({
       effort: pinnedEffort,
       ...(spawn === undefined ? {} : { spawn }),
       ...(selfCheckTimeoutMs === undefined ? {} : { timeoutMs: selfCheckTimeoutMs }),
-      // A disagreement about the effort is an anomaly rather than a refusal, so
-      // it lands in the same log as everything else an operator reads. Boot
-      // continues.
       ...(log === undefined ? {} : { log }),
     })
   } finally {
