@@ -1664,15 +1664,7 @@ export class Core {
   }
 }
 
-/**
- * The Runtime every Session runs on, while a deployment has one to give
- * (ADR-0025).
- *
- * **Never go on writing this once a Session has a Runtime of its own** — the
- * point at which ADR-0027 has the record read it from there instead. A Codex
- * Task recorded as Claude Code's is filed against the wrong Shared Window, and
- * telling two windows apart is the only thing the field is for.
- */
+/** Enforced by `fence:core-runtime-is-the-only-one`. */
 const EVERY_SESSION_RUNS_ON: Runtime = 'claude-code'
 
 /** Enforced by `fence:core-failure-in-romas-words`. */
@@ -1778,16 +1770,7 @@ function atNextCaveman(name: string, caveman: string): string {
   )
 }
 
-/**
- * What roma says where the Effort Matrix says this model takes no effort.
- *
- * Says so and refuses nothing — the harm is a false belief, not a cost.
- *
- * Claims only what roma *read*, never what roma watched: the build echoes every
- * level on every model identically, so the only account of this is a reading of
- * a minified binary that has already been wrong once. Do not strengthen the
- * sentence past that.
- */
+/** Enforced by `fence:core-takes-no-effort-says-only-what-was-read`. */
 function takesNoEffort(model: string, chosen?: string): string {
   const setting = chosen === undefined ? 'Effort' : `The effort this conversation is at (${chosen})`
   return (
@@ -1796,14 +1779,7 @@ function takesNoEffort(model: string, chosen?: string): string {
   )
 }
 
-/**
- * What roma says about a level it does not offer.
- *
- * `unknownModelReason`'s shape and its reasons.
- *
- * `ultracode` arrives here like any other unknown name and must stay that way —
- * naming it would advertise something no Caller can have.
- */
+/** Enforced by `fence:core-ultracode-refused-as-a-typo`. */
 function unknownEffortReason(name: string): string {
   return (
     `roma does not offer an effort called “${name}”. ` +
@@ -1811,14 +1787,7 @@ function unknownEffortReason(name: string): string {
   )
 }
 
-/**
- * What roma says about a Caveman it does not offer.
- *
- * `unknownEffortReason`'s shape and its reasons, and `ultracode`'s rule applies
- * to two names here rather than one: `wenyan-lite` and `wenyan-ultra` arrive like
- * any other unknown name and must stay that way, because naming them would
- * advertise something no Caller can have.
- */
+/** Enforced by `fence:core-wenyan-refused-as-a-typo`. */
 function unknownCavemanReason(name: string): string {
   return (
     `roma does not offer a caveman called “${name}”. ` +

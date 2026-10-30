@@ -1973,19 +1973,31 @@ describe('the effort a Conversation runs at', () => {
   // dynamic workflow orchestration — one Task becoming a fleet, on a window
   // everybody shares, in a thread where one person's choice is paid for by the
   // others.
-  it('refuses ultracode from a Caller, like any other name it does not offer', async () => {
+  it('refuses ultracode from a Caller, like any other name it does not offer [fence:core-ultracode-refused-as-a-typo]', async () => {
+    const why =
+      'ultracode is refused in exactly the words a typo is (ADR-0016): any sentence of its ' +
+      "own would tell a Caller it exists and is the operator's, which is roma advertising " +
+      'something no Caller can have.'
     const { adapter, claude, core } = newCore()
+    await core.handle(ingress('/effort ludicrous'))
+    const typo = posted(adapter.instructions).at(-1)
 
     await core.handle(ingress('/effort ultracode'))
+
+    expect(posted(adapter.instructions).at(-1), why).toEqual({
+      ...typo,
+      refused: 'ultracode',
+      text: (typo as { text: string }).text.replace('ludicrous', 'ultracode'),
+    })
 
     // Answered exactly as a typo is, which is the point: explaining that it
     // exists and is the operator's would be roma advertising something no Caller
     // can have — and it is not among the names on the card either.
-    expect(posted(adapter.instructions)[0]).toMatchObject({
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
       kind: 'choice',
       refused: 'ultracode',
     })
-    expect(posted(adapter.instructions)[0]).not.toMatchObject({
+    expect(posted(adapter.instructions).at(-1)).not.toMatchObject({
       options: expect.arrayContaining(['ultracode']),
     })
     expect(claude.processes).toHaveLength(0)
@@ -2100,6 +2112,35 @@ describe('an effort the model will not use', () => {
     const [reply] = posted(adapter.instructions).slice(-1)
     expect(reply).toMatchObject({ kind: 'result', text: expect.stringContaining(HAIKU) })
     expect(reply).toMatchObject({ text: expect.stringContaining('takes none') })
+  })
+
+  it('claims only what roma read about the model, in both directions [fence:core-takes-no-effort-says-only-what-was-read]', async () => {
+    const why =
+      'The takes-none sentence says the effort does not apply and nothing stronger ' +
+      '(ADR-0016): the build echoes every level on every model identically, so the only ' +
+      'account of it is a reading of a minified binary that has already been wrong once. ' +
+      'A sentence saying Claude Code ignores, strips or refuses the effort claims something ' +
+      'roma never watched.'
+    const { adapter, core } = newCore()
+    await core.handle(ingress('/model haiku'))
+
+    await core.handle(ingress('/effort max'))
+    await core.handle(ingress('/model opus'))
+    await core.handle(ingress('/model haiku'))
+
+    const [setOnHaiku, , movedOntoHaiku] = posted(adapter.instructions).slice(-3)
+    expect(setOnHaiku, why).toMatchObject({
+      text:
+        'This conversation runs at max from your next message. Anything already running ' +
+        `finishes at the effort it started at. Effort does not apply on ${HAIKU}, which ` +
+        'takes none — it applies again on a model that does.',
+    })
+    expect(movedOntoHaiku, why).toMatchObject({
+      text: expect.stringContaining(
+        `The effort this conversation is at (max) does not apply on ${HAIKU}, which ` +
+          'takes none — it applies again on a model that does.',
+      ),
+    })
   })
 
   // Set, not refused. The record is written and applies again the moment the
@@ -2342,11 +2383,23 @@ describe('the Caveman a Conversation runs at', () => {
   // typo is, because explaining that they exist and are the operator's would be
   // roma advertising something no Caller can have — and wenyan's own row claims
   // its saving in characters where a Shared Window is spent in tokens.
-  it('refuses the two wenyan levels an operator may pin, like any other name', async () => {
+  it('refuses the two wenyan levels an operator may pin, like any other name [fence:core-wenyan-refused-as-a-typo]', async () => {
+    const why =
+      'wenyan-lite and wenyan-ultra are refused in exactly the words a typo is (ADR-0030): ' +
+      "any sentence of their own would tell a Caller they exist and are the operator's, " +
+      'which is roma advertising something no Caller can have.'
     const { adapter, claude, core } = newCore()
+    await core.handle(ingress('/caveman grunt'))
+    const typo = posted(adapter.instructions).at(-1)
 
     for (const level of ['wenyan-lite', 'wenyan-ultra']) {
       await core.handle(ingress(`/caveman ${level}`))
+
+      expect(posted(adapter.instructions).at(-1), why).toEqual({
+        ...typo,
+        refused: level,
+        text: (typo as { text: string }).text.replace('grunt', level),
+      })
 
       expect(posted(adapter.instructions).at(-1)).toMatchObject({
         kind: 'choice',
@@ -3596,6 +3649,25 @@ describe('who asked', () => {
 describe('the record every Task leaves behind', () => {
   /** A real interrupt: the aborted Turn cost $0.000625 and the capture says so. */
   const INTERRUPTED = recordedStream('interrupted-turn')
+
+  it('files every Task under the only Runtime there is, and stops compiling when there are two [fence:core-runtime-is-the-only-one]', async () => {
+    const why =
+      'The Core writes one Runtime onto every Audit Record because Runtime has one member ' +
+      '(ADR-0025). The day it has two, a Session has a Runtime of its own and the record must ' +
+      "read it from there (ADR-0027): a Codex Task filed as Claude Code's is filed against " +
+      'the wrong Shared Window, and telling two windows apart is the only thing the field is for.'
+    const { audit, say } = newCore()
+
+    await say('hello')
+
+    // A second member makes this `never`, and the line stops compiling.
+    const onlyOneRuntime: [Runtime] extends ['claude-code'] ? true : never = true
+    expect(onlyOneRuntime, why).toBe(true)
+    expect(
+      recordsIn(audit).map(({ runtime }) => runtime),
+      why,
+    ).toEqual(['claude-code'])
+  })
 
   // Per-user attribution does not exist at the provider — everybody shares one
   // token — so this file is the only place the question "who spent this" is ever
