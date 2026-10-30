@@ -2239,7 +2239,12 @@ describe('the Overflow offer, out as a button and back as a press', () => {
    * It fails the moment one id parses as both kinds, which is the fault that
    * turns taking an Overflow offer into a paid Task nobody asked for.
    */
-  it('reads every id it writes as one kind and never as the other', () => {
+  it('reads every id it writes as one kind and never as the other [fence:discord-press-is-one-kind]', () => {
+    const why =
+      'Every custom_id roma writes must read back as exactly the kind it was written as. ' +
+      'Ingress.#workFor asks toIngress before toOverflowTaken (src/serve.ts), so an Overflow ' +
+      'offer read as a Menu press, or the reverse, turns taking an offer into a paid Task ' +
+      'nobody asked for, or spends money on a Task roma never named (ADR-0002, ADR-0029).'
     // Spelled here rather than imported: the inputs below are the ones written
     // to look like the *other* encoding, and a test that borrowed roma's own
     // constants for them could not tell a collision from an agreement.
@@ -2267,14 +2272,15 @@ describe('the Overflow offer, out as a button and back as a press', () => {
     const offers = tasks.map((taskId) => overflowId(taskId))
 
     for (const customId of menu) {
-      expect(readPress(customId)?.kind, customId).toBe('choose')
+      expect(readPress(customId)?.kind, `${why} (${customId})`).toBe('choose')
     }
     // And every offer comes back whole, which is the other half of what makes
     // one kind the right answer rather than merely the only one: a Task id cut
     // at a separator would name a Task roma never blocked.
-    expect(offers.map((customId) => readPress(customId))).toEqual(
-      tasks.map((taskId) => ({ kind: 'overflow', taskId })),
-    )
+    expect(
+      offers.map((customId) => readPress(customId)),
+      why,
+    ).toEqual(tasks.map((taskId) => ({ kind: 'overflow', taskId })))
   })
 
   // Every field of a Menu id comes back as it went out, over keys that are

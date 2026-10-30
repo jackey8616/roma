@@ -102,3 +102,33 @@ describe('asking roma for a credential', () => {
     },
   )
 })
+
+describe('what a Shim complains with', () => {
+  it.each([
+    ['no socket is named', () => Promise.resolve({ [SESSION_ID_VAR]: 'a-session' })],
+    [
+      'nothing is listening on the socket',
+      () =>
+        Promise.resolve({
+          [MINTER_SOCKET_VAR]: socketPathIn(directory()),
+          [SESSION_ID_VAR]: 'a-session',
+        }),
+    ],
+    [
+      'roma has no credential to give',
+      async () => ({
+        [MINTER_SOCKET_VAR]: await answering('{"token":null,"reason":"the key was revoked"}\n'),
+        [SESSION_ID_VAR]: 'a-session',
+      }),
+    ],
+  ])('names no forge when %s [fence:shim-complaint-names-no-forge]', async (_, environment) => {
+    const { complaint } = await credentialFor({ operation: 'get' }, await environment())
+
+    expect(
+      complaint,
+      'The complaint credentialFor writes is the Core speaking, and the Core may not know which ' +
+        'forge roma mints against (ADR-0008: GitHub lives in src/github/ behind a narrow port). ' +
+        "The tool's own failure beside it on stderr already says which forge it was.",
+    ).not.toMatch(/github|gitlab|\bgh\b|forge/i)
+  })
+})
