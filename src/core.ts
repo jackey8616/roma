@@ -861,9 +861,6 @@ export class Core {
     conversationKey: string,
     address: TaskAddress,
   ): OutboundInstruction {
-    // Which Session, not which Conversation. A Chosen Model belongs to a Session,
-    // which is why clearing a Conversation puts it back on the Pinned Model
-    // without anything being deleted.
     const sessionId = this.#sessions.sessionFor(conversationKey)
 
     // A switch rather than a chain of ifs, so that a fifth thing `/model` could
@@ -927,9 +924,6 @@ export class Core {
     conversationKey: string,
     address: TaskAddress,
   ): OutboundInstruction {
-    // Which Session, not which Conversation — a Chosen Effort belongs to a
-    // Session, which is what makes `/clear` return it to the Pinned Effort
-    // without anything being deleted.
     const sessionId = this.#sessions.sessionFor(conversationKey)
 
     switch (request.kind) {
@@ -1014,9 +1008,6 @@ export class Core {
     conversationKey: string,
     address: TaskAddress,
   ): OutboundInstruction {
-    // Which Session, not which Conversation — a Chosen Caveman belongs to a
-    // Session, which is what makes `/clear` return it to the Pinned Caveman
-    // without anything being deleted.
     const sessionId = this.#sessions.sessionFor(conversationKey)
 
     switch (request.kind) {
@@ -1311,11 +1302,6 @@ export class Core {
       // that it did.
       if (credential !== answeredOn && !paid.costUsd && paid.compaction === null) continue
       this.#audit.record({
-        // Absent for a Task, which is what "absent means task" asks of the
-        // writer, and `relay` for the one that arrived as a command. Nothing
-        // about cost, deliberately: what this cost is in `costUsd`, and what it
-        // says together with `compaction.trigger` is who asked for a Compaction —
-        // `relay` plus `manual` is somebody typing `/compact` and paying for it.
         ...(relay === null ? {} : { kind: 'relay' as const }),
         taskId,
         caller: message.caller,
@@ -1357,10 +1343,6 @@ export class Core {
         outputTokens: paid.outputTokens,
         cloudReach,
         documentReach,
-        // Only where one happened, which is what "absent means no Compaction"
-        // asks of the writer. On the record of the credential that paid for it:
-        // a Task blocked on the Shared Window and rerun on Overflow spent that
-        // money on one of the two bills, not on both.
         ...(paid.compaction === null ? {} : { compaction: paid.compaction }),
         apiKeySource: attempts.apiKeySource(),
       })
@@ -1533,9 +1515,6 @@ export class Core {
     const month = monthOf(new Date())
     const spent = this.#audit.totalFor(month, 'overflow')
     if (spent.costUsd >= overflow.monthlyCapUsd) {
-      // How the owner finds out. The person who asked is told they were refused;
-      // a month that has spent its budget is not theirs to act on, and both
-      // counts are here so the refusal says how solid the number behind it was.
       this.#log({
         event: 'overflow-refused',
         taskId,
@@ -1886,9 +1865,6 @@ function monthReport({ month, spend, unreadable }: AuditBreakdown): string {
 
 /** One credential's line on one Runtime, in the register that credential is read in. */
 function spendLine({ runtime, credential, costUsd, unpriced }: CredentialSpend): string {
-  // A floor where the month holds a Turn that began and was never priced. The
-  // count itself stays off the line: a column that reads zero for ever is a
-  // column nobody reads (ADR-0027).
   const figure = `${unpriced === 0 ? '' : 'at least '}$${money(costUsd)}`
   // Enforced by `fence:core-usage-never-one-figure`.
   const named = RUNTIME_NAMES[runtime]
@@ -1921,10 +1897,6 @@ const MONTH_NAMES: readonly string[] = [
   'December',
 ]
 
-/**
- * Which month a report covers, and that it is a UTC one — `monthOf` slices an
- * ISO string, so it is deliberately not the reader's month (ADR-0027).
- */
 function monthNamed(month: string): string {
   const [year, ordinal] = month.split('-')
   const name = MONTH_NAMES[Number(ordinal) - 1]
