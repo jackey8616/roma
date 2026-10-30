@@ -451,13 +451,16 @@ wrapper.
 
   And stopping *at* `system/init` would reproduce the blind spot below.
   `apiKeySource` and the model are reported before the first API call, so a token
-  that 401s produces a perfectly healthy init. Only completing the Turn sees it.
+  that 401s produces a perfectly healthy init. Only completing the Turn sees it,
+  so the probe message is as small as a Turn can be and still be one.
 
   What that costs, measured: **3682ms and $0.0709632** per boot, the spend
   dominated by the cached system prompt rather than by the probe's four output
   tokens. A wrong credential is still refused at init in ~1.2s, without waiting
   for the Turn — which matters, because a wrong credential is precisely the case
-  that then retries for three minutes.
+  that then retries for three minutes. So roma waits a minute for the probe Turn
+  before refusing to start — the retry budget's minute, for its reason: a boot
+  waiting out those three minutes is one nobody can tell from a hang.
 - **Pinning `--model` narrows what the model assertion catches.** The prototype
   watched a stray `ANTHROPIC_API_KEY` move the model to `claude-opus-5[1m]`, and
   that run did not pass `--model`. With the model pinned, seam 2 measured the

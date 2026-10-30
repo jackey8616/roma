@@ -326,6 +326,11 @@ current` to it and compares loosely — the level word anywhere in the message,
 case-insensitively, rather than the sentence's shape. A disagreement is written to
 the Operator Log. **Boot continues.**
 
+**This is never a Relay.** A Relay goes to a Caller's Session on their behalf, and
+`/effort` is roma's own Command precisely so that it never reaches one. The probe
+has no Caller, no Session and no Task, which is why `relayCommand` describes
+itself by subtraction.
+
 Not blocking, and this is the sharpest trade in the ADR. Every other self-check
 condition reads a structured field: `apiKeySource`, `model`, `num_turns`. This one
 reads English prose in at least three shapes, one of which embeds a description

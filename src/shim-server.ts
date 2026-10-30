@@ -285,11 +285,6 @@ export class ShimServer {
       return { token: null }
     }
 
-    // Said rather than failed. A deployment with no Cloud Reach is the ordinary
-    // case, and the Cloud Shortcut is installed on every image so that this
-    // sentence is what an agent reads — a refusal it can repeat to a person,
-    // rather than a hang, a crash, or a `PATH` it would go and investigate. The
-    // sentence is the Reach's; roma reads it rather than holding it.
     if (!('tokens' in reach)) {
       this.#log({ event: 'credential-failed', ...where, reason: reach.unavailable })
       return { token: null, reason: reach.unavailable }

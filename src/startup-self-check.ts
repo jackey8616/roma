@@ -5,40 +5,13 @@ import { ClaudeSession, PINNED_EFFORT, PINNED_MODEL, TurnFailedError } from './c
 import { writeToStderr, type OperatorLog } from './operator-log.js'
 import { readSystemInit, type SystemInit } from './stream-events.js'
 
-/**
- * The message the probe Turn sends.
- *
- * As small as a Turn can be and still be one. The check needs a *completed*
- * Turn, not merely a started one — `system/init` arrives before the first API
- * call, so a check that stopped there would pass under a token that 401s, which
- * is the exact blind spot `claude auth status` is rejected for.
- */
 const PROBE = 'Reply with OK and nothing else. Do not use any tools.'
 
-/**
- * The command roma relays to the probe once the Turn has passed.
- *
- * Asked once per deployment, not per spawn — measured at `num_turns: 0`,
- * `total_cost_usd: 0`, answered with no credential at all.
- *
- * **Never call this a Relay.** A Relay goes to a Caller's Session on their
- * behalf, and `/effort` is roma's own Command precisely so it never reaches one.
- * This is a boot probe with no Caller, no Session and no Task, which is why
- * `relayCommand` describes itself by subtraction.
- */
 const EFFORT_QUESTION = '/effort current'
 
 /** Enforced by `fence:startup-self-check-auto-vetoes`. */
 const UNPINNED = 'auto'
 
-/**
- * How long roma will wait for the probe Turn before refusing to start.
- *
- * The retry budget's minute, for its reason: a credential wrong in a way
- * `system/init` cannot see does not fail fast — it retries ten times across 182
- * seconds in the prototype's capture, and a boot waiting for that is one nobody
- * can tell from a hang. Seam 2 measures this Turn at 3682ms when healthy.
- */
 const DEFAULT_TIMEOUT_MS = 60_000
 
 /** Which of the check's conditions was not met. */

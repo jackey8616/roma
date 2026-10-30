@@ -176,6 +176,20 @@ an extra process in front of it.
 What none of this changes: a Shim is still not a boundary against the agent, for
 the reason two paragraphs up. It has only stopped being singular.
 
+**Amended — `git`'s Shim speaks git's protocol as it is actually spoken, and
+treats its three operations as three different things.** The helper is run as
+`helper <operation>`, is given `key=value` lines on stdin ending at a blank line
+or EOF, and answers `get` with `key=value` lines of its own:
+
+- **`get`** is answered with `username=x-access-token` and an Installation Token,
+  which is GitHub's spelling for "this credential is an App's".
+- **`erase`** is git saying the credential it was given was rejected. It hands the
+  credential back, which is roma's only signal that a token it believes in has
+  stopped working. Measured: `git` 2.43.0 calls a helper twice on an
+  authentication failure, the second time with `erase` and the dead password.
+- **`store`** is answered by doing nothing at all. roma has nowhere to store a
+  credential and wants none: nothing may outlive the operation that needed it.
+
 ### What the Installation may do
 
 `contents: write`, `pull_requests: write`, `issues: write`, `workflows: write`,

@@ -69,7 +69,8 @@ zero. The cost is that real work immediately after such a reading is
 under-counted, which is the right way round for a one-directional alarm — it can
 fail to fire, and it cannot fire wrongly. `total_cost_usd` is deliberately *not*
 treated this way: it is a figure things are billed from, and it does not exhibit
-this.
+this. Both baselines move on the same terminal event, so the two figures cannot
+come to disagree about which Turn they belong to.
 
 **Amended 2026-08-01, and this one is to the decisions rather than only to the
 evidence.** It was written the same day, on facts read off the pinned build and

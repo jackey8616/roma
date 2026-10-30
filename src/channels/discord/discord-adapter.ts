@@ -193,12 +193,6 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
    */
   toIngress(event: DiscordEvent): IngressMessage | null {
     const message =
-      // A press on a Menu button is a message the Caller did not have to type, so
-      // it arrives here rather than through a reader of its own on this
-      // interface — pressing is typing (ADR-0023). Asked first because it
-      // answers about a different kind of event entirely: the message on a press
-      // is roma's *own* card, and the reader below must go on refusing anything
-      // an app said rather than being taught an exception to it.
       readChosenOption(event) ??
       readIngressMessage(event, {
         download: (url) => this.#api.download(url),
@@ -250,12 +244,6 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     // Enforced by `fence:discord-acknowledgement-kept-until-the-end`.
     if (ENDS_THE_TASK.has(instruction.kind)) this.#acknowledgements.delete(taskId)
 
-    // Two messages can carry buttons and they are never the same message: the
-    // block that offers Overflow (ADR-0002 puts the valve at the moment of
-    // blocking rather than in a setting), and the Menu somebody may choose from
-    // (ADR-0023). Which Menus are drawn at all is the Core's — an `/effort` on a
-    // model the Effort Matrix says takes none arrives as a `result` rather than
-    // a `choice`, so there is nothing here to suppress.
     const buttons =
       instruction.kind === 'blocked' && instruction.overflowOffered
         ? [offerButton(taskId)]

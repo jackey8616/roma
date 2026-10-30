@@ -151,20 +151,6 @@ interface QuotedMessage {
 
 const NOTHING_QUOTED: QuotedMessage = { quotation: null, enclosures: [] }
 
-/**
- * Read the message this one quotes, as a Quotation and whatever came attached
- * to it.
- *
- * **The snapshot and never the link** (ADR-0021). `name` points at the quoted
- * message and following it costs a round trip, wants a scope beyond the
- * `chat.bot` roma has, and is *less* faithful — a message edited after it was
- * quoted must not change what roma says Bob said.
- *
- * `quoteType` stays unread: `REPLY` and `FORWARD` both populate the two fields
- * this reads, so telling them apart adds a guess about a payload nobody has seen
- * and buys nothing roma acts on.
- * https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces.messages
- */
 function readQuotation(
   message: Readonly<Record<string, unknown>>,
   download: DownloadAttachment | undefined,

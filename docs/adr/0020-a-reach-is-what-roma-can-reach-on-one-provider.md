@@ -86,7 +86,9 @@ knowledge that there is a cloud already lives.
 The failure this prevents is the one ADR-0015 §9 was written against and could not
 express in a type: a Reach that is missing reads, to whatever consults it, as a
 Reach that does not apply — and answering nothing is the one answer that sends an
-agent off to investigate its `PATH`.
+agent off to investigate its `PATH`. So the socket answers an unavailable Reach
+with its sentence, a refusal the agent can repeat to a person, rather than with a
+hang or a crash.
 
 **The unavailable arm is reachable from a key that is absent, and from nothing
 else.** A `prove()` that fails throws and blocks the boot, exactly as

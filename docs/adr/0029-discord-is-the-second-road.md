@@ -309,6 +309,11 @@ ADR-0023 holds unchanged: *"A press is a message the Caller did not have to type
 The button carries the Command, the Adapter reads it into an ordinary
 `IngressMessage`, and it travels the path a typed Command travels.
 
+`DiscordAdapter.toIngress` asks the press reader first, because it answers about a
+different kind of event entirely: the message on a press is roma's *own* card, and
+`readIngressMessage` goes on refusing anything an app said rather than being
+taught an exception to it.
+
 Interactions arrive over the Gateway, because *"These two methods are mutually
 exclusive"* and roma registers no endpoint URL — so the buttons cost no inbound
 port either.
@@ -319,8 +324,9 @@ invalidated."* roma's Core takes minutes. So the Adapter's own Gateway client
 acknowledges with `DEFERRED_UPDATE_MESSAGE` before the event reaches the
 Transport — *"ACK an interaction and edit the original message later; the user does
 not see a loading state"*, which is exactly right for a design where pressing is
-typing and the card should not move. This is entirely inside the Adapter and
-presses on no interface.
+typing and the card should not move. Every other callback type either posts
+something or shows a spinner, and both would have roma answering a Command twice.
+This is entirely inside the Adapter and presses on no interface.
 
 **`custom_id` carries the Conversation Key as well as the Command.** It holds
 *"1-100 characters"*; a snowflake and `/effort high` come to about thirty. Two
@@ -338,6 +344,13 @@ can answer with anything but a message"* and a Discord without it is a Discord
 where Overflow can never be taken. They are done together because a partial
 Adapter tests the contract partially, and testing the contract is what a second
 Channel is for.
+
+The two never share a message: the Overflow offer rides on the block that
+reports it, because ADR-0002 puts the valve at the moment of blocking rather than
+in a setting, and a Menu rides on its `choice`. Which Menus are drawn at all is the
+Core's — an `/effort` on a model the Effort Matrix says takes none arrives at the
+Adapter as a `result` rather than a `choice` — so the Adapter has nothing to
+suppress.
 
 ### A Quotation is completed before the Core sees it
 

@@ -325,12 +325,6 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
       'bypassPermissions',
       '--model',
       this.#model,
-      // Unconditional, like `--model` and for a stronger reason: omitting it does
-      // not fall back to nothing, it falls back to the deployment-wide settings
-      // file roma neither writes nor reads. An unrecognised value here does not
-      // fail the spawn either — it warns on stderr and the process starts on the
-      // build's own default — which is why `ROMA_EFFORT` is validated locally at
-      // boot rather than left for Claude Code to refuse.
       '--effort',
       this.#effort,
       ...(this.#appendSystemPrompt === undefined
@@ -495,9 +489,6 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     // Enforced by `fence:session-unrequested-result-moves-the-baseline`.
     const previousTotalUsd = this.#cumulativeCostUsd
     if (result.cumulativeCostUsd !== null) this.#cumulativeCostUsd = result.cumulativeCostUsd
-    // Moved on the same terminal event, so the two figures cannot come to
-    // disagree about which Turn they belong to — but only ever upwards, which is
-    // where they differ. See `#outputTokenMark`.
     const previousMark = this.#outputTokenMark
     if (result.cumulativeOutputTokens !== null) {
       this.#outputTokenMark = Math.max(previousMark, result.cumulativeOutputTokens)

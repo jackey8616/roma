@@ -119,15 +119,6 @@ export class HttpDiscordApi implements DiscordApi {
   }
 }
 
-/**
- * Discord's answer to a press that changes nothing about the card.
- *
- * *"For components, ACK an interaction and edit the original message later; the
- * user does not see a loading state"* — which is exactly right for a design
- * where pressing is typing and the card should not move (ADR-0029). Every other
- * callback type either posts something or shows a spinner, and both would have
- * roma answering a Command twice.
- */
 const DEFERRED_UPDATE_MESSAGE = 6
 
 const ACTION_ROW = 1
