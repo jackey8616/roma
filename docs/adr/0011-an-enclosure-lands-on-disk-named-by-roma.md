@@ -149,7 +149,18 @@ Queue behind others; a Task can be Parked for hours, which CONTEXT.md defines as
 "holding no concurrency slot and no process" and which an in-memory buffer would
 quietly contradict; a Task can be stopped. And the size is chosen by whoever sent
 the message, so eager buffering puts roma's memory under the control of anybody
-who can message it. *Not enforced (ADR-0031).*
+who can message it.
+
+**Amended — late means once the Session is known, not once the Turn runs.**
+The Core redeems an Enclosure as soon as it has worked out the Session, and that
+is before the Task joins the Task Queue. So a Task that waits in the queue, or is
+stopped there, has already fetched its bytes. Only two downloads are actually
+avoided: a message whose Session cannot be worked out, and a Relay, which has
+nowhere to name the file. Enforced by `fence:core-enclosures-redeemed-late` and
+by `fence:core-relay-redeems-nothing`. The other reasons above still hold. The
+bytes stream to disk rather than sitting in memory, so a queued or Parked Task
+holds no buffer, and the sender cannot size roma's memory. Fetching any later
+would mean redeeming inside the queue's slot, and this was accepted as it is.
 
 Synchronous rather than async because making `toIngress` return a promise
 conscripts every future Channel into an async read path for one Channel's
@@ -224,8 +235,9 @@ is the coupling ADR-0003 exists to prevent.
 
 **Make `toIngress` async and put the bytes in `IngressMessage`.** Rejected above:
 it widens the Channel contract for one Channel's property, buffers attacker-sized
-payloads in memory across queueing and Parking, and pays for downloads that
-`/stop` and the Shared Window make worthless.
+payloads in memory across queueing and Parking, and pays for downloads that a
+message roma cannot place makes worthless. (The design chosen still downloads
+before queueing; see the amendment above. What it avoids is the buffering.)
 
 **Fetch nothing; give the agent a shim, as the Minter gives it credentials.**
 Rejected, and it is the tempting one because the pattern is already in the repo.

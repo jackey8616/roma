@@ -283,8 +283,15 @@ assembled out of — so the repo keeps no mechanism for asserting anything about
 one file where both identities are in scope. That is acceptable for §4, which no
 longer needs one. It is recorded here because rebuilding it later is a new helper
 rather than a new expectation, and because the next person to want a rule about the
-composition root should know the machinery was removed rather than never built. Re-planted, a
-`new GoogleAuth()` in `src/startup.ts` passes every test. *Not enforced (ADR-0031).*
+composition root should know the machinery was removed rather than never built.
+
+**Amended — the composition root is bound again, by an allowlist.** A `new
+GoogleAuth()` in `src/startup.ts` used to pass every test. Now the finding calls
+may be named only under `src/channels/google-chat/`, where roma resolves its own
+identity for Chat, and every other file in `src/` is held to that, the
+composition roots included. This is not the source match deleted above. That
+match read the root for one wrong line; this rule says where the chain may live
+at all. Enforced by `fence:chain-only-for-romas-own-identity`.
 
 ### 8. What is deliberately not made uniform
 

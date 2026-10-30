@@ -244,8 +244,8 @@ because `new GoogleCloudMinter` moved inside `src/cloud/`, behind
 can no longer be written there and the directory rule now binds the construction
 site for the first time. If you are reading this because the guard looks thin: read
 ADR-0020 §7 before adding a source match back. The composition
-root's half — a `new GoogleAuth()` written in `src/startup.ts` — passes every
-test, and ADR-0020 records that gap as accepted. *Not enforced (ADR-0031).*
+root's half — a `new GoogleAuth()` written in `src/startup.ts` — is held too,
+since ADR-0020 §7's amendment. Enforced by `fence:chain-only-for-romas-own-identity`.
 
 ### 5. A Cloud Token is scoped to `cloud-platform`, and that is not configurable
 
