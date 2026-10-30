@@ -345,7 +345,7 @@ The final result is what users later search for, quote, and reply to; burying it
 inside a mutating progress message makes it hard to find. That rule is
 unconditional. Where an adapter declares no message mutation, progress degrades
 to periodic new messages or is suppressed entirely — the final result still
-arrives on its own.
+arrives on its own. Enforced by `fence:gchat-result-is-its-own-message`.
 
 **Of those two, roma suppresses** (settled when this was built, #7). The
 acknowledgement is still posted once, because a task nobody has confirmed

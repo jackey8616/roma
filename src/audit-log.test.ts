@@ -47,6 +47,15 @@ const OLD_RECORDS =
   'as a level would invent a fact nobody recorded (ADR-0016, ADR-0030; #67, #81, #99, #110, ' +
   '#115, #132, #167, #192).'
 
+/** Why a field that is present and not what it should be costs the line, not the field. */
+const TORN =
+  'An optional field that is present and of the wrong type makes the line unreadable, never a ' +
+  'record with a hole in it or one read under the default (ADR-0002, ADR-0014, ADR-0015 §10, ' +
+  'ADR-0016, ADR-0019, ADR-0022 §9, ADR-0030). Each field answers one question about who spent ' +
+  'the month, and a line answering it with the wrong kind of value answers it wrongly; an ' +
+  'unreadable line is reported, where a wrong one is not (#67, #81, #99, #110, #115, #132, ' +
+  '#167, #192).'
+
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-07-29T10:00:00.000Z'))
@@ -341,6 +350,26 @@ describe('reading records that a machine got half way through writing', () => {
     expect(log.readMonth(MONTH), ONCE).toHaveLength(2)
   })
 
+  it('starts the next record on a line of its own, however the file came to be torn [fence:audit-append-mends-a-torn-tail]', () => {
+    const why =
+      'Every append starts a new line first when the file ends mid-line, checked on every ' +
+      'append rather than once per file per run (ADR-0002: the month is the figure the ' +
+      'Overflow cap is enforced against). A power loss leaves a line with no newline, and ' +
+      'appending onto it joins the next record to the wreckage, so a Task that really happened ' +
+      'leaves the month too; a once-per-run check misses whatever else wrote to the file ' +
+      'since, a second roma over the same volume or somebody’s script (#28).'
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    log.record(entry({ taskId: 'before', costUsd: 0.01 }))
+    appendFileSync(join(dir, `${MONTH}.jsonl`), '{"at":"2026-07-29T10:00:00.000Z","cos')
+    log.record(entry({ taskId: 'after', costUsd: 0.02 }))
+
+    expect(
+      log.readMonth(MONTH).map(({ taskId }) => taskId),
+      why,
+    ).toEqual(['before', 'after'])
+  })
+
   // A line that parses but has no cost on it must not be totalled as a Task that
   // was free — that is under-reporting wearing the shape of a valid record.
   it('does not read a line with no cost on it as a Task that cost nothing [fence:audit-record-is-what-it-is-for]', () => {
@@ -535,7 +564,7 @@ describe('telling a Relay from a Task', () => {
   // Task. Guessing would defeat the whole point of the field — one kind read as
   // the other is exactly what it exists to prevent — and an unreadable line is
   // reported, where a wrong one is not.
-  it('refuses a kind it does not know', () => {
+  it('refuses a kind it does not know [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry())
@@ -544,7 +573,7 @@ describe('telling a Relay from a Task', () => {
       `${JSON.stringify({ ...entry(), kind: 'something-later', at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, relays: 0, unreadable: 1 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, relays: 0, unreadable: 1 })
   })
 
   // What the record is insurance against, and since ADR-0018 it is also the
@@ -611,7 +640,7 @@ describe('which Runtime served a Task', () => {
   // subscription's draw into Claude Code's figure, which is the one confusion
   // the field exists to remove — so the line is unreadable, and an unreadable
   // line is reported where a wrong one is not.
-  it('refuses a Runtime it does not know', () => {
+  it('refuses a Runtime it does not know [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ costUsd: 0.01 }))
@@ -621,7 +650,7 @@ describe('which Runtime served a Task', () => {
     )
 
     // The five cents are out of the month rather than filed under Claude Code.
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1, costUsd: 0.01 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, unreadable: 1, costUsd: 0.01 })
   })
 
   // A line that cannot be read names no Runtime either, so it stays the month's.
@@ -719,7 +748,7 @@ describe('which model spent the month', () => {
   // a missing cost is: the one question this field answers is which model spent
   // the shared window, and a line that answers it with a number answers it
   // wrongly.
-  it('refuses a model that is not a name', () => {
+  it('refuses a model that is not a name [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ model: 'claude-sonnet-5' }))
@@ -728,7 +757,7 @@ describe('which model spent the month', () => {
       `${JSON.stringify({ ...entry(), model: 5, at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, unreadable: 1 })
   })
 })
 
@@ -788,7 +817,7 @@ describe('what effort spent the month', () => {
     expect(EFFORT_MENU).not.toContain(record?.effort)
   })
 
-  it('refuses an effort that is not a name', () => {
+  it('refuses an effort that is not a name [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ effort: 'high' }))
@@ -797,7 +826,7 @@ describe('what effort spent the month', () => {
       `${JSON.stringify({ ...entry(), effort: 3, at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, unreadable: 1 })
   })
 })
 
@@ -853,7 +882,7 @@ describe('how short a Task was asked to be', () => {
     expect(OFF_MENU_WENYAN).not.toContain(record?.caveman)
   })
 
-  it('refuses a Caveman that is not a name', () => {
+  it('refuses a Caveman that is not a name [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ caveman: 'lite' }))
@@ -862,7 +891,7 @@ describe('how short a Task was asked to be', () => {
       `${JSON.stringify({ ...entry(), caveman: 2, at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, unreadable: 1 })
   })
 })
 
@@ -926,7 +955,7 @@ describe('what a Task produced', () => {
   // A torn line rather than a record with a hole in it, for the reason a missing
   // cost is one: a line answering "how much did this Turn produce" with a word
   // answers it wrongly, and the month is compared against other months on it.
-  it('refuses a figure that is not one', () => {
+  it('refuses a figure that is not one [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ outputTokens: 21 }))
@@ -935,7 +964,7 @@ describe('what a Task produced', () => {
       `${JSON.stringify({ ...entry(), outputTokens: 'lots', at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, unreadable: 1 })
   })
 })
 
@@ -974,7 +1003,7 @@ describe('whether a Task used the Cloud Reach', () => {
   // A yes or a no. A line answering with a number is answering a different
   // question — the count ADR-0015 refused, because one token does unlimited API
   // calls for an hour and a number would be read as a measure of what was done.
-  it('refuses an answer that is not a yes or a no', () => {
+  it('refuses an answer that is not a yes or a no [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ cloudReach: false }))
@@ -983,7 +1012,7 @@ describe('whether a Task used the Cloud Reach', () => {
       `${JSON.stringify({ ...entry(), cloudReach: 3, at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, unreadable: 1 })
   })
 })
 
@@ -1028,7 +1057,7 @@ describe('whether a Task used the Document Reach', () => {
   // Story 30. A line answering with a number is answering a different question —
   // the count ADR-0015 §10 refused and ADR-0022 §9 refuses again, because one
   // token does unlimited work for an hour.
-  it('refuses an answer that is not a yes or a no', () => {
+  it('refuses an answer that is not a yes or a no [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ documentReach: false }))
@@ -1037,7 +1066,7 @@ describe('whether a Task used the Document Reach', () => {
       `${JSON.stringify({ ...entry(), documentReach: 3, at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, unreadable: 1 })
   })
 
   // The two fields are independent facts about one Task, and a record that
@@ -1095,7 +1124,7 @@ describe('whether a Compaction happened inside a Task', () => {
   // A torn line rather than a record with a hole in it. This field is the whole
   // account of why one Task cost several times what its neighbours did, and a
   // line answering it with a string answers it wrongly.
-  it('refuses a line whose Compaction is not one', () => {
+  it('refuses a line whose Compaction is not one [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ compaction: COMPACTION }))
@@ -1104,7 +1133,7 @@ describe('whether a Compaction happened inside a Task', () => {
       `${JSON.stringify({ ...entry(), compaction: 'auto', at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, unreadable: 1 })
   })
 
   // The stream is not roma's, and a build that stopped reporting the trigger

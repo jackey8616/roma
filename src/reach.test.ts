@@ -141,3 +141,22 @@ describe('the order Reaches are proved in [fence:reach-code-is-proved-first]', (
     ).toEqual(['code', 'cloud', 'documents'])
   })
 })
+
+describe('a Reach fills only its own credential slot [fence:reach-typed-by-its-credential]', () => {
+  it('cannot be wired backwards', () => {
+    const code = githubReach(new FakeMinter())
+    const cloud = cloudReach(new FakeCloudMinter())
+    const { documents } = fakeReaches()
+
+    // @ts-expect-error -- a Reach is typed by its credential: the forge's slot refuses an available Cloud Reach
+    const backwards: Reaches = { code: cloud, cloud: code, documents }
+
+    expect(
+      [backwards],
+      'A Reach is typed by the credential it answers for, not by the bare union (ADR-0020 §3). ' +
+        'Without the type parameter a total, populated record wired backwards typechecks, and ' +
+        '`git` is handed a Cloud Token: everything looks like it works until the first API ' +
+        'call (#119).',
+    ).toHaveLength(1)
+  })
+})

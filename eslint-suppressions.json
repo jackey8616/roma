@@ -11,7 +11,7 @@
   },
   "src/audit-log.ts": {
     "roma/comment-whitelist": {
-      "count": 73
+      "count": 26
     }
   },
   "src/build-env.ts": {
@@ -71,7 +71,7 @@
   },
   "src/channels/google-chat/render.ts": {
     "roma/comment-whitelist": {
-      "count": 43
+      "count": 40
     }
   },
   "src/channels/main.ts": {
@@ -166,7 +166,7 @@
   },
   "src/github/reach.ts": {
     "roma/comment-whitelist": {
-      "count": 11
+      "count": 4
     }
   },
   "src/github/shims.ts": {
@@ -182,11 +182,6 @@
   "src/progress-reporter.ts": {
     "roma/comment-whitelist": {
       "count": 23
-    }
-  },
-  "src/reach.ts": {
-    "roma/comment-whitelist": {
-      "count": 2
     }
   },
   "src/relays.ts": {

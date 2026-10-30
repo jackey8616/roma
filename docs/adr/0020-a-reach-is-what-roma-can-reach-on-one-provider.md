@@ -145,7 +145,8 @@ type parameter `{ code: cloudReachFrom(env), cloud: githubReachFrom(minterEnv) }
 typechecks — a record that is total, populated, and wired backwards — and a `git`
 is handed a Cloud Token. That is the failure `ShimServer`'s own comment names:
 "looks like everything working until the first API call". Totality alone was not
-enough, and finding that out is what the record shape is worth.
+enough, and finding that out is what the record shape is worth. Enforced by
+`fence:reach-typed-by-its-credential`.
 
 ### 4. `prove()` yields an account, and roma stops reporting what it proved
 

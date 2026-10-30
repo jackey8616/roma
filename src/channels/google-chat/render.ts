@@ -67,9 +67,7 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
   const to = addressedTo(instruction.caller)
   switch (instruction.kind) {
     case 'result': {
-      // Its own message or messages, never the acknowledgement edited one last
-      // time — the rule ADR-0003 makes unconditional, because the result is what
-      // people search for and quote months later.
+      // Enforced by `fence:gchat-result-is-its-own-message`.
       const messages = split(to, instruction.text)
       // ADR-0002 requires the spend shown in the reply, and only where somebody
       // chose to spend it. Its own message rather than appended to the answer:

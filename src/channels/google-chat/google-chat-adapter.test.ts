@@ -707,14 +707,19 @@ describe('the acknowledgement', () => {
   // The rule ADR-0003 makes unconditional. The result is what people search for,
   // quote and reply to months later; buried in a message that was mutating for
   // the last five minutes it is hard to find.
-  it('is never what the result is written into', async () => {
+  it('is never what the result is written into [fence:gchat-result-is-its-own-message]', async () => {
+    const why =
+      'A result must be posted as a message of its own, never edited into the acknowledgement ' +
+      '(ADR-0003, Progress reporting: the rule is unconditional). The result is what people ' +
+      'search for, quote and reply to months later, and a message that was mutating for the ' +
+      'last five minutes is not one they can find (#26).'
     const { adapter, api } = newAdapter()
 
     await adapter.deliver(to(THREAD, { kind: 'progress', progress: { phase: 'working' } }))
     await adapter.deliver(to(THREAD, { kind: 'result', text: 'the answer' }))
 
-    expect(api.calls).toEqual(['post', 'post'])
-    expect(api.texts).toEqual([`${TO}Working…`, `${TO}the answer`])
+    expect(api.calls, why).toEqual(['post', 'post'])
+    expect(api.texts, why).toEqual([`${TO}Working…`, `${TO}the answer`])
   })
 
   // A post that failed left no message to edit. Remembered anyway, every later

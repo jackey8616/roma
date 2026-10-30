@@ -577,16 +577,7 @@ export class AuditLog {
     const line = `${JSON.stringify(record)}\n`
     try {
       const file = this.#fileFor(monthOf(at))
-      // Start a new line first if the file was left mid-line. A machine that
-      // loses power mid-append leaves a line with no newline on the end of it,
-      // and appending straight onto that joins the next record to the wreckage —
-      // costing the month a second record, this one a Task that really did
-      // happen. One torn line is the most a power loss may cost.
-      //
-      // Checked on every append rather than once per file per run. The cheaper
-      // version assumes nothing else ever writes here, and the day something
-      // does — a second roma over the same volume, somebody's script — the
-      // assumption is not wrong loudly, it is wrong by silently eating a record.
+      // Enforced by `fence:audit-append-mends-a-torn-tail`.
       appendFileSync(file, endsWhole(file) ? line : `\n${line}`, 'utf8')
     } catch (error) {
       this.#onWriteFailed(record, error)
@@ -727,54 +718,18 @@ function readRecord(line: string): AuditRecord | null {
   if (typeof record['caller'] !== 'string') return null
   if (!OUTCOMES.includes(record['outcome'] as TaskOutcome)) return null
   if (!isFigure(record['costUsd'])) return null
-  // Absent is a Task, which is what every record written before ADR-0012 is.
-  // Present and unrecognised is not readable: a kind this cannot name would be
-  // counted as a Task, and the whole reason the field exists is to stop one kind
-  // being read as the other.
+  // Enforced by `fence:audit-old-records-stay-readable` and `fence:audit-wrong-type-is-torn`.
   if (record['kind'] !== undefined && !KINDS.includes(record['kind'] as AuditKind)) return null
-  // Absent is the Pinned Model, which is what every record written before
-  // ADR-0014 ran on. Present and not a name is a torn line rather than a record
-  // with a hole in it: the one question this field exists to answer is which
-  // model spent the shared window, and a line that answers it with a number
-  // answers it wrongly.
   if (record['model'] !== undefined && typeof record['model'] !== 'string') return null
-  // Absent is *unknown* rather than the Pinned Effort — see the field. Present
-  // and not a name is a torn line for `model`'s reason: the question this field
-  // answers is what a Turn was asked to think at, and a line answering it with a
-  // number answers it wrongly.
   if (record['effort'] !== undefined && typeof record['effort'] !== 'string') return null
-  // Absent is unknown, as an absent effort is. Present and not a name is a torn
-  // line for the line above's reason: the question this field answers is how
-  // short a Turn was asked to be, and a line answering it with a number answers
-  // it wrongly.
   if (record['caveman'] !== undefined && typeof record['caveman'] !== 'string') return null
-  // Absent is a record written before roma wrote this down. Present and not a
-  // figure is a torn line — and the null `isFigure` allows here is its third
-  // meaning: a Turn that began and that nothing ever measured.
   if (record['outputTokens'] !== undefined && !isFigure(record['outputTokens'])) return null
-  // Absent is a no, which is what every record written before there were Cloud
-  // Reaches means. Present and not a boolean is a torn line rather than a record
-  // with a hole in it: the one question this field answers is yes or no, and a
-  // line that answers it with a number is answering a different question — the
-  // count ADR-0015 refused.
   if (record['cloudReach'] !== undefined && typeof record['cloudReach'] !== 'boolean') return null
-  // Absent is a no, which is what every record written before there were Document
-  // Reaches means, and unreadable for anything that is not a yes or a no — the
-  // line above's reasoning, for the field beside it.
   if (record['documentReach'] !== undefined && typeof record['documentReach'] !== 'boolean') {
     return null
   }
-  // Absent is no Compaction, which is what every record written before roma
-  // could see one says. Present and not readable as one is a torn line rather
-  // than a record with a hole in it, for `cloudReach`'s reason: this field is the
-  // whole account of why a Task cost several times what its neighbours did, and a
-  // line that answers that with a string answers it wrongly.
   if (record['compaction'] !== undefined && !isCompaction(record['compaction'])) return null
   if (!CREDENTIALS.includes(record['credential'] as CredentialKind)) return null
-  // Absent is Claude Code, which is what every record written while there was
-  // one Runtime ran on. Present and unrecognised is not readable: a Runtime this
-  // cannot name would be counted against Claude Code's window, and keeping two
-  // Runtimes' quotas apart is the whole reason the field exists.
   if (record['runtime'] !== undefined && !RUNTIMES.includes(record['runtime'] as Runtime)) {
     return null
   }
