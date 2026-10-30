@@ -144,6 +144,11 @@ It satisfies both of that decision's stated reasons: no inbound port is opened, 
 nothing imposes a deadline on answering. It is not a queue, and ADR-0028 is where
 that is reconciled. The Gateway **is** the `Transport`; nothing publishes onward.
 
+No client library. Node ships a `WebSocket` and a `fetch`, and the Transport
+implements the Gateway protocol against the documented frames. A library would
+bring its own event loop, its own cache of guilds and channels, and its own
+reconnection, and those are this ADR's to decide.
+
 ### Membership is the boundary, and it is weaker than the Workspace's
 
 roma answers a single private guild, and that guild's membership is the whole of

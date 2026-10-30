@@ -70,14 +70,7 @@ import type { WorkRoot } from './work-root.js'
  * all, which is what a deployment with no metered key has.
  */
 export interface OverflowOptions {
-  /**
-   * What Overflow may cost in one calendar month before it is refused outright.
-   *
-   * Named by the deployment rather than defaulted, for the reason `auditRoot`
-   * is: this is a number somebody has to have decided, and a default would be
-   * roma deciding how much of their money to spend on their behalf. Without a
-   * cap, ADR-0002's "off by default" is ceremony rather than protection.
-   */
+  /** What Overflow may cost in one calendar month before it is refused outright. */
   readonly monthlyCapUsd: number
 }
 
@@ -168,32 +161,15 @@ export type CoreLog = OperatorLog<CoreLogRecord>
 
 export interface CoreOptions {
   /**
-   * Where this Core's messages come from and go back to.
-   *
-   * One Core per Channel, sharing one pool. That is what keeps the Core free of
-   * Channel identity: there is no routing table to consult and no field to
-   * inspect, because a Core only ever has one place to reply to. (Two Channels
-   * that mint the same Conversation Key would share a Session — ADR-0003 leaves
-   * whether that is allowed undecided, and nothing here depends on it.)
+   * Where this Core's messages come from and go back to. One Core per Channel,
+   * sharing one pool.
    */
   readonly channel: ChannelAdapter
   readonly pool: SessionPool
   /**
-   * Where a Session works, asked of the Work Root rather than of the pool.
-   *
-   * The Core needs one path and needs it for one thing: an Enclosure has to be
-   * on disk before the Turn that reads it (ADR-0011), and the Session it belongs
-   * to may never have been spawned — the first message to a Conversation is as
-   * likely to carry an Enclosure as any other. That is a question about where
-   * roma keeps things, not about what is running, and the Session Pool only ever
-   * answered it because it happened to be holding the path.
-   *
-   * Writing here still *creates* the Working Directory, and that is safe for a
-   * reason this has nothing to do with: the pool stopped reading a directory's
-   * existence as the record that a Session had been spawned, and reads
-   * `.roma-session` instead (#105). Asking the Work Root rather than the pool
-   * neither caused that nor fixes it — it is named here only so a reader does
-   * not go looking for the guard in the wrong module.
+   * Where a Session works, so an Enclosure is on disk before the Turn that reads
+   * it, even for a Session never spawned. Writing here creates the Working
+   * Directory.
    *
    * **The same one the pool has.** Enforced by
    * `fence:startup-core-and-pool-share-the-work-root`.
@@ -205,10 +181,8 @@ export interface CoreOptions {
    */
   readonly queue: TaskQueue
   /**
-   * Which Session each Conversation is on — only a question because `/clear` can
-   * move one.
-   *
-   * Shared with every other Core over the same working directories. Enforced by
+   * Which Session each Conversation is on. Shared with every other Core over the
+   * same working directories. Enforced by
    * `fence:startup-one-session-record-for-every-channel`.
    */
   readonly sessions: SessionGenerations
@@ -235,68 +209,39 @@ export interface CoreOptions {
    */
   readonly cavemen: ChosenRecord<'caveman'>
   /**
-   * Whether this deployment named a Caveman at all.
-   *
-   * A second field for one setting because it is not derivable from `cavemen`
-   * above: `ROMA_CAVEMAN=off` and `ROMA_CAVEMAN` unset resolve to the same
-   * Pinned Caveman before either reaches a Chosen Record, and the Audit Record
-   * is the one place they may not be one string — `CAVEMAN_NOT_PINNED` is where
-   * that difference is argued.
+   * Whether this deployment named a Caveman at all. Not derivable from
+   * `cavemen`: `ROMA_CAVEMAN=off` and `ROMA_CAVEMAN` unset resolve to the same
+   * Pinned Caveman, and the Audit Record tells them apart.
    *
    * A Caller who types `/caveman off` on a deployment that named none chose
    * something, and their Tasks are recorded as `CAVEMAN_NOT_PINNED` all the same.
    * Enforced by `fence:core-record-survives-a-withheld-caveman`.
    *
-   * Omitted means no, which is what a deployment that named nothing has and what
-   * every Core built for a test about something else has.
+   * Omitted means no.
    */
   readonly cavemanPinned?: boolean
   /**
-   * Where every Task is written down, and shared like everything else here.
-   *
-   * Required rather than optional, though an optional one would be easy: a Core
-   * built without it would run perfectly and quietly produce nothing, and what
-   * it produces nothing of is the only record of who spent what. Per-user
-   * attribution does not exist at the provider (ADR-0002), so an audit log that
-   * was accidentally left out cannot be reconstructed afterwards from anywhere.
+   * Where every Task is written down, shared like everything else here.
+   * Required: a Core without it would run and record nothing, and per-user
+   * attribution exists nowhere else to rebuild it from (ADR-0002).
    */
   readonly audit: AuditLog
   /**
-   * Which credential the Tasks this Core runs are paid for by.
-   *
-   * Per Core today because it is per process: every Session in the pool is
-   * spawned from one environment built from one credential. Overflow will make
-   * it a per-Task decision, at which point this moves onto the Task — the field
-   * on the record is already per-Task, which is what makes that a change of
-   * where the value comes from rather than a change of what is recorded.
+   * Which credential this Core's Attempts are paid by. Taking Overflow moves one
+   * Attempt onto the metered key and no more.
+   * Enforced by `fence:core-overflow-is-for-one-attempt`.
    */
   readonly credential: CredentialKind
   /** Metered billing. Omitted, Overflow is never offered and never taken. */
   readonly overflow?: OverflowOptions
   /**
    * Whether one Task obtained a Cloud Token, asked once as its record is
-   * written.
-   *
-   * A question rather than a component, because this is the whole of what the
-   * Core is allowed to know about it: something outside answers yes or no, and
-   * the Core prints the answer. Omitted, every record says no — which is exactly
-   * right for a deployment with no Cloud Reach, where no Task can have used one.
+   * written. Omitted, every record says no.
    */
   readonly usedCloudReach?: (taskId: string) => boolean
   /**
    * Whether one Task obtained a Document Token, asked once as its record is
-   * written.
-   *
-   * The question beside it, and a second question rather than one asked about a
-   * provider: the Core prints two answers and cannot be asked whether there is a
-   * Google. Omitted, every record says no — which is exactly right for a
-   * deployment with no Document Reach, where no Task can have used one.
-   *
-   * What it answers is sharper than the cloud's. Everything the agent does in a
-   * Depot is done as one service account, so Drive's own record of what happened
-   * there names the account and never the person — and the Audit Record is the
-   * only place a Caller exists at all (ADR-0002). Neither log answers "who put
-   * this here" alone; joined on the Task's window, they narrow it (ADR-0022 §9).
+   * written. Omitted, every record says no.
    */
   readonly usedDocumentReach?: (taskId: string) => boolean
   readonly log?: CoreLog
@@ -371,16 +316,8 @@ interface Parked {
  * roma with the Channel taken out: a message goes in, outbound instructions
  * come out.
  *
- * Everything hard is on the other side of it — Session lifetime, resume,
- * eviction, serialisation, cost — and none of it has any idea which product the
- * message came from. That is the point of the split rather than a side effect of
- * it: a second Channel is an Adapter, not a rewrite, and the only thing keeping
- * that true is that nothing in here can name one.
- *
- * A Task ends one of two ways, and both of them are something the Conversation
- * is told: the result of the Turn, or why there isn't one. Silence is not an
- * outcome the Core has — someone waiting on a Task that died is the failure this
- * exists to prevent.
+ * A Task always ends in something the Conversation is told: the result of the
+ * Turn, or why there isn't one. Silence is not an outcome the Core has.
  */
 export class Core {
   readonly #channel: ChannelAdapter
@@ -477,30 +414,14 @@ export class Core {
 
   /**
    * Take one message: a Command roma answers itself, a Relay it hands over, or a
-   * Task.
-   *
-   * All three are told apart here rather than in an Adapter, so that `/stop`
-   * means the same thing on every Channel and a Channel cannot invent a fourth
-   * kind of message. Everything that is none of them is work.
+   * Task. Everything that is none of them is work, and a paid Relay goes down the
+   * Task path.
    *
    * A Command is checked before a Relay. Enforced by `fence:relays-no-command-overlap`.
    *
-   * **A paid Relay goes down the Task path, and that is ADR-0018's whole
-   * decision.** What tells a Relay from a Task is the shape the message takes on
-   * the wire; what governs it is what it costs. Those are different axes, and
-   * roma answered them together for as long as every entry on the list was free.
-   * So a `/compact` is queued, capped, stoppable, Parkable, Overflowable and
-   * audited by the machinery that already does all five — nothing is invented for
-   * it, which is what makes it not a fourth kind of message.
-   *
-   * **The Opening sits on the seam the Command branch already cuts** (ADR-0024).
-   * Everything past that line needs the Session's process — a Task, a paid Relay,
-   * a free Relay — so one place covers all three, and a Command is excluded by
-   * having returned rather than by being named again. That is the whole of why
-   * roma never answers one question twice here: `/config` reports exactly the two
-   * facts an Opening carries, and it cannot reach this line.
-   *
-   * Started here and waited for where the Channel is first told.
+   * Anything past a Command needs the Session's process, and is preceded by the
+   * Opening where the Session has not had one; a Command never is. Started here
+   * and waited for where the Channel is first told.
    * Enforced by `fence:core-opening-travels-with-the-message`.
    *
    * Resolves when the Conversation has been told how it went. It rejects only
@@ -1393,20 +1314,14 @@ export class Core {
   /**
    * Take the offer of Overflow on one Task, and say whether there was one.
    *
-   * A method rather than another Command. roma's are recognised only when the
-   * whole message is one of them, and a `/overflow` anybody could type at any
-   * moment would have to answer for itself when nothing is blocked.
-   * This is an answer to a specific offer roma made about a specific Task, so it
-   * is named by that Task's id — which the Adapter already has, on the
-   * instruction that carried the offer.
+   * A method rather than a Command: a `/overflow` anybody could type at any
+   * moment would have to answer for itself when nothing is blocked, and this
+   * answers one offer, named by the Task id the Adapter has on the instruction
+   * that carried it.
    *
    * False where there is nothing to take: the window came back first, somebody
-   * stopped the Task, or the id is not one roma is holding. An Adapter says so
-   * in its own words; roma has no message for it, because nothing happened.
-   *
-   * Anyone may take it. ADR-0002 is explicit that restricting it to an admin
-   * turns a person into an approval queue and strands urgent work whenever they
-   * are offline, so there is nobody to check here and no check to make.
+   * stopped the Task, or the id is not one roma is holding. roma sends no message
+   * for it; an Adapter says so in its own words.
    */
   async takeOverflow(taskId: string): Promise<boolean> {
     const task = [...this.#running].find(

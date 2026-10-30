@@ -15,25 +15,7 @@ export type DiscordLogRecord = GatewayLogRecord | DiscordEventLogRecord | Discor
 /** Where it says it, which the composition root widens to every other part of roma. */
 export type DiscordLog = OperatorLog<DiscordLogRecord>
 
-/**
- * Discord, built and paired with the socket its events arrive over.
- *
- * Half of a composition root and deliberately only half, exactly as Chat's is:
- * what it takes to reach this Channel is Discord's business and lives in
- * Discord's directory, and what roma *is* — one pool, one queue, one Audit Log,
- * and every Channel it serves — is `src/channels/main.ts`'s.
- *
- * **No client library, and that is a decision rather than an accident.** Node
- * ships a `WebSocket` and a `fetch`, and everything Discord-specific about using
- * them is the Gateway protocol, which the Transport implements against the
- * documented frames. A library would bring its own event loop, its own cache of
- * guilds and channels, and its own opinions about reconnection — all three of
- * which are things this Channel decides for reasons ADR-0029 argues.
- *
- * Nothing is decided here. Every address is `env-config.ts`'s, every rule about
- * what happens to a message is `serve.ts`'s, and every Discord fact is the
- * Transport's or the Adapter's.
- */
+/** Discord, built and paired with the socket its events arrive over. */
 export function discordBinding(discord: DiscordEnv, log: DiscordLog): ChannelBinding {
   const api = new HttpDiscordApi({ botToken: discord.botToken, apiBase: discord.apiBase })
 

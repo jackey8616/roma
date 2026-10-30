@@ -234,6 +234,10 @@ roma can answer it without a process, without a Turn and without money, because
 it owns the answer — and without interrupting whatever the Conversation is waiting
 on, so asking is never the slow thing.
 
+The current model is named as a Caller would type it where the Menu carries it,
+and as the bare id where it does not, so a report never sets an id beside a list
+of aliases and leaves the reader to map one vocabulary onto the other.
+
 ### The Model Menu is roma's whitelist, not Claude Code's vocabulary
 
 ```
@@ -245,14 +249,19 @@ without clearing what it has said.
 
 **Amended 2026-08-31 — `fable` was added, and first** (#196). The order is
 descending cost, which is the order both Channels draw and the order a Caller
-reads to see what they are reaching for. The pinned build already served
+reads to see what they are reaching for. Enforced by
+`fence:menu-model-ordered-by-cost`. The pinned build already served
 `claude-fable-5`, so the question was never capability but whether roma is
-willing to put the Shared Window behind it at twice Opus 5's per-token rate. It
-is, and that judgement is recorded above `MENU` in `src/model-menu.ts` — beside
-the `[1m]` exclusion's, which is the same question decided the other way.
+willing to put the Shared Window behind it at twice Opus 5's per-token rate —
+$10/$50 per MTok against $5/$25 on the first-party API. roma draws on a
+subscription rather than metered billing, so that ratio is how fast the shared
+quota drains rather than a bill roma pays. It is. Willingness is per entry, and
+the `[1m]` exclusion below is the same question decided the other way. What
+would revisit either is evidence, and `/usage` answers out of the Audit Records.
 
 Not on it: the `[1m]` variants, and arbitrary full model ids. Upstream accepts
-both.
+both. The `[1m]` multiplier is context rather than price, and they are off the
+Menu because more context per Turn is still more of a window everybody shares.
 
 This is a spending boundary rather than a typo filter, and it is named for the
 reason `CONTEXT.md` names an Installation: a term that is the whole of a security

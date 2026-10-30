@@ -281,6 +281,9 @@ and none anticipated by ADR-0001:
 
 The session id is `uuidv5(<conversation key>)`, where the conversation key comes
 from the adapter. The mapping is derivable, so **no database is required**.
+`uuidv5` is roma's own (RFC 9562) rather than a dependency: it is fifteen lines
+and one published test vector, and every Session id roma will ever use comes out
+of it.
 
 `/new` adds one qualification, and only one: the derivation also takes a
 generation, and which generation a conversation is on is written down. The

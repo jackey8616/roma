@@ -3,12 +3,8 @@ import type { Delivery, Receiver, Transport } from '../../transport.js'
 import type { ChatEvent } from './chat-events.js'
 
 /**
- * As much of one Pub/Sub message as roma reads.
- *
- * Four members out of a class with a good deal more on it. Narrow on purpose:
- * what the subscriber needs is an identity, some bytes, and the two things it
- * can say back — and a port shaped like the library would make the double a test
- * needs most of the library.
+ * As much of one Pub/Sub message as roma reads. Narrow on purpose: a port
+ * shaped like the library would make a test's double most of the library.
  */
 export interface PubSubMessage {
   /**
@@ -68,34 +64,16 @@ export type PubSubLogRecord =
     }
 
 export interface PubSubTransportOptions {
-  /**
-   * The subscription to read, already opened.
-   *
-   * Handed in rather than created here, and that is the shape of ADR-0004's
-   * "no receiver of our own": Chat publishes to a topic somebody provisioned,
-   * roma reads a subscription somebody provisioned, and the flow-control and
-   * lease settings that govern how it is read are the deployment's to choose.
-   * roma creates neither and would not know what to create them as.
-   */
+  /** The subscription to read, already opened. */
   readonly subscription: PubSubSubscription
   readonly log?: OperatorLog<PubSubLogRecord>
 }
 
 /**
- * Google Chat's inbound path: a Pub/Sub subscription, read.
- *
- * ADR-0004's whole inbound decision, and it is nearly empty by design — Chat
- * publishes its events to a topic directly, so roma needs no HTTPS receiver, no
- * open port, and none of the ~30-second webhook deadline that a minutes-long Turn
- * could never meet. What is left is decoding and settling.
- *
- * The lease is the part worth understanding. A message stays unsettled for as
- * long as the Task it carries takes to answer, which is minutes — the client
- * library keeps extending its deadline meanwhile, and a roma that dies mid-Task
- * therefore leaves the message on the subscription to be delivered again rather
- * than settled into nothing. That is the trade the acceptance criterion asks
- * for, and it is at-least-once in both directions: the same event can arrive
- * twice, which is why a Delivery carries Pub/Sub's own id.
+ * Google Chat's inbound path: a Pub/Sub subscription, read. A message stays
+ * unsettled until its Task is answered, the library extending its lease
+ * meanwhile, so a roma that dies mid-Task leaves it to be delivered again. The
+ * same event can therefore arrive twice, and a Delivery carries Pub/Sub's own id.
  */
 export class PubSubTransport implements Transport<ChatEvent> {
   readonly #subscription: PubSubSubscription

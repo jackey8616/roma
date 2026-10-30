@@ -125,6 +125,10 @@ it is the version that dies mid-Turn.
 `credential.helper` and `credential.useHttpPath`. The helper is a thin client. It
 holds no secret and mints nothing; it asks roma, over a local channel, and roma —
 which holds the App private key — mints and answers.
+The helper is named as a `!`-prefixed shell command, `git`'s own spelling for
+"run this": the Shim is a Node module in roma's build, not an executable named
+`git-credential-something`, and a shebang wrapper installed by the image would be
+a second file to keep in step.
 
 **The private key never enters the container's reachable space.** A key in the
 agent's reach would turn a one-hour exposure into a permanent, indefinitely
