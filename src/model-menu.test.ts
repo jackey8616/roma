@@ -117,10 +117,14 @@ describe('reading a /model message', () => {
     expect(MENU_NAMES).toEqual([...Object.keys(MENU), 'default'])
   })
 
-  // Held as a literal because the order is load-bearing — `MENU` says why — so a
-  // reorder fails here rather than becoming a quietly different card everywhere.
-  it('lists them in the order it means them to be read', () => {
-    expect(MENU_NAMES).toEqual(['fable', 'opus', 'sonnet', 'haiku', 'default'])
+  // Held as a literal so a reorder fails here rather than becoming a quietly
+  // different card everywhere.
+  it('lists them most expensive first, the order every Channel draws [fence:menu-model-ordered-by-cost]', () => {
+    const why =
+      'The Model Menu is ordered by descending cost (ADR-0014). Both Adapters draw their ' +
+      'buttons in `MENU` order, and the Menu is the spending boundary, so reading it ' +
+      'downwards is how a Caller sees what they are reaching for before they reach.'
+    expect(MENU_NAMES, why).toEqual(['fable', 'opus', 'sonnet', 'haiku', 'default'])
   })
 })
 
