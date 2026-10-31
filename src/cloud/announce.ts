@@ -1,12 +1,5 @@
-/** The name the image installs the Cloud Shortcut under. */
 export const CLOUD_SHORTCUT = 'roma-cloud-token'
 
-/**
- * What every Session is told about the Cloud Reach: that the credential is
- * already configured, which identity it acts as, that there is nothing to renew,
- * and that the way to spend it is Google's REST APIs, with no CLI installed. Only
- * for a deployment that has a Cloud Reach.
- */
 export function announceCloud(account: string): string {
   return [
     'Google Cloud access is already configured for this session, by roma:',

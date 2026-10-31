@@ -10,7 +10,6 @@ import {
   recordedStream,
 } from '../test/support/recorded-stream.js'
 
-/** The tool-using Turn: a thinking block, a `Bash` call, and 25 seconds of silence. */
 const TOOL = recordedStream('tool-use-partial-messages').turn(1)
 
 const INTERVAL = 5_000
@@ -26,7 +25,6 @@ function newReporter(options: Partial<ProgressReporterOptions> = {}) {
   return { reporter, sent }
 }
 
-/** Acknowledge, then hand the reporter a stretch of a recorded Turn. */
 async function acknowledgeAnd(
   reporter: ProgressReporter,
   events: readonly ClaudeEvent[],
@@ -36,13 +34,11 @@ async function acknowledgeAnd(
   await flush()
 }
 
-/** The content blocks of an `assistant` event, read straight out of the capture. */
 function blocks(event: ClaudeEvent): Record<string, unknown>[] {
   const content = (event['message'] as Record<string, unknown> | undefined)?.['content']
   return Array.isArray(content) ? (content as Record<string, unknown>[]) : []
 }
 
-/** The `assistant` event carrying the tool call — how a tool window opens. */
 const ASKS_FOR_A_TOOL = ofKind(TOOL, 'assistant').find((event) =>
   blocks(event).some((block) => block['type'] === 'tool_use'),
 ) as ClaudeEvent
@@ -51,22 +47,12 @@ const TOOL_FINISHED = ofKind(TOOL, 'system/task_notification')[0] as ClaudeEvent
 const THINKING = ofKind(TOOL, 'system/thinking_tokens')[0] as ClaudeEvent
 const TEXT_DELTAS = ofKind(GENERATING, 'stream_event/text_delta')
 
-/**
- * The two `system/status` events of a real `/compact`, told apart by `status`.
- *
- * One of them opens a window nothing else is said inside; the other closes it,
- * on the same subtype and carrying `status: null`. Taken off the capture rather
- * than written here, because which field distinguishes them is the whole thing
- * under test.
- */
 const [COMPACTING, COMPACTION_OVER] = ofKind(COMPACTED_MANUALLY, 'system/status') as [
   ClaudeEvent,
   ClaudeEvent,
 ]
 
 beforeEach(() => {
-  // setImmediate stays real, so `flush` can still drain the microtask queue
-  // while the throttle's timer is under the test's control.
   vi.useFakeTimers({
     toFake: ['setTimeout', 'clearTimeout', 'Date'],
     now: 1_800_000_000_000,
@@ -87,8 +73,6 @@ describe('acknowledging before the Task has produced anything', () => {
     expect(sent).toEqual([{ phase: 'working' }])
   })
 
-  // The acknowledgement is not an update; it is the message every later update
-  // edits. A Channel that cannot edit still has to post it once.
   it('sends it even where nothing after it will be sent', async () => {
     const { reporter, sent } = newReporter({ updates: false })
 
@@ -100,8 +84,6 @@ describe('acknowledging before the Task has produced anything', () => {
 })
 
 describe('throttling what a burst of events produces', () => {
-  // 194 `text_delta` events over 72 seconds, all handed over at once. A renderer
-  // that edited a message per event would make 194 Channel calls for one Turn.
   it('turns a burst of events into one update', async () => {
     const { reporter, sent } = newReporter()
 
@@ -125,8 +107,6 @@ describe('throttling what a burst of events produces', () => {
     expect(sent.at(-1)).toEqual({ phase: 'writing', characters: written.length })
   })
 
-  // The 25339ms tool window: nothing arrives, so there is nothing new to say,
-  // and editing the message to exactly what it already says is a wasted call.
   it('says nothing while nothing has changed', async () => {
     const { reporter, sent } = newReporter()
 
@@ -151,9 +131,6 @@ describe('throttling what a burst of events produces', () => {
 })
 
 describe('what an update says the Task is doing', () => {
-  // How much, never what. The prose itself is deliberately not carried — an
-  // Acknowledgement showing it would say what the Result is about to say, which
-  // is the duplicate ADR-0010 is about.
   it('carries how much has been written, summed across the deltas [fence:progress-writing-carries-no-prose]', async () => {
     const why =
       'A writing update must carry how much has been written and never the prose (ADR-0010). ' +
@@ -170,9 +147,6 @@ describe('what an update says the Task is doing', () => {
     })
   })
 
-  // `thinking_delta` arrives with `"thinking": ""` and a token estimate. Progress
-  // can say that thinking is happening and roughly how much, never what about —
-  // there is nothing in the stream to say it with.
   it('says thinking is happening and how much, and never what', async () => {
     const { reporter, sent } = newReporter()
 
@@ -182,9 +156,6 @@ describe('what an update says the Task is doing', () => {
     expect(sent.at(-1)).toEqual({ phase: 'thinking', estimatedTokens: 50 })
   })
 
-  // A tool window is a stretch in which the stream says nothing at all. Naming
-  // what is running is the only thing that keeps the message from going stale
-  // for as long as the tool takes.
   it('names the tool that is running', async () => {
     const { reporter, sent } = newReporter()
 
@@ -194,8 +165,6 @@ describe('what an update says the Task is doing', () => {
     expect(sent.at(-1)).toEqual({ phase: 'tool', tool: 'Bash' })
   })
 
-  // "Bash" is the tool; `system/task_started` carries the command itself, which
-  // is what a person watching actually wants to see.
   it('prefers what Claude Code calls the running task to the tool name', async () => {
     const { reporter, sent } = newReporter()
 
@@ -216,9 +185,6 @@ describe('what an update says the Task is doing', () => {
     expect(sent.at(-1)).toEqual({ phase: 'working' })
   })
 
-  // A background task can finish while the answer is being written, and that
-  // closes no window the acknowledgement is showing. Throwing the prose away
-  // for a whole interval over it would be a step backwards.
   it('keeps showing the prose when a tool finishes that it was not showing [fence:progress-tool-finish-only-closes-a-tool]', async () => {
     const why =
       'A finished tool may put the Acknowledgement back to "working" only where a tool is what ' +
@@ -238,11 +204,6 @@ describe('what an update says the Task is doing', () => {
     })
   })
 
-  // The other dead stream, and the longer one: nothing at all arrives between a
-  // Compaction starting and its boundary — 28,517ms in the longest capture roma
-  // holds. Without this a `/compact` posts "Working…" and then says nothing
-  // whatsoever until it is over, which is the failure ADR-0003 named when it
-  // argued the cap: unacknowledged waiting causes people to resend.
   it('says a Compaction is under way, which is otherwise silence', async () => {
     const { reporter, sent } = newReporter()
 
@@ -252,10 +213,6 @@ describe('what an update says the Task is doing', () => {
     expect(sent.at(-1)).toEqual({ phase: 'compacting' })
   })
 
-  // The same event carries `compact_result` when a Compaction has *finished*,
-  // with `status: null`. An announcement that work is over is not an
-  // announcement that work is starting, so the reading is on `status` rather
-  // than on the subtype.
   it('does not read a finished Compaction as one still running [fence:stream-compacting-read-off-status]', async () => {
     const why =
       'readCompacting must read `status: "compacting"`, not the `system/status` subtype ' +
@@ -269,9 +226,6 @@ describe('what an update says the Task is doing', () => {
     expect(sent.at(-1), why).toEqual({ phase: 'working' })
   })
 
-  // The complete answer arrives once more as its own `assistant` event, 85ms
-  // before the terminal result. Reading it as progress too would show the whole
-  // Turn's prose twice over.
   it('does not read the finished message back as more prose', async () => {
     const { reporter, sent } = newReporter()
 
@@ -284,8 +238,6 @@ describe('what an update says the Task is doing', () => {
 })
 
 describe('a Channel that cannot edit a message it has posted', () => {
-  // Suppression rather than periodic new messages — the choice ADR-0003 left
-  // open and the Progress reporting section now records.
   it('gets the acknowledgement and nothing after it', async () => {
     const { reporter, sent } = newReporter({ updates: false })
 
@@ -308,15 +260,8 @@ describe('a Task that is over', () => {
     expect(sent).toEqual([{ phase: 'working' }])
   })
 
-  // Not waiting on an update is not the same as handing it over late. An
-  // acknowledgement is finished with once the result is posted, so an update
-  // that reaches the Channel afterwards has nothing left to edit — the Adapter
-  // roma has posts a new message, underneath the answer.
   it('drops an update that was queued behind one the Channel was still taking [fence:progress-stop-waits-on-nothing]', async () => {
     const taking: (() => void)[] = []
-    // What the Channel was handed, recorded on the way in. Whether the delivery
-    // then completes is the Channel's business; being handed a late update at all
-    // is what costs the Conversation a second message.
     const handedOver: TaskProgress[] = []
     const { reporter } = newReporter({
       deliver: (progress) => {
@@ -328,8 +273,6 @@ describe('a Task that is over', () => {
     reporter.update({ phase: 'working' })
     reporter.update({ phase: 'writing', characters: 14 })
     await vi.advanceTimersByTimeAsync(INTERVAL)
-    // Two on the chain, and only the first has been handed over: the second is
-    // waiting on the Channel to finish taking it.
     expect(handedOver).toEqual([{ phase: 'working' }])
 
     reporter.stop()
@@ -339,9 +282,6 @@ describe('a Task that is over', () => {
     expect(handedOver, STOP_WAITS_ON_NOTHING).toEqual([{ phase: 'working' }])
   })
 
-  // Stopping waits on nothing: a Channel that has not finished taking an update
-  // must not be able to hold back the result, which is the one message roma
-  // owes unconditionally.
   it('leaves nothing armed that could fire after the Task [fence:progress-stop-waits-on-nothing]', async () => {
     const { reporter } = newReporter({ deliver: () => new Promise<void>(() => {}) })
 
@@ -361,9 +301,6 @@ const STOP_WAITS_ON_NOTHING =
   '"Working…" underneath the answer, because the Acknowledgement it would edit is gone.'
 
 describe('a Channel that will not take an update', () => {
-  // Progress is the one thing roma will go without. A Channel too broken to
-  // carry an update is not a reason to abandon work that is running fine, and
-  // the result is still owed to whoever asked for it.
   it('keeps reporting rather than failing the Task [fence:progress-deliver-is-best-effort]', async () => {
     const why =
       'A rejected or throwing deliver must be swallowed (ADR-0003, Progress reporting: progress ' +
@@ -380,7 +317,6 @@ describe('a Channel that will not take an update', () => {
     await acknowledgeAnd(reporter, TEXT_DELTAS.slice(0, 1))
     await vi.advanceTimersByTimeAsync(INTERVAL)
 
-    // Every one was attempted, and none of them threw at the Task.
     expect(attempts, why).toHaveLength(2)
   })
 
@@ -401,7 +337,6 @@ describe('a Channel that will not take an update', () => {
   })
 })
 
-/** The prose one `text_delta` carries, read straight out of the capture. */
 function textOf(event: ClaudeEvent): string {
   const inner = event['event'] as Record<string, unknown>
   return String((inner['delta'] as Record<string, unknown>)['text'])

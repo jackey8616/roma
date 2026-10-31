@@ -9,17 +9,10 @@ describe('reading the Discord channel out of the environment', () => {
     expect(readDiscordEnv(MINIMAL)).toMatchObject({ botToken: 'a-bot-token' })
   })
 
-  // Nothing rather than a refusal, and that is the whole of what makes this
-  // Channel optional: a deployment that named none of these serves another
-  // Channel, and requiring a bot token of it would be roma insisting on an
-  // application nobody there has made (ADR-0028).
   it('finds nothing where the deployment said nothing about Discord', () => {
     expect(readDiscordEnv({})).toBeNull()
   })
 
-  // Half of it is the other answer, and the dangerous one. Somebody who pointed
-  // the API at a proxy meant to serve Discord, and a roma that read that as
-  // silence would start, connect to nothing, and ignore the variable they set.
   it('refuses a Discord configured by halves, naming what is missing', () => {
     for (const named of ['ROMA_DISCORD_GATEWAY_URL', 'ROMA_DISCORD_API_BASE']) {
       expect(() => readDiscordEnv({ [named]: 'wss://somewhere' }), named).toThrow(
@@ -31,9 +24,6 @@ describe('reading the Discord channel out of the environment', () => {
     }
   })
 
-  // Neither is a deployment's to know: they are Discord's own addresses, the
-  // same everywhere, and a deployment made to state them is one that can state
-  // them wrong.
   it('needs no address, because both have one', () => {
     expect(readDiscordEnv(MINIMAL)).toMatchObject({
       gatewayUrl: DEFAULT_GATEWAY_URL,
@@ -41,9 +31,6 @@ describe('reading the Discord channel out of the environment', () => {
     })
   })
 
-  // One version, in both places. A Gateway on one and a REST call on another is
-  // roma reading one shape and asking for a different one, and that failure
-  // arrives in a payload rather than at boot.
   it('speaks one version of the API on both of them [fence:discord-one-api-version]', () => {
     const why =
       'The Gateway URL and the REST base must name one API version (ADR-0029). On two, roma ' +

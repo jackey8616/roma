@@ -16,17 +16,10 @@ describe('reading the Chat channel out of the environment', () => {
     })
   })
 
-  // Nothing rather than a refusal, and that is the whole of what makes this
-  // Channel optional: a deployment that named none of these serves another
-  // Channel, and requiring Chat's variables of it would be roma insisting on a
-  // subscription for a product nobody there uses (ADR-0028).
   it('finds nothing where the deployment said nothing about Chat', () => {
     expect(readChatEnv({})).toBeNull()
   })
 
-  // Half of it is the other answer, and the dangerous one. Somebody who set one
-  // of these meant to serve Chat, and a roma that read that as silence would
-  // start, subscribe to nothing, and ignore the variable they did set.
   it('names both required variables where the deployment named part of a Chat', () => {
     for (const named of ['ROMA_PUBSUB_MAX_MESSAGES', 'ROMA_PUBSUB_MAX_LEASE_MINUTES']) {
       expect(() => readChatEnv({ [named]: '5' }), named).toThrow(ConfigurationMissing)
@@ -50,9 +43,6 @@ describe('reading the Chat channel out of the environment', () => {
     )
   })
 
-  // The subscription is a name roma reads, never one it creates. A deployment
-  // that has not made one yet is a deployment that cannot start, and saying so
-  // is better than roma quietly making one nothing is publishing to.
   it('takes the subscription as a name rather than a path to create', () => {
     expect(readChatEnv({ ...MINIMAL, ROMA_PUBSUB_SUBSCRIPTION: 'roma-chat-events' })).toMatchObject(
       { subscription: 'roma-chat-events' },

@@ -1,22 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { CHAT_API, HttpChatApi, type ChatRequest } from './http-chat-api.js'
 
-// SEAM 3, the far side: a ChatMessage goes in and what comes out is the HTTP
-// request Google would have received. No Workspace, no credential, no quota —
-// the token is somebody else's problem by the time a request reaches here, which
-// is the whole reason the sender is a seam.
-//
-// The request shapes below are **from Google's reference documentation**, like
-// every other Chat fact in this repo. What they pin down is roma's side of the
-// call: the URL it builds, the method, and the body. Whether Chat then does what
-// the reference says it does is not something anything here can prove.
-// https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces.messages
-
 const SPACE = 'spaces/AAAA'
 const THREAD = `${SPACE}/threads/thread-1`
 const POSTED = `${SPACE}/messages/msg-1`
 
-/** A sender that records what it was asked to send and answers as Chat would. */
 function recording(answer: unknown = { name: POSTED }) {
   const requests: ChatRequest[] = []
   const api = new HttpChatApi({
@@ -30,11 +18,6 @@ function recording(answer: unknown = { name: POSTED }) {
 }
 
 describe('posting a message', () => {
-  // The one thing ADR-0004 is emphatic about: an app cannot create a thread of
-  // its own, so replying *into* the caller's thread with this option is the only
-  // way a thread ever comes to exist. Wrong or missing, roma answers every
-  // message at the top level of the space and every Conversation loses its
-  // shape.
   it('replies into a thread with the option that establishes it', async () => {
     const { api, last } = recording()
 
@@ -52,9 +35,6 @@ describe('posting a message', () => {
     })
   })
 
-  // A DM has no threads to speak of, so the message carries neither — and
-  // sending a thread name that names a single message would make every reply its
-  // own Conversation.
   it('posts plainly into a DM', async () => {
     const { api, last } = recording()
 
@@ -67,17 +47,12 @@ describe('posting a message', () => {
     })
   })
 
-  // The name is the only way to edit the message afterwards, which is the whole
-  // of what an acknowledgement is for.
   it('hands back the name Chat gave the message', async () => {
     const { api } = recording()
 
     await expect(api.post({ space: SPACE, thread: null, text: 'hello' })).resolves.toBe(POSTED)
   })
 
-  // A post that "succeeded" without a name leaves an acknowledgement roma cannot
-  // edit, and the failure would surface minutes later as an edit of `undefined`.
-  // Refused here, where it still says what went wrong.
   it('refuses a response that carries no message name [fence:gchat-post-refuses-a-nameless-message]', async () => {
     const why =
       'A post Chat accepted without a resource name must throw at the post (ADR-0010: the ' +
@@ -91,9 +66,6 @@ describe('posting a message', () => {
     )
   })
 
-  // Rejecting means the Conversation was not told, which is the one failure the
-  // Core does not absorb. Swallowed here it would become a Task that answered
-  // nobody and reported success.
   it('lets an API failure through', async () => {
     const api = new HttpChatApi({
       send: () => Promise.reject(new Error('403 permission denied')),
@@ -105,10 +77,6 @@ describe('posting a message', () => {
 })
 
 describe('the button that takes Overflow', () => {
-  // The round trip ADR-0002's valve rests on: the action name and the Task id go
-  // out on the button and come back on the click, so roma remembers nothing
-  // between offering it and its being taken. `chat-events.ts` reads exactly
-  // these two back out.
   it('goes out as a card action carrying the Task id', async () => {
     const { api, last } = recording()
 
@@ -156,8 +124,6 @@ describe('the button that takes Overflow', () => {
     })
   })
 
-  // The text is still the message. A card-only message would say the quota is
-  // spent nowhere a notification or a search would find it.
   it('keeps the text alongside the card', async () => {
     const { api, last } = recording()
 
@@ -173,11 +139,6 @@ describe('the button that takes Overflow', () => {
 })
 
 describe('the buttons that choose off a Menu', () => {
-  // A Menu is several buttons at once, which is what ended the one-action-per-
-  // message rule this file used to rest on (ADR-0023). One `buttonList` holding
-  // all of them rather than a widget each, because that is Chat's own grouping:
-  // it wraps a row across lines, which is what a six-level Effort Menu needs on
-  // a phone.
   it('puts every button of a Menu in one list', async () => {
     const { api, last } = recording()
 
@@ -200,8 +161,6 @@ describe('the buttons that choose off a Menu', () => {
       'haiku',
       'default',
     ])
-    // Both facts make the round trip on every button, because a press has to say
-    // which Command it means as well as which name off its Menu.
     expect(widget?.buttonList.buttons[0]?.onClick.action).toEqual({
       function: 'choose',
       parameters: [
@@ -221,9 +180,6 @@ describe('the buttons that choose off a Menu', () => {
 })
 
 describe('editing a message', () => {
-  // `updateMask` is not optional: without it Chat has no instruction about which
-  // field is being replaced, and an acknowledgement that silently stopped
-  // updating is exactly what a dead Task looks like.
   it('replaces the text of a message roma posted, by its resource name [fence:gchat-edit-names-the-field]', async () => {
     const why =
       'An edit carries `updateMask=text`, or Chat is not told which field is replaced ' +
@@ -250,7 +206,6 @@ describe('editing a message', () => {
   })
 })
 
-/** Just enough of Chat's card payload to read a button list back out of it. */
 interface ButtonWidget {
   readonly buttonList: {
     readonly buttons: readonly {
@@ -260,7 +215,6 @@ interface ButtonWidget {
   }
 }
 
-/** The widgets of the one card a message carries, or nothing if it carries none. */
 function buttonWidgetsOf(body: Readonly<Record<string, unknown>> | undefined): ButtonWidget[] {
   const cards = body?.['cardsV2'] as
     readonly { card: { sections: readonly { widgets: ButtonWidget[] }[] } }[] | undefined

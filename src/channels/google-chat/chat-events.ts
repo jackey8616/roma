@@ -7,58 +7,23 @@ import type {
 import { commandFor } from '../../commands.js'
 import type { OperatorLog } from '../../operator-log.js'
 
-/** Fetch the bytes of one thing Chat holds, by the resource name Chat gave it. */
 export type DownloadAttachment = (resourceName: string) => Promise<Uint8Array>
 
-/** What reading an event can tell an operator that a Conversation cannot. */
 export type ChatEventLogRecord =
   | {
-      /**
-       * An event carried a quoted message and roma read no Quotation out of it.
-       * Carries the keys that arrived, the snapshot's under their path, and never
-       * the content.
-       */
       readonly event: 'quote-unread'
       readonly keys: readonly string[]
     }
   | {
-      /**
-       * An event carried something attachment-shaped and roma read no Enclosure
-       * out of it.
-       *
-       * The shape this file reads was written from Google's documentation rather
-       * than from a capture, and the envelope depends on delivery (roma is on
-       * Pub/Sub, not an HTTP webhook). A wrong guess reads as `null` and falls
-       * through with no throw and no reply, which looks exactly like roma ignoring
-       * images; this line is what tells the two apart.
-       *
-       * `keys` rather than the payload, because an attachment's metadata is
-       * somebody's filename, and the Operator Log holds no user content.
-       */
       readonly event: 'attachment-unread'
       readonly keys: readonly string[]
     }
 
-/**
- * One event as Google Chat delivers it. Left open because the shape is Chat's and
- * it adds fields; everything roma reads out of one is read in this file, so a
- * change in Chat's shape breaks in one place.
- */
 export type ChatEvent = Readonly<Record<string, unknown>>
 
-/** Enforced by `fence:gchat-conversation-key-from-the-space`. */
 const DIRECT_MESSAGE = 'DIRECT_MESSAGE'
 const DM = 'DM'
 
-/**
- * Read one Chat event as a message for the Core, or null if roma should not
- * answer it: a thread, a space, a sender and an @-mention go in, and a key, a
- * Caller and some text come out.
- *
- * Null covers everything roma is delivered and does not answer: the app being
- * added to or removed from a space, a card click, and anything an app said.
- * Enforced by `fence:gchat-never-answers-an-app`.
- */
 export function readIngressMessage(
   event: ChatEvent,
   { download, log }: ReadOptions = {},
@@ -70,26 +35,14 @@ export function readIngressMessage(
   const sender = asRecord(message['sender'])
   const caller = asString(sender?.['name'])
   if (caller === null || asString(sender?.['type']) === 'BOT') return null
-  // The readable half of the same person, and null where Chat did not send one.
-  // It is not on every delivery, and Chat's own User resource has `isAnonymous`
-  // for somebody who has no name to give — so this is read the way every other
-  // field here is read, and roma answers the message either way.
   const callerName = asString(sender?.['displayName'])
 
   const conversationKey = conversationKeyOf(event, message)
   if (conversationKey === null) return null
 
-  // `argumentText` is the message with roma's @-mention removed, which is what
-  // Claude Code should see: the mention is how Chat addresses roma, not part of
-  // what was asked.
   const text = (asString(message['argumentText']) ?? asString(message['text']) ?? '').trim()
   const quoted = readQuotation(message, download, log)
-  // The Caller's own first and the quotation's behind them, which is the order
-  // they are named to the agent in. Nothing distinguishes them here beyond the
-  // `from` each carries — an Enclosure is an Enclosure, whoever sent it, and the
-  // Core writes them all into one Working Directory in one pass.
   const enclosures = [...readEnclosures(message, null, download, log), ...quoted.enclosures]
-  // Enforced by `fence:gchat-answers-anything-with-content`.
   if (text === '' && enclosures.length === 0 && quoted.quotation === null) return null
 
   return {
@@ -102,13 +55,10 @@ export function readIngressMessage(
   }
 }
 
-/** Enforced by `fence:gchat-conversation-key-from-the-space`. */
 function conversationKeyOf(
   event: ChatEvent,
   message: Readonly<Record<string, unknown>>,
 ): string | null {
-  // The event carries the space, and so does the message inside it. Either will
-  // do and neither is always present, so both are tried before giving up.
   const space = asRecord(event['space']) ?? asRecord(message['space'])
   const spaceName = asString(space?.['name'])
   if (spaceName === null) return null
@@ -137,15 +87,9 @@ function readQuotation(
   if (metadata === null) return NOTHING_QUOTED
 
   const snapshot = asRecord(metadata['quotedMessageSnapshot'])
-  // Chat's only sender that is a bare string rather than a `User`, and its
-  // documented shape is "the quoted message's author name" — which is an id in
-  // one reading and a display name in the other. Carried either way and read
-  // neither: printing it is all roma ever does with a person's name.
   const author = asString(snapshot?.['sender'])
   const text = (asString(snapshot?.['text']) ?? '').trim()
   const enclosures = snapshot === null ? [] : readEnclosures(snapshot, author, download, log)
-  // Only where there are words. A quotation with no text is a tag with nothing
-  // in it, and an attachment that came with it stands on its own already.
   const quotation = text === '' ? null : { text, author }
 
   if (quotation === null && enclosures.length === 0) {
@@ -163,27 +107,11 @@ function readQuotation(
   return { quotation, enclosures }
 }
 
-/** What reading an event needs beyond the event. */
 export interface ReadOptions {
-  /** How to fetch an attachment's bytes. Absent, a read produces no Enclosures. */
   readonly download?: DownloadAttachment
   readonly log?: OperatorLog<ChatEventLogRecord>
 }
 
-/**
- * Chat's two ways of attaching something, and roma's reach into each.
- *
- * `attachmentDataRef` is Chat's own storage. `driveDataRef` names a file in the
- * **sender's** Drive, which roma has no scope for — an Enclosure is still made
- * and fails when redeemed, so the Task ends with a reason the person can read
- * rather than roma silently ignoring what somebody sent.
- *
- * Both read, neither assumed, like every other pair in this file: the envelope
- * depends on how the event was delivered.
- *
- * `from` is null for the Caller's own — a quoted message's snapshot comes
- * through here too, and its Enclosures have to say so (ADR-0021).
- */
 function readEnclosures(
   message: Readonly<Record<string, unknown>>,
   from: string | null,
@@ -197,10 +125,6 @@ function readEnclosures(
   for (const entry of attachments) {
     const attachment = asRecord(entry)
     if (attachment === null) continue
-    // Chat's own name for the file, which roma prints and never makes into a
-    // path — see `PendingEnclosure`. `contentName` is the documented field;
-    // falling back to the resource name keeps an Enclosure readable rather than
-    // nameless where it is missing.
     const name = asString(attachment['contentName']) ?? asString(attachment['name']) ?? 'attachment'
 
     const resourceName = asString(asRecord(attachment['attachmentDataRef'])?.['resourceName'])
@@ -224,9 +148,6 @@ function readEnclosures(
     }
   }
 
-  // Nothing understood out of something that was plainly there. See
-  // `ChatEventLogRecord`: this is the difference between a payload roma cannot
-  // read and a roma that ignores images, and without it they look the same.
   if (enclosures.length === 0) {
     log?.({
       event: 'attachment-unread',
@@ -237,41 +158,18 @@ function readEnclosures(
   return enclosures
 }
 
-/**
- * Chat's own name for a button press, and roma's name for the one it has.
- *
- * The action name travels out on the button and comes back on the click, so
- * these two constants are the whole of the round trip.
- */
 const CARD_CLICKED = 'CARD_CLICKED'
 export const TAKE_OVERFLOW = 'takeOverflow'
 export const TASK_ID_PARAMETER = 'taskId'
 
-/**
- * A press on one name off a Menu: three constants for one round trip, because
- * this button carries which Command a press means and which name off its Menu.
- */
 export const CHOOSE = 'choose'
 export const CHOOSES_PARAMETER = 'chooses'
 export const OPTION_PARAMETER = 'option'
 
-/**
- * Read a click on the Overflow button as the Task it was about, or null. The Task
- * id is one roma minted and put on the offer, so this only ever answers an offer
- * roma made. Written from Google's documented shape, not from a capture.
- */
 export function readOverflowTaken(event: ChatEvent): string | null {
   return pressed(event, TAKE_OVERFLOW, TASK_ID_PARAMETER)
 }
 
-/**
- * Read a press on a Menu button as the message the Caller would have typed, or
- * null if this event is not one. What comes out is an ordinary Ingress Message
- * carrying, say, `/model opus`.
- *
- * Whoever pressed is on `event.user`, never on the message's sender.
- * Enforced by `fence:gchat-press-is-read-off-the-presser`.
- */
 export function readChosenOption(event: ChatEvent): IngressMessage | null {
   const chooses = pressed(event, CHOOSE, CHOOSES_PARAMETER)
   const option = pressed(event, CHOOSE, OPTION_PARAMETER)
@@ -297,17 +195,14 @@ export function readChosenOption(event: ChatEvent): IngressMessage | null {
   }
 }
 
-/** Enforced by `fence:gchat-reads-only-the-menus-it-draws`. */
 type Menu = Extract<OutboundInstruction, { kind: 'choice' }>['chooses']
 
-/** Enforced by `fence:gchat-reads-only-the-menus-it-draws`. */
 const MENUS: Readonly<Record<Menu, true>> = { model: true, effort: true, caveman: true }
 
 function isMenu(name: string): name is Menu {
   return Object.hasOwn(MENUS, name)
 }
 
-/** Enforced by `fence:gchat-press-reads-both-shapes`. */
 function pressed(event: ChatEvent, action: string, parameter: string): string | null {
   if (asString(event['type']) !== CARD_CLICKED) return null
 

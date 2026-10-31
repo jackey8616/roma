@@ -40,49 +40,24 @@ import {
 } from '../../../test/support/recording-discord-api.js'
 import { sources } from '../../../test/support/sources.js'
 
-// SEAM 3 — the Discord Channel: a raw Gateway frame goes in and an ingress
-// message comes out, with only the socket and the REST call doubled.
-//
-// **Wider than the Chat seam, deliberately.** It covers the Transport as well as
-// the Adapter, because this Transport *decides* things where Chat's only decodes
-// an envelope: which channels a guild has, and therefore whether a message is in
-// a thread; and what a Quotation says, which costs a round trip. Nothing that
-// decides something may sit behind an untested port.
-//
-// The frames below are **written from Discord's documented shape, not
-// captured**. Nothing in this repo can capture one — there is no guild and no
-// application — which is the position ADR-0004's first version was in when two of
-// its facts turned out to be wrong. The one fact everything here rests on is
-// quoted twice in Discord's own reference: *"The created thread and the message
-// it was started from will share the same id"*.
-
 const TOKEN = 'a-bot-token'
 const GATEWAY = 'wss://gateway.example/?v=10&encoding=json'
 const RESUME_GATEWAY = 'wss://resume.example/?v=10&encoding=json'
-/** What `HELLO` carries in Discord's own documented example. */
 const HEARTBEAT_INTERVAL = 41_250
 
 const ROMA = '100000000000000001'
 const CALLER = '200000000000000002'
 const SOMEBODY_ELSE = '200000000000000003'
 const GUILD = '300000000000000004'
-/** One of the guild's own channels: a top-level message here opens a thread. */
 const CHANNEL = '400000000000000005'
-/** A thread in that channel, which is therefore *not* one of the guild's channels. */
 const THREAD = '500000000000000006'
-/** A thread nobody has posted in for a day: in the channel list and the thread list alike, absent. */
 const ARCHIVED = '500000000000000007'
-/** A forum channel: one of the guild's own, and every message in it is inside a post. */
 const FORUM = '400000000000000016'
-/** The channel a direct message arrives in, which has no guild at all. */
 const DM = '600000000000000008'
 const MESSAGE = '700000000000000009'
-/** A second question in the same channel, which is a second Conversation entirely. */
 const NEXT_MESSAGE = '700000000000000019'
 const QUOTED = '700000000000000010'
-/** A card roma posted, which is the message a press arrives carrying. */
 const CARD = '700000000000000017'
-/** One press, which is its own event and never the card's. */
 const INTERACTION = '900000000000000018'
 const INTERACTION_TOKEN = 'an-interaction-token'
 
@@ -90,10 +65,8 @@ const OP_HEARTBEAT = 1
 const OP_IDENTIFY = 2
 const OP_RESUME = 6
 
-/** Discord's own hello, and the only thing it says. */
 const HELLO = { op: 10, d: { heartbeat_interval: HEARTBEAT_INTERVAL } }
 
-/** The dispatch that names roma to itself, and says where a resume goes. */
 function ready(sequence = 1): unknown {
   return {
     op: 0,
@@ -107,13 +80,6 @@ function ready(sequence = 1): unknown {
   }
 }
 
-/**
- * The guild's state, as `GUILD_CREATE` carries it.
- *
- * Both lists, because the whole of the key below is which one it is read against:
- * `channels` is *"Channels in the guild"* and `threads` is *"All active
- * threads…"* — so the archived one below is deliberately in neither.
- */
 function guildCreate(channels: readonly string[] = [CHANNEL], sequence = 2): unknown {
   return {
     op: 0,
@@ -131,7 +97,6 @@ function dispatch(name: string, payload: unknown, sequence = 3): unknown {
   return { op: 0, s: sequence, t: name, d: payload }
 }
 
-/** A message in one of the guild's channels, addressed to roma. */
 function addressed(overrides: Record<string, unknown> = {}): DiscordMessage {
   return {
     id: MESSAGE,
@@ -145,7 +110,6 @@ function addressed(overrides: Record<string, unknown> = {}): DiscordMessage {
   }
 }
 
-/** A message in a direct message, where being sent one is the whole of the address. */
 function inDm(overrides: Record<string, unknown> = {}): DiscordMessage {
   return {
     id: MESSAGE,
@@ -157,13 +121,6 @@ function inDm(overrides: Record<string, unknown> = {}): DiscordMessage {
   }
 }
 
-/**
- * roma's own card, in the thread it opened.
- *
- * Authored by an application, which is what a press event always carries — and
- * the reason the press gets a reader of its own rather than a branch inside the
- * message reader (ADR-0023).
- */
 function card(overrides: Record<string, unknown> = {}): DiscordMessage {
   return {
     id: CARD,
@@ -175,19 +132,14 @@ function card(overrides: Record<string, unknown> = {}): DiscordMessage {
   }
 }
 
-/** A press on one button, as Discord delivers one over the same socket messages arrive on. */
 function press(customId: string, overrides: Record<string, unknown> = {}): unknown {
   return dispatch('INTERACTION_CREATE', {
     id: INTERACTION,
     token: INTERACTION_TOKEN,
-    // `MESSAGE_COMPONENT`. The other kind is an application command, and roma
-    // registers none.
     type: 3,
     application_id: ROMA,
     channel_id: MESSAGE,
     guild_id: GUILD,
-    // Whoever pressed, where a guild puts them. Never the card's author, which
-    // is roma.
     member: { user: { id: CALLER, username: 'ada', global_name: 'Ada' } },
     data: { custom_id: customId, component_type: 2 },
     message: card(),
@@ -195,7 +147,6 @@ function press(customId: string, overrides: Record<string, unknown> = {}): unkno
   })
 }
 
-/** An attachment as Discord documents one: a name to print and a link that expires. */
 const ATTACHED = {
   id: '800000000000000011',
   filename: 'screenshot.png',
@@ -203,20 +154,13 @@ const ATTACHED = {
   url: 'https://cdn.example/attachments/screenshot.png?ex=deadbeef',
 }
 
-/** roma, with the socket open and nothing said on it yet. */
 async function listening() {
   const api = new RecordingDiscordApi()
   const network = new FakeGatewayNetwork()
   const log: DiscordLogRecord[] = []
-  // Every wait roma sat through, in order, spent instantly. What a retry policy
-  // does that a test can see is *how long it waited before trying again*, so the
-  // clock is the thing that has to be recorded rather than mocked away.
   const waits: number[] = []
   const adapter = new DiscordAdapter({
     api,
-    // The same log the Transport writes to, because it is the same log: an
-    // operator reads one file, and a Conversation answered in the wrong place is
-    // a line beside the frames it arrived on.
     log: (record) => log.push(record),
     wait: (ms) => {
       waits.push(ms)
@@ -229,18 +173,11 @@ async function listening() {
     connect: network.connect,
     api,
     log: (record) => log.push(record),
-    // Pinned so a heartbeat lands *on* the interval rather than somewhere inside
-    // it. The jitter is Discord asking a fleet of connections not to beat in
-    // unison, and roma is one connection.
     jitter: () => 1,
   })
 
   const deliveries: Delivery<DiscordEvent>[] = []
   const read: IngressMessage[] = []
-  // What roma had already said to Discord at the moment each Delivery arrived.
-  // The only way to assert that the acknowledgement went out *before* the event
-  // was handed on, which is the whole of the three-second deadline: read after
-  // the fact, both orders leave the same two calls in the same list.
   const saidBefore: DiscordCall[][] = []
   await transport.receive(async (delivery) => {
     saidBefore.push([...api.calls])
@@ -260,15 +197,12 @@ async function listening() {
     deliveries,
     read,
     saidBefore,
-    /** The buttons on the last message roma posted, in the order it posted them. */
     get buttons(): readonly DiscordButton[] {
       return api.messages.at(-1)?.posted.buttons ?? []
     },
-    /** What the Core was handed last, or null where it was handed nothing. */
     get last(): IngressMessage | null {
       return read.at(-1) ?? null
     },
-    /** Push one frame, and let the completion behind it finish. */
     async take(frame: unknown): Promise<void> {
       network.socket.push(frame)
       await flushed()
@@ -276,7 +210,6 @@ async function listening() {
   }
 }
 
-/** roma, identified, with the guild's channel list in hand. */
 async function connected(channels: readonly string[] = [CHANNEL]) {
   const channel = await listening()
   await channel.take(HELLO)
@@ -285,25 +218,16 @@ async function connected(channels: readonly string[] = [CHANNEL]) {
   return channel
 }
 
-/** One message, delivered and read. */
 async function messaged(message: DiscordMessage, channels: readonly string[] = [CHANNEL]) {
   const channel = await connected(channels)
   await channel.take(dispatch('MESSAGE_CREATE', message))
   return channel
 }
 
-/**
- * What an instruction says, with the address taken off.
- *
- * Distributed over the union rather than `Partial<…>`, so that a test asking for
- * a `result` with no text is a type error here rather than a passing test of
- * something the Core cannot send.
- */
 type Outcome<T> = T extends unknown
   ? Omit<T, 'taskId' | 'conversationKey' | 'caller' | 'callerName'>
   : never
 
-/** An instruction addressed to one Conversation, as the Core would send it. */
 function to(
   conversationKey: string,
   outcome: Outcome<OutboundInstruction>,
@@ -314,28 +238,14 @@ function to(
   return { ...outcome, taskId, conversationKey, caller, callerName }
 }
 
-/**
- * A refusal as `HttpDiscordApi` would have built one from a response.
- *
- * The two fields a retry acts on and nothing else — a status, and however long
- * Discord's own headers asked roma to wait.
- */
 function refusal(status: number, retryAfterMs: number | null = null): DiscordRefusal {
   return new DiscordRefusal(`Discord answered ${status}`, status, retryAfterMs)
 }
 
-/** Every line roma wrote about a Conversation it was refused the thread for. */
 function unopened(log: readonly DiscordLogRecord[]): readonly DiscordLogRecord[] {
   return log.filter(({ event }) => event === 'thread-unopened')
 }
 
-/**
- * A Menu as the Core sends one, over the real Menu rather than a copy of it.
- *
- * The names are what a button is labelled with *and* what a press comes back
- * saying, so a test spelling its own would be asserting that roma agrees with
- * the test rather than that a Menu survives the round trip.
- */
 function choice(
   chooses: 'model' | 'effort' | 'caveman',
   options: readonly string[],
@@ -344,20 +254,12 @@ function choice(
   return { kind: 'choice', text, chooses, options, refused: null }
 }
 
-/**
- * The `custom_id` off a button roma actually posted.
- *
- * Never a string a test wrote: a button carrying something roma's own reader
- * cannot read back is the failure this whole area exists to catch, and it is
- * invisible to a press built out of a literal.
- */
 function customIdFor(buttons: readonly DiscordButton[], label: string): string {
   const button = buttons.find((candidate) => candidate.label === label)
   if (button === undefined) throw new Error(`no button labelled ${label}`)
   return button.customId
 }
 
-/** The complete answer of the recorded 72-second generating Turn. */
 function recordedAnswer(): string {
   const [finished] = recordedStream('generation-partial-messages')
     .turn(1)
@@ -366,26 +268,18 @@ function recordedAnswer(): string {
 }
 
 describe('which Conversation a Discord message belongs to', () => {
-  // Row one of ADR-0029's table. There is no guild, so there is nothing to
-  // classify and nowhere to open a thread: roma replies in place.
   it('is the channel, in a direct message', async () => {
     const channel = await messaged(inDm())
 
     expect(channel.last?.conversationKey).toBe(DM)
   })
 
-  // Row two. The channel the message arrived in is not one of the guild's, so it
-  // is a thread — and a thread is already a place roma can reply in.
   it('is the channel it arrived in, in a thread', async () => {
     const channel = await messaged(addressed({ channel_id: THREAD }))
 
     expect(channel.last?.conversationKey).toBe(THREAD)
   })
 
-  // Row three, and the one that only works because of the fact quoted twice in
-  // Discord's reference: a thread takes the id of the message it was started
-  // from. So the key minted here, before any thread exists, is the id the thread
-  // will have — no Adapter state, no lookup, and `toIngress` stays synchronous.
   it('is the message’s own id at the top level — the id the thread will take', async () => {
     const channel = await messaged(addressed())
 
@@ -406,11 +300,6 @@ describe('which Conversation a Discord message belongs to', () => {
     expect(sessionIdFor(THREAD)).not.toBe(sessionIdFor(DM))
   })
 
-  // The polarity ADR-0029 chose, and the whole reason it chose it. An archived
-  // thread is in neither of the guild's lists: `channels` is complete and
-  // `threads` holds only the active ones. Read against the thread list this would be
-  // taken for one of the guild's channels and keyed on the message — a Session per message,
-  // for ever, in a thread roma is already in.
   it('reads a thread archived out of both of the guild’s lists as a thread [fence:discord-key-against-channel-list]', async () => {
     const why =
       'A Conversation Key must be derived against the guild’s channel list, never its thread ' +
@@ -422,8 +311,6 @@ describe('which Conversation a Discord message belongs to', () => {
     expect(channel.last?.conversationKey, why).toBe(ARCHIVED)
   })
 
-  // The channel list is kept current over the same socket, at no cost in intents
-  // or round trips. A channel made after roma connected is a channel.
   it('learns a channel made after it connected, and forgets a deleted one', async () => {
     const channel = await connected()
     const made = '400000000000000012'
@@ -433,13 +320,9 @@ describe('which Conversation a Discord message belongs to', () => {
     await channel.take(dispatch('CHANNEL_DELETE', { id: made, guild_id: GUILD, type: 0 }))
     await channel.take(dispatch('MESSAGE_CREATE', addressed({ id: '2', channel_id: made })))
 
-    // Top level while it was a channel, and read as a thread once it was gone —
-    // which is the harmless direction, and the only one available for a channel
-    // that no longer exists.
     expect(channel.read.map(({ conversationKey }) => conversationKey)).toEqual(['1', made])
   })
 
-  // A thread is never one of the guild's channels, however it is announced.
   it('takes a thread announced on the socket back out of the channel list', async () => {
     const channel = await connected([CHANNEL, THREAD])
 
@@ -450,17 +333,7 @@ describe('which Conversation a Discord message belongs to', () => {
   })
 })
 
-// The misclassification itself, built the only way it can honestly arise: a
-// thread the guild listed among its own channels. An *active* thread cannot
-// produce it — `GUILD_CREATE` names those and roma takes them straight back out
-// — so this is the archived one, which is in neither list and therefore free to
-// turn up in the wrong one.
 describe('every way the key can be wrong is the harmless direction', () => {
-  // A thread misread as top level. Every message gets a key of its own, so the
-  // context resets visibly — and two people talking in it never share a Session,
-  // which is the half that matters: nothing leaks between Callers. The reply
-  // still arrives, in `channel_id`, once Discord refuses a thread inside a
-  // thread — that half is asserted under "where an answer goes".
   it('gives a misread thread a Session per message, and mixes nobody', async () => {
     const channel = await connected([CHANNEL, ARCHIVED])
 
@@ -482,10 +355,6 @@ describe('every way the key can be wrong is the harmless direction', () => {
     expect(sessionIdFor('1')).not.toBe(sessionIdFor('2'))
   })
 
-  // The place a reply belongs is on the event whichever way the key went,
-  // which is what makes the fallback ADR-0029 describes possible at all: roma is
-  // refused the thread, and posts in `channel_id`, which is where the reply
-  // belonged. Carrying it is what this asserts; using it is the Adapter's.
   it('carries the channel the message arrived in, whatever the key says', async () => {
     const channel = await connected([CHANNEL, ARCHIVED])
 
@@ -497,9 +366,6 @@ describe('every way the key can be wrong is the harmless direction', () => {
 })
 
 describe('what roma reads out of a message', () => {
-  // Discord does not strip the mention, unlike Chat's `argumentText`. Left in,
-  // `readCommand` matches nothing and `/stop` becomes a paid Task — the exact
-  // fault ADR-0023 exists to close, arriving by a different door.
   it('strips its own mention, so a Command survives as one [fence:discord-strips-only-its-own-mention]', async () => {
     const channel = await messaged(addressed({ content: `<@${ROMA}> /stop` }))
 
@@ -519,8 +385,6 @@ describe('what roma reads out of a message', () => {
     })
   })
 
-  // Only roma's own. Every other mention is content somebody typed, and a reader
-  // that removed those would be editing what the model is asked about.
   it('leaves everybody else’s mention where it was [fence:discord-strips-only-its-own-mention]', async () => {
     const channel = await messaged(
       addressed({ content: `<@${ROMA}> ask <@${SOMEBODY_ELSE}> about the outage` }),
@@ -529,9 +393,6 @@ describe('what roma reads out of a message', () => {
     expect(channel.last?.text, STRIPS_ITS_OWN).toBe(`ask <@${SOMEBODY_ELSE}> about the outage`)
   })
 
-  // Answering an app is how two bots in one channel talk to each other until
-  // somebody notices. roma's own messages carry the same flag, which is what
-  // stops it answering itself.
   it('ignores another app, and says so rather than saying nothing [fence:discord-press-has-its-own-reader]', async () => {
     const channel = await messaged(addressed({ author: { id: SOMEBODY_ELSE, bot: true } }))
 
@@ -545,25 +406,18 @@ describe('what roma reads out of a message', () => {
     expect(channel.read).toEqual([])
   })
 
-  // The price ADR-0029 accepts for asking for no privileged intent: in a guild,
-  // every message must address roma. Without the intent this one arrives empty
-  // anyway — the decision is made here rather than left to a side effect of it.
   it('ignores a guild message that did not address it', async () => {
     const channel = await messaged(addressed({ content: 'what did you all think?', mentions: [] }))
 
     expect(channel.read).toEqual([])
   })
 
-  // A reply-ping addresses roma without the mention appearing in the text, which
-  // is why both readings are made.
   it('answers a message that names it in the mentions and not in the words [fence:discord-addressed-by-either-half]', async () => {
     const channel = await messaged(addressed({ content: 'and this one?' }))
 
     expect(channel.last?.text, EITHER_HALF).toBe('and this one?')
   })
 
-  // The other half: a payload that carries no `mentions` list at all, where the
-  // literal in the words is the only thing saying roma was asked.
   it('answers a message that names it in the words and carries no list [fence:discord-addressed-by-either-half]', async () => {
     const channel = await messaged(addressed({ mentions: undefined }))
 
@@ -576,17 +430,12 @@ describe('what roma reads out of a message', () => {
     expect(channel.last?.text).toBe('hello')
   })
 
-  // A bare mention with nothing after it. Answering would spend a Turn asking
-  // Claude Code what to make of an empty message.
   it('reads a message with nothing in it as not a request', async () => {
     const channel = await messaged(addressed({ content: `<@${ROMA}>` }))
 
     expect(channel.read).toEqual([])
   })
 
-  // Both halves, wanted for different things: the id is what an Audit Record is
-  // filed under and what tells two people of the same name apart, and the
-  // display name is the half a person reads (ADR-0009). Neither is parsed.
   it('passes the author through as the Caller, with the display name beside it', async () => {
     const channel = await messaged(addressed())
 
@@ -601,8 +450,6 @@ describe('what roma reads out of a message', () => {
 })
 
 describe('what was sent alongside the message', () => {
-  // Redeemed late, as every Enclosure is: the bytes are fetched once the Core
-  // knows the Session (ADR-0011), not when the Adapter reads the message.
   it('takes an attachment as an Enclosure, and fetches nothing until it is redeemed', async () => {
     const channel = await messaged(addressed({ attachments: [ATTACHED] }))
     channel.api.holdsAttachment(ATTACHED.url, 'the bytes')
@@ -615,17 +462,12 @@ describe('what was sent alongside the message', () => {
     expect(channel.api.downloads).toEqual([ATTACHED.url])
   })
 
-  // A link that has expired is the ordinary case rather than an edge one: a Task
-  // parked for the Shared Window can wait hours, and `redeem` is allowed to
-  // reject for exactly this (#173).
   it('lets a redeem fail where the link has expired', async () => {
     const channel = await messaged(addressed({ attachments: [ATTACHED] }))
 
     await expect(channel.last?.enclosures[0]?.redeem()).rejects.toThrow(/no content/)
   })
 
-  // The same rule Chat has: nothing in it is not a request, and a pasted
-  // screenshot with no words is the most ordinary thing there is to send.
   it('reads a message with an attachment and no words as a request', async () => {
     const channel = await messaged(inDm({ content: '', attachments: [ATTACHED] }))
 
@@ -634,7 +476,6 @@ describe('what was sent alongside the message', () => {
 })
 
 describe('a Quotation is completed before the Core sees it', () => {
-  /** A reply, whose quoted message arrives empty because roma has no content intent. */
   const replying = addressed({
     content: `<@${ROMA}> what do you think about this?`,
     message_reference: { message_id: QUOTED, channel_id: CHANNEL },
@@ -655,10 +496,6 @@ describe('a Quotation is completed before the Core sees it', () => {
     expect(channel.last?.quotation).toEqual({ text: 'the deploy failed at 3am', author: 'Bob' })
   })
 
-  // The fallback and not supporting Quotations at all are one code path, which
-  // is what makes the unverified premise behind the fetch a question rather than
-  // a risk (#170). The message still arrives — what is lost is the *this* in
-  // "what do you think about this?", and the operator is told.
   it('hands over no Quotation where the fetch is refused, and says so', async () => {
     const channel = await messaged(replying)
 
@@ -667,9 +504,6 @@ describe('a Quotation is completed before the Core sees it', () => {
     expect(channel.log).toContainEqual({ event: 'quote-unfetched', reason: expect.any(String) })
   })
 
-  // A forward carries its own snapshot and excludes the author, so the Quotation
-  // has none. **Never invented**: unattributed words in front of the model are
-  // read as the Caller's own, and a made-up attribution is worse than none.
   it('takes a forwarded passage from the snapshot, with no author at all', async () => {
     const channel = await messaged(
       addressed({
@@ -682,8 +516,6 @@ describe('a Quotation is completed before the Core sees it', () => {
     expect(channel.api.fetched).toEqual([])
   })
 
-  // Pointing at a message is what a chat window is for, so a message that quotes
-  // one and says nothing is still a request (ADR-0021).
   it('reads a message that only quotes something as a request', async () => {
     const channel = await messaged(
       inDm({
@@ -700,10 +532,6 @@ describe('a Quotation is completed before the Core sees it', () => {
 })
 
 describe('nothing is processed before the state that makes it readable', () => {
-  // No key can be derived until the guild's channel list has arrived: a
-  // channel roma has not been told about is indistinguishable from a thread. So
-  // the message waits — and there is no queue behind this Transport to wait in,
-  // which is why the waiting is roma's own.
   it('holds a message that arrives before the guild’s channels, then reads it right', async () => {
     const channel = await listening()
     await channel.take(HELLO)
@@ -715,13 +543,9 @@ describe('nothing is processed before the state that makes it readable', () => {
 
     await channel.take(guildCreate())
 
-    // Top level, which is the answer only the channel list can give. Read on
-    // arrival it would have been a thread — a Session per message, in the place
-    // people talk in most.
     expect(channel.last?.conversationKey).toBe(MESSAGE)
   })
 
-  // A direct message needs no guild, so nothing holds it up past `READY`.
   it('holds a direct message only until it knows who it is', async () => {
     const channel = await listening()
 
@@ -754,10 +578,6 @@ describe('nothing is processed before the state that makes it readable', () => {
   })
 })
 
-/**
- * What `#deliver` reads, and when: the guild as it stood when the frame arrived,
- * and never on the socket's own time.
- */
 describe('a delivery runs beside the socket rather than on it', () => {
   it('reads the next message while a Task from the last one is still running [fence:discord-deliver-is-detached]', async () => {
     const api = new RecordingDiscordApi()
@@ -771,8 +591,6 @@ describe('a delivery runs beside the socket rather than on it', () => {
       jitter: () => 1,
     })
     const arrived: string[] = []
-    // A receiver that resolves when its Task is finished with, which is minutes,
-    // and here is never.
     await transport.receive((delivery) => {
       arrived.push(delivery.id)
       return new Promise(() => {})
@@ -792,7 +610,6 @@ describe('a delivery runs beside the socket rather than on it', () => {
     const channel = await connected()
     channel.api.holds(CHANNEL, QUOTED, { id: QUOTED, content: 'the deploy failed at 3am' })
 
-    // Back to back, so the guild changes while the Quotation is being fetched.
     channel.network.socket.push(
       dispatch(
         'MESSAGE_CREATE',
@@ -814,9 +631,6 @@ describe('the connection roma holds open', () => {
 
     const [identify] = channel.network.socket.sentWith(OP_IDENTIFY)
     expect(identify?.['d']).toMatchObject({ token: TOKEN, intents: INTENTS })
-    // `MESSAGE_CONTENT`, the one roma refuses. It is a toggle in a developer
-    // portal where nothing versions it and no test can see it, and its
-    // exceptions are exactly the messages roma answers (ADR-0029).
     expect(
       INTENTS & (1 << 15),
       'INTENTS asks for MESSAGE_CONTENT, the privileged intent roma refuses (ADR-0029)',
@@ -832,20 +646,13 @@ describe('the connection roma holds open', () => {
     expect(channel.network.socket.sentWith(OP_HEARTBEAT)).toEqual([])
     vi.advanceTimersByTime(HEARTBEAT_INTERVAL)
 
-    // The sequence is what a resume asks to be replayed from, so a heartbeat
-    // that carried the wrong one would lose exactly the events roma missed.
     expect(channel.network.socket.sentWith(OP_HEARTBEAT)).toEqual([{ op: OP_HEARTBEAT, d: 7 }])
 
-    // Discord answers every one of them, and the next beat only goes out
-    // because this arrived — see the connection roma gives up on below.
     await channel.take({ op: 11 })
     vi.advanceTimersByTime(HEARTBEAT_INTERVAL)
     expect(channel.network.socket.sentWith(OP_HEARTBEAT)).toHaveLength(2)
   })
 
-  // A socket that stops answering heartbeats is open and dead. Left alone roma
-  // looks healthy and answers nobody, which is the one failure nothing else here
-  // can see.
   it('gives up on a connection that stopped answering, and resumes [fence:discord-dead-socket-noticed]', async () => {
     const why =
       'roma must close a connection whose last heartbeat went unanswered (ADR-0029). The ' +
@@ -887,10 +694,6 @@ describe('the connection roma holds open', () => {
     }
   })
 
-  // Closing a socket is a handshake, so the close roma asked for arrives after
-  // roma has already reconnected. Read as the *current* connection ending, it
-  // opens a second one on top of the live one — and roma holds two Gateways,
-  // both delivering everything.
   it('ignores a close from a connection it has already left behind [fence:discord-stale-close-ignored]', async () => {
     const why =
       '#closed must ignore a close from any socket but the current one (ADR-0029). A socket ' +
@@ -913,8 +716,6 @@ describe('the connection roma holds open', () => {
     expect(channel.network.sockets, why).toHaveLength(2)
   })
 
-  // Resuming is what makes a dropped connection a gap rather than a loss: the
-  // session and the sequence together are what Discord replays from.
   it('resumes where READY said to, naming the session and the last event', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] })
     const channel = await listening()
@@ -940,10 +741,6 @@ describe('the connection roma holds open', () => {
     expect(channel.network.socket.sentWith(OP_IDENTIFY)).toEqual([])
   })
 
-  // The property the whole of settling rests on. A resumed session replays what
-  // roma missed, so the same message can arrive twice — and `Ingress.take` tells
-  // that from a second message saying the same words by the Delivery's id, which
-  // is the event's own snowflake and nothing minted here.
   it('names a replayed message the same both times [fence:discord-delivery-named-by-snowflake]', async () => {
     const why =
       'A Delivery must be named by the event’s own snowflake, never by anything minted in the ' +
@@ -965,9 +762,6 @@ describe('the connection roma holds open', () => {
     ).toEqual([MESSAGE, MESSAGE])
   })
 
-  // Both no-ops, and #178 is what makes that a supported shape rather than a
-  // lie. A socket has nowhere to hand a Delivery back to, so roma says nothing
-  // on the wire either way (ADR-0028).
   it('settles a Delivery by saying nothing at all [fence:discord-settling-does-nothing]', async () => {
     const why =
       'A Gateway Delivery’s ack and nack must do nothing (ADR-0028). A socket has nowhere to hand ' +
@@ -985,9 +779,6 @@ describe('the connection roma holds open', () => {
     expect(channel.network.sockets, why).toHaveLength(1)
   })
 
-  // Dropped, because there is nowhere to hand it back to — so this line is the
-  // only trace it leaves, and the difference between "Discord changed shape" and
-  // "nobody is talking to roma".
   it('writes down a frame it cannot read rather than dropping it in silence', async () => {
     const channel = await listening()
 
@@ -1012,9 +803,6 @@ describe('the connection roma holds open', () => {
     expect(channel.log, why).toContainEqual({ event: 'gateway-error', reason: 'connection reset' })
   })
 
-  // A bad token and a disallowed intent are deployment facts: another attempt
-  // fails identically, and attempts that cannot succeed are what earn a ban on
-  // the whole API. So roma stops, and says why — nothing else would.
   it('stops reconnecting when Discord refuses the connection for good [fence:discord-refused-for-good-stops]', async () => {
     const why =
       'A close with 4004, 4010, 4011, 4012, 4013 or 4014 — a bad token, a shard roma does not ' +
@@ -1034,8 +822,6 @@ describe('the connection roma holds open', () => {
     expect(channel.network.sockets, why).toHaveLength(1)
   })
 
-  // Where the session is gone rather than the connection, roma identifies afresh
-  // instead of asking to be replayed into a session that no longer exists.
   it('identifies afresh when the session is invalidated [fence:discord-reopen-does-not-wait-for-close]', async () => {
     const why =
       'Leaving a connection on purpose must run the close handling itself rather than wait ' +
@@ -1066,14 +852,7 @@ describe('the connection roma holds open', () => {
   })
 })
 
-// The outbound half, driven the way the inbound half is: a real Gateway frame
-// goes in first, because everything an answer needs beyond the Conversation Key
-// — the message it replies to, the channel a thread has to be opened in — is
-// learned from the event and cannot be learned anywhere else.
 describe('where an answer goes', () => {
-  // Row three of ADR-0029's table, completed. The key is the message's own id
-  // because that is the id the thread will take, and this is the moment the
-  // thread has to come to exist.
   it('opens a thread from a top-level message and answers in it', async () => {
     const channel = await messaged(addressed())
 
@@ -1090,9 +869,6 @@ describe('where an answer goes', () => {
     })
   })
 
-  // Rows one and two. Both are already a place roma can speak, so there is
-  // nothing to open — and asking Discord for a thread inside a thread would be a
-  // refused call roma spends its invalid-request budget on for nothing.
   it('answers in place in a thread and in a direct message', async () => {
     const inThread = await messaged(addressed({ channel_id: THREAD }))
     const direct = await messaged(inDm())
@@ -1106,11 +882,6 @@ describe('where an answer goes', () => {
     expect(direct.api.messages[0]?.posted.channel).toBe(DM)
   })
 
-  // **A forum needs no special case, and this is the proof rather than the
-  // claim.** The Start Thread route does not work on a forum or media channel at
-  // all — and it is never reached for one, because every message in a forum is
-  // inside a post, a post is a thread, and a thread is not among the guild's
-  // channels. So the key has already routed it to a reply in place.
   it('opens no thread in a forum, because the key already put the reply in place', async () => {
     const post = '500000000000000015'
     const channel = await messaged(addressed({ channel_id: post }), [CHANNEL, FORUM])
@@ -1122,9 +893,6 @@ describe('where an answer goes', () => {
     expect(channel.api.messages[0]?.posted.channel).toBe(post)
   })
 
-  // One thread for a Conversation, however much roma says in it. The key names
-  // the thread once it exists, so nothing has to be remembered to find it again
-  // — which is also what makes a restart mid-Conversation harmless.
   it('opens one thread however many messages a Task posts', async () => {
     const channel = await messaged(addressed())
 
@@ -1135,11 +903,6 @@ describe('where an answer goes', () => {
     expect(channel.api.messages.map(({ posted }) => posted.channel)).toEqual([MESSAGE, MESSAGE])
   })
 
-  // The fallback ADR-0029 calls the harmless direction, and the property #179
-  // carried the channel id for. roma may hold no `CREATE_PUBLIC_THREADS`, the
-  // channel may be one the route does not work on, or a thread may have been
-  // read as top level — in every one of them the reply belongs in the
-  // channel the message arrived in, and only the Session is in the wrong place.
   it('falls back to the channel the message arrived in when a thread is refused [fence:discord-thread-refusal-falls-back]', async () => {
     const why =
       'A refused thread must fall back to the channel the message arrived in and never end ' +
@@ -1170,9 +933,6 @@ describe('where an answer goes', () => {
     expect(name.startsWith('a first line that goes on')).toBe(true)
   })
 
-  // Remembered, so that the rest of a Task lands where its first message did. A
-  // second attempt would also be a second 403, and 403s are what the ban roma
-  // must not earn is counted in.
   it('keeps answering where it fell back to, without asking again', async () => {
     const channel = await messaged(addressed())
     channel.api.failEvery('startThread', refusal(403))
@@ -1206,7 +966,6 @@ describe('where an answer goes', () => {
       '(ADR-0028, ADR-0029). Kept, one bad minute leaves every later message in the ' +
       'Conversation waiting on a promise that has already rejected (#191).'
     const channel = await messaged(addressed())
-    // A wait longer than roma will sit through, so the first attempt rejects outright.
     channel.api.failNext('startThread', refusal(429, RETRY_CEILING_MS + 1))
 
     await expect(
@@ -1224,15 +983,6 @@ describe('where an answer goes', () => {
     ).toEqual([MESSAGE])
   })
 
-  /**
-   * **The claim ADR-0029 says this design would fail on, made visible.** The
-   * reply arrives, so nothing in the Conversation looks wrong; what is wrong is
-   * that the key named a thread that was never opened, so the next message in
-   * this channel mints another key and gets a Session that has never heard of
-   * this one. No Task fails and there is nobody to tell, which is why the ADR
-   * called it a fault with no error anybody sees — this line is the whole of the
-   * evidence, and the outcome beside it is unchanged.
-   */
   it('writes down the channel it was refused a thread in, and answers anyway', async () => {
     const channel = await messaged(addressed())
     channel.api.failEvery('startThread', refusal(403))
@@ -1245,12 +995,6 @@ describe('where an answer goes', () => {
     expect(channel.api.messages[0]?.posted.channel).toBe(CHANNEL)
   })
 
-  // The three ways this call is refused share a fallback and are not one fault:
-  // a 403 is a permission roma will not hold tomorrow either, and a 400 is the
-  // route refusing the channel's type, which ADR-0029 says is either harmless or
-  // a fault in the classifier. Discord's own number is what separates them, and
-  // it is carried rather than read — a refusal nobody predicted comes out as
-  // itself instead of as whichever of the two roma guessed.
   it('carries the number Discord refused with, rather than what roma makes of it', async () => {
     const noPermission = await messaged(addressed())
     noPermission.api.failEvery('startThread', refusal(403))
@@ -1268,15 +1012,6 @@ describe('where an answer goes', () => {
     ])
   })
 
-  /**
-   * **Once per Conversation, and the second Conversation is not deduplicated.**
-   * The thread is asked for once and the fallback remembered, so a Task saying
-   * five things says this once. A second question in the same channel is a
-   * second Session, which is precisely the thing going wrong — so it is a second
-   * line rather than a silence bought by remembering the channel, and the same
-   * `channel` arriving over and over is what tells a permission roma will never
-   * hold from a thread that was misread once.
-   */
   it('says it once for a Task, and again for the next Conversation', async () => {
     const channel = await messaged(addressed())
     channel.api.failEvery('startThread', refusal(403))
@@ -1292,8 +1027,6 @@ describe('where an answer goes', () => {
     ])
   })
 
-  // The Core cannot absorb this one: an instruction that reached nobody looks,
-  // from the Conversation, exactly like a message that was never received.
   it('does not swallow a refusal it has run out of attempts on [fence:discord-refusal-not-swallowed]', async () => {
     const why =
       'deliver must reject when Discord refused and the attempts are spent (ADR-0028). ' +
@@ -1309,10 +1042,6 @@ describe('where an answer goes', () => {
   })
 })
 
-/**
- * ADR-0029's outbound decision: the Caller is addressed with Discord's own
- * reply, on the first message and no other.
- */
 describe('addressing the person who asked', () => {
   it('replies to the Caller’s message on the first piece and on nothing else [fence:discord-reply-on-first-piece-only]', async () => {
     const why =
@@ -1332,9 +1061,6 @@ describe('addressing the person who asked', () => {
     ).toBe(true)
   })
 
-  // Nothing in the words, which is the whole difference from Chat: a mention
-  // spends characters out of a limit half the size, and Discord has a form for
-  // this that costs none.
   it('says nothing in the text about who it is for', async () => {
     const channel = await messaged(inDm())
 
@@ -1343,9 +1069,6 @@ describe('addressing the person who asked', () => {
     expect(channel.api.texts).toEqual(['the answer'])
   })
 
-  // A thread is many people sharing one Conversation, and two Tasks can be in
-  // flight in it at once. Keyed on the Conversation alone, Ada's answer would
-  // reply to whichever question arrived last — which is Bob's (ADR-0009).
   it('answers each of a thread’s two Callers on their own message [fence:discord-answering-by-caller]', async () => {
     const channel = await connected()
     await channel.take(dispatch('MESSAGE_CREATE', addressed({ id: 'ada-1', channel_id: THREAD })))
@@ -1367,8 +1090,6 @@ describe('addressing the person who asked', () => {
     ).toEqual(['ada-1', 'bob-1'])
   })
 
-  // Both halves are decimal, so these two pairs are one string wherever the
-  // separator is something a snowflake can hold — here, nothing at all.
   it('keeps two Conversations apart whose ids would run together [fence:discord-answering-by-caller]', async () => {
     const channel = await connected()
     await channel.take(
@@ -1391,7 +1112,6 @@ describe('addressing the person who asked', () => {
   })
 })
 
-/** `#answering`, which is the one thing the Adapter keeps, and how it is kept. */
 describe('what the Adapter remembers about a message', () => {
   it('forgets the oldest Conversation past REMEMBERED of them [fence:discord-answering-is-bounded]', async () => {
     const why =
@@ -1439,8 +1159,6 @@ describe('what the Adapter remembers about a message', () => {
     ).toEqual([NEXT_MESSAGE, null])
   })
 
-  // Concurrent rather than one after the other: the second update arrives while
-  // Discord has not yet answered the first post.
   it('keeps one acknowledgement for two updates sent together [fence:discord-acknowledgement-is-a-promise]', async () => {
     const why =
       '#acknowledgements must hold the promise of the acknowledgement from the moment it is ' +
@@ -1491,16 +1209,6 @@ describe('what the Adapter remembers about a message', () => {
 })
 
 describe('an answer longer than Discord will take', () => {
-  // 17706 characters is what the recorded generating Turn produced, and Discord
-  // refuses anything over 2000. Without this the longest answers — the ones
-  // worth having — would be the ones that never arrive.
-  //
-  // **Twelve, and ADR-0029 predicted nine.** Nine is 17706 divided by 2000 and
-  // is what a splitter that cut mid-word would produce; twelve is what the
-  // paragraph rule costs, because a window whose last blank line falls just past
-  // halfway spends the rest of itself on nothing. The rule is the decision and
-  // the count is its consequence, so the count is asserted here rather than
-  // written down anywhere that could go on claiming nine.
   it('splits the recorded 17,706-character Turn into twelve messages', async () => {
     const channel = await messaged(inDm())
     const answer = recordedAnswer()
@@ -1512,13 +1220,9 @@ describe('an answer longer than Discord will take', () => {
     for (const message of channel.api.messages) {
       expect(message.text.length).toBeLessThanOrEqual(MAX_TEXT)
     }
-    // Nothing dropped and nothing duplicated: the words arrive in order and
-    // whole, which is the only thing a split may not cost.
     expect(channel.api.texts.join('\n\n').replace(/\s+/g, ' ')).toBe(answer.replace(/\s+/g, ' '))
   })
 
-  // At a blank line where there is one. Cutting mid-word makes a long answer
-  // read as corrupted rather than as continued.
   it('breaks at a paragraph boundary, in order', async () => {
     const channel = await messaged(inDm())
     const paragraphs = Array.from({ length: 12 }, (_, n) =>
@@ -1534,9 +1238,6 @@ describe('an answer longer than Discord will take', () => {
     }
   })
 
-  // A failed Turn's reason is the Turn's own text, which has no more of a length
-  // limit than an answer does. Posted whole, Discord refuses it and the
-  // Conversation is told nothing at all about a Task that is already dead.
   it('splits a failure the same way it splits an answer', async () => {
     const channel = await messaged(inDm())
 
@@ -1550,9 +1251,6 @@ describe('an answer longer than Discord will take', () => {
     }
   })
 
-  // A break in the first few characters and none after it: the window has
-  // nowhere good to cut, and cutting at the only boundary it has would post a
-  // scrap and then the rest.
   it('cuts text with no late break hard, rather than into scraps [fence:discord-split-no-tiny-pieces]', async () => {
     const why =
       'A split may only break at a boundary in the second half of its window (ADR-0029). ' +
@@ -1588,10 +1286,6 @@ const ACKNOWLEDGEMENT_KEPT =
   'leaves it behind for good (#29, #191).'
 
 describe('the acknowledgement', () => {
-  // One message, edited. ADR-0029 declares message mutation, so progress
-  // reporting runs in its full ADR-0003 form — and a renderer that posted per
-  // update would make a Task that ran for five minutes into sixty messages
-  // burying the Conversation it is reporting on.
   it('is edited in place rather than posted again', async () => {
     const channel = await messaged(inDm())
 
@@ -1608,9 +1302,6 @@ describe('the acknowledgement', () => {
     expect(channel.api.messages[0]).toMatchObject({ text: 'Writing… (14 chars)', edits: 2 })
   })
 
-  // The rule ADR-0003 makes unconditional, and Discord is where it pays most:
-  // its search reads message content and no part of an edited-over
-  // acknowledgement is a thing anybody can quote-reply to months later.
   it('is never what the result is written into [fence:discord-result-is-its-own-message]', async () => {
     const why =
       'A result must be posted as a message of its own, never edited into the acknowledgement ' +
@@ -1647,9 +1338,6 @@ describe('the acknowledgement', () => {
     expect(channel.api.calls).toEqual(['post', 'post', 'post'])
   })
 
-  // Not an ending, the way a block is not: it arrives mid-Task and the Task goes
-  // on to whatever ending it has. Forgetting the acknowledgement here would
-  // strand the message the person is watching and post a second one under it.
   it('keeps the one it was mutating for a message that is not an ending [fence:discord-acknowledgement-kept-until-the-end]', async () => {
     const channel = await messaged(inDm())
 
@@ -1673,10 +1361,6 @@ describe('the acknowledgement', () => {
     expect(channel.api.calls, ACKNOWLEDGEMENT_KEPT).toEqual(['post', 'post', 'post'])
   })
 
-  // A post that failed left no message to edit. Remembered anyway, every later
-  // update for that Task would try to edit an id that never existed — so one
-  // Discord hiccup would silence the acknowledgement for the rest of a Task that
-  // is running perfectly well.
   it('tries again after a post that failed, rather than editing nothing [fence:discord-failed-acknowledgement-forgotten]', async () => {
     const why =
       'An acknowledgement whose post failed must be forgotten (ADR-0029). It left no message ' +
@@ -1696,11 +1380,6 @@ describe('the acknowledgement', () => {
     expect(channel.api.texts, why).toEqual(['Running awk…'])
   })
 
-  // The one phase whose length roma does not control: a tool is named by Claude
-  // Code's own description of it, which is the command itself. It is cut to
-  // something that can be read at a glance, well before Discord's limit is in
-  // question — a message edited every few seconds is not where a thousand
-  // characters of shell belongs.
   it('quotes only as much of a tool command as can be read at a glance', async () => {
     const channel = await messaged(inDm())
     const tool = `awk ${'-v x=1 '.repeat(1000)}`
@@ -1710,7 +1389,6 @@ describe('the acknowledgement', () => {
     const text = channel.api.texts[0] ?? ''
     expect(text.length).toBe('Running '.length + 120 + '…'.length)
     expect(text.length).toBeLessThanOrEqual(MAX_TEXT)
-    // The beginning is what names the command, so it is the end that goes.
     expect(text.startsWith('Running awk -v x=1 ')).toBe(true)
   })
 })
@@ -1738,11 +1416,6 @@ describe('what a Conversation is told', () => {
     ])
   })
 
-  // Plainly that quota is spent, with the reset time the event gave — and that
-  // the Task is kept, because told only that quota is spent people send the
-  // message again, which is the behaviour the acknowledgement exists to prevent.
-  // Nothing in the words about the offer: that is the button below, and a
-  // sentence beside it would have to name a Command roma never had.
   it('says quota is spent, when it comes back, and that the Task is kept', async () => {
     const channel = await messaged(inDm())
 
@@ -1766,9 +1439,6 @@ describe('what a Conversation is told', () => {
     ])
   })
 
-  // The one place roma knows an exit the person cannot guess, said as the
-  // consequence rather than the cause — two codes arrive here and only one of
-  // them is a thread that got too long.
   it('names /clear when the context cannot be reduced any further', async () => {
     const channel = await messaged(inDm())
 
@@ -1780,9 +1450,6 @@ describe('what a Conversation is told', () => {
     ])
   })
 
-  // The words are the whole answer whether or not anything draws them, which is
-  // what lets a Channel ignore `options` and be *correct* rather than degraded
-  // (ADR-0023). The buttons under them are the shortcut, asserted below.
   it('posts a Menu as the words it already is', async () => {
     const channel = await messaged(inDm())
 
@@ -1801,9 +1468,6 @@ describe('what a Conversation is told', () => {
     ])
   })
 
-  // ADR-0002 requires the spend in the reply, and its own message rather than
-  // appended to the answer: the answer is what gets quoted months later, and a
-  // price tag inside it would be quoted with it.
   it('posts the answer and then what an Overflow Turn cost', async () => {
     const channel = await messaged(inDm())
 
@@ -1812,8 +1476,6 @@ describe('what a Conversation is told', () => {
     expect(channel.api.texts).toEqual(['done', 'Ran on metered billing: $0.42.'])
   })
 
-  // "$0.00" would report money as free, which is the one claim the Audit Record
-  // refuses to make about a Turn nothing priced.
   it('does not price a Turn nothing priced [fence:discord-null-cost-not-free]', async () => {
     const why =
       'A null Overflow cost must be said as unreported, never as $0.00 (ADR-0002). "$0.00" ' +
@@ -1835,10 +1497,6 @@ describe('what a Conversation is told', () => {
     expect(adapter.capabilities).toEqual({ messageMutation: true, stableConversationKey: true })
   })
 
-  // ADR-0024: an Opening is a reply, sent before the Acknowledgement of the
-  // message that prompted it. On this Channel it is also what opens the thread —
-  // so the first thing said in a Session is the first thing in the thread, and
-  // the acknowledgement lands underneath it rather than in the parent channel.
   it('says the Opening first, and acknowledges underneath it', async () => {
     const channel = await messaged(addressed())
 
@@ -1853,13 +1511,6 @@ describe('what a Conversation is told', () => {
   })
 })
 
-/**
- * ADR-0023 applied to Discord, unchanged: **a press is a message the Caller did
- * not have to type.** The button carries the Command, the Adapter reads it into
- * an ordinary Ingress Message, and it travels the path a typed Command travels
- * — no new Core entrance, no new `ChannelAdapter` method, no new authority to
- * scope, and nothing remembered between posting a card and its being pressed.
- */
 describe('a Menu, out as buttons and back as a press', () => {
   it('draws one button per option, in the order the Menu lists them', async () => {
     const channel = await messaged(inDm())
@@ -1870,9 +1521,6 @@ describe('a Menu, out as buttons and back as a press', () => {
     expect(MENU_NAMES).toEqual(['fable', 'opus', 'sonnet', 'haiku', 'default'])
   })
 
-  // Six, which is one more than an action row holds — so this is the case that
-  // proves a Menu is not bounded by a row. Where the second row starts is
-  // `http-discord-api.test.ts`'s, because it is a fact about the payload.
   it('draws the whole Effort Menu, past the width of one row', async () => {
     const channel = await messaged(inDm())
 
@@ -1882,18 +1530,6 @@ describe('a Menu, out as buttons and back as a press', () => {
     expect(EFFORT_NAMES.length).toBeGreaterThan(5)
   })
 
-  /**
-   * The third Menu, which cost this Channel a type and no rendering at all —
-   * `choiceButtons` is generic over a Menu, so a Menu roma gained arrives as six
-   * more buttons. Asserted anyway, because "it should just work" is how a card
-   * ships four buttons wide with two names missing.
-   *
-   * **Six is the whole Menu and not the whole of what may be pinned.**
-   * `wenyan-lite` and `wenyan-ultra` are levels an operator sets in
-   * `ROMA_CAVEMAN` and no Caller may choose, so they are absent from `options`
-   * before this Channel sees it — which makes a card carrying one a Menu drawn
-   * from something other than the Core's own answer.
-   */
   it('draws the Caveman Menu whole, and the operator’s two levels nowhere on it', async () => {
     const channel = await messaged(inDm())
 
@@ -1906,11 +1542,6 @@ describe('a Menu, out as buttons and back as a press', () => {
     }
   })
 
-  // The one Menu shape Discord will not take: it refuses a message carrying more
-  // than 25 buttons whole. Drawn in part it would be a card saying those are all
-  // the names there are, with the rest unreachable by pressing anything — so
-  // roma draws none, which ADR-0023 calls correct, and the sentence still names
-  // every one of them.
   it('draws no buttons at all for a Menu wider than one message holds [fence:discord-menu-whole-or-not-at-all]', async () => {
     const why =
       'A Menu wider than MAX_BUTTONS must be drawn as no buttons, never as its first ' +
@@ -1926,10 +1557,6 @@ describe('a Menu, out as buttons and back as a press', () => {
     expect(channel.api.messages.at(-1)?.text).toContain(`option-${MAX_BUTTONS}`)
   })
 
-  // *"1-100 characters"*, and being over it is a message Discord refuses whole —
-  // a Menu nobody is shown, with nothing in the log about it. Asserted rather
-  // than reasoned about, because what goes in one is a Conversation Key roma does
-  // not choose the length of.
   it('spends a custom_id Discord will take [fence:discord-custom-id-fits]', async () => {
     const why =
       `Every custom_id roma posts must be 1-${MAX_CUSTOM_ID} characters (ADR-0023, ADR-0029). ` +
@@ -1948,11 +1575,6 @@ describe('a Menu, out as buttons and back as a press', () => {
     }
   })
 
-  // The whole of the design in one assertion: what comes back is the message the
-  // Caller would have typed, and `readCommand` reads it as the Command it is. A
-  // name that did not survive that round trip would be a button that produces a
-  // billable Task — which is why the invariant is driven over the real Menus in
-  // `commands.test.ts` rather than restated here.
   it('reads a press as the message the Caller would have typed [fence:discord-press-has-its-own-reader] [fence:discord-presser-off-the-event]', async () => {
     const presser =
       'A press’s Caller must be read off the interaction’s member.user (or user), never off ' +
@@ -1968,21 +1590,6 @@ describe('a Menu, out as buttons and back as a press', () => {
     expect(readCommand(channel.last?.text ?? '')).toEqual({ command: 'model', argument: 'opus' })
   })
 
-  /**
-   * The whole trip, over every name on all three real Menus and over the buttons
-   * this Adapter actually posted.
-   *
-   * `commands.test.ts` holds the same invariant one step earlier, over
-   * `commandFor` alone. This is the half that only exists once a Channel draws
-   * the Menu, and it is a claim about `choiceButtons` and `readPress` as a pair:
-   * they are one fact written in two files, and widening either alone is a
-   * button Discord draws and roma refuses — a Caller presses, nothing happens,
-   * and nothing anywhere reports it.
-   *
-   * Every Menu named outright rather than enumerated from a list of Menus: a
-   * loop over a list nobody added the third Menu to passes vacuously, which is
-   * the failure this is here to catch.
-   */
   it('reads every name on every Menu back as the Command a Caller would have typed [fence:discord-every-menu-name-reads-back]', async () => {
     const why =
       'choiceButtons and the Command guard in readPress are one fact in two files and must ' +
@@ -2001,9 +1608,6 @@ describe('a Menu, out as buttons and back as a press', () => {
       expect(channel.buttons, why).toHaveLength(names.length)
 
       for (const [at, { label, customId }] of channel.buttons.entries()) {
-        // The button roma posted, pressed — never a `custom_id` a test wrote. A
-        // press built out of a literal cannot tell an agreement from a
-        // collision.
         await channel.take(press(customId, { id: `90000000000000002${at}` }))
         expect(readCommand(channel.last?.text ?? ''), why).toEqual({
           command: chooses,
@@ -2013,12 +1617,6 @@ describe('a Menu, out as buttons and back as a press', () => {
     }
   })
 
-  /**
-   * `wenyan-full` is the first hyphenated name any roma Menu has carried, and the
-   * hyphen had never been through this path. What comes back out is a *message*,
-   * so a name that arrived as two words would reach the Core as prose, drive a
-   * Turn, and bill somebody for a button roma offered (ADR-0023, ADR-0030).
-   */
   it('reads a Caveman press, hyphen and all, as the Command it stands for', async () => {
     const channel = await messaged(inDm())
     await channel.adapter.deliver(to(DM, choice('caveman', CAVEMAN_NAMES)))
@@ -2032,8 +1630,6 @@ describe('a Menu, out as buttons and back as a press', () => {
     })
   })
 
-  // The Conversation Key is on the button, so a press answers the Conversation
-  // the card was posted about rather than the one the card happens to sit in.
   it('carries the Conversation Key the card was posted for', async () => {
     const channel = await messaged(addressed())
     await channel.adapter.deliver(to(MESSAGE, choice('effort', EFFORT_NAMES)))
@@ -2043,14 +1639,6 @@ describe('a Menu, out as buttons and back as a press', () => {
     expect(channel.last?.conversationKey).toBe(MESSAGE)
   })
 
-  /**
-   * **The Discord-specific cousin of ADR-0023's stated failure mode.** roma may
-   * be refused the thread a top-level key names, and then the card sits in the
-   * parent channel — whose id is not the key. Reading the Conversation off
-   * `channel_id` there would answer in a Conversation nobody was ever in, and
-   * every press in a guild roma lacks `CREATE_PUBLIC_THREADS` in would be wrong
-   * (ADR-0029).
-   */
   it('is right about the Conversation even where the card is not in it [fence:discord-press-survives-thread-fallback]', async () => {
     const why =
       'A press must take its Conversation Key off the button, never off the channel the card ' +
@@ -2064,9 +1652,6 @@ describe('a Menu, out as buttons and back as a press', () => {
     await posting.adapter.deliver(to(MESSAGE, choice('model', MENU_NAMES)))
     expect(posting.api.messages.at(-1)?.posted.channel).toBe(CHANNEL)
 
-    // Pressed at a roma that has never seen the card, because that is the state
-    // ADR-0023 claims: nothing is remembered between posting one and its being
-    // pressed, so the whole of what a press is answered from is the press.
     const restarted = await connected()
     restarted.api.failEvery('startThread', refusal(403))
     await restarted.take(
@@ -2075,21 +1660,10 @@ describe('a Menu, out as buttons and back as a press', () => {
 
     expect(restarted.last?.conversationKey, why).toBe(MESSAGE)
     expect(sessionIdFor(restarted.last?.conversationKey ?? '')).toBe(sessionIdFor(MESSAGE))
-    // And the answer still reaches somebody. The key names a thread that was
-    // never opened, so what carries the reply is the channel the *card* is in —
-    // which is the whole of why a press is remembered as a message is.
     await restarted.adapter.deliver(to(MESSAGE, { kind: 'result', text: 'Now on haiku.' }))
     expect(restarted.api.messages.at(-1)?.posted.channel, why).toBe(CHANNEL)
   })
 
-  /**
-   * **There is nothing to expire and nothing to sweep** (ADR-0023). The card
-   * carries a *message* rather than a decision, so pressing a three-week-old one
-   * means send this Command now — which is what typing it now would mean.
-   *
-   * Driven over an Adapter and a Transport that have never seen the card, which
-   * is what a restart between the two leaves behind.
-   */
   it('answers a press on a card posted before roma last started', async () => {
     const posting = await messaged(addressed())
     await posting.adapter.deliver(to(MESSAGE, choice('model', MENU_NAMES)))
@@ -2099,18 +1673,10 @@ describe('a Menu, out as buttons and back as a press', () => {
     await restarted.take(press(pressed))
 
     expect(restarted.last).toMatchObject({ conversationKey: MESSAGE, text: '/model sonnet' })
-    // And the answer still reaches the Conversation: the key names the thread
-    // once it exists, so a message can only ever have the one and asking again
-    // is a success.
     await restarted.adapter.deliver(to(MESSAGE, { kind: 'result', text: 'Now on sonnet.' }))
     expect(restarted.api.messages.at(-1)?.posted.channel).toBe(MESSAGE)
   })
 
-  // The Effort Matrix's third use is the Core's — an `/effort` on a model it says
-  // takes none arrives as a `result` rather than a `choice`, so there is no Menu
-  // here to suppress and no second reading of the Matrix to disagree with
-  // `Core.#effortStranded` (ADR-0023). What the Adapter owes is drawing exactly
-  // what it was sent, which is what this asserts from the other side.
   it('draws nothing on the reply a suppressed Menu arrives as', async () => {
     const channel = await messaged(inDm())
 
@@ -2124,9 +1690,6 @@ describe('a Menu, out as buttons and back as a press', () => {
     expect(channel.buttons).toEqual([])
   })
 
-  // Only where there is something to explain. A Menu long enough to split would
-  // otherwise repeat itself under every piece, and the buttons belong under the
-  // words that name them.
   it('puts the buttons under the last piece of a split answer and no other [fence:discord-buttons-on-last-piece-only]', async () => {
     const why =
       'Only the last piece of a split answer may carry its buttons (ADR-0023). Buttons belong ' +
@@ -2149,9 +1712,6 @@ describe('a Menu, out as buttons and back as a press', () => {
 })
 
 describe('the Overflow offer, out as a button and back as a press', () => {
-  // ADR-0002 puts the valve at the moment of blocking rather than in a setting,
-  // and the label says what pressing it costs — "Run anyway" would be that
-  // decision made by somebody who did not know they were making it.
   it('offers Overflow on the message that reports the block', async () => {
     const channel = await messaged(inDm())
 
@@ -2170,9 +1730,6 @@ describe('the Overflow offer, out as a button and back as a press', () => {
     expect(OVERFLOW_BUTTON, why).toBe(CHAT_OVERFLOW_BUTTON)
   })
 
-  // False where the provider says overage is unavailable or roma holds no
-  // metered credential. A button that cannot work spends somebody's attention on
-  // nothing, and on this Channel it is the only thing they could have pressed.
   it('offers none where the Core says there is none to offer', async () => {
     const channel = await messaged(inDm())
 
@@ -2183,9 +1740,6 @@ describe('the Overflow offer, out as a button and back as a press', () => {
     expect(channel.buttons).toEqual([])
   })
 
-  // Named by the Task and never by the Conversation, which can have a second
-  // Task blocked behind this one — "the blocked Task here" would spend money on
-  // whichever roma looked at first.
   it('takes the offer for the Task it was made about [fence:discord-overflow-named-by-task]', async () => {
     const why =
       'The Overflow button must carry the Task id, never the Conversation (ADR-0002). A ' +
@@ -2211,13 +1765,6 @@ describe('the Overflow offer, out as a button and back as a press', () => {
     expect(channel.adapter.toOverflowTaken(takingSecond), why).toBe('task-8')
   })
 
-  /**
-   * **`Ingress.#workFor` tries `toIngress` first and only calls
-   * `toOverflowTaken` where that answered null** (`src/serve.ts`). So the two
-   * encodings have to be unambiguous in that order: an Overflow press read as an
-   * ingress message would turn taking an offer into a paid Task, and a Menu press
-   * read as an Overflow one would spend money on a Task roma never named.
-   */
   it('tells the two presses apart in the order the subscriber asks', async () => {
     const channel = await messaged(inDm())
     await channel.adapter.deliver(
@@ -2238,29 +1785,13 @@ describe('the Overflow offer, out as a button and back as a press', () => {
     expect(channel.adapter.toOverflowTaken(choosing)).toBeNull()
   })
 
-  /**
-   * **The same claim without an order to ask in.** The test above drives the two
-   * readers the way the subscriber does; this one asks what an id *is*, over
-   * every id either builder can be made to produce — including the ones written
-   * to look like the other encoding, since a Task id and a Menu name are the two
-   * fields whose spelling is not roma's to bound.
-   *
-   * It fails the moment one id parses as both kinds, which is the fault that
-   * turns taking an Overflow offer into a paid Task nobody asked for.
-   */
   it('reads every id it writes as one kind and never as the other [fence:discord-press-is-one-kind]', () => {
     const why =
       'Every custom_id roma writes must read back as exactly the kind it was written as. ' +
       'Ingress.#workFor asks toIngress before toOverflowTaken (src/serve.ts), so an Overflow ' +
       'offer read as a Menu press, or the reverse, turns taking an offer into a paid Task ' +
       'nobody asked for, or spends money on a Task roma never named (ADR-0002, ADR-0029).'
-    // Spelled here rather than imported: the inputs below are the ones written
-    // to look like the *other* encoding, and a test that borrowed roma's own
-    // constants for them could not tell a collision from an agreement.
     const keys = ['1', MESSAGE, 'overflow:task-1']
-    // `wenyan-full` is here rather than only on the Menu above because the
-    // hyphen is a separator in nothing this file encodes and would be in an id
-    // that gained one.
     const names = [
       'opus',
       'default',
@@ -2283,17 +1814,12 @@ describe('the Overflow offer, out as a button and back as a press', () => {
     for (const customId of menu) {
       expect(readPress(customId)?.kind, `${why} (${customId})`).toBe('choose')
     }
-    // And every offer comes back whole, which is the other half of what makes
-    // one kind the right answer rather than merely the only one: a Task id cut
-    // at a separator would name a Task roma never blocked.
     expect(
       offers.map((customId) => readPress(customId)),
       why,
     ).toEqual(tasks.map((taskId) => ({ kind: 'overflow', taskId })))
   })
 
-  // Every field of a Menu id comes back as it went out, over keys that are
-  // snowflakes — which is what a key is — and names that are not roma's to bound.
   it('reads a Menu name back whole, separators and all [fence:discord-option-rides-last]', () => {
     const why =
       'The option must be the last field of a Menu custom_id and be rejoined on the way back ' +
@@ -2312,8 +1838,6 @@ describe('the Overflow offer, out as a button and back as a press', () => {
     }
   })
 
-  // A `custom_id` arrives from whoever sent the event, so one naming a Command
-  // roma never put on a Menu is a forgery — or a roma that drew one it should not.
   it('reads no Command off a press but one with a Menu [fence:discord-menu-door-opens-only-menus]', async () => {
     const why =
       'A press may only ever read as /model, /effort or /caveman (ADR-0023). A custom_id ' +
@@ -2336,12 +1860,6 @@ describe('the Overflow offer, out as a button and back as a press', () => {
   })
 })
 
-/**
- * The deadline Chat does not have: *"you must send an initial response within 3
- * seconds of receiving the event. If the 3 second deadline is exceeded, the
- * token will be invalidated"* — and roma's Core takes minutes. This is why
- * ADR-0029 made this Transport a thing that decides rather than a bare port.
- */
 describe('a press is acknowledged before anything answers it', () => {
   it('says the press arrived before the event is handed on [fence:discord-press-acknowledged-first]', async () => {
     const channel = await messaged(inDm())
@@ -2352,14 +1870,9 @@ describe('a press is acknowledged before anything answers it', () => {
     expect(channel.api.acknowledged, ACKNOWLEDGED_FIRST).toEqual([
       { interactionId: INTERACTION, token: INTERACTION_TOKEN },
     ])
-    // Already said by the time the receiver was called. Read afterwards, both
-    // orders leave the same two calls in the same list.
     expect(channel.saidBefore.at(-1), ACKNOWLEDGED_FIRST).toContain('acknowledgePress')
   })
 
-  // `DEFERRED_UPDATE_MESSAGE` and nothing after it: pressing is typing, and
-  // typing does not rewrite the message you typed into. What roma sends to say
-  // that is `http-discord-api.test.ts`'s; that roma never edits the card is this.
   it('leaves the card exactly as it was', async () => {
     const channel = await messaged(inDm())
     await channel.adapter.deliver(to(DM, choice('model', MENU_NAMES)))
@@ -2371,10 +1884,6 @@ describe('a press is acknowledged before anything answers it', () => {
     expect(channel.api.messages.map(({ text, edits }) => ({ text, edits }))).toEqual(before)
   })
 
-  // A press roma could not acknowledge is one Discord marks as failed — and
-  // answering it late is better than a Task that stays blocked because nobody
-  // could take the offer. Nothing else would say so: the answer arrives, so from
-  // the Conversation there is no fault to see.
   it('answers a press it could not acknowledge, and writes down that it could not [fence:discord-press-acknowledged-first]', async () => {
     const channel = await messaged(inDm())
     channel.api.failEvery('acknowledgePress', refusal(404))
@@ -2389,9 +1898,6 @@ describe('a press is acknowledged before anything answers it', () => {
     })
   })
 
-  // Two presses on one card are two events, and a Delivery named by the card
-  // would make the second look like the first arriving twice — which
-  // `Ingress.take` drops while the first is still running.
   it('names a Delivery by the press rather than by the card [fence:discord-delivery-named-by-press]', async () => {
     const why =
       'A press’s Delivery must be named by the interaction’s id, never the card’s message id ' +
@@ -2410,8 +1916,6 @@ describe('a press is acknowledged before anything answers it', () => {
     ).toEqual([INTERACTION, '900000000000000019'])
   })
 
-  // roma replies to the Caller on every card, so a card always carries a
-  // `message_reference` — to the very question the press is answering.
   it('spends no round trip quoting the card a press is on [fence:discord-press-quotes-nothing]', async () => {
     const why =
       'A press must never have its Quotation completed (ADR-0029). The card is roma’s own ' +
@@ -2432,9 +1936,6 @@ describe('a press is acknowledged before anything answers it', () => {
     expect(channel.last?.quotation, why).toBeNull()
   })
 
-  // roma registers no application commands — ADR-0029 leaves slash commands open
-  // and explicitly not as something to add quietly — so an interaction that is
-  // not a press is one roma neither answers nor acknowledges.
   it('acknowledges nothing that is not a press on something roma posted', async () => {
     const channel = await messaged(inDm())
 
@@ -2444,9 +1945,6 @@ describe('a press is acknowledged before anything answers it', () => {
     expect(channel.deliveries).toHaveLength(1)
   })
 
-  // A press whose `custom_id` roma cannot read is acknowledged all the same —
-  // the three seconds are spent whether or not roma understands it — and then
-  // answers nothing, which is what an event roma is not meant to answer does.
   it('answers nothing for a custom_id roma never put out', async () => {
     const channel = await messaged(inDm())
 
@@ -2459,15 +1957,7 @@ describe('a press is acknowledged before anything answers it', () => {
   })
 })
 
-// ADR-0028 moved the remedy for a failed post into `deliver`, because
-// re-reading a socket repairs no POST. What that retry inherits here is a
-// penalty Chat has no counterpart for: a 429 counts toward an invalid-request
-// budget of 10,000 per 10 minutes whose block is on the whole API rather than on
-// the channel that earned it, so a loop in one Conversation is an outage of
-// every Conversation — the Gateway included.
 describe('a call Discord refused', () => {
-  // Read off the response, never hard coded: Discord's per-route limits are
-  // dynamic and its reference says so in as many words.
   it('waits exactly as long as Discord asked before trying again [fence:discord-waits-what-discord-asked]', async () => {
     const why =
       'A retry after a 429 must wait the Retry-After Discord sent, never a time of roma’s ' +
@@ -2483,8 +1973,6 @@ describe('a call Discord refused', () => {
     expect(channel.api.texts, why).toEqual(['the answer'])
   })
 
-  // Where Discord named no time at all — a 503, or a socket that never answered
-  // — roma backs off on its own clock rather than hammering.
   it('backs off on its own clock where Discord named no time', async () => {
     const channel = await messaged(inDm())
     channel.api.failNext('post', refusal(503))
@@ -2512,9 +2000,6 @@ describe('a call Discord refused', () => {
     ).toHaveLength(ATTEMPTS)
   })
 
-  // A wait this long is a block on the whole API rather than a bucket refilling,
-  // and sleeping through one inside `deliver` holds the Task and everything
-  // queued behind it for as long as it lasts.
   it('gives up rather than sleeping through a ban [fence:discord-no-sleeping-through-a-ban]', async () => {
     const why =
       `A Retry-After longer than RETRY_CEILING_MS (${RETRY_CEILING_MS}) must be given up on, ` +
@@ -2534,9 +2019,6 @@ describe('a call Discord refused', () => {
     ).toHaveLength(1)
   })
 
-  // Every attempt at something Discord will go on refusing is another entry in
-  // the budget whose penalty is the block above. A 403 is a permission roma does
-  // not have, and it will not have it a second later either.
   it('does not try again where trying again cannot work [fence:discord-retry-only-what-can-work]', async () => {
     const channel = await messaged(inDm())
     channel.api.failEvery('post', refusal(403))
@@ -2551,18 +2033,6 @@ describe('a call Discord refused', () => {
     ).toHaveLength(1)
   })
 
-  /**
-   * **Opening a thread is not idempotent, and forgetting that makes every retry
-   * permanent.** *"A message can only have a single thread created from it"* —
-   * so a creation that Discord carried out and then failed to report is one
-   * roma re-attempts, and the second attempt must be read as the thread it
-   * wanted rather than as a refusal. Read as a refusal, the answer goes to the
-   * parent channel of a thread roma had already opened.
-   *
-   * What `HttpDiscordApi` reads out of the 400 to decide that is asserted in
-   * `http-discord-api.test.ts`; what is asserted here is that roma asks again
-   * and speaks in what it is handed back.
-   */
   it('treats a re-attempted thread as the thread it wanted, and posts into it', async () => {
     const channel = await messaged(addressed())
     channel.api.failNext('startThread', refusal(500))
@@ -2573,10 +2043,6 @@ describe('a call Discord refused', () => {
     expect(channel.api.messages[0]?.posted.channel).toBe(MESSAGE)
   })
 
-  // A socket that failed carries no status, so there is nothing to say Discord
-  // refused anything — and the request may in fact have arrived. Retried anyway:
-  // a Conversation told twice is a great deal better than one told nothing about
-  // a Turn that has already been paid for.
   it('tries again after a fault that never reached Discord at all [fence:discord-retry-only-what-can-work]', async () => {
     const channel = await messaged(inDm())
     channel.api.failNext('post', new Error('socket hang up'))
@@ -2587,7 +2053,6 @@ describe('a call Discord refused', () => {
   })
 })
 
-/** Failure messages that more than one test above carries. */
 const STRIPS_ITS_OWN =
   'readIngressMessage must strip roma’s own mention, both spellings, and no other (ADR-0023). ' +
   'Discord does not strip it and readCommand matches the whole message, so left in, ' +
@@ -2631,11 +2096,6 @@ const RETRY_WHAT_CAN_WORK =
   'told nothing (#191).'
 
 describe('roma opens no inbound port for Discord', () => {
-  // ADR-0003's "ingress is a queue, not a webhook" survives here by a different
-  // route: the Gateway is a socket roma opens *outward*, and interactions arrive
-  // on it too — the HTTP endpoint is the other half of a mutually exclusive pair
-  // and roma registers none. A guard rather than a comment, because the file
-  // that would break it is one somebody writes while adding buttons.
   it('has no code under src/channels/discord that could receive a request', () => {
     const offenders = discordSources().filter(({ source }) =>
       LISTENS.some((pattern) => pattern.test(source)),
@@ -2645,19 +2105,16 @@ describe('roma opens no inbound port for Discord', () => {
   })
 })
 
-/** Every way this directory could start accepting connections instead of making one. */
 const LISTENS = [/\bcreateServer\b/, /\.listen\s*\(/, /node:(http|https|http2|net|tls|dgram)\b/]
 
 function discordSources() {
   return sources().filter(({ file }) => file.split(sep).includes('discord'))
 }
 
-/** One person, as Discord names them on a message. */
 function person(id: string): Record<string, unknown> {
   return { id, username: `user-${id}`, global_name: `User ${id}` }
 }
 
-/** Let the completion behind a message, which runs detached from the frame, finish. */
 function flushed(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve))
 }

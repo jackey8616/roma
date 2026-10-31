@@ -12,66 +12,25 @@ import {
   type ClaudeEvent,
 } from './stream-events.js'
 
-/** One completed Turn: one message in, one finished response out. */
 export interface Turn {
-  /** What the assistant said, complete. */
   readonly text: string
-  /**
-   * What this Turn cost — the delta, not the running total.
-   * Enforced by `fence:session-cost-is-a-delta`.
-   *
-   * Null where the terminal event carried no total at all. The next Turn that
-   * does report one is billed from the last known total and covers both: the
-   * month still adds up, and only the split between two Tasks is lost.
-   * Enforced by `fence:session-unreported-is-null-not-zero`.
-   */
   readonly costUsd: number | null
-  /** Measured from `send` to the terminal event, as roma observed it. */
   readonly durationMs: number
   readonly isError: boolean
   readonly subtype: string
   readonly stopReason: string | null
   readonly terminalReason: string | null
-  /**
-   * How many model Turns this drove, or null where the event did not say. Zero
-   * for a message Claude Code answered locally, including a Relay that spends
-   * money; `outputTokens` is what tells those apart.
-   *
-   * Nothing in the Core reads this. Enforced by `fence:session-compact-reports-no-turns`.
-   */
   readonly turns: number | null
-  /**
-   * The output tokens this Turn produced — what it added, not the running total,
-   * since `modelUsage` is cumulative for the process. What the Relay drift check
-   * reads.
-   *
-   * **Never negative**, unlike `costUsd`: a backwards reading reports zero.
-   * Enforced by `fence:session-output-tokens-never-negative`.
-   *
-   * Null where the terminal event carried no `modelUsage` at all; a free Relay
-   * reports an empty object and therefore zero.
-   * Enforced by `fence:session-unreported-is-null-not-zero`.
-   */
   readonly outputTokens: number | null
-  /** The raw terminal event, for anything this interface does not name. */
   readonly result: ClaudeEvent
 }
 
-/** Enforced by `fence:session-interrupted-read-off-terminal-reason`. */
 const ABORTED = 'aborted_streaming'
 
-/** Whether this Turn ended because it was interrupted rather than because it failed. */
 export function wasInterrupted(turn: Turn): boolean {
   return turn.terminalReason === ABORTED
 }
 
-/**
- * A Turn that ended in failure, thrown rather than returned.
- * Enforced by `fence:session-failure-is-a-rejection`.
- *
- * The Turn rides along because a failed Turn still costs money and still needs
- * auditing.
- */
 export class TurnFailedError extends Error {
   readonly turn: Turn
 
@@ -86,25 +45,9 @@ export class TurnFailedError extends Error {
   }
 }
 
-/**
- * What Claude Code says when `--resume` is pointed at a Transcript that is not
- * there. It arrives in the terminal event's `errors` under the invocation roma
- * spawns, and on stderr from a process that died without one; both readings use
- * this one pattern.
- */
 export const NO_CONVERSATION = /no conversation found/i
 
-/**
- * A `--resume` refused because the Session it named has no Transcript: nothing
- * ran and nothing was spent. The pool reads it to respawn with `--session-id`,
- * and `reasonFor` to tell the Conversation what happened.
- *
- * A `TurnFailedError`, so everything that audits a failed Turn audits this one.
- * The reason is carried off the terminal event, not looked up on stderr.
- * Enforced by `fence:session-refused-resume-read-off-errors`.
- */
 export class TranscriptNotFound extends TurnFailedError {
-  /** Claude Code's own sentence, out of the terminal event rather than stderr. */
   readonly reason: string
 
   constructor(turn: Turn, reason: string) {
@@ -115,7 +58,6 @@ export class TranscriptNotFound extends TurnFailedError {
   }
 }
 
-/** The process died with a Turn still in flight. */
 export class ClaudeExitedError extends Error {
   readonly exit: ClaudeProcessExit
 
@@ -128,28 +70,11 @@ export class ClaudeExitedError extends Error {
 
 export interface ClaudeSessionOptions {
   readonly sessionId: string
-  /** The Session's own working directory. Enforced by `fence:pool-a-session-works-in-its-own-directory`. */
   readonly cwd: string
-  /** Built by `buildEnv`. Never inherited. */
   readonly env: Readonly<Record<string, string>>
-  /**
-   * Whether this Session already exists on disk.
-   *
-   * One boolean, two flags: `--session-id` names a new Session and `--resume`
-   * reaches an existing one. Enforced by `fence:session-one-flag-never-both`.
-   */
   readonly resume?: boolean
   readonly model?: string
-  /**
-   * How hard the model is asked to think, passed on every spawn including the
-   * Sessions nobody has touched. Enforced by `fence:session-effort-always-passed`.
-   */
   readonly effort?: string
-  /**
-   * What this Session is told about itself on top of Claude Code's own prompt.
-   * Passed as `--append-system-prompt`, never as a file in the working directory.
-   * Enforced by `fence:session-prompt-rides-the-flag`.
-   */
   readonly appendSystemPrompt?: string
   readonly spawn?: SpawnClaudeProcess
 }
@@ -169,28 +94,13 @@ interface PendingTurn {
   readonly fail: (error: Error) => void
 }
 
-/** The Pinned Model where `ROMA_MODEL` names none. The startup self-check asserts it. */
 export const PINNED_MODEL = 'claude-sonnet-5'
 
-/**
- * The Pinned Effort where `ROMA_EFFORT` names none. Unlike the model,
- * `system/init` carries no effort field, so the startup self-check has to ask
- * the process in prose.
- */
 export const PINNED_EFFORT = 'high'
 const COMMAND = 'claude'
 
-/** How long a SIGTERM is given before SIGKILL. */
 export const TERMINATE_GRACE_MS = 5_000
 
-/**
- * One `claude -p` process, seen as a sequence of Turns.
- *
- * Everything between "here is some text" and "here is the completed answer and
- * what it cost" lives in here: process lifecycle, NDJSON framing, Turn
- * boundaries, and cost accounting. Callers get Turns and never see the stream —
- * except through `event`, which exists for progress reporting.
- */
 export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
   readonly sessionId: string
 
@@ -207,16 +117,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
   #pending: PendingTurn | null = null
   #stdoutBuffer = ''
   #controlRequests = 0
-  /**
-   * The last `total_cost_usd` seen. Turn cost is the difference between
-   * consecutive values.
-   *
-   * Zero for every process, resumed ones included: seam 2 measured a Session
-   * that had spent $0.0822846 reporting $0.0105342 on its first Turn after
-   * resuming, so the total is the *process's* and there is nothing to carry.
-   */
   #cumulativeCostUsd = 0
-  /** Enforced by `fence:session-output-tokens-never-negative`. */
   #outputTokenMark = 0
 
   constructor(options: ClaudeSessionOptions) {
@@ -239,12 +140,6 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     return this.#process?.pid
   }
 
-  /**
-   * Everything *this process* has spent, as Claude Code last reported it.
-   *
-   * Not the Session's lifetime spend: a resumed process starts counting again
-   * from zero, so a Session that has been evicted has spent more than this.
-   */
   get cumulativeCostUsd(): number {
     return this.#cumulativeCostUsd
   }
@@ -289,16 +184,6 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     proc.onError((error) => this.#failPending(error))
   }
 
-  /**
-   * Send one message and wait for the Turn it drives.
-   *
-   * Rejects with `TurnFailedError` if the Turn ends in failure, and with
-   * `ClaudeExitedError` if the process dies first. Serialised by refusal rather
-   * than by queueing: two concurrent Turns in one Session is a caller bug, and
-   * the pool is where waiting belongs.
-   *
-   * Every way this can fail is a rejection. Enforced by `fence:session-send-only-rejects`.
-   */
   async send(text: string): Promise<Turn> {
     if (this.#process === null) throw new Error(`Session ${this.sessionId} has not been started`)
     if (this.#exit !== null) throw new ClaudeExitedError(this.#exit)
@@ -326,16 +211,6 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     return await turn
   }
 
-  /**
-   * Ask Claude Code to abandon the running Turn, and say whether there was one.
-   *
-   * In-band over stdin, so the process survives and the next message is served
-   * normally. The Turn still ends — as a failure, with whatever it had already
-   * spent.
-   *
-   * False means nothing was interrupted and nothing was sent.
-   * Enforced by `fence:session-interrupt-needs-a-turn`.
-   */
   interrupt(): boolean {
     if (this.#process === null || this.#exit !== null || this.#pending === null) return false
     this.#controlRequests += 1
@@ -347,10 +222,6 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     return true
   }
 
-  /**
-   * End the process. Used for eviction, never for stopping a Turn — `--resume`
-   * recovers the Session afterwards with its context intact.
-   */
   async terminate(signal: NodeJS.Signals = 'SIGTERM'): Promise<ClaudeProcessExit> {
     const proc = this.#process
     if (proc === null) throw new Error(`Session ${this.sessionId} has not been started`)
@@ -361,17 +232,6 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     return await exited
   }
 
-  /**
-   * End the process for certain — SIGTERM, then SIGKILL if it is ignored.
-   * Enforced by `fence:session-kill-when-term-is-ignored`.
-   *
-   * `terminate` on its own waits for an exit that a wedged process never
-   * produces, so a caller that awaits the ending wants this one. Enforced by
-   * `fence:pool-eviction-kills-what-ignores-sigterm` and
-   * `fence:startup-self-check-always-ends-the-probe`.
-   *
-   * `onGraceExpired` fires only when the escalation was needed.
-   */
   async terminateOrKill(
     graceMs: number = TERMINATE_GRACE_MS,
     onGraceExpired?: () => void,
@@ -397,8 +257,6 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
   }
 
   #onStdout(chunk: string): void {
-    // stdout arrives in whatever sizes the OS felt like; a line can be split
-    // across any number of them, so the tail is held until its newline lands.
     this.#stdoutBuffer += chunk
     let newline: number
     while ((newline = this.#stdoutBuffer.indexOf('\n')) !== -1) {
@@ -422,7 +280,6 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     const result = readTerminalResult(event)
     if (result === null) return
 
-    // Enforced by `fence:session-unrequested-result-moves-the-baseline`.
     const previousTotalUsd = this.#cumulativeCostUsd
     if (result.cumulativeCostUsd !== null) this.#cumulativeCostUsd = result.cumulativeCostUsd
     const previousMark = this.#outputTokenMark
@@ -456,7 +313,6 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
       pending.settle(turn)
       return
     }
-    // Enforced by `fence:session-refused-resume-read-off-errors`.
     const lost = result.errors.find((entry) => NO_CONVERSATION.test(entry))
     pending.fail(
       lost === undefined ? new TurnFailedError(turn) : new TranscriptNotFound(turn, lost),

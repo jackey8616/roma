@@ -4,9 +4,6 @@ import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { apiKeySourceFor, buildEnv, type BuildEnvOptions, type Credential } from './build-env.js'
 
-// The host environment a test pretends to be running under. It deliberately
-// carries both credentials and an unrelated secret, because the point of
-// buildEnv is that none of that leaks into a Claude Code process by accident.
 const HOST = {
   PATH: '/usr/bin:/bin',
   HOME: '/home/roma',
@@ -20,7 +17,6 @@ const HOST = {
   AWS_SECRET_ACCESS_KEY: 'nothing-to-do-with-claude',
 }
 
-/** Where a Session's Claude Code state goes. Required, so every call names one. */
 const CONFIG_DIR = '/work/claude-home'
 
 describe('buildEnv', () => {
@@ -74,21 +70,6 @@ describe('buildEnv', () => {
     expect('AWS_SECRET_ACCESS_KEY' in env).toBe(false)
   })
 
-  /**
-   * The allowlist stopped being only about credentials at ADR-0016, and this is
-   * the test that says so.
-   *
-   * Precedence was measured as `CLAUDE_CODE_EFFORT_LEVEL` > `--effort` >
-   * `settings.effortLevel`, so a host that exports this beats every `--effort`
-   * roma passes — and roma would go on reporting, and recording, the level it
-   * asked for. Nothing else in roma stands between the host environment and the
-   * effort of every Session it serves.
-   *
-   * It already passes, because `PASSTHROUGH` is an allowlist and this was never
-   * on it. That is the point: the property is free and load-bearing, so
-   * narrowing that list is now a decision about effort as well as about
-   * credentials, and this is where somebody finds that out.
-   */
   it('keeps a host CLAUDE_CODE_EFFORT_LEVEL out, which would otherwise beat --effort [fence:buildenv-no-host-effort]', () => {
     const why =
       'A host CLAUDE_CODE_EFFORT_LEVEL must never reach a Claude Code process (ADR-0016). ' +
@@ -136,7 +117,7 @@ describe('buildEnv', () => {
       oauthToken: 'oauth-token',
       apiKey: 'api-key',
     } as const
-    // @ts-expect-error -- fence:buildenv-one-credential-at-a-time: a Credential carrying both halves must not compile.
+    // @ts-expect-error -- fence:buildenv-one-credential-at-a-time
     const credential: Credential = { kind: 'overflow', apiKey: 'k', oauthToken: 't' }
 
     const env = buildEnv({ credential: both as Credential, inherit: HOST, configDir: CONFIG_DIR })
@@ -148,11 +129,6 @@ describe('buildEnv', () => {
     ).toEqual(['CLAUDE_CODE_OAUTH_TOKEN'])
   })
 
-  // Both are needed to isolate a Session's credential resolution: without the
-  // securestorage dir the process can still reach the machine's keychain login.
-  // The same directory is where Claude Code writes the Transcript, which
-  // ADR-0005 makes the only record of what an agent did — so this one variable
-  // decides both, and neither is conditional on a deployment naming it.
   it('isolates credential resolution by setting both Claude config dirs [fence:buildenv-config-dir-is-required]', () => {
     const why =
       'buildEnv must always set CLAUDE_CONFIG_DIR and CLAUDE_SECURESTORAGE_CONFIG_DIR, and ' +
@@ -164,7 +140,7 @@ describe('buildEnv', () => {
       inherit: HOST,
       configDir: CONFIG_DIR,
     })
-    // @ts-expect-error -- fence:buildenv-config-dir-is-required: configDir must stay required.
+    // @ts-expect-error -- fence:buildenv-config-dir-is-required
     const unnamed: BuildEnvOptions = { credential: { kind: 'shared-window', oauthToken: 'x' } }
 
     expect(unnamed.credential.kind, why).toBe('shared-window')
@@ -172,10 +148,6 @@ describe('buildEnv', () => {
     expect(env['CLAUDE_SECURESTORAGE_CONFIG_DIR'], why).toBe(CONFIG_DIR)
   })
 
-  // Three variables, widening an allowlist that exists to admit almost nothing.
-  // They are admissible for exactly the reasons an Installation Token is not:
-  // none is a secret, and none expires — so none of them goes stale in an
-  // environment that is fixed at spawn while the process outlives an hour.
   describe('with Credential Shims in front of a Session’s tools', () => {
     const SHIMS = {
       sessionId: 'a-session',
@@ -198,16 +170,11 @@ describe('buildEnv', () => {
       expect(env['GIT_CONFIG_GLOBAL']).toBe('/run/roma/gitconfig')
     })
 
-    // The one thing that must never be here. An environment is fixed at spawn
-    // and would be stale within the hour — and `env` in a Turn writes it into a
-    // Transcript roma has promised never to delete (ADR-0006).
     it('carries no credential for the forge at all', () => {
       expect(JSON.stringify(env)).not.toMatch(/gh[su]_|x-access-token/)
     })
   })
 
-  // The startup self-check's probe is not a Session roma serves: it has no
-  // Session id to report and nothing to clone.
   it('leaves the Shim variables out where there is no Session', () => {
     const env = buildEnv({
       credential: { kind: 'shared-window', oauthToken: 'oauth-token' },

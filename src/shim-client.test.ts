@@ -22,7 +22,6 @@ function directory(): string {
   return dir
 }
 
-/** Something on the socket that answers every request with `reply`, then hangs up. */
 async function answering(reply: string): Promise<string> {
   const socketPath = socketPathIn(directory())
   const server = createServer((socket) => {

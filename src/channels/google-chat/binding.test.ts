@@ -8,8 +8,6 @@ const seen = vi.hoisted(() => ({
   apis: [] as HttpChatApiOptions[],
 }))
 
-// What gaxios does: JSON unless asked for something else, so a file read
-// without `responseType` arrives as whatever its bytes parse or decode to.
 vi.mock('google-auth-library', () => ({
   GoogleAuth: class {
     async getClient() {

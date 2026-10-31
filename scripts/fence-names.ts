@@ -1,63 +1,32 @@
-/**
- * Which checks exist, by the name a comment or an ADR cites them by.
- *
- * One resolver for both citers — `roma/comment-whitelist` and
- * `scripts/check-adr-enforcers.ts` — so the two cannot disagree about whether
- * `Enforced by` names something real (ADR-0031).
- *
- * A name is one of:
- *
- * - `fence:<id>` — a test whose title carries `[fence:<id>]`, in a file the free
- *   run executes, read from `vitest.config.ts` itself. A test only seam 2 runs
- *   does not count: CI never runs it, so it would be cited as enforcing something
- *   nothing checks.
- * - `roma/<rule>` — a rule in roma's own ESLint plugin.
- */
-
 import { globSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import freeRun from '../vitest.config.js'
 
-/**
- * How a comment or an ADR says which checks hold a rule: `Enforced by` and one
- * or more names in backticks, joined by commas, `and` or `and by`.
- */
 export const ENFORCED_BY =
   /Enforced by\s+(`[^`]+`(?:\s*(?:,\s*(?:and\s+)?|and\s+)(?:by\s+)?`[^`]+`)*)/g
 
-/** One name a citation gives, and where in the text its citation starts. */
 export interface Cited {
   readonly name: string
   readonly index: number
 }
 
-/** Every name every `Enforced by` in `text` cites, not only the first of each. */
 export function citedIn(text: string): Cited[] {
   return [...text.matchAll(ENFORCED_BY)].flatMap((match) =>
     [...match[1]!.matchAll(/`([^`]+)`/g)].map(([, name]) => ({ name: name!, index: match.index })),
   )
 }
 
-/** The checks that exist, and where each one lives. */
 export interface Fences {
-  /** `fence:<id>` → the test file that carries it. */
   readonly tests: ReadonlyMap<string, string>
-  /**
-   * `fence:<id>` → every file that carries it, for a name more than one file
-   * claims. A citation of it would name whichever was read last.
-   */
   readonly claimedTwice: ReadonlyMap<string, readonly string[]>
-  /** `roma/<rule>` names. */
   readonly rules: ReadonlySet<string>
 }
 
-/** One test file, by path, and its text. */
 export interface TestSource {
   readonly file: string
   readonly text: string
 }
 
-/** Every fence the free run carries, read from the repository at `root`. */
 export function fencesIn(root: string, rules: Iterable<string>): Fences {
   const sources = testFiles(root).map((file) => ({
     file,
@@ -66,7 +35,6 @@ export function fencesIn(root: string, rules: Iterable<string>): Fences {
   return fencesFrom(sources, rules)
 }
 
-/** The fences these test files carry, and the rules roma's plugin has. */
 export function fencesFrom(sources: readonly TestSource[], rules: Iterable<string>): Fences {
   const carriers = new Map<string, Set<string>>()
   for (const { file, text } of sources) {
@@ -82,7 +50,6 @@ export function fencesFrom(sources: readonly TestSource[], rules: Iterable<strin
   return { tests, claimedTwice, rules: new Set([...rules].map((rule) => `roma/${rule}`)) }
 }
 
-/** The failure a person reads when two test files claim one fence name. */
 export function claimedTwiceMessage(claimedTwice: Fences['claimedTwice']): string {
   const found = [...claimedTwice]
     .map(([name, files]) => `  ${name}: ${files.join(', ')}`)
@@ -97,7 +64,6 @@ was read last, and deleting either one goes unnoticed. Rename one of them.
 `
 }
 
-/** Why `name` cannot be cited as a check, or null when it can. */
 export function unresolved(name: string, fences: Fences): string | null {
   if (name.startsWith('fence:')) {
     return fences.tests.has(name) ? null : `no test in the free run carries [${name}] in its title`
@@ -108,7 +74,6 @@ export function unresolved(name: string, fences: Fences): string | null {
   return `\`${name}\` is not a check name: cite fence:<id> or roma/<rule>`
 }
 
-/** Every test file the free run executes, relative to `root`. */
 function testFiles(root: string): string[] {
   const { include = [], exclude = [] } = freeRun.test ?? {}
   return globSync(include, { cwd: root, exclude }).sort()

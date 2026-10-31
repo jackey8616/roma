@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { IngressMessage, PendingEnclosure } from './channel-adapter.js'
 
-/**
- * What a Channel must say about every message, held at the type rung: each
- * `@ts-expect-error` below is a message a Channel forgot to complete, and
- * `npm run typecheck` fails the moment one of them starts compiling.
- */
 describe('what a Channel hands the Core', () => {
   it('cannot leave out a name, what came with it, or what it quotes [fence:adapter-ingress-says-everything]', () => {
     const why =
@@ -22,7 +17,7 @@ describe('what a Channel hands the Core', () => {
       enclosures: [{ name: 'a.png', from: null, redeem }],
       quotation: null,
     }
-    // @ts-expect-error -- a Channel with no name to give says null rather than forgetting
+    // @ts-expect-error -- fence:adapter-ingress-says-everything
     const noName: IngressMessage = {
       conversationKey: 'c',
       caller: 'users/1',
@@ -30,7 +25,7 @@ describe('what a Channel hands the Core', () => {
       enclosures: [],
       quotation: null,
     }
-    // @ts-expect-error -- a Channel with nothing attached says [] rather than forgetting
+    // @ts-expect-error -- fence:adapter-ingress-says-everything
     const noEnclosures: IngressMessage = {
       conversationKey: 'c',
       caller: 'users/1',
@@ -38,7 +33,7 @@ describe('what a Channel hands the Core', () => {
       text: 'hi',
       quotation: null,
     }
-    // @ts-expect-error -- a Channel whose message quotes nothing says null rather than forgetting
+    // @ts-expect-error -- fence:adapter-ingress-says-everything
     const noQuotation: IngressMessage = {
       conversationKey: 'c',
       caller: 'users/1',
@@ -46,7 +41,7 @@ describe('what a Channel hands the Core', () => {
       text: 'hi',
       enclosures: [],
     }
-    // @ts-expect-error -- an Enclosure the Caller attached says from: null rather than forgetting
+    // @ts-expect-error -- fence:adapter-ingress-says-everything
     const noFrom: PendingEnclosure = { name: 'a.png', redeem }
 
     expect(Object.keys(complete), why).toHaveLength(6)

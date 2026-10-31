@@ -38,7 +38,6 @@ const SEND_ONLY_REJECTS =
   'class of failure and rejects for another cannot be handled in one place (ADR-0003), and ' +
   'the caller finds out at runtime.'
 
-/** What `send` hands back, or what it threw before it could hand anything back. */
 function sendOrThrow(session: ClaudeSession, text: string): unknown {
   try {
     return session.send(text)
@@ -58,9 +57,6 @@ describe('how the process is invoked', () => {
     expect(claude.lastSpawn.args).not.toContain('--resume')
   })
 
-  // The CLI refuses the two flags together unless --fork-session is present, and
-  // roma never forks (ADR-0003). One boolean produces exactly one of them; there
-  // is no way to ask for both.
   it('reaches an existing Session with --resume and never both flags [fence:session-one-flag-never-both]', () => {
     const why =
       'A spawn names a new Session with --session-id or reaches an existing one with ' +
@@ -75,12 +71,6 @@ describe('how the process is invoked', () => {
     expect(claude.lastSpawn.args, why).not.toContain('--session-id')
   })
 
-  // A capability nobody knows about is a capability nobody has: an agent in an
-  // empty directory has no reason to believe it can clone anything, and will
-  // explain that it has no access rather than trying. `--append-system-prompt`
-  // rather than a file in the working directory, because the agent runs
-  // `git add -A` in there and anything roma left behind would eventually be
-  // committed into somebody's repository (ADR-0008).
   it('tells the Session what it can reach, where it has been given something to say [fence:session-prompt-rides-the-flag]', () => {
     const why =
       'What a Session is told about itself must ride --append-system-prompt, never a file in ' +
@@ -117,16 +107,6 @@ describe('how the process is invoked', () => {
     expect(args[args.indexOf('--model') + 1], why).toBe('claude-sonnet-5')
   })
 
-  /**
-   * On every spawn, including the Sessions nobody has touched.
-   *
-   * Omitting it does not fall back to nothing — it falls back to an
-   * `effortLevel` in the settings file under the config dir, which is one per
-   * deployment, so a value left there would set the effort for every Session in
-   * roma invisibly. Precedence was measured as `CLAUDE_CODE_EFFORT_LEVEL` >
-   * `--effort` > `settings.effortLevel` (ADR-0016): passing this closes the
-   * bottom of that list, and `buildEnv`'s allowlist closes the top.
-   */
   it('pins the effort, because omitting it falls back to a file every Session shares [fence:session-effort-always-passed]', () => {
     const why =
       '--effort must be passed on every spawn, the pinned default included (ADR-0016). ' +
@@ -151,9 +131,6 @@ describe('how the process is invoked', () => {
     expect(args[args.indexOf('--effort') + 1]).toBe('max')
   })
 
-  // --verbose is in here because the CLI requires it: "When using --print,
-  // --output-format=stream-json requires --verbose". Pinned so it cannot be
-  // tidied away as noise; seam 2 checks that the requirement is still real.
   it('runs the invocation the spec pins [fence:session-invocation-pinned]', () => {
     const why =
       'The claude -p invocation is pinned (ADR-0001, ADR-0003, ADR-0010). --verbose is a ' +
@@ -198,10 +175,6 @@ describe('how the process is invoked', () => {
   })
 })
 
-// Every stream below is a recording of a real `claude -p`, not a hand-written
-// double. The numbers asserted against them were read out of the captures
-// themselves — see test/fixtures/claude-stream/README.md.
-
 describe('completing a Turn', () => {
   it('returns the completed Turn text', async () => {
     const { claude, session } = newSession()
@@ -230,8 +203,6 @@ describe('completing a Turn', () => {
     ])
   })
 
-  // The OS decides where stdout chunks end, and it does not care about our
-  // newlines. One byte at a time is the worst case of the same thing.
   it('reassembles NDJSON lines split across chunk boundaries', async () => {
     const { claude, session } = newSession()
     const stream = recordedStream('three-turns-one-process')
@@ -264,9 +235,6 @@ describe('completing a Turn', () => {
 })
 
 describe('reporting failure', () => {
-  // The failure this whole design exists to avoid: `is_error: true` arriving
-  // alongside `subtype: "success"`. A wrapper keying on subtype reports a 401 as
-  // a completed answer.
   it('fails a Turn on is_error even when the subtype says success [fence:session-failure-is-a-rejection]', async () => {
     const why =
       'A failed Turn must be read off `is_error`, never `subtype`, and must reject with ' +
@@ -298,12 +266,6 @@ describe('reporting failure', () => {
     await expect(turn).rejects.toBeInstanceOf(ClaudeExitedError)
   })
 
-  // The fourth ending, and the one that is barely a Turn: nothing ran and
-  // nothing was spent, because the CLI refused before it called anything. Named
-  // here rather than worked out by whoever catches it — the pool wants it so it
-  // can spawn under the other flag and the Core wants it so it can say something
-  // better than "roma could not run this Task.", and neither can be the one that
-  // knows.
   it('names a refused resume for the Transcript that is missing [fence:session-refused-resume-read-off-errors]', async () => {
     const { claude, session } = newSession({ resume: true })
     session.start()
@@ -313,21 +275,12 @@ describe('reporting failure', () => {
 
     await expect(turn, REFUSED_RESUME).rejects.toBeInstanceOf(TranscriptNotFound)
     await turn.catch((error: TranscriptNotFound) => {
-      // Carried in the error rather than looked up when somebody wants it. The
-      // terminal event settles the Turn as it is parsed, and the matching stderr
-      // line is on another pipe that may not have been delivered yet.
       expect(error.reason, REFUSED_RESUME).toContain('No conversation found')
-      // The Turn is still there to be audited, and it is why this ending needs a
-      // name at all: it carries no text whatsoever, so anything reading a failed
-      // Turn's own words about itself gets nothing.
       expect(error.turn.text).toBe('')
       expect(error.turn.costUsd).toBe(0)
     })
   })
 
-  // The constraint the fix had to hold: these are two different endings and only
-  // one of them is recoverable by spawning again. A 401 puts its sentence in
-  // `result` and carries no `errors` at all.
   it('leaves a Turn that genuinely failed as one [fence:session-refused-resume-read-off-errors]', async () => {
     const { claude, session } = newSession({ resume: true })
     session.start()
@@ -339,9 +292,6 @@ describe('reporting failure', () => {
     await expect(turn, REFUSED_RESUME).rejects.not.toBeInstanceOf(TranscriptNotFound)
   })
 
-  // `errors` is an array in the stream and roma has only ever seen one entry in
-  // it. The refusal is looked for in all of them, so a build that puts another
-  // sentence first does not turn a recoverable ending into a failure.
   it('finds the refusal wherever it is among the errors [fence:session-refused-resume-read-off-errors]', async () => {
     const { claude, session } = newSession({ resume: true })
     session.start()
@@ -371,9 +321,6 @@ const REFUSED_RESUME =
   'and the Conversation fails on every message.'
 
 describe('per-Turn cost', () => {
-  // total_cost_usd on the terminal event is cumulative for the process:
-  // 0.0103129 → 0.0103129 → 0.0123081 across these three Turns. Logged raw, the
-  // third Turn would be recorded at the price of all three.
   it('reports the delta rather than the running total [fence:session-cost-is-a-delta]', async () => {
     const why =
       "A Turn's cost is the difference between consecutive `total_cost_usd` readings, never " +
@@ -399,8 +346,6 @@ describe('per-Turn cost', () => {
     expect(session.cumulativeCostUsd).toBeCloseTo(0.0123081, 7)
   })
 
-  // No capture holds a terminal event without a total; this is what a build that
-  // stopped reporting one would look like, built out of a real Turn.
   it('prices nothing it was not told, and bills the next total from the last one known [fence:session-unreported-is-null-not-zero]', async () => {
     const { claude, session } = newSession()
     const stream = recordedStream('three-turns-one-process')
@@ -424,10 +369,6 @@ describe('per-Turn cost', () => {
     expect(ended[2]?.costUsd, UNREPORTED_IS_NULL).toBeCloseTo(0.0019952, 7)
   })
 
-  // A resumed process counts its own spend from zero rather than continuing the
-  // Session's, which is what lets the baseline live here instead of in whatever
-  // outlives the process. Measured at seam 2; the figures are in ADR-0003's
-  // observability section.
   it('starts a resumed process from zero rather than from what the Session spent', async () => {
     const { claude, session } = newSession({ resume: true })
     const stream = recordedStream('three-turns-one-process')
@@ -439,7 +380,6 @@ describe('per-Turn cost', () => {
     expect((await turn).costUsd).toBeCloseTo(0.0105342, 7)
   })
 
-  // A Turn that failed still spent money, so the audit record still needs it.
   it('reports the cost of a failed Turn too', async () => {
     const { claude, session } = newSession()
     const stream = recordedStream('interrupted-turn')
@@ -455,8 +395,6 @@ describe('per-Turn cost', () => {
 })
 
 describe('staying resident', () => {
-  // system/init is re-emitted at the start of every Turn. A wrapper reading it
-  // as "a new process started" would tear down a perfectly good Session.
   it('serves every Turn from the same process despite a system/init per Turn', async () => {
     const { claude, session } = newSession()
     const stream = recordedStream('three-turns-one-process')
@@ -498,10 +436,6 @@ describe('staying resident', () => {
     expect((await next).text).toBe('alive')
   })
 
-  // What roma reports "there was nothing to stop" from. Sending the control
-  // request regardless would be the same call whether or not it interrupted
-  // anything, and `/stop` a second after sending — while the process is still
-  // starting — would end nothing while saying it had.
   it('says there was nothing to interrupt when no Turn is in flight [fence:session-interrupt-needs-a-turn]', async () => {
     const why =
       'interrupt() must send nothing and answer false when no Turn is in flight (ADR-0003, ' +
@@ -540,8 +474,6 @@ describe('staying resident', () => {
     expect(wasInterrupted(await finished), INTERRUPTED).toBe(false)
   })
 
-  // The same recorded ending with its `terminal_reason` taken away: what any other
-  // error during execution looks like, which says `error_during_execution` too.
   it('does not read every execution error as an interruption [fence:session-interrupted-read-off-terminal-reason]', async () => {
     const { claude, session } = newSession()
     session.start()
@@ -611,9 +543,6 @@ const INTERRUPTED =
   'is reported as a /stop somebody asked for.'
 
 describe('a generating Turn', () => {
-  // With --include-partial-messages the same prose arrives twice: once as 194
-  // text_delta events, and once more as the complete assistant message 85ms
-  // before the terminal result. A Turn that reads both reports the essay twice.
   it('reports prose that arrives twice as text exactly once', async () => {
     const { claude, session } = newSession()
     const stream = recordedStream('generation-partial-messages')
@@ -627,8 +556,6 @@ describe('a generating Turn', () => {
     expect(text.split('# The Pipe: How a Single Character Reshaped Computing')).toHaveLength(2)
   })
 
-  // Generation is otherwise silent, so this is the only thing a progress
-  // renderer has to read while a long answer is being written.
   it('surfaces the partial-message events a progress renderer reads', async () => {
     const { claude, session } = newSession()
     const stream = recordedStream('generation-partial-messages')
@@ -647,8 +574,6 @@ describe('a generating Turn', () => {
 })
 
 describe('when the process misbehaves', () => {
-  // `claude` missing from PATH surfaces as a spawn error, not an exit. Without
-  // this the Turn would hang forever on a process that never existed.
   it('fails a Turn whose process never started', async () => {
     const { claude, session } = newSession()
     session.start()
@@ -659,7 +584,6 @@ describe('when the process misbehaves', () => {
     await expect(turn).rejects.toThrow(/ENOENT/)
   })
 
-  // The only place a process explains itself when it refuses to run at all.
   it('surfaces what the process wrote to stderr', () => {
     const { claude, session } = newSession()
     const stderr: string[] = []
@@ -671,9 +595,6 @@ describe('when the process misbehaves', () => {
     expect(stderr.join('')).toContain('requires --verbose')
   })
 
-  // A terminal result with nothing waiting for it still moved the running total.
-  // Left out of the running total, its spend is folded into the next Turn — the
-  // cumulative-total bug arriving by a different route.
   it('keeps the cost baseline current when a result arrives with no Turn in flight [fence:session-unrequested-result-moves-the-baseline]', async () => {
     const why =
       'The cost baseline must be rebased on every terminal event, whether or not a Turn was ' +
@@ -694,10 +615,6 @@ describe('when the process misbehaves', () => {
   })
 })
 
-// What the Relay drift check reads, and the only field that can see a
-// `type:"local"` command doing model work: on a manual `/compact` the top-level
-// `usage` is all zeros, `duration_api_ms` is 0 and `num_turns` is 0, while
-// `modelUsage` moves.
 describe('per-Turn output tokens', () => {
   it('reports what the Turn added rather than the process total [fence:session-compact-reports-no-turns]', async () => {
     const why =
@@ -718,9 +635,6 @@ describe('per-Turn output tokens', () => {
       await turn.catch(() => {})
     }
 
-    // 21 → 28 → 36 → 2014 across the four, summed across both models the capture
-    // names. The fourth is the `/compact`, and it is the only one of the four
-    // that reports `num_turns: 0`.
     expect(
       ended.map((turn) => turn.outputTokens),
       why,
@@ -731,8 +645,6 @@ describe('per-Turn output tokens', () => {
     ).toEqual([1, 1, 1, 0])
   })
 
-  // The empty object a free Relay reports, which is a Turn that produced nothing
-  // rather than a build that stopped saying.
   it('reads an empty modelUsage as no output at all', async () => {
     const { claude, session } = newSession()
     session.start()
@@ -743,13 +655,6 @@ describe('per-Turn output tokens', () => {
     expect((await turn).outputTokens).toBe(0)
   })
 
-  // **The reading that goes backwards, and it is a real capture on the pinned
-  // build.** One process: the third Turn drops the `claude-haiku-4-5` entry and
-  // reports fewer `outputTokens` for `claude-sonnet-5` than the Turn before it,
-  // while `total_cost_usd` climbs as it should. Reported faithfully that is a
-  // negative Turn and a baseline left below where it had been — and the *next*
-  // ordinary Turn would then look like a burst of model work, on an entry that
-  // did nothing wrong. So the mark holds and the Turn reports zero.
   it('never reports a negative Turn, however the breakdown moves [fence:session-output-tokens-never-negative]', async () => {
     const why =
       "A Turn's output tokens are measured above a high-water mark and floored at zero, never " +
@@ -775,9 +680,6 @@ describe('per-Turn output tokens', () => {
     ).toEqual([17, 0, 0])
   })
 
-  // A build that stopped reporting the object is a different fact from a Turn
-  // that produced nothing, and only one of the two should be able to retire the
-  // check that reads this.
   it('says nothing rather than zero where the field is absent [fence:session-unreported-is-null-not-zero]', async () => {
     const { claude, session } = newSession()
     session.start()

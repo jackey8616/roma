@@ -1,20 +1,10 @@
 import { SESSION_ID_VAR } from '../shim-protocol.js'
 import type { Depot } from './depot.js'
 
-/** The name the image installs the Document Shortcut under. */
 export const DOCUMENT_SHORTCUT = 'roma-document-token'
 
-/** The Drive metadata key every file the agent creates is asked to carry. */
 export const CONVERSATION_TAG = 'conversation'
 
-/**
- * What every Session is told about the Document Reach: the Shortcut and that
- * re-running it is free, the Depot's id, what may and may not be done there and
- * that the refusal is Google's, the tagging convention, and that the Depot is
- * shared. It states facts and instructs nothing.
- *
- * The tag is the Session id, not the Conversation Key, so a `/clear` moves it.
- */
 export function announceDocuments(account: string, depot: Depot): string {
   return [
     'Google Drive access is already configured for this session, by roma. It is for writing the',

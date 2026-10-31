@@ -18,24 +18,10 @@ import {
   THREE_TURNS,
 } from '../test/support/recorded-stream.js'
 
-// SEAM 1, at the outermost edge roma has: an event arrives on the Transport and
-// what comes out is a Channel that was told something and a Delivery that was
-// settled. Claude Code is the recorded fake, the Channel is the recording
-// double, and the queue is a Transport a test drives by hand — so what is
-// asserted here is roma's own wiring, not anybody's client library.
-
 const OAUTH: Credential = { kind: 'shared-window', oauthToken: 'oauth-token' }
 const METERED: Credential = { kind: 'overflow', apiKey: 'metered-key' }
 const KEY = 'conversation-one'
 
-/**
- * One ingress message, as the recording Channel's events already are.
- *
- * Annotated rather than inferred, which is not decoration: an unannotated
- * literal here type-checks against nothing, so a field added to
- * `IngressMessage` is missing at runtime in every test in this file and in
- * none of the compiler's output.
- */
 function said(text: string, conversationKey = KEY): IngressMessage {
   return {
     conversationKey,
@@ -50,7 +36,6 @@ function said(text: string, conversationKey = KEY): IngressMessage {
 let running: Serving[] = []
 let fixtures: RomaFixture[] = []
 
-/** A `FakeTransport` whose queue can refuse the next acknowledgement, as a lost lease does. */
 class RefusingTransport extends FakeTransport {
   refuseNextAck = false
 
@@ -76,10 +61,6 @@ interface BootOptions {
 function boot({ overflow = true, channels = 1 }: BootOptions = {}) {
   const fixture = romaFixture('serve')
   fixtures.push(fixture)
-  // One Channel and the Transport its events arrive over, per Channel asked for.
-  // Two instances of each double is the whole of what a second Channel takes
-  // here, which is the point: `FakeTransport` and `RecordingAdapter` were
-  // already parameterised, so nothing new had to be built to see two of them.
   const bound = Array.from({ length: channels }, () => ({
     channel: new RecordingAdapter(),
     transport: new RefusingTransport(),
@@ -104,16 +85,11 @@ function boot({ overflow = true, channels = 1 }: BootOptions = {}) {
     running.push(roma)
     return roma
   })
-  // Attached now rather than by whichever test awaits it. Answering the probe
-  // takes two exchanges since ADR-0016 — the Turn, then the relayed `/effort
-  // current` — so a boot that refuses on the first one rejects while the fixture
-  // is still between them.
   serving.catch(() => {})
 
   const [first] = bound
   return {
     claude: fixture.claude,
-    /** The first Channel's, for the tests that are about one Channel. */
     channel: first!.channel,
     transport: first!.transport,
     channels: bound,
@@ -125,20 +101,12 @@ function boot({ overflow = true, channels = 1 }: BootOptions = {}) {
   }
 }
 
-/**
- * The subscriber's own records, kept, and everything else dropped.
- *
- * The pool's and the Cores' lines are traffic to this file; `IngressLogRecord`
- * is what `serve` itself decided, and two of its five are the only trace their
- * Delivery leaves anywhere.
- */
 function ingressOnly(kept: IngressLogRecord[]): ServeLog {
   return (record) => {
     if (record.event.startsWith('ingress-')) kept.push(record as IngressLogRecord)
   }
 }
 
-/** Boot, pass the self-check, and be receiving. */
 async function booted(options?: BootOptions) {
   const roma = boot(options)
   await roma.answerProbe()
@@ -146,7 +114,6 @@ async function booted(options?: BootOptions) {
   return roma
 }
 
-/** Which Conversations one Channel was asked to post into, in the order it was asked. */
 function conversationsOf(channel: RecordingAdapter): string[] {
   return [...new Set(channel.instructions.map(({ conversationKey }) => conversationKey))]
 }
@@ -161,16 +128,11 @@ afterEach(async () => {
 })
 
 describe('accepting messages only once roma is fit to serve them', () => {
-  // The acceptance criterion, and the only form it can take: there is nothing
-  // subscribed to the queue until the self-check has passed, so there is no
-  // window in which a message could arrive at a roma that has not proved its
-  // credential.
   it('receives nothing until the self-check has passed', async () => {
     const roma = boot()
 
     await flush()
     expect(roma.transport.receiving).toBe(false)
-    // One process, and it is the probe.
     expect(roma.claude.spawns).toHaveLength(1)
 
     await roma.answerProbe()
@@ -201,19 +163,12 @@ describe('carrying one message from the queue to the Channel and back', () => {
     expect(roma.channel.instructions.at(-1)).toMatchObject({ kind: 'result', text: 'ok' })
   })
 
-  // The settling is timed, not merely done. A Delivery finished with on arrival
-  // is gone the moment roma dies, and whoever sent it waits for an answer
-  // nothing is working on any more — so settling waits for the Conversation to
-  // have been answered, and a crash before that leaves the message on the queue
-  // to be delivered again.
   it('settles a Delivery only once the Conversation has been answered', async () => {
     const roma = await booted()
 
     const delivered = roma.transport.deliver(said('hello'), 'm-1')
     await flush()
 
-    // Mid-Task: the Conversation has its Acknowledgement, and the Delivery is
-    // still unsettled.
     expect(roma.channel.instructions.some(({ kind }) => kind === 'progress')).toBe(true)
     expect(roma.transport.settlements).toEqual([])
 
@@ -223,9 +178,6 @@ describe('carrying one message from the queue to the Channel and back', () => {
     expect(roma.transport.acked).toEqual(['m-1'])
   })
 
-  // A failed Task is an outcome rather than an error: the Conversation was told
-  // what happened, so the work is done and the message is finished with. Handing
-  // it back would rerun a Turn that already failed and spent whatever it spent.
   it('finishes with a Task that failed, because the Conversation was told', async () => {
     const roma = await booted()
 
@@ -250,9 +202,6 @@ describe('an event roma cannot or should not answer', () => {
     'bug). A subscriber that falls over on one bad event, or on a settlement the queue ' +
     'refused, makes one malformed message the end of roma answering anybody (#31).'
 
-  // Finished with rather than handed back. It is not a message roma answers and
-  // it never will be, so redelivering it makes it something the subscriber
-  // trips over on every pass for as long as the subscription keeps it.
   it('finishes with an event that is not one roma answers', async () => {
     const roma = await booted()
 
@@ -276,8 +225,6 @@ describe('an event roma cannot or should not answer', () => {
     expect(roma.channel.instructions).toEqual([])
   })
 
-  // The half of "rejected without stopping the subscriber" that is worth
-  // asserting: rejecting one event is only useful if the next one still works.
   it('keeps serving after one it could not read [fence:serve-take-never-rejects]', async () => {
     const roma = await booted()
 
@@ -295,9 +242,6 @@ describe('an event roma cannot or should not answer', () => {
     expect(roma.transport.acked, NEVER_REJECTS).toEqual(['m-1', 'm-2', 'm-3'])
   })
 
-  // A settlement that failed is not a failed Task: the work happened and the
-  // Conversation was answered. All that follows is a redelivery, so it is
-  // written down, and the subscriber goes on.
   it('survives the queue refusing to hear a settlement [fence:serve-take-never-rejects]', async () => {
     const roma = await booted()
     const transport = roma.transport as RefusingTransport
@@ -323,10 +267,6 @@ describe('an event roma cannot or should not answer', () => {
     expect(transport.acked, NEVER_REJECTS).toEqual(['m-2'])
   })
 
-  // The one failure that is worth another attempt, and the only one the Core
-  // reports by rejecting: the Conversation was never told anything. Handed back,
-  // it is delivered again once the Channel is reachable; finished with, it is a
-  // Task that ran, spent quota, and told nobody.
   it('hands back a Delivery the Channel could not be told about [fence:serve-take-never-rejects]', async () => {
     const roma = await booted()
     roma.channel.refuse('result', new Error('Chat is unreachable'))
@@ -341,10 +281,6 @@ describe('an event roma cannot or should not answer', () => {
 })
 
 describe('serving more than one Channel from one process', () => {
-  // The whole of what a second Channel is: a second Core over the same
-  // everything, each with exactly one place to reply to. A Core that answered
-  // into the other Channel would be a message posted where nobody sent it, and
-  // no Adapter could tell — neither of them ever learns the other exists.
   it('answers each Channel on itself, and neither on the other', async () => {
     const roma = await booted({ channels: 2 })
     const [first, second] = roma.channels
@@ -362,10 +298,6 @@ describe('serving more than one Channel from one process', () => {
     expect(second!.transport.acked).toEqual(['m-2'])
   })
 
-  // The cap is three across the whole of roma rather than three per Channel, and
-  // that is what one process buys: the queue is built once and handed to every
-  // Core. Two processes with a Channel each would run six Tasks against one
-  // Shared Window with no configuration looking wrong (ADR-0028).
   it('runs three Tasks at once across both Channels, not three each [fence:queue-one-for-all-channels]', async () => {
     const why =
       'Every Core must share the one TaskQueue (ADR-0028; the cap is ADR-0003’s). A queue ' +
@@ -373,12 +305,8 @@ describe('serving more than one Channel from one process', () => {
       'six Tasks against one Shared Window, with no configuration looking wrong (#23).'
     const roma = await booted({ channels: 2 })
     const [first, second] = roma.channels
-    // Counted rather than assumed zero: the Startup Self-Check has spawned its
-    // own probe by now, and what this is about is the three after it.
     const started = roma.claude.processes.length
 
-    // Two Conversations on each, so nothing here waits by sharing a Session:
-    // what holds the fourth back is the cap, and only the cap.
     const delivered = [
       first!.transport.deliver(said('hello', 'one'), 'm-1'),
       first!.transport.deliver(said('hello', 'two'), 'm-2'),
@@ -388,8 +316,6 @@ describe('serving more than one Channel from one process', () => {
     await flush()
 
     expect(roma.claude.processes, why).toHaveLength(started + 3)
-    // Told so rather than merely held: the fourth is the second Channel's, and
-    // it is waiting behind Tasks it can neither see nor be told about.
     expect(second!.channel.instructions.at(-1)).toMatchObject({
       kind: 'progress',
       conversationKey: 'four',
@@ -405,12 +331,6 @@ describe('serving more than one Channel from one process', () => {
 })
 
 describe('a Transport with nowhere to hand a Delivery back to', () => {
-  // ADR-0028: what `nack` buys is the Transport's, and a socket roma holds open
-  // has nothing to give the event back to — `FakeTransport`'s `nack` is exactly
-  // that, a settlement that hands nothing anywhere. What has to survive it is
-  // `take`: the failure is written down, the Delivery is settled all the same,
-  // and the subscriber is still running afterwards. Nothing here branches on
-  // which kind of Transport it is, which is the decision rather than an omission.
   it('logs the failure, settles anyway, and keeps serving', async () => {
     const roma = await booted()
     roma.channel.refuse('result', new Error('Chat is unreachable'))
@@ -444,10 +364,6 @@ describe('the same message delivered twice [fence:serve-redelivery-dropped-while
     'answers into one Conversation; kept for ever, it is a database roma does not have, and a ' +
     'genuine redelivery after the answer is never run (#31).'
 
-  // At-least-once is what a queue promises, and roma holds a delivery for as
-  // long as the Task takes — minutes, sometimes. A redelivery arriving in that
-  // window is the same work, and running it twice would spend the Turn twice and
-  // post two answers into one Conversation.
   it('drops a redelivery of work it is still doing', async () => {
     const roma = await booted()
 
@@ -456,17 +372,12 @@ describe('the same message delivered twice [fence:serve-redelivery-dropped-while
     const second = roma.transport.deliver(said('hello'), 'm-1')
     await second
 
-    // The redelivery settled nothing: the Delivery it duplicates is still
-    // outstanding, and the attempt that is doing the work is the one that owns
-    // the settling.
     expect(roma.transport.settlements, WHY).toEqual([])
 
     feed(roma.procFor(), OK)
     await first
 
     expect(roma.transport.acked, WHY).toEqual(['m-1'])
-    // Two results, and only one of them is an answer: the Session's Opening goes
-    // out ahead of the work, and the redelivery produced neither.
     const results = roma.channel.instructions.filter((instruction) => instruction.kind === 'result')
     expect(results, WHY).toHaveLength(2)
     expect(
@@ -475,10 +386,6 @@ describe('the same message delivered twice [fence:serve-redelivery-dropped-while
     ).toHaveLength(1)
   })
 
-  // Only while it is in flight. Once a Task is answered the id is forgotten, so
-  // this is a guard against doing one piece of work twice at once rather than a
-  // record of everything roma has ever seen — which it could not keep anyway,
-  // since roma has no database and a restart would empty it.
   it('runs a redelivery that arrives after the first one finished', async () => {
     const roma = await booted()
 
@@ -497,10 +404,6 @@ describe('the same message delivered twice [fence:serve-redelivery-dropped-while
 })
 
 describe('an event that answers an offer rather than asking for work', () => {
-  // The other thing a Channel can deliver, and the reason the subscriber asks
-  // two questions of every event. A button press is not an ingress message: it
-  // names a Task roma is already holding, so it drives no Turn of its own and
-  // starts no second Task.
   it('takes Overflow on the Task the press names', async () => {
     const roma = await booted()
 
@@ -517,17 +420,11 @@ describe('an event that answers an offer rather than asking for work', () => {
     feed(roma.procFor(), OK)
     await delivered
 
-    // The same Task, rerun on the metered environment map.
     expect(roma.claude.lastSpawn.env).toMatchObject({ ANTHROPIC_API_KEY: 'metered-key' })
     expect(roma.channel.instructions.at(-1)).toMatchObject({ kind: 'result', text: 'ok' })
-    // The press is its own Delivery and is finished with immediately; the Task's
-    // own Delivery is settled when the Task ends.
     expect(roma.transport.acked).toEqual(['m-2', 'm-1'])
   })
 
-  // Nothing happened, and nothing is owed. An offer that has since been taken,
-  // withdrawn or never made is not an error and not work — saying so is the
-  // Adapter's business, and the delivery is finished with either way.
   it('finishes with a press against an offer that is no longer open', async () => {
     const roma = await booted()
 
@@ -538,9 +435,6 @@ describe('an event that answers an offer rather than asking for work', () => {
 })
 
 describe('shutting down', () => {
-  // Both halves, in this order. Stopping the subscriber first is what keeps roma
-  // from taking on work it is about to kill; ending the processes is what keeps
-  // a restart from leaving `claude` processes behind with nothing to talk to.
   it('stops receiving before it ends the Resident Sessions', async () => {
     const roma = await booted()
     const order: string[] = []
@@ -565,11 +459,6 @@ describe('shutting down', () => {
     expect(proc.signals).toContain('SIGTERM')
   })
 
-  // The Task is killed with the process, so the Conversation is told it failed
-  // — and the Delivery is handed back rather than finished with, so the work
-  // comes round again on whatever starts next. Finished with instead, it would
-  // be a message somebody sent, was told had failed, and has to send again,
-  // which is precisely the losing that holding the Delivery exists to prevent.
   it('hands back a Delivery it was still working on [fence:serve-shutdown-hands-back]', async () => {
     const why =
       'Once roma is stopping, every settlement must be a hand-back (nack), whatever the work ' +
@@ -580,7 +469,6 @@ describe('shutting down', () => {
 
     const delivered = roma.transport.deliver(said('hello'), 'm-1')
     await flush()
-    // Mid-Task, with nothing settled yet.
     expect(roma.transport.settlements).toEqual([])
 
     const stopped = (await roma.serving).shutdown()
@@ -600,7 +488,6 @@ describe('shutting down', () => {
     const [first, second] = roma.channels
     let release = (): void => {}
     const closing = first!.transport.close.bind(first!.transport)
-    // Held once, by the shutdown under test; the teardown's own closes go through.
     first!.transport.close = () => {
       first!.transport.close = closing
       return new Promise<void>((resolve) => {
@@ -623,10 +510,6 @@ describe('shutting down', () => {
     expect(second!.transport.acked, why).toEqual([])
   })
 
-  // Every Transport, and the pool once. Once is the half worth asserting: the
-  // pool, the queue and the Audit Log are roma's rather than a Channel's, so a
-  // shutdown that ended them per Channel would end them again under whatever the
-  // first one left running.
   it('closes every Channel’s Transport, and ends the pool once', async () => {
     const roma = await booted({ channels: 2 })
     const serving = await roma.serving
@@ -643,9 +526,6 @@ describe('shutting down', () => {
     expect(ended).toBe(1)
   })
 
-  // The one failure that must not stop the rest of shutting down. A `close` that
-  // rejected and took the pool with it would leave `claude` processes running
-  // with nothing to talk to — which is the whole of what this is for.
   it('ends the Resident Sessions even when closing the queue fails', async () => {
     const roma = await booted()
 

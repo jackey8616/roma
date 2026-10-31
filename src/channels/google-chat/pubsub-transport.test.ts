@@ -4,12 +4,6 @@ import type { ChatEvent } from './chat-events.js'
 import { PubSubTransport, type PubSubLogRecord } from './pubsub-transport.js'
 import { FakePubSubMessage, FakeSubscription } from '../../../test/support/fake-pubsub.js'
 
-// SEAM 3 — the Transport on its own: bytes off a subscription in, a Delivery
-// out. No project, no credential, no queue, and the subscription is a double —
-// roma reads one somebody else created, so there is nothing here to provision
-// even in a test.
-
-/** A subscriber over a fake subscription, with everything it did recorded. */
 function subscribing() {
   const subscription = new FakeSubscription()
   const log: PubSubLogRecord[] = []
@@ -21,7 +15,6 @@ function subscribing() {
     log,
     taken,
     transport,
-    /** Start receiving, settling every Delivery the given way. */
     receive: (settle: Settle | 'none' = 'ack') =>
       transport.receive(async (delivery) => {
         taken.push(delivery)
@@ -31,7 +24,6 @@ function subscribing() {
   }
 }
 
-/** A Chat message event, as Chat publishes one. */
 const EVENT = {
   type: 'MESSAGE',
   space: { name: 'spaces/AAAA' },
@@ -54,9 +46,6 @@ describe('taking events off the subscription', () => {
     expect(sub.taken[0], why).toMatchObject({ id: 'msg-1', event: EVENT })
   })
 
-  // The id is Pub/Sub's own, which is what makes it the same across
-  // redeliveries — the property the subscriber's in-flight check depends on.
-  // An id minted here would be different every time and would catch nothing.
   it('settles the message the way roma settled the delivery', async () => {
     const acking = subscribing()
     await acking.receive('ack')
@@ -83,11 +72,6 @@ describe('taking events off the subscription', () => {
 })
 
 describe('a message roma cannot make an event out of', () => {
-  // Acknowledged rather than handed back, and it never reaches the Core. Bytes
-  // that are not JSON will not become JSON on the next attempt, so redelivering
-  // makes one bad message something the subscriber trips over for as long as the
-  // subscription keeps it — which is the whole distance between "rejected" and
-  // "stops the subscriber".
   it('acknowledges bytes that are not JSON, and never passes them on', async () => {
     const sub = subscribing()
     await sub.receive()
@@ -103,8 +87,6 @@ describe('a message roma cannot make an event out of', () => {
     ])
   })
 
-  // Valid JSON that is not an object: a bare string, a list, a null. An Adapter
-  // reads fields off an event, and there are no fields on any of these.
   it('acknowledges JSON that is not an event', async () => {
     const sub = subscribing()
     await sub.receive()
@@ -132,10 +114,6 @@ describe('a message roma cannot make an event out of', () => {
 })
 
 describe('surviving the things a subscription does', () => {
-  // A stream error is Pub/Sub's business to recover from — the client library
-  // reconnects — and roma's business only to write down. Thrown from a listener
-  // it would be an unhandled error taking the process with it, which is a
-  // network blip ending roma.
   it('writes down a subscription error rather than throwing it [fence:gchat-subscription-error-is-written-down]', async () => {
     const why =
       'A subscription error is written to the Operator Log and never thrown (ADR-0005). The ' +
@@ -148,10 +126,6 @@ describe('surviving the things a subscription does', () => {
     expect(sub.log, why).toEqual([{ event: 'pubsub-error', reason: 'stream reset' }])
   })
 
-  // The receiver is not supposed to reject — settling is its job, and it has
-  // better information than this side does about whether an attempt is worth
-  // repeating. If it ever does, the message is handed back rather than left to
-  // sit until its lease expires, and the subscriber stays up.
   it('hands the message back if the receiver throws, and keeps going', async () => {
     const subscription = new FakeSubscription()
     const log: PubSubLogRecord[] = []
@@ -170,7 +144,6 @@ describe('surviving the things a subscription does', () => {
   })
 })
 
-/** Let the message handler, which runs detached from `publish`, finish. */
 function flushed(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve))
 }

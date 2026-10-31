@@ -16,15 +16,6 @@ import {
   stripesInPng,
 } from '../test/support/striped-png.js'
 
-// SEAM 2 — a real `claude -p`. Slow, and it spends Shared Window quota.
-// Excluded from `npm test` by living in its own config; run it with
-// `npm run test:seam2`.
-//
-// It exists because the whole architecture rests on this stream contract, and
-// asserting that contract from documentation is the exact failure this project
-// already made once. Behaviour is version-specific: the version in use is
-// recorded from system/init below rather than assumed.
-
 const PING = 'Reply with exactly the word PING and nothing else. Do not use any tools.'
 const RECALL = 'What word did I ask you to reply with? Answer with just that word.'
 
@@ -59,75 +50,40 @@ describe('a Session over a real claude -p', () => {
     expect(turns[0]?.text).toContain('PING')
   })
 
-  // The entire justification for keeping a process resident. If the second Turn
-  // needed a cold start, or lost the first Turn's context, the pool has no
-  // reason to exist.
   it('serves the second message from the same process, with context retained', () => {
     expect(session.alive).toBe(true)
-    // The pid is what makes this "the same process" rather than "a process".
     expect(pids[0]).toBeDefined()
     expect(pids[1]).toBe(pids[0])
     expect(turns[1]?.text).toContain('PING')
   })
 
-  // system/init arrives at the start of every Turn, not once per process.
-  // Anything treating it as a spawn signal would tear this Session down.
   it('re-emits system/init per Turn without restarting the process', () => {
     const inits = events.filter((e) => e.type === 'system' && e['subtype'] === 'init')
     expect(inits.length).toBe(2)
   })
 
-  // The two silent-degradation modes ADR-0003's startup self-check exists to
-  // catch. Asserted here because this is the only place a real credential
-  // resolves against a real CLI.
   it('resolves the Shared Window credential without falling through to an API key', () => {
     const init = events.find((e) => e.type === 'system' && e['subtype'] === 'init')
     expect(init?.['apiKeySource']).toBe('none')
     expect(init?.['model']).toBe('claude-sonnet-5')
-    // Recorded rather than asserted: behaviour is version-specific, so a future
-    // failure needs to know which build produced this baseline.
     console.log(`seam 2 ran against Claude Code ${String(init?.['claude_code_version'])}`)
   })
 
-  // total_cost_usd is a cumulative total for the process. Two Turns is the
-  // smallest run that can tell a delta apart from it.
   it('reports per-Turn cost as a delta of the running total', () => {
     const [first, second] = turns
     expect(first?.costUsd).toBeGreaterThan(0)
     expect(second?.costUsd).toBeGreaterThan(0)
     expect(session.cumulativeCostUsd).toBeCloseTo((first?.costUsd ?? 0) + (second?.costUsd ?? 0), 9)
-    // The giveaway: logged raw, the second Turn would be billed for both.
     expect(second?.costUsd).toBeLessThan(session.cumulativeCostUsd)
   })
 
-  // --include-partial-messages is required, not optional: without it the stream
-  // is silent through generation and there is nothing to render progress from.
   it('emits partial-message events during the Turn', () => {
     const deltas = events.filter((e) => e.type === 'stream_event')
     expect(deltas.length).toBeGreaterThan(0)
   })
 })
 
-// ADR-0011 decided that what arrives with a message is written to disk as a file
-// rather than handed over as a content block, and the whole decision rests on one
-// property of the pinned build: that the Read tool puts an image's *pixels* in
-// front of the model. It is documented to, which is not the standard this repo
-// uses for the build it ships — so #73 asks for it here, before any of the work
-// is built on it.
-//
-// The stripe order is drawn fresh on every run, so there is no answer to be had
-// from the filename, the file size, or a guess — one in 3750, and the only place
-// it exists is the pixels.
-
 const STRIPE_COUNT = 5
-/**
- * The minted names, taken from ADR-0011's own example.
- *
- * roma names the file; what the sender called it rides beside the path as a
- * string and never becomes one. The marker below is the ADR's, verbatim, so a
- * pass here is about the mechanism roma will actually use rather than about
- * reading a file in general.
- */
 const MINTED = 'a3f9c2.png'
 const MINTED_AGAIN = 'b7d1e4.png'
 
@@ -143,12 +99,8 @@ describe('an Enclosure on disk, read by the agent', () => {
   const sessionId = randomUUID()
   const events: ClaudeEvent[] = []
   const turns: Turn[] = []
-  // Where each Turn's events start, so tool use can be attributed to the Turn
-  // that asked for it rather than to the run.
   const marks: number[] = []
   const stripes = randomStripes(STRIPE_COUNT)
-  // A second image, with its own order, so the second Turn cannot be answered
-  // out of the first one's context.
   const stripesAgain = randomStripes(STRIPE_COUNT)
   let cwd: string
   let session: ClaudeSession
@@ -189,15 +141,8 @@ describe('an Enclosure on disk, read by the agent', () => {
       ),
     )
     marks.push(events.length)
-    // Its own limit rather than the config's 60s hook timeout: both Turns here
-    // run a tool, and a hook that times out mid-Turn spends the money and
-    // reports nothing.
   }, 240_000)
 
-  // In the hook rather than in a test, so that a run which spent the money still
-  // leaves the record behind when an assertion is what failed. Behaviour here is
-  // version-specific, and a future disagreement needs to know what this baseline
-  // actually saw.
   afterAll(async () => {
     if (session.alive) await session.terminate()
     const init = events.find((e) => e.type === 'system' && e['subtype'] === 'init')
@@ -215,50 +160,21 @@ describe('an Enclosure on disk, read by the agent', () => {
     )
   })
 
-  // Free, and it runs before anything is concluded from the two Turns below.
-  // "The agent could not tell you what is in this image" and "that file is not
-  // the image you think it is" are indistinguishable from the assertions, and
-  // only one of them is a fact about Claude Code.
   it('wrote the images it meant to write', () => {
     expect(stripesInPng(readFileSync(join(cwd, MINTED)))).toEqual(stripes)
     expect(stripesInPng(readFileSync(join(cwd, MINTED_AGAIN)))).toEqual(stripesAgain)
   })
 
-  // The mechanism end to end: roma says where the file is and says nothing about
-  // opening it. An agent that has to be told to look is an agent that will
-  // sometimes not look, which is the objection ADR-0011 raised against handing
-  // out a shim instead of a file.
   it('goes and reads the file, given nothing but the enclosure marker', () => {
     expect(toolsIn(0)).toContain('Read')
     expect(stripeColoursIn(turns[0]?.text ?? '')).toEqual(stripes)
   })
 
-  // The premise itself, narrowed. Without this the Turn above could have passed
-  // by shelling out to decode the PNG — which would say nothing about the Read
-  // tool, and would not be available to an agent that had only been shown a
-  // picture. Asserting the tool set, not just that Read appears, is what closes
-  // that door.
   it('renders the image through the Read tool and nothing else', () => {
     expect(new Set(toolsIn(1))).toEqual(new Set(['Read']))
     expect(stripeColoursIn(turns[1]?.text ?? '')).toEqual(stripesAgain)
   })
 })
-
-// #85 — the two facts ADR-0012 measured by hand while #81 was being built, and
-// the reason that issue exists: both are load-bearing, both are claims about the
-// pinned build rather than about roma, and neither was a test. Nothing re-checked
-// either of them when the ADR-0007 pin moved.
-//
-// One Session, three sends, and the order is the whole measurement. A free Relay
-// on a process that has not spent is nearly free and settles the cheap half; the
-// same Relay after a real Turn is the half worth the money, because it is the
-// only one that can tell "the terminal event repeated the running total" apart
-// from "the process had spent nothing yet". Run cold-only, the second assertion
-// passes for the wrong reason.
-//
-// Written through `relayed` rather than as a bare string, so what goes on the
-// wire is the frame roma actually sends — the marker *after* the command, which
-// is what ADR-0012 exists for.
 
 const RELAY_CALLER = { caller: 'users/17', callerName: 'Ada' }
 const CONTEXT = { command: '/context', argument: null }
@@ -282,10 +198,6 @@ describe("a free Relay on roma's own invocation path", () => {
     turns.push(await session.send(relayed(RELAY_CALLER, CONTEXT)))
   }, 240_000)
 
-  // In the hook, so a run that spent the money leaves the reading behind even
-  // when an assertion is what failed. The raw field is logged rather than
-  // asserted on purpose: the delta is what protects roma, and the raw total is
-  // the thing that would move under it.
   afterAll(async () => {
     if (session.alive) await session.terminate()
     const labels = ['cold relay', 'task', 'warm relay']
@@ -304,40 +216,21 @@ describe("a free Relay on roma's own invocation path", () => {
     )
   })
 
-  // The premise of the whole Relay list, and the cheap half of it. `/context`
-  // answering locally is also what makes the entry still an entry: a command
-  // that had been removed would come back as `Unknown command`, for free, and
-  // pass a test that only looked at the cost.
   it('drives no Turn and costs nothing on a process that has not spent', () => {
     expect(turns[0]?.turns).toBe(0)
     expect(turns[0]?.costUsd).toBe(0)
     expect(turns[0]?.text).toContain('Context Usage')
   })
 
-  // The one worth the money. `ClaudeSession` prices a Turn by differencing
-  // `total_cost_usd` and rebases its baseline on every terminal event, so a
-  // build whose Relay reported `0` instead of the running total would record a
-  // negative cost here *and* rebase the baseline to zero — billing the next Task
-  // in this Session for the whole of the process's prior spend.
-  //
-  // `core.test.ts` cannot catch that: `readout-context.jsonl` was captured on a
-  // fresh process and therefore reports `0`, so the unit tests rewrite it with
-  // `withTotalCostUsd` and are pinned to this measurement rather than to the
-  // behaviour. They stay green if the behaviour moves. This does not.
   it('still costs nothing on a process that has already spent', () => {
-    // The guard that keeps the assertion below meaningful. If the middle Turn
-    // were free, the Relay after it would report zero either way.
     expect(turns[1]?.costUsd).toBeGreaterThan(0)
 
     expect(turns[2]?.turns).toBe(0)
     expect(turns[2]?.costUsd).toBe(0)
-    // The other half of the same fact, from the Session's side: a free Relay moves
-    // the baseline nowhere, so the process's total is still the Task's.
     expect(session.cumulativeCostUsd).toBe(turns[1]?.costUsd)
   })
 })
 
-/** Run `claude` to its exit, for the invocations that are meant to be refused. */
 async function runClaude(args: string[]): Promise<{ code: number | null; stderr: string }> {
   const { configDir, cwd } = liveSessionDirs(`flags-${args.join('-').replace(/\W+/g, '')}`)
   const stderr: string[] = []
@@ -354,10 +247,6 @@ async function runClaude(args: string[]): Promise<{ code: number | null; stderr:
   })
 }
 
-// The constraint the Session's one `resume` boolean encodes. It is worth a live
-// check because the design depends on the CLI genuinely rejecting both flags —
-// if it ever accepted them, the pool's first-spawn-versus-resume rule would be
-// solving a problem that no longer exists.
 describe('--session-id and --resume', () => {
   it('are refused together, and refused for that reason rather than a missing Session', async () => {
     const sessionId = randomUUID()
@@ -365,25 +254,14 @@ describe('--session-id and --resume', () => {
     const both = await runClaude(['-p', '--session-id', sessionId, '--resume', sessionId])
     const resumeOnly = await runClaude(['-p', '--resume', sessionId])
 
-    // The message names the flag combination, so this failure cannot be the
-    // "that Session does not exist" failure wearing a disguise — the control
-    // is what that one actually looks like.
     expect(both.code).not.toBe(0)
     expect(both.stderr).toContain('--session-id can only be used with')
     expect(resumeOnly.stderr).toContain('No conversation found')
 
-    // Narrows a claim this ticket inherited. The prototype reported the two
-    // flags as flatly mutually exclusive; the CLI's own wording says they
-    // combine when --fork-session is present. roma never forks, so one boolean
-    // still picks between them, but the reason is the narrower one.
     expect(both.stderr).toContain('--fork-session')
   })
 })
 
-// --verbose is a precondition of the output format, not a verbosity preference.
-// Pinned so it reads as a requirement rather than as clutter someone tidies away
-// — an invocation missing it produces no events at all. ADR-0003's invocation
-// block cites this test.
 describe('--output-format stream-json under --print', () => {
   it('refuses to start without --verbose', async () => {
     const withoutVerbose = await runClaude([

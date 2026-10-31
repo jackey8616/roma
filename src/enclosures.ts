@@ -3,27 +3,14 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { PendingEnclosure } from './channel-adapter.js'
 
-/** Enforced by `fence:enclosures-out-of-the-agents-way`. */
 const DIRECTORY = '.enclosures'
 
-/** An Enclosure once roma has written it down: what the agent is given. */
 export interface WrittenEnclosure {
-  /** Relative to the Working Directory, and minted here. */
   readonly path: string
-  /** What the Channel said the sender called it. Never a path. */
   readonly name: string
-  /** Whoever sent it along, where that is not the Caller. Carried from `PendingEnclosure` unchanged. */
   readonly from: string | null
 }
 
-/**
- * Redeem every Enclosure on a message and write it into the Working Directory,
- * under `.enclosures/` with a name roma mints. Call it once the Session is
- * known. Each is held in memory once, briefly, for the length of its write.
- *
- * Rejects with `EnclosureUnreadable` on the first Enclosure that cannot be
- * fetched.
- */
 export async function writeEnclosures(
   enclosures: readonly PendingEnclosure[],
   cwd: string,
@@ -47,13 +34,6 @@ export async function writeEnclosures(
   return written
 }
 
-/**
- * An Enclosure roma was told about and could not fetch. Its own type so the
- * Core can tell the Caller its reason, where any other error gets `reasonFor`'s
- * one sentence about roma having failed.
- *
- * Carries the sender's own name for it, so a message with two says which one.
- */
 export class EnclosureUnreadable extends Error {
   readonly enclosureName: string
 
@@ -64,7 +44,6 @@ export class EnclosureUnreadable extends Error {
   }
 }
 
-/** Enforced by `fence:enclosures-name-is-minted`. */
 function mintedName(declared: string): string {
   const dot = declared.lastIndexOf('.')
   const suffix = dot === -1 ? '' : declared.slice(dot + 1)
