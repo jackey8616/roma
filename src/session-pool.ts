@@ -33,12 +33,8 @@ const SPAWN_FILE = '.roma-session'
 const ALREADY_IN_USE = /session id .* is already in use/i
 
 /**
- * One operational moment in the pool's life.
- *
- * Eviction and reaping are invisible to the person using roma by design, which
- * is exactly why an operator needs them written down: a Turn that took an extra
- * cold start is explained by a `spawn` with `resume: true`, and that record is
- * the only place the reason exists.
+ * A Turn that took an extra cold start is explained by a `spawn` with
+ * `resume: true`, and nowhere else.
  */
 export type PoolLogRecord =
   | {
@@ -46,39 +42,12 @@ export type PoolLogRecord =
       readonly sessionId: string
       readonly resume: boolean
       readonly cwd: string
-      /** Which of the two bills this process's Turns land on. */
       readonly credential: CredentialKind
-      /**
-       * Which model its Turns run on: this Session's Chosen Model, or the
-       * Pinned Model.
-       *
-       * Here as well as on the Audit Record because the two answer different
-       * questions. The record says what a Task was spent on; this says what a
-       * *process* was started for, which is what makes the swap above readable —
-       * a swap says the terms changed, and the spawn that follows it says what
-       * they changed to.
-       */
+      /** This Session's Chosen Model, or the Pinned Model. */
       readonly model: string
-      /**
-       * What effort its Turns run at: this Session's Chosen Effort, or the
-       * Pinned Effort.
-       *
-       * Here for the model's reason and with one of its own: `--effort` is
-       * echoed nowhere in the stream, so unlike the model there is no second
-       * account of it anywhere. This line is roma saying what it put in the
-       * spawn arguments, and it is the only such statement per process.
-       */
+      /** This Session's Chosen Effort, or the Pinned Effort. */
       readonly effort: string
-      /**
-       * How short its Turns were asked to be: this Session's Chosen Caveman, or
-       * the Pinned Caveman.
-       *
-       * Here for the effort's reason, and it is what keeps the swap below
-       * readable when two terms move at once — a swap names one of them, and the
-       * spawn that follows is where the others are recovered from. The *level*
-       * rather than the text it renders to: what reaches the argv is several
-       * thousand characters of a ruleset, and an Operator Log line is read.
-       */
+      /** This Session's Chosen Caveman, or the Pinned Caveman: the level, never the ruleset. */
       readonly caveman: string
       readonly residents: number
     }
@@ -87,25 +56,9 @@ export type PoolLogRecord =
        * A process ended because the next Turn's terms are not the ones it was
        * started for.
        *
-       * Its own record rather than an eviction, because an eviction is roma
-       * making room and this is money moving. It is the only place the move
-       * appears as something that happened to a process; what it cost appears
-       * on the Task's Audit Record.
-       *
-       * Four reasons, one shape — the way `evict` and `reap` already differ only
-       * in what prompted them. A credential change is money moving between
-       * bills, a model change is money moving between models, an effort change is
-       * money moving between depths of thinking, and a Caveman change is money
-       * moving between lengths of answer; an operator looking at an unexplained
-       * respawn is asking which. Where more than one differs at once the model is
-       * named first, the effort second and the Caveman third, because a model
-       * change is the larger fact and because every one of the four is on the
-       * `spawn` record that follows — so what a swap chooses between is which
-       * *`from`* is worth keeping, and the model's is.
-       *
-       * `from` and `to` say what changed rather than being two fields per
-       * reason, and they are typed by the reason so that a model can never land
-       * in a field an operator reads as a credential.
+       * One record per swap however many terms moved. It names the model if that
+       * moved, else the effort, else the Caveman, else the credential; every term
+       * is on the `spawn` record that follows.
        */
       readonly event: 'swap'
       readonly sessionId: string
@@ -114,15 +67,7 @@ export type PoolLogRecord =
       readonly to: CredentialKind
     }
   | {
-      /**
-       * The same event, moving between models, efforts or Cavemen rather than
-       * between bills.
-       *
-       * One arm for all three because they carry the same two strings; the
-       * `reason` is what an operator reads them as. Deliberately not folded in
-       * with the credential above, which is typed to `CredentialKind` so that a
-       * model can never be logged where a bill is expected.
-       */
+      /** The same event, moving between models, efforts or Cavemen rather than between bills. */
       readonly event: 'swap'
       readonly sessionId: string
       readonly reason: 'model' | 'effort' | 'caveman'
@@ -130,7 +75,6 @@ export type PoolLogRecord =
       readonly to: string
     }
   | {
-      /** Both end a process the same way; they differ in what prompted it. */
       readonly event: 'evict' | 'reap'
       readonly sessionId: string
       readonly idleMs: number
@@ -144,10 +88,7 @@ export type PoolLogRecord =
     }
   | { readonly event: 'kill'; readonly sessionId: string; readonly graceMs: number }
   | {
-      /**
-       * A Turn abandoned mid-retry. Where an operator finds out that a
-       * credential is wrong, since the caller is only told the Task is over.
-       */
+      /** A Turn abandoned mid-retry. */
       readonly event: 'retry-storm'
       readonly sessionId: string
       readonly retries: number
@@ -159,27 +100,18 @@ export type PoolLogRecord =
     }
   | {
       /**
-       * Both are a spawn that guessed wrong about whether the Session already
-       * exists, and both are recovered by retrying with the other flag. They
-       * differ in which way the guess was wrong: `resume-lost` reached for a
-       * transcript that is not there, `transcript-survived` created one that is.
+       * A spawn that guessed wrong about whether the Session already exists,
+       * recovered by retrying once with the other flag: `resume-lost` reached for
+       * a transcript that is not there, `transcript-survived` created one that is.
        */
       readonly event: 'resume-lost' | 'transcript-survived'
       readonly sessionId: string
       /**
-       * How the CLI refused, in its own words.
-       *
-       * Called this rather than `stderr`, which is what it was: the refusal roma
-       * meets in production arrives on *stdout* as a terminal event, and it can
-       * settle the Turn before the matching stderr chunk is delivered — separate
-       * pipes. So the record is written from the process's stderr where it
-       * delivered any and from the ending's own reason where it did not, and a
-       * field named for one pipe would be a lie in the case this record was
-       * added for. Never empty either way, because this is the one line an
-       * operator has to read.
+       * How the CLI refused, in its own words: its stderr and the Turn's ending,
+       * each once, whichever arrived. Never empty. Enforced by
+       * `fence:refusal-keeps-both-halves`.
        */
       readonly refusal: string
-      /** The flag the Turn was retried with, so the recovery reads as one record. */
       readonly retryWith: '--resume' | '--session-id'
     }
   | {
@@ -203,22 +135,16 @@ export type PoolLog = OperatorLog<PoolLogRecord>
 export const logToStderr: PoolLog = writeToStderr
 
 /**
- * A Turn abandoned because it was retrying more than the budget allows.
- *
- * Its own class rather than a `ClaudeExitedError`, because the two are opposite
- * news: a process that died is roma failing, and this is roma deciding. The
- * caller has a Task that is over either way, but only this one can say what it
- * was over.
+ * A Turn abandoned because it was retrying more than the budget allows: roma
+ * deciding, where a `ClaudeExitedError` is a process dying.
  */
 export class RetryStormError extends Error {
-  /** Retries roma saw before it stopped waiting. */
   readonly retries: number
-  /** How long the Turn had been retrying, from its first retry. */
+  /** Measured from the Turn's first retry, not from its start. */
   readonly elapsedMs: number
   /**
-   * The last retry seen, and the only account of the underlying failure roma
-   * has: the error proper surfaces after the retries are exhausted, which is
-   * exactly the wait being cut short here.
+   * The last retry seen: the only account of the underlying failure, because the
+   * error proper surfaces only once the retries are exhausted.
    */
   readonly lastRetry: ApiRetry
 
@@ -235,96 +161,49 @@ export class RetryStormError extends Error {
 }
 
 /**
- * One Session's environment, built by `buildEnv`.
- *
- * A function of the Session rather than one map reused for every process,
- * because two of the variables in it are the Session's own — the id a Credential
- * Shim reports a request under, and nothing else that differs. Everything
- * expensive or secret is closed over once at startup; this only fills in who is
- * asking.
+ * One Session's environment, built by `buildEnv`. Cheap: everything expensive or
+ * secret is closed over once at startup, and only the Session id a Credential
+ * Shim reports a request under is filled in here.
  */
 export type BuildSessionEnv = (sessionId: string) => Readonly<Record<string, string>>
 
 /**
  * The environment to spawn with for each credential a Turn can be paid for by.
- *
- * Partial, because Overflow is configuration a deployment may not have: no
- * metered key, no entry, and a Turn that asks for one is refused rather than
- * quietly served on the subscription. ADR-0002's point exactly — Overflow is not
- * a mode, it is the other environment map.
+ * A deployment with no metered key has no Overflow entry, and a Turn that asks
+ * for one is refused rather than served on the subscription.
  */
 export type CredentialEnvs = Readonly<Partial<Record<CredentialKind, BuildSessionEnv>>>
 
-/**
- * Which model a Session runs on, asked afresh at every spawn.
- *
- * A port rather than the record itself, because what the pool needs is one
- * question answered and not a directory of files: `ChosenRecord` is what
- * implements it. Asked at spawn rather than handed over per call so the invariant
- * re-establishes itself after a restart — the same reason the pool reads whether
- * a Session is resuming off the filesystem instead of remembering it.
- */
+/** Which model a Session runs on, asked afresh at every spawn. */
 export interface SessionModels {
-  /**
-   * Carried so that this port and `SessionEfforts` stay distinct. Enforced by
-   * `fence:pool-ports-are-distinct`.
-   */
+  /** Enforced by `fence:pool-ports-are-distinct`. */
   readonly kind: 'model'
   inForce(sessionId: string): string
 }
 
-/**
- * What effort a Session runs at, asked afresh at every spawn.
- *
- * `SessionModels`' twin, and a port for the same reason: what the pool needs is
- * one question answered rather than a directory of files, and asking at spawn is
- * what makes the invariant re-establish itself after a restart of roma.
- */
+/** What effort a Session runs at, asked afresh at every spawn. */
 export interface SessionEfforts {
-  /** Carried for `SessionModels.kind`'s reason. */
+  /** Enforced by `fence:pool-ports-are-distinct`. */
   readonly kind: 'effort'
   inForce(sessionId: string): string
 }
 
 /**
- * How short a Session is asked to be, asked afresh at every spawn.
- *
- * The third of these, and a port for the same reason as the first two. What it
- * answers is a *level* and never the text — the ruleset is roma's own rendering
- * of it (`cavemanRuleset`), and a port that handed over finished prose would put
- * the question "what is this Session set to" in two places, one of which cannot
- * be asked (ADR-0030).
+ * How short a Session is asked to be, asked afresh at every spawn. Answers a
+ * level and never the text; `cavemanRuleset` renders it.
  */
 export interface SessionCavemen {
-  /** Carried for `SessionModels.kind`'s reason. */
+  /** Enforced by `fence:pool-ports-are-distinct`. */
   readonly kind: 'caveman'
   inForce(sessionId: string): string
 }
 
 /**
- * What a process is started for, and therefore what its Turns run on.
+ * What a process is started for, and therefore what its Turns run on. Fixed at
+ * spawn: a Turn on other terms gets a new process.
  *
- * The things that are fixed at spawn and cannot be changed under a running
- * process: which bill its Turns land on, which model answers them, how hard that
- * model is asked to think, how short it is asked to be, and what it is told about
- * itself on top of Claude Code's own prompt. Named as one thing because they are
- * already one thing everywhere they are talked about — `#acquire` takes a Session
- * "for a Turn on these terms", and `#swap` ends a process because "the next
- * Turn's terms are not the ones it was started for".
- *
- * They travel together through acquisition, spawning and the swap between them,
- * and each one that arrives becomes a member here rather than another loose
- * parameter beside them. A list that grows one at a time is one where a caller
- * eventually passes the model where the effort goes and nothing says so; this
- * cannot be got wrong silently.
- *
- * The last two are one fact in two currencies, which is the only place this type
- * repeats itself and is worth the repetition: `caveman` is the word an operator
- * reads and `appendSystemPrompt` is what the argv carries. Both are here because
- * both are needed at a different moment — the append at the spawn, the level at
- * the swap, where a record naming several thousand characters of ruleset would be
- * unreadable. They are resolved together in `#acquire` and never separately.
- * Enforced by `fence:pool-caveman-read-once`.
+ * `caveman` and `appendSystemPrompt` are one fact, the level and the text
+ * rendered from it, read together. Enforced by `fence:pool-caveman-read-once`.
  */
 export interface SpawnTerms {
   readonly credential: CredentialKind
@@ -340,75 +219,34 @@ export interface SpawnTerms {
 }
 
 export interface SessionPoolOptions {
-  /**
-   * The tree Working Directories live in, one per Session.
-   *
-   * The Work Root itself rather than its path, so that the layout it holds —
-   * directories are Sessions, files are records — has one owner instead of being
-   * a rule this pool enforced in one line and `session-generation.ts` relied on
-   * from a module it does not import.
-   */
   readonly workRoot: WorkRoot
-  /** One environment per credential a Turn may run on. */
   readonly envs: CredentialEnvs
   /**
-   * The model every Session runs on, for a pool built without `models`.
-   *
-   * No longer how roma runs: `startup.ts` always supplies `models`, which
-   * answers per Session and makes this unreachable in production. It is kept for
-   * the tests that are about something else and want one model for the whole
-   * pool, and saying so is the point — a reader who found it described as "the
-   * fallback" would go looking for the deployment that takes it.
+   * The model every Session runs on, for a pool built without `models`. Only
+   * tests omit `models`; `startup.ts` always supplies it.
    */
   readonly model?: string
-  /**
-   * Which model each Session runs on, where somebody has chosen one.
-   *
-   * Omitted, every Session runs on `model` — which is what roma did before a
-   * Conversation could say otherwise.
-   */
+  /** Which model each Session runs on. Omitted, every Session runs on `model`. */
   readonly models?: SessionModels
   /**
-   * What effort every Session runs at, for a pool built without `efforts`.
-   *
-   * `model`'s counterpart, kept for the tests that are about something else and
-   * want one effort for the whole pool. `startup.ts` always supplies `efforts`.
+   * What effort every Session runs at, for a pool built without `efforts`. Only
+   * tests omit `efforts`.
    */
   readonly effort?: string
-  /**
-   * What effort each Session runs at, where somebody has chosen one.
-   *
-   * Omitted, every Session runs at `effort` — which is what roma did before a
-   * Conversation could say otherwise.
-   */
+  /** What effort each Session runs at. Omitted, every Session runs at `effort`. */
   readonly efforts?: SessionEfforts
   /**
    * How short every Session is asked to be, for a pool built without `cavemen`.
-   *
-   * `model`'s counterpart again, kept for the tests that are about something else
-   * and want one Caveman for the whole pool. `startRoma` always supplies
-   * `cavemen`.
+   * Only tests omit `cavemen`.
    */
   readonly caveman?: string
-  /**
-   * How short each Session is asked to be, where somebody has chosen.
-   *
-   * Omitted, every Session is asked for `caveman` — which is what roma did
-   * between ADR-0030 landing and a Conversation being able to say otherwise.
-   */
+  /** How short each Session is asked to be. Omitted, every Session is asked for `caveman`. */
   readonly cavemen?: SessionCavemen
   /**
-   * What every Session is told about what roma can reach, one part per Reach.
-   *
-   * The pool's rather than the Core's because the pool is what spawns, and a list
-   * rather than the finished text because the finished text is no longer one
-   * thing: half of it is the deployment's and settled at boot, and half of it is
-   * this Session's. Joining them is `#appendSystemPromptFor`'s, so that the rule
-   * about empty parts is applied once rather than at both ends of a seam.
-   *
-   * Each part is exactly what one Reach announces, including the empty string an
-   * unavailable one announces — dropped at the join rather than filtered by the
-   * caller, for the same reason.
+   * What every Session is told about what roma can reach, one part per Reach,
+   * each exactly what that Reach announces. Pass the empty string an unavailable
+   * Reach announces as it is; the pool drops empty parts and appends the Caveman
+   * ruleset after the rest.
    */
   readonly announcements?: readonly string[]
   readonly maxResident?: number
@@ -461,26 +299,9 @@ interface Resident {
 }
 
 /**
- * Resident Sessions: which Claude Code processes are alive, and for how long.
- *
- * A Session outlives any one process. Callers send a message to a Session id and
- * get back a Turn; whether that was served by a process already running, one
- * resumed from disk, or one created for the first time is the pool's business
- * and nothing else's. Eviction and reaping are therefore invisible except in the
- * log and in how long the Turn took.
- *
- * What the pool owns, and why it has to be here rather than in `ClaudeSession`:
- *
- * - **First spawn versus resume.** `--session-id` names a new Session and
- *   `--resume` reaches an existing one, and the CLI refuses both together. Only
- *   something that outlives the process can tell which case it is in.
- * - **Who gets evicted.** A Session with a Turn in flight never does.
- *
- * What it deliberately does *not* own is cost, though it nearly had to.
- * `total_cost_usd` turned out to be cumulative for the process rather than for
- * the Session, so a resumed process has nothing to carry forward and there is no
- * baseline to keep here. Measured at seam 2; the figures are in ADR-0003's
- * observability section.
+ * Callers send a message to a Session id and get back a Turn; whether a running
+ * process served it, or one resumed or created for it, shows only in the log
+ * and in how long the Turn took.
  */
 export class SessionPool extends EventEmitter<SessionPoolEvents> {
   readonly #workRoot: WorkRoot
@@ -532,15 +353,13 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   }
 
   /**
-   * Send one message to a Session and wait for the Turn it drives.
+   * Send one message to a Session and wait for the Turn it drives. The Session
+   * is pinned against eviction until the Turn ends.
+   * Enforced by `fence:pool-busy-session-is-never-evicted`.
    *
-   * The Session is made resident first — resumed or created as needed — and is
-   * pinned against eviction until the Turn ends. Serialisation between Tasks is
-   * not done here: two concurrent messages to one Session is a caller bug, and
-   * queueing belongs to the Task queue.
-   *
-   * Rejects with `RetryStormError` if the Turn spends its retry budget, which
-   * is the one way a Turn ends that nobody asked for.
+   * Does not serialise: two concurrent messages to one Session is a caller bug,
+   * and the Task Queue is what prevents it. Rejects with `RetryStormError` if the
+   * Turn spends its retry budget.
    */
   async send(
     sessionId: string,
@@ -551,17 +370,13 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   }
 
   /**
-   * How short the process serving this Session was asked to be, or null where
-   * none is serving it.
-   *
-   * The Resident's own answer, never a fresh reading of the record. Enforced by
+   * How short the process serving this Session was asked to be: the process's
+   * own level, never a fresh reading of the record. Enforced by
    * `fence:pool-caveman-is-what-the-process-ran-at`.
    *
-   * Null for a Session with no process: a Task stopped in the queue, a
-   * Conversation roma could not name a Session for, a process that died with its
-   * Turn in flight. Nothing here invents a level for those, because what a
-   * record says instead is the Core's — it is the only thing that knows what the
-   * deployment would have given them.
+   * Null where no process serves it, such as a Task stopped in the queue or a
+   * process that died with its Turn in flight. What to record then is the
+   * caller's to decide.
    */
   cavemanOn(sessionId: string): string | null {
     return this.#residents.get(sessionId)?.caveman ?? null
@@ -569,10 +384,8 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
 
   /**
    * Ask a resident Session to abandon its running Turn. Its process survives.
-   *
-   * False if there was no Turn to abandon — including the case where the Session
-   * is not resident at all, which is what a Conversation that has been quiet all
-   * morning looks like.
+   * False if there was no Turn to abandon, including when the Session is not
+   * resident.
    */
   interrupt(sessionId: string): boolean {
     return this.#residents.get(sessionId)?.session.interrupt() ?? false
@@ -587,24 +400,9 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   }
 
   /**
-   * Delete working directories nothing has used for seven days.
-   *
-   * Runs on a timer as well, because a directory only goes stale by *not* being
-   * used and nothing else would ever come and look.
-   *
-   * The deleting is the Work Root's, which is what knows that a directory is a
-   * Session and a file is a record. What is the pool's is the two things only it
-   * can supply: which Sessions are resident and must survive whatever their
-   * mtime says, and the announcement — an operator reads a reclaim beside an
-   * Eviction and a Reaping, and those are judgements this pool made.
-   *
-   * The Transcript is deliberately left behind. It belongs to Claude Code and
-   * ADR-0006 upheld that it is not roma's to delete, so a Conversation that goes
-   * quiet for more than seven days comes back to a directory that is gone and a
-   * Transcript that is not. That used to be a known gap with an unmeasured
-   * outcome; it is measured now, and `#wrongFlag` is where it is handled — the
-   * spawn is refused as already in use and the Turn retries with `--resume`,
-   * which reaches the Session having forgotten nothing.
+   * Delete Working Directories nothing has used for seven days, sparing resident
+   * Sessions whatever their mtime, and log each. Also runs on a timer. Returns
+   * the Session ids reclaimed.
    */
   reclaimIdleWorkDirs(): string[] {
     const reclaimed: string[] = []

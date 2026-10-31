@@ -39,41 +39,19 @@ export interface GoogleChatAdapterOptions {
   readonly api: ChatApi
   /**
    * Where to say that an event carried something attachment-shaped roma could
-   * not read.
-   *
-   * Optional the way every other log in this repo is, and the one place that
-   * being absent costs something: see `ChatEventLogRecord`. A deployment that
-   * drops it gets a roma whose failure to understand a payload is silent.
+   * not read. Without it, that failure is silent.
    */
   readonly log?: OperatorLog<ChatEventLogRecord>
 }
 
 /**
- * Google Chat, and the only module in roma that knows Chat exists.
- *
- * A Chat event goes in and an ingress message comes out; an outbound instruction
- * goes in and a Chat API call comes out. Everything Chat-specific is on this side
- * of it — thread names, `messageReplyOption`, the 4096-character limit, the words
- * roma uses — and nothing on the other side has ever heard of any of it.
- *
- * It keeps no record of who is talking to whom, which is ADR-0004's claim that
- * Chat needs no adapter-side identity storage. It can afford that because a
- * Conversation Key *is* a Chat resource name: the space is the first two segments
- * of it, and in a space the key is the thread as well. So a reply months later is
- * addressed by parsing the key the Core handed back, not by remembering anything
- * — and a restart mid-Conversation changes nothing.
- *
- * The one thing it does keep is which message carries each running Task's
- * acknowledgement, and that is nothing to persist: a Task does not survive a
- * restart either.
+ * Google Chat's Channel Adapter. It keeps no record of who is talking to whom:
+ * a reply is addressed by parsing the Conversation Key the Core hands back, so a
+ * restart mid-Conversation changes nothing. The one thing it keeps is which
+ * message carries each running Task's acknowledgement, which a restart loses
+ * along with the Task.
  */
 export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
-  /**
-   * Both true, and both measured against Chat rather than hoped for: Chat can
-   * edit a message it has posted, so progress reporting runs in its full form;
-   * and a thread name is stable for the life of the thread, so no Conversation
-   * Key has to be minted or persisted here.
-   */
   readonly capabilities: ChannelCapabilities = {
     messageMutation: true,
     stableConversationKey: true,
@@ -92,11 +70,7 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
 
   /**
    * One Chat event as a message for the Core, or null if roma should not answer
-   * it.
-   *
-   * Which events those are is `readIngressMessage`'s business. What matters here
-   * is that the Core never sees an event: by this point a thread, a space, a
-   * sender and an @-mention have become a key, a Caller and some text.
+   * it. Which events those are is `readIngressMessage`'s business.
    */
   toIngress(event: ChatEvent): IngressMessage | null {
     return (
@@ -108,22 +82,17 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
   }
 
   /**
-   * A click on the Overflow button, as the Task it was about.
-   *
-   * The other half of `#offer` below: what goes out as a parameter on the button
-   * comes back as one on the click, so the Task id makes the round trip and roma
-   * needs to remember nothing between the offer and its being taken.
+   * A click on the Overflow button, as the Task it was about. The Task id makes
+   * the round trip as a parameter on the button, so nothing is remembered
+   * between the offer and its being taken.
    */
   toOverflowTaken(event: ChatEvent): string | null {
     return readOverflowTaken(event)
   }
 
   /**
-   * Carry out one instruction, as one or more Chat messages.
-   *
-   * Progress edits the acknowledgement in place; everything else is a new
-   * message, which is the rule ADR-0003 makes unconditional for a result and
-   * this Adapter has no reason to bend for the rest.
+   * Carry out one instruction, as one or more Chat messages. Progress edits the
+   * acknowledgement in place; everything else is a new message.
    *
    * Rejecting means the Conversation was not told.
    * Enforced by `fence:gchat-deliver-rejects-what-chat-refused`.

@@ -9,87 +9,47 @@
  */
 
 /**
- * Which of roma's three credentials is being asked for.
- *
- * A word rather than a product, every time: `code` is what reaches anybody's
- * code, `cloud` is what reaches the Cloud Reach, and `documents` is what reaches
- * the things people read and edit by hand. Naming a provider here would put
- * GitHub and Google in the Core, which is the one thing this file exists on the
- * near side of — and it is why the third member is not `drive`, `sheets` or
- * `google`. `workspace` fails twice over: it is Google's product name *and* the
- * first entry in CONTEXT.md's list of things not to call a Working Directory
- * (ADR-0022 §1).
- *
- * A closed union, so that adding a member is a compile error at the composition
- * root until it is wired (ADR-0020 §8). Enforced by
- * `fence:shim-credential-wanted-is-closed`.
+ * Which of roma's three credentials is being asked for: `code` reaches anybody's
+ * code, `cloud` the Cloud Reach, and `documents` the Document Reach.
+ * Enforced by `fence:shim-credential-wanted-is-closed`.
  */
 export type CredentialWanted = 'code' | 'cloud' | 'documents'
 
 /**
  * What something in the agent's userland asks roma for, one JSON object on one
- * line.
- *
- * Deliberately not the shape of any tool's own protocol. `git` speaks a
- * key-value dialect and `gh` speaks an environment variable, and translating
- * between those and this is each Shim's whole job — which is what keeps the
- * knowledge of either tool out of here and under `src/github/`.
+ * line. Not the shape of any tool's own protocol: translating to it is each
+ * Shim's job.
  */
 export interface ShimRequest {
   /**
-   * Which Session's tool is asking.
-   *
-   * The Shim reports it from its own environment, and an agent can put anything
-   * it likes there. That is not a hole being left open: a Shim is not a boundary
-   * against the agent (ADR-0008), and this records the truth about the ordinary
-   * path the same way the `Requested-by:` trailer does.
+   * Which Session's tool is asking, as the Shim read it from its own environment:
+   * self-reported, so the agent can put anything there.
    */
   readonly session: string
   /**
    * `get` for a credential; `erase` to say the one it was given was rejected.
-   *
-   * Two rather than three: `git` also calls a helper with `store`, and roma has
-   * nowhere to store anything — the whole design is that no credential outlives
-   * the operation that needed it. The Shim answers that one itself.
+   * `git`'s `store` never reaches roma: the Shim answers it itself.
    */
   readonly operation: 'get' | 'erase'
   /**
-   * What the tool named it was reaching for, where it named one.
-   *
-   * Null is a real answer and not a gap: `gh api graphql` has no repository to
-   * announce. Recorded rather than acted on here — this slice scopes nothing to
-   * it — but it is what an Audit Record will be able to say a Task reached for,
-   * and foreclosing that is exactly what setting `credential.useHttpPath` avoids.
+   * What the tool named it was reaching for, where it named one. Null is a real
+   * answer and not a gap: `gh api graphql` has no repository to announce.
+   * Recorded, and nothing is scoped to it.
    */
   readonly path?: string | null
   /** The credential being handed back, on `erase`. */
   readonly token?: string | null
   /**
-   * Which credential is wanted. Absent means `code`.
-   *
-   * Optional so that the two Credential Shims, which predate there being a
-   * second credential and ask for the only one they can use, need not say so.
-   * The existing fields keep their meanings exactly: `path` stays null for a
-   * cloud or documents request, because unlike `git` naming a repository there
-   * is no destination to announce — either token reaches the whole of its own
-   * Reach, and asking the agent to declare a target would record an unverifiable
-   * self-report (ADR-0015 §10, ADR-0022 §9).
+   * Which credential is wanted. Absent means `code`, so the two Credential Shims
+   * need not say so. `path` stays null for a `cloud` or `documents` request.
    */
   readonly credential?: CredentialWanted
 }
 
 /**
- * What roma answers with: a credential, or why there is not one.
- *
- * The two fields beside the token are the answer's rather than the asker's —
- * roma is the only thing that knows when a token dies or which identity it acts
- * as, and an asker that inferred either would be inventing it. They ride on every
- * successful answer, not only the Cloud Shortcut's: withholding them from the two
- * Credential Shims was minimalism rather than protection, and the branch that did
- * it was where a Reach could be paired with the wrong tokens (ADR-0020 §9).
- *
- * Absent on an answer that carries no token, because there is nothing to say
- * about one that was never minted.
+ * What roma answers with: a credential, or why there is not one. `expiresAt` and
+ * `account` ride on every answer that carries a token, whichever credential was
+ * asked for, and are absent on one that carries none.
  */
 export interface ShimResponse {
   readonly token: string | null
@@ -97,23 +57,22 @@ export interface ShimResponse {
   /** Epoch milliseconds, as the provider reported it. */
   readonly expiresAt?: number
   /**
-   * Which identity the token acts as, or null where roma knows of none.
-   *
-   * Nullable rather than absent for the null case: "roma answered no account" and
-   * "roma did not answer one" are different facts, and a Shortcut that could not
-   * tell them apart would report the second when it meant the first.
+   * Which identity the token acts as, or null where roma knows of none. Null
+   * ("roma answered no account") and absent ("roma did not answer one") are
+   * different facts.
    */
   readonly account?: string | null
 }
 
 /**
  * The one name a Session's Shims are told to look for.
- *
- * Here rather than in the Shims, because roma is what sets it and a second copy
- * of the string is a second place for it to drift.
+ * Enforced by `fence:shim-variables-named-once`.
  */
 export const MINTER_SOCKET_VAR = 'ROMA_MINTER_SOCKET'
-/** The one name a Shim reports its Session from. */
+/**
+ * The one name a Shim reports its Session from.
+ * Enforced by `fence:shim-variables-named-once`.
+ */
 export const SESSION_ID_VAR = 'ROMA_SESSION_ID'
 
 /** The socket's name inside roma's own directory. */

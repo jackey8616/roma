@@ -2,24 +2,10 @@ import type { OutboundInstruction, TaskProgress } from '../../channel-adapter.js
 import type { Command } from '../../commands.js'
 import { progressPhrase } from '../../progress-phrase.js'
 
-/**
- * Chat's limit on the text of one message.
- *
- * Not advisory: the API rejects a longer one, so a Turn that wrote more than
- * this has to arrive as several messages or not at all. The generating capture
- * in `test/fixtures/claude-stream/` is 17706 characters, so this is the ordinary
- * case rather than an edge.
- */
+/** Chat's limit on the text of one message. The API rejects a longer one. */
 export const MAX_TEXT = 4096
 
-/**
- * What the button that takes Overflow says.
- *
- * It says that it costs money, because that is the whole of the decision being
- * asked for: ADR-0002 has the valve off by default precisely so that spending is
- * something somebody chooses, and a button labelled "Run anyway" would be that
- * choice made by somebody who did not know they were making it.
- */
+/** What the button that takes Overflow says. */
 export const OVERFLOW_BUTTON = 'Run it on metered billing'
 
 /**
@@ -48,16 +34,9 @@ function addressedTo(caller: string): string {
 }
 
 /**
- * How a Task's outcome reads in Chat.
- *
- * Wording is the Channel's business: the Core hands over facts — stopped,
- * nothing to stop, this text — because it cannot see the result of any sentence
- * it might write. The exception is a failure, whose reason the Core does write
- * and this passes through, since it is one sentence that reads the same on every
- * Channel and a second voice on the same fact would only muddle it.
- *
- * One message per string, in the order they should be posted. More than one when
- * what has to be said is longer than Chat will take.
+ * How a Task's outcome reads in Chat: one message per string, in the order they
+ * should be posted, more than one when it is longer than Chat will take. A
+ * failure's reason is the Core's sentence, passed through.
  *
  * The Caller is mentioned on the **first** message only, inside the limit.
  * Enforced by `fence:gchat-split-under-the-limit`.
@@ -134,11 +113,8 @@ function money(usd: number): string {
 }
 
 /**
- * The acknowledgement's text for one phase, addressed and fitted to Chat.
- *
- * The words are `progressPhrase`'s, which is where they are argued. What is
- * Chat's is the mention in front of them and the limit they have to fit inside
- * once it has been spent.
+ * The acknowledgement's text for one phase: `progressPhrase`'s words, with the
+ * mention in front and fitted to what it leaves of Chat's limit.
  */
 export function progressText(caller: string, progress: TaskProgress): string {
   const to = addressedTo(caller)
@@ -147,13 +123,11 @@ export function progressText(caller: string, progress: TaskProgress): string {
 
 /**
  * One acknowledgement phrase, inside what the mention leaves of Chat's limit.
+ * The **end** is what goes.
  *
- * The **end** is what goes, for the reason `progressPhrase` gives about the tool
- * it quotes. The budget is what the mention leaves of `MAX_TEXT`.
- *
- * What it promises is exactly `result.length <= budget`, for every budget. It
- * cannot make the *message* fit when the mention alone has spent the limit, but
- * it can decline to add to it. Enforced by `fence:gchat-fitted-holds-the-budget`.
+ * It promises exactly `result.length <= budget`, for every budget: it cannot make
+ * the message fit when the mention alone has spent the limit, but it adds nothing.
+ * Enforced by `fence:gchat-fitted-holds-the-budget`.
  */
 export function fitted(text: string, budget: number): string {
   if (text.length <= budget) return text

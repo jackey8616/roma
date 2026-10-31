@@ -24,6 +24,18 @@ inbound path is therefore nearly empty: it subscribes and republishes into the
 core's ingress format. No HTTPS receiver, no open port, and the VM's firewall
 denies all ingress.
 
+roma creates nothing it reads. The topic, the subscription, the service account,
+the grant that lets Chat publish, and the flow-control and lease settings the
+subscription is read with are the deployment's to provision. A program that
+created its own subscription could silently create the wrong one and then sit
+listening to it.
+
+The lease's default is roma's (`ROMA_PUBSUB_MAX_LEASE_MINUTES`, an hour) rather
+than the client library's, so that an operator who was
+answered twice can find the number. An hour covers a Turn and not always a
+parked Task. Raising it makes a second run rarer, not impossible; Pub/Sub's own
+ceiling is a day.
+
 ADR-0003 requires events to reach the core over a queue and removes the ~30s
 webhook response deadline that a minutes-long turn cannot meet. Google Chat
 satisfies that requirement natively. That is Chat's convenience, not the

@@ -31,6 +31,7 @@ import {
   RECONNECT_FLOOR_MS,
 } from './gateway-transport.js'
 import { MAX_TEXT, OVERFLOW_BUTTON } from './render.js'
+import { OVERFLOW_BUTTON as CHAT_OVERFLOW_BUTTON } from '../google-chat/render.js'
 import { FakeGatewayNetwork } from '../../../test/support/fake-gateway.js'
 import { recordedStream } from '../../../test/support/recorded-stream.js'
 import {
@@ -807,7 +808,7 @@ describe('a delivery runs beside the socket rather than on it', () => {
 })
 
 describe('the connection roma holds open', () => {
-  it('identifies with the guild and message intents, and no privileged one', async () => {
+  it('identifies with the guild and message intents, and no privileged one [fence:discord-no-privileged-intent]', async () => {
     const channel = await listening()
     await channel.take(HELLO)
 
@@ -816,7 +817,10 @@ describe('the connection roma holds open', () => {
     // `MESSAGE_CONTENT`, the one roma refuses. It is a toggle in a developer
     // portal where nothing versions it and no test can see it, and its
     // exceptions are exactly the messages roma answers (ADR-0029).
-    expect(INTENTS & (1 << 15)).toBe(0)
+    expect(
+      INTENTS & (1 << 15),
+      'INTENTS asks for MESSAGE_CONTENT, the privileged intent roma refuses (ADR-0029)',
+    ).toBe(0)
   })
 
   it('heartbeats on the interval Discord named, carrying the last event it saw', async () => {
@@ -2158,6 +2162,14 @@ describe('the Overflow offer, out as a button and back as a press', () => {
     expect(channel.buttons.map(({ label }) => label)).toEqual([OVERFLOW_BUTTON])
   })
 
+  it('words the offer as Chat does [fence:discord-overflow-worded-as-chat]', () => {
+    const why =
+      'Taking Overflow is one decision, whichever Channel draws the button: what it costs must ' +
+      'read the same everywhere (ADR-0002). Two Channels wording it differently would be two ' +
+      'decisions, and the label is the only place a Caller is told that pressing it spends money.'
+    expect(OVERFLOW_BUTTON, why).toBe(CHAT_OVERFLOW_BUTTON)
+  })
+
   // False where the provider says overage is unavailable or roma holds no
   // metered credential. A button that cannot work spends somebody's attention on
   // nothing, and on this Channel it is the only thing they could have pressed.
@@ -2236,7 +2248,12 @@ describe('the Overflow offer, out as a button and back as a press', () => {
    * It fails the moment one id parses as both kinds, which is the fault that
    * turns taking an Overflow offer into a paid Task nobody asked for.
    */
-  it('reads every id it writes as one kind and never as the other', () => {
+  it('reads every id it writes as one kind and never as the other [fence:discord-press-is-one-kind]', () => {
+    const why =
+      'Every custom_id roma writes must read back as exactly the kind it was written as. ' +
+      'Ingress.#workFor asks toIngress before toOverflowTaken (src/serve.ts), so an Overflow ' +
+      'offer read as a Menu press, or the reverse, turns taking an offer into a paid Task ' +
+      'nobody asked for, or spends money on a Task roma never named (ADR-0002, ADR-0029).'
     // Spelled here rather than imported: the inputs below are the ones written
     // to look like the *other* encoding, and a test that borrowed roma's own
     // constants for them could not tell a collision from an agreement.
@@ -2264,14 +2281,15 @@ describe('the Overflow offer, out as a button and back as a press', () => {
     const offers = tasks.map((taskId) => overflowId(taskId))
 
     for (const customId of menu) {
-      expect(readPress(customId)?.kind, customId).toBe('choose')
+      expect(readPress(customId)?.kind, `${why} (${customId})`).toBe('choose')
     }
     // And every offer comes back whole, which is the other half of what makes
     // one kind the right answer rather than merely the only one: a Task id cut
     // at a separator would name a Task roma never blocked.
-    expect(offers.map((customId) => readPress(customId))).toEqual(
-      tasks.map((taskId) => ({ kind: 'overflow', taskId })),
-    )
+    expect(
+      offers.map((customId) => readPress(customId)),
+      why,
+    ).toEqual(tasks.map((taskId) => ({ kind: 'overflow', taskId })))
   })
 
   // Every field of a Menu id comes back as it went out, over keys that are

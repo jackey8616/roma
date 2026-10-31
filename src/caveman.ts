@@ -1,20 +1,9 @@
 /**
  * The Cavemen an operator may pin, and what roma appends to a Session's system
  * prompt for one.
- *
- * The Effort Menu's opposite number across the Turn — that one is how hard roma
- * asks the model to think, this one is how short it asks it to be — and the same
- * shape in the one way that matters here: a list a Caller may pick from, plus the
- * values that reach roma only through an operator's hand.
- *
- * What is different is where the words come from. The levels are caveman's, and
- * so is the ruleset below, derived from that project's `SKILL.md` at a pinned
- * commit with three of its lines rewritten. ADR-0030 argues why roma borrows the
- * text and installs none of the machinery that ships around it; nothing in this
- * file re-argues it.
  */
 
-/** ADR-0030: no ruleset at all, rather than the ruleset filtered to a level named off. */
+/** The level that appends no ruleset at all. */
 export const CAVEMAN_OFF = 'off'
 
 /**
@@ -25,64 +14,32 @@ export const CAVEMAN_OFF = 'off'
 export const CAVEMAN_NOT_PINNED = 'not-pinned'
 
 /**
- * Every level a Caller will be able to pick, `off` among them.
- *
- * Five of caveman's eleven, and ADR-0030 says which are held back and why. The
- * sixth thing on the Menu it describes is the name that means the Pinned Caveman,
- * which is not a level and arrives with the Menu itself — `EFFORT_MENU` and
- * `PINNED_EFFORT_NAME` are the same split for the same reason.
- *
- * `wenyan` is the omission worth arguing here rather than citing, because roma
- * declines a fold its source performs: caveman's hook rewrites `wenyan` to
- * `wenyan-full`, and roma appends its own text and relays nothing to that hook,
- * so a second accepted spelling would be one roma had chosen to claim rather than
- * one it inherited. `EFFORT_MENU`'s argument against `med`, at higher stakes —
- * the Audit Record would carry two spellings for one level.
- *
- * This is the Menu a Caller types, and a Channel that can draw one draws it —
- * pressing means what typing means, so a name added here **is** a button
- * (ADR-0023). Enforced by `fence:caveman-menu-round-trips`.
+ * Every level a Caller will be able to pick, `off` among them. A name added here
+ * is a button wherever a Channel draws the Menu.
+ * Enforced by `fence:caveman-menu-round-trips`.
  */
 export const CAVEMAN_MENU: readonly string[] = ['off', 'lite', 'full', 'ultra', 'wenyan-full']
 
 /**
- * The name that means the Pinned Caveman.
+ * The name that means the Pinned Caveman: not a level, but whatever
+ * `ROMA_CAVEMAN` resolves to, so a Session that asked for it follows the
+ * deployment when the pin moves.
  *
- * Not a level of its own, for `PINNED_EFFORT_NAME`'s reason: it names whatever
- * `ROMA_CAVEMAN` resolved to for this deployment, so a Conversation can be put
- * back without clearing what it has said, and a deployment that moves its Pinned
- * Caveman does not strand a Session that asked for "default" at the old one.
- *
- * **Not the same word as `off`, and the difference is the whole of why both
- * exist.** `off` is a level: it says this Session gets no ruleset whatever the
- * deployment pinned. `default` says this Session follows the deployment. They
- * coincide on a roma that pinned nothing and part company the moment an operator
- * sets `ROMA_CAVEMAN`, which is exactly when somebody needs to be able to say
- * which of the two they meant.
+ * Not `off`, which is a level: no ruleset whatever the deployment pinned. The two
+ * coincide only on a roma that pinned nothing.
  */
 export const PINNED_CAVEMAN_NAME = 'default'
 
 /** Every name a Caller may type, in the order `/caveman` lists them. */
 export const CAVEMAN_NAMES: readonly string[] = [...CAVEMAN_MENU, PINNED_CAVEMAN_NAME]
 
-/**
- * The two wenyan levels an operator may pin and no Caller may ask for.
- *
- * `ULTRACODE`'s move in `effort-menu.ts`, for a different reason: those are held
- * back because they cost more, and these because roma cannot say what they cost
- * at all. wenyan's own intensity row claims "80-90% character reduction — chars,
- * not tokens", and a Shared Window is spent in tokens. `wenyan-full` is on the
- * Menu despite that; these two are the ones a button roma cannot account for
- * would be drawn for (ADR-0030).
- */
+/** The two wenyan levels an operator may pin and no Caller may ask for. */
 export const OFF_MENU_WENYAN: readonly string[] = ['wenyan-lite', 'wenyan-ultra']
 
 /**
  * Whether an operator may pin this Caveman, which is a wider question than what
- * a Caller may choose.
- *
- * Asked at boot and answered locally, with no process involved.
- * Enforced by `fence:caveman-pin-refused-at-boot`.
+ * a Caller may choose. Asked at boot and answered locally, with no process
+ * involved. Enforced by `fence:caveman-pin-refused-at-boot`.
  */
 export function isPinnableCaveman(value: string): boolean {
   return CAVEMAN_MENU.includes(value) || OFF_MENU_WENYAN.includes(value)
@@ -92,13 +49,9 @@ export function isPinnableCaveman(value: string): boolean {
 export type CavemanRequest =
   | {
       /**
-       * What Caveman this Session runs at, and what else it may run at.
-       *
-       * `/caveman` with no argument. There is no Runtime command of this name to
-       * relay it to — the pinned build has never heard of it — so unlike
-       * `/effort`'s report this is not roma declining to hand something over. It
-       * is the only answer there is, and roma owns it outright: no process, no
-       * Turn, no money.
+       * What Caveman this Session runs at, and what else it may run at: `/caveman`
+       * with no argument. roma answers it alone, with no process, no Turn and no
+       * money; no Runtime has a command of this name.
        */
       readonly kind: 'report'
     }
@@ -122,12 +75,9 @@ export type CavemanRequest =
     }
 
 /**
- * Read what a `/caveman` Command was asking for.
- *
- * Total, and it takes the argument the Command reader already separated rather
- * than the message — `readEffortRequest`'s rule, for its reason: which messages
- * are `/caveman` at all is `readCommand`'s single answer, and a second parser
- * here would be a second answer to it.
+ * Read what a `/caveman` Command was asking for. Total, and it takes the argument
+ * `readCommand` already separated rather than the message: which messages are
+ * `/caveman` at all is that function's single answer.
  */
 export function readCavemanRequest(argument: string | null): CavemanRequest {
   if (argument === null) return { kind: 'report' }
@@ -138,21 +88,9 @@ export function readCavemanRequest(argument: string | null): CavemanRequest {
 
 /**
  * What a Session's system prompt carries about how short to be, or no text at all.
- *
- * roma's own text, derived from caveman's, performing the act caveman's
- * `SessionStart` hook performs on a channel roma already owns — and installing
- * none of the machinery that ships around it. Why not the skill, why not the
- * plugin, and why not the two arrangements that look cheaper is ADR-0030.
- *
- * `off` is the empty string rather than a filtered ruleset, and the empty string
- * rather than `undefined`, because the caller joining this to the Reach
- * announcements drops empty parts before the join — `startup.ts` says what that
- * buys and `--append-system-prompt` is why it is not trimmed afterwards.
- *
- * **The level is interpolated, so this cannot become a lookup table of finished
- * strings.** The line that hardcoded caveman's own default now names the level in
- * force, which is a runtime value; six strings would be six copies of one idea,
- * five of which nobody would notice going stale.
+ * `off` is the empty string, not `undefined`: the caller joining this to the
+ * Reach announcements drops empty parts before the join, and nothing trims after.
+ * Enforced by `fence:caveman-one-template`.
  */
 export function cavemanRuleset(level: string): string {
   if (level === CAVEMAN_OFF) return ''

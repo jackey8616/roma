@@ -13,43 +13,22 @@ const PROGRESS_INTERVAL_MS = 5_000
 
 export interface ProgressReporterOptions {
   /**
-   * Where an update goes.
-   *
-   * Best-effort by contract: a rejection is swallowed.
+   * Where an update goes. Best-effort: a rejection is swallowed.
    * Enforced by `fence:progress-deliver-is-best-effort`.
    */
   readonly deliver: (progress: TaskProgress) => void | Promise<void>
   /**
-   * Whether anything after the acknowledgement is sent at all.
-   *
-   * False for a Channel that cannot edit a message it has posted. The
-   * acknowledgement still goes — it is a message, not an edit — and everything
-   * after it is dropped rather than posted again.
+   * Whether anything after the Acknowledgement is sent at all: false for a
+   * Channel that cannot edit a message it has posted. The Acknowledgement still
+   * goes, and everything after it is dropped rather than posted again.
    */
   readonly updates?: boolean
 }
 
 /**
- * One Task's acknowledgement, and the throttle that keeps it readable.
- *
- * The shape of the thing this exists for: a Task acknowledged the moment it
- * arrives, whose acknowledgement then keeps changing so that someone waiting can
- * tell it is alive rather than dead. The final result is not in here at all, and
- * that is the point — it is a separate message, unconditionally, and nothing
- * this class does can make it otherwise.
- *
- * Two jobs, because a stream that emits 194 events in 72 seconds cannot be shown
- * as it arrives. It reads events into a single "what is happening now", and it
- * sends that at most once per interval — the first one straight away, since an
- * acknowledgement nobody has seen yet is the one update that cannot wait.
- *
- * **There is no stall detection here and no timeout, deliberately.** Not because
- * silence is impossible — a tool window is 25 seconds of nothing, and tool
- * runtime is unbounded — but because that is exactly what makes a threshold
- * useless: a stalled tool call and a slow one are the same signal. A Task ends
- * when it finishes or when a human stops it. The older reason for this rule, that
- * generation itself is silent, is no longer true (#2) and should not be used to
- * argue the rule back the other way.
+ * One Task's Acknowledgement, and the throttle that keeps it readable. It reads
+ * events into a single "what is happening now", and sends that at most once per
+ * interval, the first straight away. The final result is never sent through it.
  */
 export class ProgressReporter {
   readonly #deliver: (progress: TaskProgress) => void | Promise<void>
@@ -101,14 +80,13 @@ export class ProgressReporter {
   }
 
   /**
-   * The Task is over: nothing more is scheduled, and nothing more is sent.
+   * The Task is over: nothing more is scheduled, and nothing more is sent. Waits
+   * on nothing, and drops an update still queued behind one the Channel is
+   * taking, which is the guarantee `channel-adapter.ts` states.
+   * Enforced by `fence:progress-stop-waits-on-nothing`.
    *
-   * Waits on nothing, and drops an update still queued behind one the Channel
-   * is taking. Enforced by `fence:progress-stop-waits-on-nothing`.
-   *
-   * This is where that has to be decided. Left to the Adapters it is a rule
-   * every Channel has to be told, and the first one was written without knowing
-   * it: `channel-adapter.ts` states the guarantee this keeps.
+   * Decided here rather than left to the Adapters, where it would be a rule every
+   * Channel has to be told; the first was written without knowing it.
    */
   stop(): void {
     this.#stopped = true

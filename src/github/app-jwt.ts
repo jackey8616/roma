@@ -16,24 +16,21 @@ const LIFETIME_S = 9 * 60
 const BACKDATED_S = 60
 
 export interface AppJwtOptions {
-  /** The GitHub App's id, which is what it signs as. */
+  /** The GitHub App's id: the JWT's `iss`. */
   readonly appId: string
   /** The App's private key, PEM as GitHub issued it. */
   readonly privateKey: string
-  /** Epoch milliseconds. Injected so the arithmetic can be asserted on. */
+  /** Epoch milliseconds. Defaults to `Date.now()`. */
   readonly now?: number
 }
 
 /**
- * A JWT the App can exchange for an Installation Token.
+ * A JWT the App can exchange for an Installation Token, backdated a minute and
+ * good for nine. Use it for one request, inside the Minter: never cache it or
+ * hand it on.
  *
- * Signed here rather than with a library because the whole of it is three
- * base64url segments and one RS256 signature, and a dependency that reaches a
- * private key is a dependency somebody has to keep reading. `node:crypto` does
- * the only hard part.
- *
- * The result is never cached and never handed to anything: it exists for one
- * request, inside the Minter, which is the only thing that holds the key at all.
+ * Signed with `node:crypto` rather than a library, because a dependency that
+ * reaches a private key is one somebody has to keep reading.
  */
 export function appJwt({ appId, privateKey, now = Date.now() }: AppJwtOptions): string {
   const issuedAt = Math.floor(now / 1000) - BACKDATED_S

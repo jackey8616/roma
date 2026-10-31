@@ -43,6 +43,10 @@ Nothing here implements `/compact`; what it does is make the value `trigger:
   it stayed healthy, cost two cents and answered, and the Session served the next
   Turn normally. It happened twice, in both captures.
 
+The longest Compaction roma holds a capture of is a later one, the `/compact` in
+`test/fixtures/claude-stream/manual-compaction.jsonl`: **28,517ms**, with nothing
+else on the stream until it finished.
+
 **Read off the bundle, on the pinned build** — #98's second comment, quoting the
 switch that maps every code to what Claude Code does with it:
 

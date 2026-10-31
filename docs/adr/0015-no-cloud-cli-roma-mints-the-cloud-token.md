@@ -389,6 +389,10 @@ record an unverifiable self-report.
 It records the ordinary path only. An agent that reaches the metadata server
 itself is invisible here, the same honesty the `Requested-by:` trailer carries.
 
+What it is for is the Google Cloud bill. Everything the agent does there is done
+as one service account, so unexplained activity on it can be narrowed to the
+people whose Tasks touched it, and nowhere else answers that.
+
 ### 11. `infra/` provisions none of it, and roma's own identity is renamed
 
 `infra/main.tf` is one project, and it is the project holding roma's control

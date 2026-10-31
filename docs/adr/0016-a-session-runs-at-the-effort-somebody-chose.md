@@ -241,7 +241,9 @@ models because a costlier model is a bigger share of a window everybody stands i
 and roma cannot check what it hands over. Neither reason survives here: the levels
 are enumerable, they are all Claude Code's own, and a Caller asking for more
 thinking on a task they are about to wait for is the feature rather than the
-risk.
+risk. The build's one alias, `med`, is not on it: the Menu is roma's outright,
+nothing is relayed and nothing is compared against Claude Code, so an alias would
+be a spelling roma had chosen to claim rather than one it inherited.
 
 **`ultracode` is off the Menu and reachable only through `ROMA_EFFORT`.** It is
 not a level — `hBc = {ultracode:"xhigh"}` — it is `xhigh` plus dynamic workflow
@@ -340,6 +342,15 @@ wrong depth. The Operator Log is where an anomaly goes — ADR-0012's drift chec
 already writes a misbehaving Readout there for the same reason, and the loose
 match exists so the line fires on a changed *level* rather than on changed
 *prose*, because a check people learn to ignore has stopped watching.
+
+**`auto` anywhere in the answer is a disagreement**, whatever else it names —
+stricter than the loose match alone. The cost is a false disagreement if a
+release ever writes something like `Current effort level: high (auto-selected)`,
+which is the prose-brittleness the loose match was chosen to avoid. It is taken
+deliberately, because the two mistakes are not the same size: a false
+disagreement is one line in the Operator Log on a boot that continues, and a
+false agreement is roma believing it verified its own wiring when it verified
+nothing. Enforced by `fence:startup-self-check-auto-vetoes`.
 
 **Once, at boot, and not on every spawn.** Per-spawn verification was decided and
 then withdrawn when the precedence measurements came in: with `--effort` beating

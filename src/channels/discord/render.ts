@@ -3,33 +3,17 @@ import type { Command } from '../../commands.js'
 import { progressPhrase } from '../../progress-phrase.js'
 
 /**
- * Discord's limit on the text of one message.
- *
- * Not advisory: the API rejects a longer one, so a Turn that wrote more than
- * this arrives as several messages or not at all. Less than half of Chat's,
- * which is what makes splitting the ordinary case here rather than the long
- * tail — how many messages the recorded generating Turn becomes is asserted in
- * `discord-channel.test.ts`, because a number in prose goes stale in silence.
- *
- * **Read everywhere and not found in Discord's own reference** — ADR-0029's
- * second tier of verification, where every secondary source states 2000 and the
- * section read gave no number. Being wrong about it *high* is a message Discord
- * refuses whole, which is a long answer that reaches nobody, so this is the one
- * number in this Channel worth checking against a real guild first.
+ * Discord's limit on the text of one message. Not advisory: the API rejects a
+ * longer one, so a Turn that wrote more than this arrives as several messages or
+ * not at all. Unverified against Discord's own reference (ADR-0029).
  */
 export const MAX_TEXT = 2000
 
 /**
- * What the button that takes Overflow says.
- *
- * It says that it costs money, because that is the whole of the decision being
- * asked for: ADR-0002 has the valve off by default precisely so that spending is
- * something somebody chooses, and a button labelled "Run anyway" would be that
- * choice made by somebody who did not know they were making it.
- *
- * Chat's word for word, and that is the argument being shared rather than a
- * constant: what the offer costs reads the same wherever it is drawn, and two
- * Channels wording one decision differently would be two decisions.
+ * What the button that takes Overflow says. It says that it costs money, because
+ * that is the whole of the decision being asked for: a button labelled "Run
+ * anyway" would be that choice made by somebody who did not know they were
+ * making it. Enforced by `fence:discord-overflow-worded-as-chat`.
  */
 export const OVERFLOW_BUTTON = 'Run it on metered billing'
 
@@ -47,22 +31,12 @@ type NotProgress<T> = T extends { readonly kind: 'progress' } ? never : T
 export type TaskOutcome = NotProgress<OutboundInstruction>
 
 /**
- * How a Task's outcome reads in Discord.
+ * How a Task's outcome reads in Discord: one message per string, in the order
+ * they should be posted, more than one when it is longer than Discord will take.
+ * A failure's reason is the Core's sentence, passed through.
  *
- * Wording is the Channel's business: the Core hands over facts — stopped,
- * nothing to stop, this text — because it cannot see the result of any sentence
- * it might write. The exception is a failure, whose reason the Core does write
- * and this passes through, since it is one sentence that reads the same on every
- * Channel.
- *
- * One message per string, in the order they should be posted. More than one when
- * what has to be said is longer than Discord will take.
- *
- * **Nothing here addresses the Caller in words.** Chat prefixes every piece with
- * an @-mention because a mention is what Chat has; Discord answers the Caller's
- * own message instead, which is the idiomatic form, costs nothing out of the
- * limit, and is therefore the Adapter's to put on the first message and no other
- * (ADR-0029).
+ * Nothing here addresses the Caller in words: the Adapter replies to the
+ * Caller's own message with the first.
  */
 export function outcomeMessages(instruction: TaskOutcome): string[] {
   switch (instruction.kind) {
@@ -119,12 +93,9 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
 }
 
 /**
- * What the thread roma opens from a top-level message is called.
- *
- * The Caller's own first line, because that is what somebody scanning a
- * channel's thread list is reading and roma has nothing better to name it with.
- * A message with no words in it — a pasted screenshot — leaves roma's own name,
- * which is at least true.
+ * What the thread roma opens from a top-level message is called: the Caller's
+ * own first line, fitted. A message with no words in it (a pasted screenshot)
+ * leaves roma's own name.
  */
 export function threadName(text: string): string {
   const [first = ''] = text.trim().split('\n')
@@ -147,11 +118,8 @@ function money(usd: number): string {
 }
 
 /**
- * The acknowledgement's text for one phase, fitted to Discord.
- *
- * The words are `progressPhrase`'s, which is where they are argued. What is
- * Discord's is the limit, and nothing is addressed in words here — the reply
- * does that, and it is the Adapter's (ADR-0029).
+ * The Acknowledgement's text for one phase: `progressPhrase`'s words, fitted to
+ * Discord, addressed to nobody (the Adapter's reply does that).
  */
 export function progressText(progress: TaskProgress): string {
   return fitted(progressPhrase(progress), MAX_TEXT)

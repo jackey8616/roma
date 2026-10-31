@@ -1,3 +1,6 @@
+import { globSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { CAVEMAN_MENU, OFF_MENU_WENYAN } from './caveman.js'
 import { readDiscordEnv } from './channels/discord/env-config.js'
@@ -601,3 +604,43 @@ describe('a real Channel, named at all', () => {
     },
   )
 })
+
+describe('every reader of the environment', () => {
+  it('reads a variable through envValue and never by indexing [fence:env-read-through-env-value]', () => {
+    const why =
+      'envValue is the one place that decides whether the environment really has a variable, ' +
+      'and the rule a second copy would drop first is the one that is not obvious: an empty ' +
+      'string is unset. Every env-config.ts, the Channels’ and the Reaches’ included, reads ' +
+      'through it rather than indexing the environment itself.'
+    const src = fileURLToPath(new URL('.', import.meta.url))
+    const indexing = globSync('**/env-config.ts', { cwd: src }).flatMap((file) => {
+      const source = ts.createSourceFile(
+        file,
+        readFileSync(src + file, 'utf8'),
+        ts.ScriptTarget.Latest,
+        true,
+      )
+      const found: string[] = []
+      const visit = (node: ts.Node): void => {
+        const read =
+          (ts.isElementAccessExpression(node) || ts.isPropertyAccessExpression(node)) &&
+          ['env', 'process.env'].includes(node.expression.getText(source))
+        if (read && !(file === 'env-config.ts' && enclosingFunction(node) === 'envValue')) {
+          found.push(`${file}: ${node.getText(source)}`)
+        }
+        ts.forEachChild(node, visit)
+      }
+      visit(source)
+      return found
+    })
+
+    expect(indexing, why).toEqual([])
+  })
+})
+
+function enclosingFunction(node: ts.Node): string | undefined {
+  for (let at: ts.Node | undefined = node; at !== undefined; at = at.parent) {
+    if (ts.isFunctionDeclaration(at)) return at.name?.text
+  }
+  return undefined
+}

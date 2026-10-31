@@ -11,12 +11,8 @@ export interface HttpDiscordApiOptions {
   /** Where the API lives, version included. See `DEFAULT_API_BASE`. */
   readonly apiBase: string
   /**
-   * How a request is actually made.
-   *
-   * The platform's own `fetch` unless something hands in another, which is what
-   * lets this file be asserted on without a network. Node ships one, which is
-   * the whole reason roma reaches Discord with no dependency at all — the same
-   * argument the Gateway client makes about `WebSocket`.
+   * How a request is actually made. The platform's own `fetch` unless a test
+   * hands in another; Node's is why roma reaches Discord with no dependency.
    */
   readonly fetch?: typeof globalThis.fetch
 }
@@ -25,16 +21,11 @@ export interface HttpDiscordApiOptions {
 const THREAD_ALREADY_CREATED = 160004
 
 /**
- * The six REST calls, over HTTP.
+ * The six REST calls, over HTTP. Decides nothing: it puts a token on a request,
+ * checks that Discord answered, and hands back what came.
  *
- * The far side of seam 3 and deliberately the whole of what sits behind it: this
- * decides nothing. It puts a token on a request, checks that Discord answered,
- * and hands back what came — everything that could be wrong about *which*
- * request to make was decided before it got here.
- *
- * The two things it does read out of a response are the two a caller cannot get
- * anywhere else: how long Discord asked roma to wait, and whether a refused
- * thread was refused because it already exists.
+ * Any refusal throws `DiscordRefusal`, carrying how long Discord asked roma to
+ * wait where it said. A thread refused because it already exists is a success.
  */
 export class HttpDiscordApi implements DiscordApi {
   readonly #botToken: string

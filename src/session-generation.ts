@@ -33,33 +33,14 @@ const OFFERED_EFFORTS = new Set(EFFORT_MENU)
 const OFFERED_CAVEMEN = new Set(CAVEMAN_MENU)
 
 export interface SessionGenerationsOptions {
-  /**
-   * The Work Root the Session Pool gives Sessions their working directories in.
-   *
-   * The same one the pool has, so that everything a Conversation leaves on disk
-   * is in one place and a deployment has one path to mount. The Work Root itself
-   * rather than its path, because where a record goes and what a sweep may
-   * delete are one fact and it is kept there.
-   */
+  /** The same Work Root the Session Pool gives Sessions their working directories in. */
   readonly workRoot: WorkRoot
 }
 
 /**
  * Which of a Conversation's Sessions is the current one, and how it gets a new
- * one.
- *
- * A Conversation Key cannot move: it is the Channel's, and the same DM carries
- * the same key forever. So `/clear` cannot work by finding a different key, and
- * the Session id is a pure derivation from the key — which leaves exactly one
- * thing that can change, the generation, and one question: where it is kept.
- *
- * On disk, next to the working directories. Enforced by `fence:session-generation-kept-on-disk`.
- *
- * This is not the database roma does without. Nothing is looked *up* here: the
- * Session id is still derived from the Conversation Key, a Conversation that has
- * never used `/clear` has no record at all, and losing every file in this directory
- * costs the Conversations that rotated their last rotation — not roma's ability
- * to find anybody's Session.
+ * one. Kept on disk, next to the working directories.
+ * Enforced by `fence:session-generation-kept-on-disk`.
  */
 export class SessionGenerations {
   readonly #workRoot: WorkRoot
@@ -74,13 +55,10 @@ export class SessionGenerations {
   }
 
   /**
-   * Move the Conversation onto a Session with nothing in it, and say which.
-   *
-   * The Session it was on is not touched. Its transcript stays where Claude Code
-   * put it, its process — if it has one — is left to be reaped or evicted like
-   * any other idle Session, and a Task already running in it still finishes and
-   * still answers the person who asked. Only the *next* message goes somewhere
-   * new, which is the whole of what `/clear` promises.
+   * Move the Conversation onto a Session with nothing in it, and say which. The
+   * Session it was on is not touched: its Transcript stays, its process is left to
+   * be reaped or evicted like any idle Session, and a Task already running in it
+   * still finishes and answers. Only the *next* message goes somewhere new.
    */
   freshSession(conversationKey: string): string {
     const generation = this.#generationOf(conversationKey) + 1
@@ -108,17 +86,10 @@ export class SessionGenerations {
 }
 
 /**
- * A Session's Chosen Model record names something roma does not offer.
- *
- * Its own type because this is the one failure here a *Caller* can clear, and
- * they can only do it if somebody tells them how. Refusing to guess is right —
- * see `OFFERED` — but a refusal that surfaces as "roma could not run this Task"
- * on every message is loud in the log and silent in the thread, which is not
- * what story 38 asked for when it asked that removing a Menu entry be noticed.
- *
- * `/model default` is the way out and does not read the record at all, so the
- * sentence the Core builds from this can promise it. Clearing the Conversation
- * works too, by moving the Session id past the record entirely.
+ * A Session's Chosen Model record names something roma does not offer: a failure
+ * a Caller can clear, so the Core tells them how. `/model default` does not read
+ * the record at all, so it is always a way out; clearing the Conversation is
+ * another.
  */
 export class ChosenModelNotOffered extends Error {
   constructor(readonly model: string) {
@@ -128,14 +99,9 @@ export class ChosenModelNotOffered extends Error {
 }
 
 /**
- * A Session's Chosen Effort record names a level roma does not offer.
- *
- * `ChosenModelNotOffered`'s twin, and a class of its own rather than one error
- * carrying a kind: the Core routes on `instanceof` to two different sentences,
- * because `/model default` and `/effort default` are two different ways out.
- *
- * A narrower hole than the model's — the Effort Menu holds every level the build
- * has, so the only way to arrive here is roma *removing* one.
+ * A Session's Chosen Effort record names a level roma does not offer. A class of
+ * its own, because the Core routes on `instanceof` to the way out:
+ * `/effort default`. Reachable only by roma removing a level from the Menu.
  */
 export class ChosenEffortNotOffered extends Error {
   constructor(readonly effort: string) {
@@ -145,17 +111,10 @@ export class ChosenEffortNotOffered extends Error {
 }
 
 /**
- * A Session's Chosen Caveman record names a level roma does not offer.
- *
- * The third of these, and a class of its own for the reason the second is: the
- * Core routes on `instanceof` to a sentence per kind, because `/caveman default`
- * is a third way out and names a third Command.
- *
- * The widest hole of the three. The other two are reachable only by roma
- * *removing* something it offered; this one is reachable that way and by an
- * operator's own hand — `ROMA_CAVEMAN=wenyan-lite` is a value roma accepts and
- * this Set does not, so a record that named it would have to have been written
- * by something other than a Command.
+ * A Session's Chosen Caveman record names a level roma does not offer. A class of
+ * its own, because the Core routes on `instanceof` to the way out:
+ * `/caveman default`. Reachable by roma removing a level, or by a record naming
+ * a level only an operator may pin, which no Command writes.
  */
 export class ChosenCavemanNotOffered extends Error {
   constructor(readonly caveman: string) {
@@ -179,11 +138,8 @@ export interface ChosenRecordOptions<K extends ChosenKind> {
    */
   readonly offered: ReadonlySet<string>
   /**
-   * What a Session runs on, or at, when nobody has said otherwise.
-   *
-   * Held here rather than looked up by each caller, so that "what is this Session
-   * on" has one answer and `default` returns to what the deployment actually
-   * pinned rather than to a name written down somewhere else.
+   * What a Session runs on, or at, when nobody has said otherwise: the one answer
+   * to what `default` returns to.
    */
   readonly pinned: string
   /** How this kind refuses a record naming something off the Menu. */
@@ -191,26 +147,12 @@ export interface ChosenRecordOptions<K extends ChosenKind> {
 }
 
 /**
- * What one Session was moved onto, kept by roma rather than by the process.
+ * A Chosen Record. `chosenModels`, `chosenEfforts` and `chosenCavemen` are its
+ * three adapters, and it knows none of them: nothing here imports a Menu or an
+ * error class.
  *
- * Written once and paid back three times — `chosenModels`, `chosenEfforts` and
- * `chosenCavemen` below are the three adapters, and this knows about none of
- * them. That is the whole of what makes it a seam: nothing here imports a Menu or
- * an error class.
- *
- * roma's rather than the process's, and that is the decision ADR-0014, ADR-0016
- * and ADR-0030 all make. A choice handed to a process lives and dies with it —
- * `--model`, `--effort` and `--append-system-prompt` are fixed at spawn, and
- * processes end at an Eviction, a Reaping or a deploy, which `CONTEXT.md` defines
- * as unobservable to the person using the Session. Kept there, a choice would be
- * a setting that reverts at a moment nobody can see.
- *
- * **Keyed by the Session id, in the Work Root**, so the reset Command reverts it
- * by moving the generation. Enforced by `fence:session-choice-keyed-by-session-id`.
- *
- * The price is litter. Every reset leaves a record under a Session id nothing
- * will use again, and records are never reclaimed — which is what keeps
- * generations safe — so this accumulates at tens of bytes per reset forever.
+ * Keyed by the Session id, in the Work Root, so the reset Command reverts it by
+ * moving the generation. Enforced by `fence:session-choice-keyed-by-session-id`.
  */
 export class ChosenRecord<K extends ChosenKind> {
   /**
@@ -240,25 +182,18 @@ export class ChosenRecord<K extends ChosenKind> {
   }
 
   /**
-   * What this Session actually runs on: what somebody chose, or the pinned value.
-   *
-   * The pinned value for almost every Session, and that is not written down — a
-   * Session nobody moved has left no record, so the answer stands on its own for
-   * everybody who never asked for anything else.
-   *
-   * Anything else on disk is an error rather than a reason to fall back.
-   * Enforced by `fence:session-choice-refuses-to-guess`.
+   * What this Session actually runs on: what somebody chose, or the pinned value
+   * where there is no record. A record naming anything off the Menu throws rather
+   * than falling back. Enforced by `fence:session-choice-refuses-to-guess`.
    */
   inForce(sessionId: string): string {
     return this.chosenFor(sessionId) ?? this.#pinned
   }
 
   /**
-   * What this Session was moved onto, or null where nobody moved it.
-   *
-   * The distinction `inForce` collapses, kept because saying what a Session is on
-   * needs it and running a Turn does not. A Session with no record *follows* the
-   * pinned value; one whose record names that same value follows nothing.
+   * What this Session was moved onto, or null where nobody moved it: the
+   * distinction `inForce` collapses. A Session with no record *follows* the pinned
+   * value; one whose record names that same value follows nothing.
    * Enforced by `fence:session-chosen-pinned-is-still-chosen`.
    */
   chosenFor(sessionId: string): string | null {
@@ -270,25 +205,18 @@ export class ChosenRecord<K extends ChosenKind> {
   }
 
   /**
-   * Move this Session onto one of the Menu's values.
-   *
-   * Nothing is torn down and nothing is checked against a running process: this
-   * is aimed at what the *next* message reaches, and the Session Pool is what
-   * maintains the invariant that a Turn runs on what its Session is on. Nothing
-   * is checked against the Session's other record either — the Effort Matrix
-   * reports and never refuses, so a `max` on a model that takes none is written
-   * down and answered with a sentence rather than turned away.
+   * Move this Session onto one of the Menu's values, from the *next* message on.
+   * Nothing is torn down, and nothing is checked against a running process (the
+   * Session Pool keeps a Turn on what its Session is on) or against the Session's
+   * other records.
    */
   choose(sessionId: string, value: string): void {
     this.#workRoot.writeRecord(this.#recordFor(sessionId), value)
   }
 
   /**
-   * Put this Session back on the pinned value, by forgetting the record.
-   * Enforced by `fence:session-default-forgets`.
-   *
-   * The same state a fresh Session is in, which is the point — `default` and the
-   * reset Command leave a Conversation in exactly one place.
+   * Put this Session back on the pinned value, by forgetting the record: the
+   * state a fresh Session is in. Enforced by `fence:session-default-forgets`.
    */
   usePinned(sessionId: string): void {
     this.#workRoot.forgetRecord(this.#recordFor(sessionId))
@@ -301,13 +229,7 @@ export interface ChosenModelsOptions {
   readonly pinnedModel: string
 }
 
-/**
- * The Chosen Model record: which model each Session runs on.
- *
- * One of the three adapters over `ChosenRecord`. What it supplies is the whole of
- * what makes a model's record a model's: the Model Menu, the file the Work Root
- * files a model under, and the error a record off the Menu raises.
- */
+/** The Chosen Model record: which model each Session runs on. */
 export function chosenModels({
   workRoot,
   pinnedModel,
@@ -326,20 +248,12 @@ export interface ChosenEffortsOptions {
   readonly workRoot: WorkRoot
   /**
    * Whatever `ROMA_EFFORT` resolved to for this deployment. May be `ultracode`,
-   * which is off the Menu — the same shape a Pinned Model off the Model Menu has,
-   * and handled the same way: `offered` gates the record and never this.
+   * which is off the Menu: `offered` gates the record and never this.
    */
   readonly pinnedEffort: string
 }
 
-/**
- * The Chosen Effort record: what effort each Session runs at.
- *
- * `chosenModels`' twin, and sharper in one way that shows nowhere here: `--model`
- * is echoed back in `system/init` and the startup self-check asserts on it, where
- * `--effort` is echoed nowhere at all. What roma wrote down is the only account
- * there is of what a Session was asked to run at.
- */
+/** The Chosen Effort record: what effort each Session runs at. */
 export function chosenEfforts({
   workRoot,
   pinnedEffort,
@@ -359,22 +273,12 @@ export interface ChosenCavemenOptions {
   /**
    * Whatever `ROMA_CAVEMAN` resolved to for this deployment, which is `off` where
    * it named nothing. May be `wenyan-lite` or `wenyan-ultra`, which are off the
-   * Caveman Menu — the shape a Pinned Effort of `ultracode` already has, and
-   * handled the same way: `offered` gates the record and never this.
+   * Caveman Menu: `offered` gates the record and never this.
    */
   readonly pinnedCaveman: string
 }
 
-/**
- * The Chosen Caveman record: how short each Session is asked to be.
- *
- * The third adapter, and the one whose value never reaches a flag of its own.
- * `--model` and `--effort` are arguments naming what roma wrote down; a Caveman
- * is rendered into `--append-system-prompt` as English, so what is written here
- * is not merely the only account of what a Session was asked for — it is the only
- * place the answer exists as a *word* rather than as several thousand characters
- * of somebody else's prose.
- */
+/** The Chosen Caveman record: how short each Session is asked to be. */
 export function chosenCavemen({
   workRoot,
   pinnedCaveman,

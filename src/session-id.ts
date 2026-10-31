@@ -12,20 +12,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const GENERATION_SEPARATOR = '\u0000'
 
 /**
- * The Session backing one Conversation.
- *
- * Derived rather than looked up, which is the whole reason roma needs no
- * database: the same Conversation Key reaches the same Session across a restart,
- * a redeploy, or a different machine, with nothing persisted anywhere. What the
- * key *is* belongs to the Channel Adapter that supplied it — the Core's only
- * rule is that it is stable.
- *
- * A Conversation Key names a Conversation for as long as that Conversation
- * exists, which is exactly what makes `/clear` impossible without the second
- * argument: the key cannot move, so the generation is what does. Generation zero
- * is the plain derivation and every Conversation starts there, so a Session that
- * has never been rotated has the id it always had — see `SessionGenerations` for
- * where the current generation is kept.
+ * The Session id backing one Conversation. Generation zero is the plain
+ * derivation, so a Session never rotated keeps the id it always had. Throws on
+ * an empty key or a generation that is not a whole number from zero.
  */
 export function sessionIdFor(conversationKey: string, generation = 0): string {
   if (conversationKey.trim() === '') {
@@ -39,13 +28,7 @@ export function sessionIdFor(conversationKey: string, generation = 0): string {
   return uuidv5(name, ROMA_NAMESPACE)
 }
 
-/**
- * RFC 9562 version 5: a uuid that is the SHA-1 of a namespace and a name.
- *
- * Written out here rather than taken as a dependency because it is fifteen lines
- * and one published test vector, and because every Session id roma will ever use
- * comes out of it.
- */
+/** RFC 9562 version 5: a uuid that is the SHA-1 of a namespace and a name. */
 export function uuidv5(name: string, namespace: string): string {
   const hash = createHash('sha1')
   hash.update(namespaceBytes(namespace))

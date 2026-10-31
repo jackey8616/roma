@@ -41,15 +41,8 @@ function isCompaction(value: unknown): boolean {
 }
 
 /**
- * What kind of work one record describes — the shape the message took on the
+ * What kind of work one record describes: the shape the message took on the
  * wire, and nothing about what it cost.
- *
- * Two values rather than three, deliberately. ADR-0018 separated the shape of a
- * message from what governs it, so a third value naming a *paid* Relay would
- * smuggle cost back into a field that is not about cost. What a Relay cost is
- * already on the record, in `costUsd`, and who asked for a Compaction is
- * `(kind, compaction.trigger)` between them: `task`+`auto` is a bill for a thread
- * the whole Conversation filled, `relay`+`manual` is a bill for a `/compact`.
  */
 export type AuditKind = 'task' | 'relay'
 
@@ -61,33 +54,14 @@ export interface AuditRecord {
   readonly at: string
   readonly taskId: string
   /**
-   * Whether this was a Task or a Relay (ADR-0012, ADR-0018).
+   * Whether this was a Task or a Relay. Optional, and **absent means `task`**.
+   * Enforced by `fence:audit-old-records-stay-readable`.
    *
-   * Optional, and **absent means `task`**. Enforced by `fence:audit-old-records-stay-readable`.
-   *
-   * A free Relay is recorded at all because the list it comes from is maintained
-   * by a person and can be wrong. "Ought to be free" is an assumption, and
-   * writing no record would bake it into the ledger — the one place that has to
-   * survive it being false. On the day an entry becomes a model Turn, the money
-   * lands here instead of nowhere.
-   *
-   * **This value was spelled `readout` until ADR-0018, and no legacy spelling is
-   * kept.** Records written before the rename are dropped by `readRecord`,
-   * counted in `unreadable`, and absent from their month's `costUsd` — a genuine
-   * breaking change to the ledger, chosen with it in view because the alternative
-   * is a synonym that can never be deleted and has to be explained to every
-   * future reader of a two-value enum with three values in it. It is not silent,
-   * and it is avoidable by scheduling: deployed at a month boundary the loss is
-   * entirely in a closed month, and the live Overflow cap is untouched.
+   * A record spelled `readout`, written before ADR-0018, is unreadable: dropped
+   * by `readRecord` and counted in `unreadable`.
    */
   readonly kind?: AuditKind
-  /**
-   * Whoever sent the message, named however the Channel names people.
-   *
-   * The reason this file exists. Everyone shares one subscription token, so the
-   * provider has no idea who any of this was for — ADR-0002 — and there is no
-   * second place to go and look it up afterwards.
-   */
+  /** Whoever sent the message, named however the Channel names people. */
   readonly caller: string
   /**
    * The same person as a human reads them, in three states that mean three
@@ -105,31 +79,18 @@ export interface AuditRecord {
   readonly sessionId: string | null
   readonly outcome: TaskOutcome
   /**
-   * What this Task cost, as the per-Turn delta.
-   *
-   * Never `total_cost_usd` raw. Enforced by `fence:session-cost-is-a-delta`.
-   *
-   * Three values rather than two, because "free" and "unpriced" are different
-   * facts and only one of them can be added up:
+   * What this Task cost, as the per-Turn delta. Never `total_cost_usd` raw.
+   * Enforced by `fence:session-cost-is-a-delta`.
    *
    * - a **number**, where a Turn ended and Claude Code priced it;
-   * - **zero**, where no Turn ever began — a Task stopped while it was still
-   *   queued spent nothing, and that is a fact rather than an absence;
-   * - **null**, where a Turn began and nothing ever priced it. The cost arrives
-   *   on the terminal event, so a Turn abandoned mid-retry-storm or cut short by
-   *   a process that died has none — and the tokens it had already spent are
-   *   real. Recording that as zero would report money as free, which is the same
-   *   class of wrong as the cumulative total this field exists to avoid, only
-   *   pointing the other way.
+   * - **zero**, where no Turn ever began, so nothing was spent;
+   * - **null**, where a Turn began and nothing ever priced it: unpriced, not
+   *   free, and not to be added up as zero.
    */
   readonly costUsd: number | null
   /**
    * How long the person waited: from the message arriving to being told how it
    * went, queueing and cold start included.
-   *
-   * The Task's own wall-clock rather than the Turn's, because it is the only one
-   * that exists for every ending — a Task stopped while it was still queued
-   * never had a Turn — and the only one that describes what was actually endured.
    */
   readonly durationMs: number
   /** How much of that was the Turn itself. Null where no Turn ran. */
@@ -137,56 +98,22 @@ export interface AuditRecord {
   /** The credential roma ran this Task on. */
   readonly credential: CredentialKind
   /**
-   * The Runtime that served this Task.
-   *
-   * Beside the credential rather than derived from it. `credential` says which
-   * of the two *bills* a Task landed on and nothing about whose subscription,
-   * and a Shared Window is one per Runtime — so a month added up without this
-   * sums two separate quotas into one figure the day there are two, which is the
-   * sentence `CONTEXT.md` forbids under Shared Window (ADR-0025).
-   *
-   * Written while there is one Runtime and the answer is uninteresting, because
-   * that is when it is cheapest: a record is append-only and roma deletes none,
-   * so a field added the day Codex lands leaves every line before it ambiguous
-   * between "Claude Code" and "written before anybody was asking" — which is the
-   * one distinction it exists to make (ADR-0027).
-   *
-   * Optional, and **absent means `claude-code`**, which is what every record
-   * written while there was one Runtime ran on. Enforced by `fence:audit-old-records-stay-readable`.
+   * The Runtime that served this Task. Optional, and **absent means
+   * `claude-code`**. Enforced by `fence:audit-old-records-stay-readable`.
    */
   readonly runtime?: Runtime
   /**
    * The model roma ran this Task on: the Session's Chosen Model, or the Pinned
-   * Model where it had none.
-   *
-   * Here because a Chosen Model is a Caller moving the shared bill and nothing
-   * else would remember which Task did (ADR-0014). The whole justification for
-   * letting anybody do that is that it becomes answerable afterwards, and this is
-   * where the answer is.
-   *
-   * Optional, and **absent means the Pinned Model** — which is what every record
-   * roma wrote before ADR-0014 ran on, since nothing else was reachable. roma
-   * writes it on every record all the same; the optionality is for reading the
-   * past. Enforced by `fence:audit-old-records-stay-readable`.
+   * Model where it had none. Written on every record, and optional only for
+   * reading the past: **absent means the Pinned Model**.
+   * Enforced by `fence:audit-old-records-stay-readable`.
    */
   readonly model?: string
   /**
    * What effort roma ran this Task at: the Session's Chosen Effort, the Pinned
    * Effort, or `EFFORT_NOT_APPLIED` where the Effort Matrix says the model takes
-   * none.
-   *
-   * Here because ADR-0014's argument requires it: a decision whose justification
-   * is that nobody can see afterwards what spent the shared window does not get
-   * to leave that unrecorded, and a Chosen Effort is a Caller moving the shared
-   * bill exactly as a Chosen Model is.
-   *
-   * **It is weaker evidence than the model beside it and must not be spelled as
-   * though it were.** The model on a record was echoed by the process that ran
-   * the Turn; the effort is what roma *sent*, boot-verified once, and interpreted
-   * through a Matrix read off a binary — `system/init` carries no effort field at
-   * all. Where that Matrix says the model takes no effort, this says so rather
-   * than naming a level nothing ran at, because naming one would be the ledger
-   * asserting something roma has read the opposite of.
+   * none. What roma *sent*, not what the process echoed, so weaker evidence than
+   * `model`.
    *
    * Optional, and **absent reads as unknown rather than as the Pinned Effort** —
    * which is the one place this differs from `model`. Enforced by `fence:audit-old-records-stay-readable`.
@@ -195,165 +122,71 @@ export interface AuditRecord {
   /**
    * How short roma asked the model to be: the Caveman the process that served
    * this Task was spawned at, or `CAVEMAN_NOT_PINNED` where nothing named one.
+   * The level the *process* ran at, not the record the pool would consult now: a
+   * Chosen Caveman written during the Turn moves the next spawn and not this one.
    *
-   * The third field here on the argument the two above are here on, and the
-   * first of the three whose answer is not trivially true from the day it lands
-   * (ADR-0030): `model` and `runtime` went on the record while their answer was
-   * the only answer there was, and this one can differ per Session from its
-   * first hour.
-   *
-   * The level the *process* ran at rather than the record the pool would consult
-   * now. A Chosen Caveman written while the Turn was running moves the next
-   * spawn and not this one, and a ledger that resolved it a second time would
-   * name a level nothing was asked for.
-   *
-   * Where nothing named one, `CAVEMAN_NOT_PINNED` rather than a level — that
-   * constant is where the difference is argued.
-   *
-   * Optional, and **absent reads as unknown rather than as `off`** — the effort's
-   * rule rather than the model's. Enforced by `fence:audit-old-records-stay-readable`.
+   * Optional, and **absent reads as unknown rather than as `off`**.
+   * Enforced by `fence:audit-old-records-stay-readable`.
    */
   readonly caveman?: string
   /**
-   * What the Turn produced, as the per-Turn delta.
-   *
-   * Beside the Caveman above and the reason it is worth having: a Caveman is
-   * roma asking for fewer output tokens, and these two together are what let a
-   * deployment settle from its own traffic whether asking did anything —
-   * ADR-0030's first verification question, which roma answers by writing the
-   * figures down and claims nothing about until somebody has compared two
-   * months of them. Already computed for ADR-0018's drift check before this
-   * field existed; a reading nothing records is one nobody can compare.
-   *
-   * Never a running total: `Turn.outputTokens` is where the differencing is
-   * done, once, and this carries what it says. Enforced by
-   * `fence:session-output-tokens-never-negative`.
-   *
-   * Three values rather than two, exactly as `costUsd` has three:
+   * What the Turn produced, as the per-Turn delta. Never a running total:
+   * `Turn.outputTokens` does the differencing, once.
+   * Enforced by `fence:session-output-tokens-never-negative`.
    *
    * - a **number**, where a Turn ended and the terminal event reported usage;
-   * - **zero**, where no Turn ever began, or where one produced nothing — a
-   *   Task stopped while it was still queued produced nothing, and that is a
-   *   fact rather than an absence;
-   * - **null**, where a Turn began and nothing measured it. A Turn abandoned
-   *   mid-retry-storm or cut short by a process that died produced tokens that
-   *   are real and unrecorded. Enforced by `fence:audit-unmeasured-is-not-zero`.
+   * - **zero**, where no Turn ever began, or where one produced nothing;
+   * - **null**, where a Turn began and nothing measured it.
+   *   Enforced by `fence:audit-unmeasured-is-not-zero`.
    *
    * Optional, and absent where a record was written before it. Enforced by `fence:audit-old-records-stay-readable`.
    */
   readonly outputTokens?: number | null
   /**
-   * Whether this Task obtained a Cloud Token.
+   * Whether this Task obtained a Cloud Token: a yes or a no, never a count, and
+   * never what was reached for.
    *
-   * A yes or a no, and deliberately **not a count** (ADR-0015 §10). One token
-   * does unlimited API calls for an hour, so a number of mints is not a measure
-   * of what was done and would be read as one — the same trade this file already
-   * refuses in the other direction when it writes an unpriced Turn down as
-   * unpriced rather than as free.
-   *
-   * Not *what* was reached for, either, because roma cannot know: a request to
-   * the Cloud Shortcut carries no destination, and asking the agent to declare
-   * one would record an unverifiable self-report.
-   *
-   * What it is for is the Google Cloud bill. Everything the agent does there is
-   * done as one service account, so unexplained activity on it can be narrowed
-   * to the people whose Tasks touched it — and nowhere else answers that.
-   *
-   * Optional, and **absent means no** — which is what every record roma wrote
-   * before there were Cloud Reaches means, since there was no way to obtain one.
-   * roma writes it on every record going forward. Enforced by `fence:audit-old-records-stay-readable`.
+   * Optional, and **absent means no**. Enforced by `fence:audit-old-records-stay-readable`.
    */
   readonly cloudReach?: boolean
   /**
-   * Whether this Task obtained a Document Token.
+   * Whether this Task obtained a Document Token: a yes or a no, never a count,
+   * and never what was reached for. The token can outlive the Task by up to an
+   * hour, so what it did may fall after `at`.
    *
-   * A yes or a no, and deliberately **not a count**, for `cloudReach`'s reasons
-   * unchanged: one token does unlimited work for an hour, and the request
-   * carries no destination for roma to record (ADR-0022 §9).
-   *
-   * **What it is for is sharper than the field above.** Everything the agent does
-   * in a Depot is done as one service account, so Drive's own audit log can say
-   * what happened and never who asked — and the Audit Record is the only place a
-   * Caller exists at all (ADR-0002). Neither log answers "who put this here"
-   * alone; joined on the Task's own window, they narrow it. Given that one Depot
-   * holds every Conversation's work, that question will be asked.
-   *
-   * The window is wider than the Task: a Document Token outlives the Task that
-   * minted it by up to an hour. Recording the moment of the mint would narrow it
-   * and is deliberately not done — it would be a third kind of field in an area
-   * where only counts and destinations have been argued about, and the accuracy
-   * has no question waiting for it.
-   *
-   * Optional, and **absent means no** — which is what every record roma wrote
-   * before there were Document Reaches means, since there was no way to obtain
-   * one. Enforced by `fence:audit-old-records-stay-readable`.
+   * Optional, and **absent means no**. Enforced by `fence:audit-old-records-stay-readable`.
    */
   readonly documentReach?: boolean
   /**
-   * The Compaction that happened inside this Task, where one did.
+   * The Compaction that happened inside this Task, where one did. With `kind`
+   * beside it, `trigger` says who asked.
    *
-   * Here because it is the largest unexplained variation there is in what a Task
-   * costs. Measured on byte-identical messages in one Session: $0.0917 against
-   * $0.0186 — **4.9 times** — and twelve times the wall clock, and nothing on the
-   * record told the two apart. That is the exact question an Audit Record exists
-   * to answer, and it was being answered wrongly with no way to tell, because a
-   * Compaction happens *inside* a Turn and a Conversation is many people sharing
-   * one Session: whoever sent the message that crossed the threshold pays for
-   * compacting a context the whole thread filled.
-   *
-   * It is a **cost fact and not an operational event**, which is why it is here
-   * and not in the Operator Log. That log is what roma decided — an Eviction, a
-   * Reaping, a refusal — and a successful Compaction prompts no decision at all:
-   * roma cannot prevent it, delay it, or react to it.
-   *
-   * `trigger` is what makes it answer *who asked*, together with `kind` beside
-   * it: a Task that compacted automatically is somebody's bad luck, and a
-   * relayed `/compact` is somebody's choice (ADR-0018). No field is invented for
-   * the question, which is why `/compact` needs no schema decision of its own.
-   *
-   * The token figures are `pre_tokens` and `post_tokens` and deliberately not
-   * `cumulative_dropped_tokens`: that one is cumulative for the process the way
-   * `total_cost_usd` is, so recording it would file every Compaction the Session
-   * has ever had under this Task.
-   *
-   * Optional, and **absent means no Compaction happened** — which is what every
-   * record roma wrote before it could see one says, since nothing could have
-   * written it. Enforced by `fence:audit-old-records-stay-readable`.
-   *
-   * The stream's own reduction rather than a shape of the ledger's own, because
-   * there is nothing here the ledger knows that the reader does not, and two
-   * identical interfaces are two things to keep in step.
+   * Optional, and **absent means no Compaction happened**.
+   * Enforced by `fence:audit-old-records-stay-readable`.
    */
   readonly compaction?: Compaction
   /**
    * What Claude Code said its credential resolved to — `apiKeySource` off
-   * `system/init`, and null where no Turn reached that point.
-   *
-   * Recorded next to the credential above rather than instead of it, because the
-   * two disagreeing is the failure ADR-0002 is most afraid of: a stray
-   * `ANTHROPIC_API_KEY` silently moves every run onto metered billing, and the
-   * only evidence is this field. Intent alone would record the reassuring half of
-   * that, and the observation alone would lose what roma believed it was doing.
+   * `system/init`, and null where no Turn reached that point. Recorded beside
+   * `credential`, not instead of it: the two disagreeing is what `mismatched`
+   * counts.
    */
   readonly apiKeySource: string | null
 }
 
 /**
- * An Audit Record before it has been stamped.
- *
- * The one field a caller does not supply, so that the stamp on a record and the
- * month it is filed under are one decision rather than two that can disagree.
+ * An Audit Record before it has been stamped: `at` is the one field a caller
+ * does not supply, so the stamp and the month it is filed under are one decision.
  */
 export type UnstampedRecord = Omit<AuditRecord, 'at'>
 
 /**
  * What a calendar month of Tasks came to.
  *
- * `costUsd` is the number the Overflow cap is enforced on, and the three counts
- * beside it are every way that number can be less than the truth. None of them
- * is an error and none of them stops the total being returned — a cap that
- * refuses to be computed is a cap that cannot be enforced — but a caller
- * spending real money against this should read them before it does.
+ * `costUsd` is the number the Overflow cap is enforced on, and `unpriced`,
+ * `unreadable` and `mismatched` are every way that number can be less than the
+ * truth. None of them stops the total being returned, so a caller spending real
+ * money against it should read them first.
  */
 export interface AuditTotal {
   readonly month: string
@@ -364,25 +197,11 @@ export interface AuditTotal {
   readonly tasks: number
   /** Relays in the month, counted separately. */
   readonly relays: number
-  /**
-   * What the month spent, Relays included.
-   *
-   * Everything that cost anything, whatever kind of thing it was. Most of the
-   * Relay list is expected to cost nothing and is summed anyway: the moment one
-   * of those does not, the cap this feeds is the thing that has to know, and a
-   * total that filtered by kind would be enforcing against a figure it had
-   * chosen not to see. Since ADR-0018 one entry is expected to cost money, and
-   * this is the sentence that already covered it.
-   */
+  /** What the month spent: everything that cost anything, Relays included. */
   readonly costUsd: number
   /**
-   * Tasks in the total whose cost was never reported, and which are therefore in
-   * `tasks` but not in `costUsd`.
-   *
-   * A Turn that began and never reached a terminal event: abandoned mid-retry-
-   * storm, or cut short by a process that died. Whatever it had already spent is
-   * real and unrecoverable, so the honest reading of this total is "at least
-   * `costUsd`, over `tasks` Tasks, `unpriced` of which are not in the figure".
+   * Tasks in the total whose cost was never reported, which are in `tasks` but
+   * not in `costUsd`: read the total as at least `costUsd`.
    */
   readonly unpriced: number
   /**
@@ -394,11 +213,8 @@ export interface AuditTotal {
   readonly unreadable: number
   /**
    * Records where the credential roma ran the Task on is not the one Claude Code
-   * said was paying.
-   *
-   * Above zero means the total below is describing money that came out of
-   * somewhere else, and the number to act on is which credential is really being
-   * billed rather than this one.
+   * said was paying. Above zero, the total describes money that came out of
+   * somewhere else.
    */
   readonly mismatched: number
 }
@@ -407,16 +223,11 @@ export interface AuditTotal {
 const CREDENTIALS: readonly CredentialKind[] = ['shared-window', 'overflow']
 
 /**
- * What one credential drew in a calendar month, on one Runtime.
+ * What one credential drew in a calendar month, on one Runtime: `AuditTotal`'s
+ * figures, counted over that pair's records alone. Not `unreadable`, which
+ * belongs to the month.
  *
- * Two names for the bucket rather than one, because with a second Runtime there
- * are four credentials and not two: a Shared Window is one per Runtime
- * (ADR-0025), so the pair is what identifies one. The four figures are
- * `AuditTotal`'s, counted over that pair's records alone. What is not here is
- * `unreadable`: a line that cannot be read cannot be said to belong to one
- * credential rather than the other, so it belongs to the month.
- *
- * Kept apart from every other bucket and **never added to one** (ADR-0027).
+ * Kept apart from every other bucket and **never added to one**.
  * Enforced by `fence:audit-buckets-never-summed`.
  */
 export interface CredentialSpend {
@@ -427,24 +238,17 @@ export interface CredentialSpend {
   readonly costUsd: number
   readonly unpriced: number
   /**
-   * Records roma filed under this credential that Claude Code contradicted.
-   *
-   * Per credential because `totalFor` has always counted it for the credential
-   * it was asked about. What may not be done with it is print it beside that
-   * credential's figure: the count says the record's own `credential` is not to
-   * be believed, so attributing it to one is asserting the thing in doubt. A
-   * report reads it for the month and prints no number (ADR-0027).
+   * Records roma filed under this credential that Claude Code contradicted. Read
+   * it for the month, and never print it beside this credential's figure: it says
+   * the record's own `credential` is not to be believed.
    */
   readonly mismatched: number
 }
 
 /**
  * One calendar month, split by Runtime and credential, plus the one count that
- * can belong to neither.
- *
- * **The only walk of a month's file there is.** `totalFor` folds this down, so a
- * caller that wants both figures asks once. Enforced by
- * `fence:audit-unreadable-counted-once`.
+ * can belong to neither. `totalFor` folds this down, so a caller that wants both
+ * asks once. Enforced by `fence:audit-unreadable-counted-once`.
  */
 export interface AuditBreakdown {
   readonly month: string
@@ -493,12 +297,8 @@ function paidAsIntended({ credential, apiKeySource }: AuditRecord): boolean {
 }
 
 /**
- * The calendar month a moment falls in, as the records of it are filed.
- *
- * UTC, and exported because every caller of `totalFor` needs it: a month has to
- * be a fixed set of records rather than one that depends on where the reader is
- * standing, and that rule belongs in one place rather than in each caller's
- * arithmetic.
+ * The calendar month a moment falls in, as the records of it are filed: UTC, so
+ * a month is a fixed set of records wherever the reader stands.
  */
 export function monthOf(at: Date): string {
   return at.toISOString().slice(0, 7)
@@ -525,20 +325,8 @@ const reportToStderr = (record: AuditRecord, error: unknown): void => {
 
 /**
  * Every Task roma has run, one line each, kept for as long as the disk keeps it.
- *
- * This is the only place per-user attribution exists. Everybody shares one
- * subscription token (ADR-0002), so the provider sees one customer and can never
- * be asked who spent what — the question is answerable here or nowhere.
- *
- * Two properties follow from what the records are for rather than from taste:
- *
- * - **A month is a file.** The monthly Overflow cap is a calendar-month sum, so
- *   the sum is one file read rather than a scan of everything roma has ever
- *   done, and a month that has passed is never appended to again.
- * - **A record is written where it can be read again.** Held in memory it would
- *   describe money right up until the next deploy and then be gone, which is the
- *   one failure this cannot have: the number it carries is not recoverable from
- *   anywhere else afterwards.
+ * One file per calendar month, and a month that has passed is never appended to
+ * again.
  */
 export class AuditLog {
   readonly #auditRoot: string
@@ -555,11 +343,8 @@ export class AuditLog {
   }
 
   /**
-   * Write one Task down.
-   *
-   * **Never throws.** A record that cannot be written is handed to
-   * `onWriteFailed` instead, which by default puts it on stderr. Enforced by
-   * `fence:audit-record-never-throws`.
+   * Write one Task down. **Never throws**: a record that cannot be written is
+   * handed to `onWriteFailed` instead. Enforced by `fence:audit-record-never-throws`.
    */
   record(task: UnstampedRecord): void {
     // Stamped here so that the time on the record and the month it is filed
@@ -578,12 +363,7 @@ export class AuditLog {
     }
   }
 
-  /**
-   * Every record of one calendar month, in the order the Tasks ended.
-   *
-   * UTC, because a month has to be a fixed set of records rather than one that
-   * depends on where the reader is standing.
-   */
+  /** Every record of one calendar month (see `monthOf`), in the order the Tasks ended. */
   readMonth(month: string): AuditRecord[] {
     return this.#linesOf(month).flatMap((line) => {
       const record = readRecord(line)
@@ -592,11 +372,9 @@ export class AuditLog {
   }
 
   /**
-   * What one calendar month came to, per credential and unsummed.
-   *
-   * Every rule for reading this file lives here, because every other reading is
-   * folded from it. A second walk written beside this one is a second answer to
-   * "what is in the month" that nothing keeps in step.
+   * What one calendar month came to, per credential and unsummed: the only walk
+   * of a month's file, which every other reading folds.
+   * Enforced by `fence:audit-unreadable-counted-once`.
    */
   breakdownFor(month: string): AuditBreakdown {
     const drawn: Record<Runtime, Record<CredentialKind, Tally>> = {
@@ -635,13 +413,9 @@ export class AuditLog {
 
   /**
    * What one calendar month came to, which is what the Overflow cap needs.
-   *
-   * Filtered by credential where the caller has one in mind, and never by
-   * Runtime: the cap is on metered spend, and Shared Window Tasks are not spend
-   * in the sense it means. So a Runtime added to the walk above moves nothing
-   * here — its buckets are summed with the rest of their credential's, and this
-   * answers what it answered before. `unreadable` is carried whole either way —
-   * see the field.
+   * Filtered by credential where one is given, and never by Runtime: every
+   * Runtime's buckets are summed with the rest of their credential's.
+   * `unreadable` is carried whole either way.
    */
   totalFor(month: string, credential?: CredentialKind): AuditTotal {
     const { spend, unreadable } = this.breakdownFor(month)

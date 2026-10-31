@@ -12,19 +12,6 @@ import type { Installation } from './installation.js'
 /** Enforced by `fence:github-announcement-caps-the-advertisement`. */
 const NAMED_AT_MOST = 100
 
-/**
- * A capability nobody knows about is a capability nobody has.
- *
- * Claude Code in an empty directory has no reason to believe it can clone
- * anything, and an agent that explains it has no access instead of trying is the
- * failure this text exists to prevent — so it says the credentials are present,
- * what they reach, and that the working directory is empty on purpose.
- *
- * That the list goes stale if the App is installed somewhere new is accepted,
- * and it goes stale softly: the token already covers the new repository, so
- * cloning it works. Only the advertisement is behind, and only until the next
- * restart.
- */
 export function announce(installation: Installation): string {
   const { account, repositories } = installation
   const named = repositories.slice(0, NAMED_AT_MOST)

@@ -1,5 +1,8 @@
+import { globSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
-import { buildEnv, type BuildEnvOptions, type Credential } from './build-env.js'
+import { apiKeySourceFor, buildEnv, type BuildEnvOptions, type Credential } from './build-env.js'
 
 // The host environment a test pretends to be running under. It deliberately
 // carries both credentials and an unrelated secret, because the point of
@@ -215,5 +218,37 @@ describe('buildEnv', () => {
     expect('ROMA_SESSION_ID' in env).toBe(false)
     expect('ROMA_MINTER_SOCKET' in env).toBe(false)
     expect('GIT_CONFIG_GLOBAL' in env).toBe(false)
+  })
+})
+
+describe('apiKeySourceFor', () => {
+  it('is the only table of what apiKeySource reads on each credential [fence:buildenv-one-api-key-source-table]', () => {
+    const why =
+      'What system/init.apiKeySource reports per credential is written once, in apiKeySourceFor. ' +
+      'Its two readers, the startup self-check and the Audit Record mismatch count, exist to ' +
+      'catch the same failure: a stray key silently moving every run onto metered billing ' +
+      '(ADR-0002). A second copy that drifted would leave the check passing while the count ' +
+      'reported nothing, so the one failure both were built to see would be invisible in both.'
+    const src = fileURLToPath(new URL('.', import.meta.url))
+    const holders = globSync('**/*.ts', { cwd: src })
+      .filter((file) => !/\.test\.ts$/.test(file))
+      .filter((file) => {
+        const source = ts.createSourceFile(
+          file,
+          readFileSync(src + file, 'utf8'),
+          ts.ScriptTarget.Latest,
+        )
+        let found = false
+        const visit = (node: ts.Node): void => {
+          if (ts.isStringLiteralLike(node) && node.text === apiKeySourceFor('overflow'))
+            found = true
+          ts.forEachChild(node, visit)
+        }
+        visit(source)
+        return found
+      })
+
+    expect(holders, why).toEqual(['build-env.ts'])
+    expect(apiKeySourceFor('shared-window'), why).toBe('none')
   })
 })

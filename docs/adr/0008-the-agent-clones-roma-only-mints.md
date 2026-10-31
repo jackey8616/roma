@@ -125,6 +125,10 @@ it is the version that dies mid-Turn.
 `credential.helper` and `credential.useHttpPath`. The helper is a thin client. It
 holds no secret and mints nothing; it asks roma, over a local channel, and roma —
 which holds the App private key — mints and answers.
+The helper is named as a `!`-prefixed shell command, `git`'s own spelling for
+"run this": the Shim is a Node module in roma's build, not an executable named
+`git-credential-something`, and a shebang wrapper installed by the image would be
+a second file to keep in step.
 
 **The private key never enters the container's reachable space.** A key in the
 agent's reach would turn a one-hour exposure into a permanent, indefinitely
@@ -167,6 +171,14 @@ named in CONTEXT.md: `git`'s credential helper, and something ahead of `gh` on
 and no other. Per invocation rather than per Session, for this section's own
 arithmetic — an environment fixed at spawn is stale within the hour, and a
 Resident Session outliving an hour is ordinary.
+
+Per invocation costs less than it sounds, and the cache in front of the Minter
+saves less than it was built expecting: `git` asks once per operation — one
+request for a clone, a fetch or a push, not one per object
+(`docs/github-app-verification.md`) — so it saves a round trip per operation
+rather than rescuing roma from a rate limit. It stays because `gh` asks once per
+invocation and an agent runs many, three Tasks run at once, and a token expiring
+mid-operation would be a failure nobody could reproduce.
 
 The GitHub MCP server was considered in `gh`'s place and is worse here rather
 than better: its token is an environment variable read at launch, and an MCP

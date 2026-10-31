@@ -46,7 +46,6 @@ const MISUSED = 2
 export interface ShortcutOptions {
   /** The name the image installs it under, for anything it has to say. */
   readonly name: string
-  /** Which credential it asks roma for. */
   readonly credential: CredentialWanted
   readonly argv: readonly string[]
   readonly env: NodeJS.ProcessEnv

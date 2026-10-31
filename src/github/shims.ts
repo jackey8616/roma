@@ -22,27 +22,12 @@ function loaderFor(shim: string): string {
   return ` --import ${createRequire(import.meta.url).resolve('tsx')}`
 }
 
-/**
- * The command `git` runs when it needs a credential.
- *
- * A `!`-prefixed shell command rather than a bare path, which is git's own
- * spelling for "run this": the Shim is a Node module in roma's build and not an
- * executable named `git-credential-something`, and asking the image to install a
- * shebang wrapper for it would be a second file to keep in step.
- */
+/** The command `git` runs when it needs a credential. */
 export function gitCredentialHelper(shim = shimBesideThisFile(), node = process.execPath): string {
   return `!${node}${loaderFor(shim)} ${shim}`
 }
 
-/**
- * The gitconfig every Session's `GIT_CONFIG_GLOBAL` points at.
- *
- * `useHttpPath` is set even though this slice scopes no token to a repository,
- * and that is deliberate. It is what makes `git` name the repository on every
- * credential request — measured, on git 2.43.0, and recorded in ADR-0008's
- * amendment — which is what will let an Audit Record say which repositories a
- * Task reached for. That record is out of scope here; foreclosing it is not.
- */
+/** The gitconfig every Session's `GIT_CONFIG_GLOBAL` points at. */
 export function gitConfig(helper = gitCredentialHelper()): string {
   return ['[credential]', `\thelper = ${helper}`, '\tuseHttpPath = true', ''].join('\n')
 }

@@ -252,10 +252,12 @@ that last line — and each has its own bullet below. Enforced by
       this is the existing mechanism with one more reason to fire. *Not enforced
       (ADR-0031).*
   - **A resume that finds no transcript re-creates the session.** The pool reads
-    the existence of the session's working directory as the record that the
-    session exists, which is what makes the `--session-id`-then-`--resume` rule
-    survive a restart of roma. The directory is created before the process is,
-    so a session whose first process died before Claude Code wrote a transcript
+    a spawn file inside the session's working directory, `.roma-session`, as the
+    record that the session exists, which is what makes the `--session-id`-then-`--resume` rule
+    survive a restart of roma. *(Amended by #105, #107: it used to read the directory
+    itself, and an Enclosure written before the first process created the
+    directory and made roma resume a session it never started.)* The record is
+    written before the process starts, so a session whose first process died before Claude Code wrote a transcript
     would otherwise be resumed forever at something that is not there — the CLI
     answers `No conversation found with session ID: …` and exits. On that, and
     only that, the pool spawns again with `--session-id`. Enforced by
@@ -281,6 +283,9 @@ and none anticipated by ADR-0001:
 
 The session id is `uuidv5(<conversation key>)`, where the conversation key comes
 from the adapter. The mapping is derivable, so **no database is required**.
+`uuidv5` is roma's own (RFC 9562) rather than a dependency: it is fifteen lines
+and one published test vector, and every Session id roma will ever use comes out
+of it.
 
 `/new` adds one qualification, and only one: the derivation also takes a
 generation, and which generation a conversation is on is written down. The
@@ -312,6 +317,16 @@ depends on resolving it yet.
   reaches the "bot halted" state listed under accepted risks below — without any
   task hanging. A task is abandoned after a bounded number of `api_retry` events
   (or a fixed retry wall-clock), releasing the slot and surfacing the error.
+  roma counts the `api_retry` events it sees rather than reading the attempt
+  number on them, so the budget is its own and not a reflection of the CLI's
+  `max_retries`.
+  The budget is **five retries or sixty seconds, whichever comes first**. Against
+  the observed backoff (from 580ms, retries at roughly 0.6s, 1.2s, 2.5s, 5s and
+  9s) the count fires, in under twenty seconds. The window is the backstop for a
+  backoff already at ~35s between attempts, which the count would not reach in
+  time, and bounds a wedged slot at a minute either way. Five rather than three so
+  that a genuine transient overload still gets a few attempts: a Task abandoned
+  here is one the person has to send again.
 
 ### Stopping a turn
 
@@ -357,7 +372,7 @@ ADR-0001 specified updating "as stream events arrive", which was written without
 knowing that generation emits no events at all. The throttle has something to
 throttle only because of `--include-partial-messages`. **Verified:** with the flag
 on, the longest a renderer would have waited for new content during generation was
-**2641ms** — shorter than even the 5s floor of the 5–10s throttle above, so every
+**2641ms**, with 194 `text_delta`s across the 72-second Turn — shorter than even the 5s floor of the 5–10s throttle above, so every
 scheduled update had fresh text to show. roma throttles at that floor, because the
 floor costs nothing: every tick has something to show, and none is a wasted call. The prose arrives as
 `stream_event.event.delta.text`; the complete final message still arrives as its
@@ -366,7 +381,7 @@ separate-final-message rule is served from that event rather than from the delta
 
 **Stall detection stays declined, and the evidence for it is narrower than it
 was.** The original ground was that generation is silent, which makes "stalled"
-and "thinking" indistinguishable. That no longer holds: with the flag on, **0 of
+and "thinking" indistinguishable. That no longer holds (#2): with the flag on, **0 of
 207** mid-stream gaps in a 72-second generating turn exceeded 3s. What survives is
 tool execution. The stream marks a tool starting and then says nothing until it
 finishes — **25339ms** of silence in a turn whose largest generating gap was 208ms
@@ -394,8 +409,8 @@ roughly how much, never what.
   days idle. A shared working directory would let concurrent sessions corrupt
   each other's checkouts, with symptoms that are very hard to diagnose.
   - **Reclaiming a working directory also forgets that the session exists**, and
-    that is a known hole rather than a design. The pool reads the directory as
-    the record of existence, but the transcript `--resume` needs belongs to
+    that is a known hole rather than a design. The pool reads the spawn file in
+    the directory as the record of existence, but the transcript `--resume` needs belongs to
     Claude Code and is not ours to delete — so a conversation that goes quiet for
     more than 7 days and then comes back is spawned with `--session-id` at an id
     that may still have a transcript. **What the CLI does with that is
@@ -412,6 +427,9 @@ roughly how much, never what.
       than by inheritance. A refusal that arrives as a terminal event leaves
       the refused process for roma to end; measured to exit in 1–3s on its own
       (#105). Enforced by `fence:pool-one-process-per-transcript`.
+      That terminal event is on stdout and can settle the Turn before the
+      matching stderr chunk arrives on its own pipe, so the Operator Log's
+      `refusal` is written from both rather than named for either.
 - A local mirror of frequently used repositories, cloned from locally at session
   start — faster, and avoids repeated use of git credentials.
 - Egress allowlist: the Anthropic API, our git remote, and package registries
@@ -452,7 +470,10 @@ wrapper.
   And stopping *at* `system/init` would reproduce the blind spot below.
   `apiKeySource` and the model are reported before the first API call, so a token
   that 401s produces a perfectly healthy init. Only completing the Turn sees it,
-  so the probe message is as small as a Turn can be and still be one.
+  so the probe message is as small as a Turn can be and still be one. The other
+  half is that a wrong credential is refused *at* init without waiting for the
+  Turn, which would otherwise retry for three minutes: seam 2 measured a stray
+  key refused in **1189ms**.
 
   What that costs, measured: **3682ms and $0.0709632** per boot, the spend
   dominated by the cached system prompt rather than by the probe's four output

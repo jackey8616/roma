@@ -2,35 +2,18 @@ import { MINTER_SOCKET_VAR, SESSION_ID_VAR } from './shim-protocol.js'
 
 /**
  * The credential a Claude Code process runs under: one of the two, never both.
- *
  * Enforced by `fence:buildenv-one-credential-at-a-time`.
  */
 export type Credential =
   | { readonly kind: 'shared-window'; readonly oauthToken: string }
   | { readonly kind: 'overflow'; readonly apiKey: string }
 
-/**
- * Which of the two a Task ran on, without the secret that goes with it.
- *
- * What an audit record carries: the question it answers is which of the two
- * bills a Task landed on, and the token itself has no business on disk.
- */
+/** Which of the two a Task ran on, without the secret that goes with it: what an Audit Record carries. */
 export type CredentialKind = Credential['kind']
 
 /**
- * What `system/init.apiKeySource` reports for a process run on this credential.
- *
- * The other side of `buildEnv`: that decides which variable is set, and this is
- * what Claude Code says about it once it has resolved one. Both values measured
- * rather than assumed — `"none"` under the OAuth token, `"ANTHROPIC_API_KEY"`
- * the moment a key is present (ADR-0002).
- *
- * One function rather than one per reader. Its two readers are the startup
- * self-check and the audit record's mismatch count, and they exist to catch the
- * same failure: a stray key silently moving every run onto metered billing. Two
- * copies that drifted would leave the check passing while the count reported
- * nothing wrong, so the one thing both were built to see would be invisible in
- * both at once.
+ * What `system/init.apiKeySource` reports for a process run on this credential:
+ * the other side of `buildEnv`. Enforced by `fence:buildenv-one-api-key-source-table`.
  */
 export function apiKeySourceFor(credential: CredentialKind): string {
   return credential === 'shared-window' ? 'none' : 'ANTHROPIC_API_KEY'
@@ -48,11 +31,9 @@ export interface SessionShims {
   /** The Unix domain socket the Minter answers on. */
   readonly socketPath: string
   /**
-   * The gitconfig `GIT_CONFIG_GLOBAL` points at, which is what puts the `git`
-   * Shim in front of `git`.
-   *
-   * The path is fixed at spawn; the file's contents are roma's to rewrite, which
-   * is what makes per-Task behaviour possible later without re-spawning anything.
+   * The gitconfig `GIT_CONFIG_GLOBAL` points at, which puts the `git` Shim in
+   * front of `git`. The path is fixed at spawn; the file's contents are roma's to
+   * rewrite without re-spawning.
    */
   readonly gitConfigPath: string
 }
@@ -61,7 +42,6 @@ export interface BuildEnvOptions {
   readonly credential: Credential
   /**
    * CLAUDE_CONFIG_DIR and CLAUDE_SECURESTORAGE_CONFIG_DIR, both pointed here.
-   *
    * Enforced by `fence:buildenv-config-dir-is-required`.
    */
   readonly configDir: string
@@ -74,10 +54,9 @@ export interface BuildEnvOptions {
 const PASSTHROUGH = ['PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'TMPDIR'] as const
 
 /**
- * Construct a Claude Code process environment explicitly.
- *
- * Nothing is inherited implicitly. A variable the host does not define is left
- * absent. Enforced by `fence:buildenv-unset-stays-absent`.
+ * Construct a Claude Code process environment explicitly. Nothing is inherited
+ * implicitly, and a variable the host does not define is left absent.
+ * Enforced by `fence:buildenv-unset-stays-absent`.
  */
 export function buildEnv({
   credential,

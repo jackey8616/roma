@@ -8,31 +8,16 @@ import { GoogleDocumentMinter } from './google-document-minter.js'
 
 /**
  * What roma says when something asks for a document credential and there is no
- * Document Reach.
- *
- * A plain sentence rather than a failure, because most deployments have none and
- * that is not a fault (ADR-0015 §9, ADR-0022 §8). The Document Shortcut is
- * installed on every image either way, so that this is what an agent reads
- * instead of `command not found` — which it would spend a Turn investigating as
- * a broken `PATH`.
- *
- * Here rather than in `shim-server.ts` because it is a sentence about documents,
- * and the Core is not allowed to know there is a Drive. The socket reads it off
- * the Reach that carries it (ADR-0020 §2).
+ * Document Reach: a sentence, not a failure.
  */
 export const NO_DOCUMENT_REACH =
   'This roma has no Document Reach, so there is no document credential for it to give.'
 
 /**
  * roma's Reach on the team's documents, where a deployment has a key and a Depot.
- *
- * The proof is three things in one place, any of which blocks the boot: the key
- * mints a token, which is thrown away; the Depot answers; and the answer says
- * this identity can add to it (ADR-0022 §6). The third is new to roma — every
- * other proof it makes says a credential is *live* — and it exists because a
- * Depot named by a typo, a shared drive the account was never added to, and an
- * account added as a Viewer are three different mistakes that would otherwise
- * all surface inside somebody's first Task.
+ * Its proof throws `ConfigurationMissing`, blocking the boot, unless the key
+ * mints a token, the Depot answers, and the answer says this identity can add to
+ * it. `announce` throws if called before the proof succeeded.
  */
 export function documentReach(minter: DocumentMinter): AvailableReach<'documents'> {
   // What `prove` found, held for `announce`. The Depot's id is in the
@@ -73,13 +58,7 @@ export function documentReach(minter: DocumentMinter): AvailableReach<'documents
   }
 }
 
-/**
- * The Reach a deployment with no key has: present, and with nothing to give.
- *
- * Not an absence. "There is none" is an answer roma gives out loud rather than a
- * case it has no branch for, and a Reach that were simply missing would read, to
- * whatever consulted it, as one that does not apply.
- */
+/** The Reach a deployment with no key has: present, and with nothing to give. */
 export function noDocumentReach(): Reach<'documents'> {
   return {
     credential: 'documents',

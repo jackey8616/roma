@@ -310,6 +310,23 @@ describe('the three lines that describe a machine roma does not install [fence:c
       expect(cavemanRuleset(level), TRACKER).not.toContain('Default: **full**')
     }
   })
+
+  it('is one text for every level, differing only where the level is named [fence:caveman-one-template]', () => {
+    const why =
+      'cavemanRuleset is one template with the level interpolated, not a lookup table of ' +
+      'finished strings: six strings would be six copies of one idea, and five of them could ' +
+      'go stale without anybody noticing (ADR-0030). Every level must render the same text once ' +
+      'its own name, its intensity row and its examples are set aside.'
+    const shared = (level: string): string =>
+      cavemanRuleset(level)
+        .split('\n')
+        .map((line) => line.replace(`level: ${level}`, 'level: <level>'))
+        .map((line) => line.replace(`level: **${level}**`, 'level: **<level>**'))
+        .filter((line) => !line.startsWith('| **') && !line.startsWith(`- ${level}:`))
+        .join('\n')
+    const [first, ...rest] = LEVELS_WITH_RULES
+    for (const level of rest) expect(shared(level), `${level}: ${why}`).toBe(shared(first!))
+  })
 })
 
 describe('the line roma would not have thought to write', () => {

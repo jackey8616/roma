@@ -20,18 +20,8 @@ export type ChatLogRecord = PubSubLogRecord | ChatEventLogRecord
 export type ChatLog = OperatorLog<ChatLogRecord>
 
 /**
- * Google Chat, built and paired with the Transport its events arrive over.
- *
- * Half of a composition root and deliberately only half: what it takes to reach
- * this Channel is Chat's business and lives in Chat's directory, and what roma
- * *is* — one pool, one queue, one Audit Log, and every Channel it serves — is
- * `src/channels/main.ts`'s. So this builds a binding and hands it over rather
- * than starting anything, which is what lets one process serve a second Channel
- * without this file knowing there is one (ADR-0028).
- *
- * Nothing is decided here. Every number is `env-config.ts`'s, every rule about
- * what happens to a message is `serve.ts`'s, and every Chat fact is the
- * Adapter's.
+ * Google Chat, built and paired with the Transport its events arrive over, and
+ * handed back for the composition root to serve. It starts nothing.
  */
 export async function googleChatBinding(chat: ChatEnv, log: ChatLog): Promise<ChannelBinding> {
   // Application Default Credentials: a key file named by

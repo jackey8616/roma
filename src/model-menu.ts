@@ -1,62 +1,16 @@
 /**
- * The models a Caller may put a Session on, and how `/model`'s argument is read.
- *
- * The Menu, and the whole of what stops one person moving everybody's Shared
- * Window onto something costlier without anybody agreeing to it (ADR-0014).
- * Everyone draws on one subscription token (ADR-0002) and a thread is many people
- * sharing one Session, so the person who pays for a costlier model is usually not
- * the person who chose it.
- *
- * **An offer rather than a filter.** Claude Code's own `/model` says what it
- * takes: `` `/model <name>. Available: …, default, or a full model ID.` `` — so
- * there is no list roma could hold that would be a complete check, and this is a
- * decision about what roma is *willing* to put the shared window behind rather
- * than an attempt to enumerate what works. It is also what makes the check local
- * and immediate: an unknown name is refused in the reply to the message that
- * carried it, addressed to whoever typed it, rather than surfacing later as a
- * process that will not start on somebody else's message.
- *
- * **This Menu is a person's judgement about Claude Code 2.1.220** (the ADR-0007
- * pin), read out of that build's own alias table, and it must be re-audited when
- * the pin moves. Nothing enforces that — the version is named here so the drift
- * report's working-tree sweep lists this file under what rests on the pin, which
- * is enumeration rather than enforcement. `src/relays.ts` carries the same line
- * for the same reason.
+ * The Model Menu, and how `/model`'s argument is read. A person's judgement
+ * about Claude Code 2.1.220, re-audited when the pin moves.
+ * Enforced by `fence:pin-lists-name-the-version`.
  */
 
 /**
- * What each name a Caller may type resolves to.
+ * What each name a Caller may type resolves to: the model id roma passes
+ * `--model` and files on the Audit Record, never the alias. Independent of
+ * `PINNED_MODEL`, so moving `ROMA_MODEL` moves nothing here.
  *
- * The resolved ids rather than the aliases, because roma passes `--model` the id
- * and files it on the Audit Record: `PINNED_MODEL` is `claude-sonnet-5`, a Caller
- * types `sonnet`, and the two spellings have to come out as one model or the
- * ledger has two names for it.
- *
- * That `sonnet` resolves to the same string `PINNED_MODEL` holds is a coincidence
- * of what this deployment pins, and the two are deliberately not one constant: an
- * operator moving `ROMA_MODEL` moves the Pinned Model and moves nothing here,
- * because `sonnet` is Claude Code's name for one model and not roma's name for
- * whichever model it happens to be pinned to.
- *
- * **Ordered most expensive first**, which is not presentation. `MENU_NAMES`
- * derives from `Object.keys` here and both Adapters draw their buttons in that
- * order, so this is the order every Channel shows — and the Menu is the spending
- * boundary, so reading it downwards is how a Caller sees what they are reaching
- * for before they reach.
- *
- * **`fable` is on the Menu on a judgement, and this is the judgement.** Fable 5
- * is priced at twice Opus 5 per token on the first-party API — $10/$50 per MTok
- * against $5/$25 — and roma draws on a subscription rather than metered billing,
- * so that ratio is how fast the shared quota drains rather than a bill roma
- * pays. roma is willing to put the Shared Window behind it at that rate. Written
- * here rather than in an ADR because willingness is per-entry, as the `[1m]`
- * refusal below is: the same question, decided the other way (ADR-0014). What
- * would revisit it is evidence, and `/usage` answers out of the Audit Records.
- *
- * Deliberately not here: the `[1m]` variants, which Claude Code declares as
- * `opus[1m]`, `sonnet[1m]` and `fable[1m]` at `5x more context`. That multiplier
- * is context rather than price, and it is off the Menu because more context per
- * Turn is still more of a window everybody shares.
+ * Ordered most expensive first, the order every Channel draws.
+ * Enforced by `fence:menu-model-ordered-by-cost`.
  */
 export const MENU: Readonly<Record<string, string>> = {
   fable: 'claude-fable-5',
@@ -66,12 +20,8 @@ export const MENU: Readonly<Record<string, string>> = {
 }
 
 /**
- * The name that means the Pinned Model.
- *
- * Not a model of its own: it names whatever `ROMA_MODEL` resolved to for this
- * deployment, so that a Conversation can be put back without clearing what it has
- * said — and so that a deployment moving its Pinned Model does not leave a
- * Session that asked for "default" on the old one.
+ * The name that means the Pinned Model: whatever `ROMA_MODEL` resolved to, so a
+ * Session on it follows a deployment that moves its Pinned Model.
  */
 export const PINNED_NAME = 'default'
 
@@ -82,17 +32,9 @@ export const MENU_NAMES: readonly string[] = [...Object.keys(MENU), PINNED_NAME]
 export type ModelRequest =
   | {
       /**
-       * Which model this Session is on, and what else it may be on.
-       *
-       * `/model` with no argument. Claude Code's own no-argument `/model` is an
-       * interactive picker, and roma answers it with one: the Menu in words,
-       * which every Channel can post, plus the same Menu as something a Channel
-       * may render as pressable (ADR-0023). This said a Channel could not render
-       * a picker, which stopped being true the day ADR-0002's offer became a
-       * button.
-       *
-       * Either way roma owns the answer, so it costs no process, no Turn and no
-       * money.
+       * `/model` with no argument: which model this Session is on, and what else
+       * it may be on. roma answers it without a process or a Turn.
+       * Enforced by `fence:core-model-never-relayed`.
        */
       readonly kind: 'report'
     }
@@ -116,31 +58,17 @@ export type ModelRequest =
     }
 
 /**
- * Read what a `/model` Command was asking for.
- *
- * Total, and it takes the argument the Command reader already separated rather
- * than the message: which messages are `/model` at all — the head, the
- * whitespace, the casing, and the rule that one argument is an argument and three
- * words are prose — is `readCommand`'s single answer, and a second parser here
- * would be a second answer to it.
- */
-/**
- * What a Caller would type to ask for this model, or null where nothing would.
- *
- * The reverse of the table above, for saying which model a Session is on: roma
- * keeps the resolved id, and a report that named only that would offer a list of
- * aliases against a model spelled another way — leaving the person to map one
- * vocabulary onto the other, and to find out by being refused that the id itself
- * is not something they may type.
- *
- * Null for a Pinned Model the Menu does not carry, which is what a deployment
- * that set `ROMA_MODEL` to something off it has. That is reported as the bare id,
- * because it is the truthful answer and there is no name for it.
+ * What a Caller would type to ask for this model: `MENU` read backwards. Null
+ * for a Pinned Model the Menu does not carry, which is reported as the bare id.
  */
 export function menuNameFor(model: string): string | null {
   return Object.entries(MENU).find(([, offered]) => offered === model)?.[0] ?? null
 }
 
+/**
+ * Read what a `/model` Command was asking for. Total, and it takes the argument
+ * `readCommand` already separated, not the message.
+ */
 export function readModelRequest(argument: string | null): ModelRequest {
   if (argument === null) return { kind: 'report' }
   if (argument === PINNED_NAME) return { kind: 'default' }

@@ -4,14 +4,7 @@ import type { MinterEnv } from './env-config.js'
 import { GitHubMinter } from './github-minter.js'
 import type { Installation, InstallationMinter } from './installation.js'
 
-/**
- * roma's Reach on the forge: the credential, what it reaches, and what every
- * Session is told about it.
- *
- * Always available and never the other arm — required means required (ADR-0008),
- * and the return type is what says so. There is no development mode that skips
- * the forge credential and now no way to spell one.
- */
+/** roma's Reach on the forge. */
 export function githubReach(minter: InstallationMinter): AvailableReach<'code'> {
   let installation: Installation | null = null
 
@@ -35,12 +28,7 @@ export function githubReach(minter: InstallationMinter): AvailableReach<'code'> 
   }
 }
 
-/**
- * The same, built from what a deployment configured.
- *
- * The composition root's entry point, so that assembling roma names this
- * directory and not the class inside it.
- */
+/** The same, built from what a deployment configured: the composition root's entry point. */
 export function githubReachFrom(env: MinterEnv): AvailableReach<'code'> {
   return githubReach(new GitHubMinter(env))
 }

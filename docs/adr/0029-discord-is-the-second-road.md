@@ -78,7 +78,9 @@ read here did not. The **exceptions** to the message-content intent — DMs,
 messages mentioning the app, and the app's own messages — which come from
 Discord's developer support article rather than from the API reference, and which
 the whole of the *No privileged intent* decision below rests on. That the CDN URLs
-on attachments **expire**.
+on attachments **expire**. Of these the 2000 is the one to check against a real
+guild first: wrong *high*, it is a message Discord refuses whole, which is a long
+answer that reaches nobody.
 
 **Not stated anywhere read, and load-bearing.** Whether `referenced_message` and
 `message_snapshots` content are *also* emptied by the message-content intent — the
@@ -144,6 +146,11 @@ It satisfies both of that decision's stated reasons: no inbound port is opened, 
 nothing imposes a deadline on answering. It is not a queue, and ADR-0028 is where
 that is reconciled. The Gateway **is** the `Transport`; nothing publishes onward.
 
+No client library. Node ships a `WebSocket` and a `fetch`, and the Transport
+implements the Gateway protocol against the documented frames. A library would
+bring its own event loop, its own cache of guilds and channels, and its own
+reconnection, and those are this ADR's to decide.
+
 ### Membership is the boundary, and it is weaker than the Workspace's
 
 roma answers a single private guild, and that guild's membership is the whole of
@@ -160,6 +167,7 @@ capability"* — and it is accepted here rather than repaired.
 ### No privileged intent: roma reads what is addressed to it
 
 Message content is behind a privileged intent. roma does not ask for it.
+Enforced by `fence:discord-no-privileged-intent`.
 
 It does not have to. The intent's exceptions — direct messages, messages that
 mention the app, and the app's own messages — are precisely the messages roma
@@ -229,6 +237,11 @@ mistakes it for a channel, and one reading the channel list gets it right.
 `CHANNEL_CREATE`, `THREAD_CREATE` and `THREAD_LIST_SYNC` keep the set current;
 all are under the non-privileged `GUILDS` intent, so this costs no REST call and
 no intent.
+
+A message that arrives before its guild's channel list is **held**, not
+classified: a channel roma has not been told about looks exactly like a thread,
+and a top-level message read as one is a Session per message for as long as it
+lasts. There is no queue behind the Gateway to wait in, so the wait is roma's own.
 
 **Every way it can be wrong is the harmless direction**, which is the property
 bought here and it is ADR-0004's own test:
@@ -327,15 +340,25 @@ not see a loading state"*, which is exactly right for a design where pressing is
 typing and the card should not move. Every other callback type either posts
 something or shows a spinner, and both would have roma answering a Command twice.
 This is entirely inside the Adapter and presses on no interface.
+A press that misses the deadline goes to the Operator Log: its ordinary cause is
+a REST API roma cannot reach at all, whose every other symptom arrives minutes
+later as an answer nobody was told.
 
 **`custom_id` carries the Conversation Key as well as the Command.** It holds
-*"1-100 characters"*; a snowflake and `/effort high` come to about thirty. Two
+*"1-100 characters"*; a tag, a Command, a snowflake and a name off a Menu come to
+about forty. Nothing at runtime enforces the rest, because there is nothing good
+to do with an id that would not fit: dropped, the button is gone, and truncated,
+it comes back meaning something else. Two
 things are bought. ADR-0023's stated failure mode — *"If a press does not carry
 the message it was pressed on, no Conversation Key can be derived"* — cannot
 arise, and neither can its Discord-specific cousin, where a card posted by the
 fallback path sits in a parent channel whose id is not the key. ADR-0023's best
 property survives intact: *"What the Adapter remembers between posting a card and
 its being pressed. Nothing."*
+
+A message carries at most twenty-five buttons, five rows of five, rather than the
+forty #181 names: that is the count under Discord's newer component set, which
+roma neither asks for nor sends. roma's own Menus are four, six and six.
 
 Both Menus and the Overflow offer are drawn. ADR-0023 says a Channel that ignores
 `options` is *"correct"* rather than degraded, so the Menus could have waited; the
@@ -417,7 +440,10 @@ it is the one unverified reading a decision here actually rests on.
   429s count toward the *"10,000 per 10 minutes"* invalid-request limit, whose
   penalty is not scoped to the channel that caused it. ADR-0028 moved the retry
   into `deliver()`; this is the constraint that retry inherits, and it has no
-  counterpart on Chat, whose Adapter retries nothing. Enforced by
+  counterpart on Chat, whose Adapter retries nothing. Three attempts, because
+  what the retry repairs is a blip — a 503 while Discord moves something, or a
+  bucket roma shares with itself during a split answer — and a fault that
+  survives three, spread over a wait Discord named, is not transient. Enforced by
   `fence:discord-waits-what-discord-asked`. Enforced by `fence:discord-attempts-bounded`.
   Enforced by `fence:discord-no-sleeping-through-a-ban`.
 

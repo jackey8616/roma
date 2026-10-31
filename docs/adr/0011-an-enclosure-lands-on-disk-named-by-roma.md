@@ -158,9 +158,17 @@ stopped there, has already fetched its bytes. Only two downloads are actually
 avoided: a message whose Session cannot be worked out, and a Relay, which has
 nowhere to name the file. Enforced by `fence:core-enclosures-redeemed-late` and
 by `fence:core-relay-redeems-nothing`. The other reasons above still hold. The
-bytes stream to disk rather than sitting in memory, so a queued or Parked Task
-holds no buffer, and the sender cannot size roma's memory. Fetching any later
-would mean redeeming inside the queue's slot, and this was accepted as it is.
+bytes are on disk before the Task queues, so a queued or Parked Task holds no
+buffer. Fetching any later would mean redeeming inside the queue's slot, and
+this was accepted as it is.
+
+**Amended — held, not streamed.** `redeem` yields a `Uint8Array`, so each
+Enclosure is in memory once, briefly, for the length of its write; the sender
+still sizes that moment. A streaming redemption would be faithful to the word
+used above and would cost every Adapter a stream to produce; what this ADR
+argued was *when*, and that is kept. Worth revisiting if a Channel ever carries
+something big enough for the difference to matter, which is the same moment the
+deferred size policy comes due.
 
 Synchronous rather than async because making `toIngress` return a promise
 conscripts every future Channel into an async read path for one Channel's
@@ -196,7 +204,11 @@ Turn. That is accepted: a DM to roma is a message to roma.
 
 No new instruction kind. `failure` already means "this Task has no result, and
 here is why", and a Task whose Enclosure never arrived is exactly that. The
-Caller is told, in the Conversation, with the reason.
+Caller is told, in the Conversation, with the reason — not with the one
+sentence about roma having failed that any other error gets, because what failed
+is *their* attachment and they are the only person who can do anything about it.
+For a Channel with an unreachable class of attachment, such as Chat's
+`driveDataRef`, this is the normal path rather than an edge case.
 
 ## Consequences
 

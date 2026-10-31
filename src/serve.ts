@@ -9,12 +9,8 @@ import type { Delivery, Settle, Transport } from './transport.js'
 
 /**
  * One thing the ingress subscriber did that an operator, rather than a
- * Conversation, needs.
- *
- * Every one of these is about an event nobody will be told about anywhere else.
- * An ingress message that reaches the Core produces its own answer in the
- * Conversation and its own Audit Record; these four are the endings that produce
- * neither, which makes this log the only place they exist.
+ * Conversation, needs: endings that produce no answer and no Audit Record, so
+ * this log is the only place they exist.
  */
 export type IngressLogRecord =
   | {
@@ -29,13 +25,9 @@ export type IngressLogRecord =
     }
   | {
       /**
-       * An event roma is not meant to answer. Every Channel has some — another
-       * app talking, roma being added somewhere, a gesture aimed at nothing —
-       * and which ones they are is that Channel Adapter's business.
-       *
-       * Routine, and logged anyway. It is the difference between "roma is
-       * ignoring these" and "roma is not receiving anything", which are
-       * indistinguishable from the outside and have completely different causes.
+       * An event roma is not meant to answer, as the Channel Adapter decides.
+       * Routine, and logged so that "roma is ignoring these" can be told from
+       * "roma is receiving nothing".
        */
       readonly event: 'ingress-ignored'
       readonly deliveryId: string
@@ -48,13 +40,9 @@ export type IngressLogRecord =
   | {
       /**
        * roma could not tell the Conversation anything at all, so the delivery
-       * was handed back.
-       *
-       * The one ingress failure that is worth another attempt, and the one whose
-       * cost is invisible: the Turn may well have run and spent quota, and a
-       * Transport with somewhere to hand it back to will run it again. Where
-       * there is nowhere, this line is the only trace the Task leaves anywhere
-       * (ADR-0028).
+       * was handed back. The Turn may have run and spent quota, and a Transport
+       * that redelivers will run it again; one that does not leaves this line
+       * as the Task's only trace.
        */
       readonly event: 'ingress-failed'
       readonly deliveryId: string
@@ -63,11 +51,9 @@ export type IngressLogRecord =
   | {
       /**
        * Settling the delivery itself failed — the queue refused the
-       * settlement, or roma had already lost its lease on the message.
-       *
-       * Its own record because the consequence differs from every other failure
-       * here: the work happened, the Conversation was answered, and the message
-       * is still going to be delivered again.
+       * settlement, or roma had already lost its lease on the message. The
+       * Conversation may have been answered and the message will still be
+       * delivered again.
        */
       readonly event: 'ingress-unsettled'
       readonly deliveryId: string
@@ -86,23 +72,14 @@ export type ServeLog = OperatorLog<
 >
 
 /**
- * One Channel roma answers on, and the Transport its events arrive over, paired
- * and then erased.
- *
- * Opaque, and `bind` is the only way to make one — which is the whole of the
- * design rather than a detail of it. What this hides is the type of event that
- * Channel delivers: `serve` holds a list of these and can name no type variable
- * per element, so the pairing is checked once, at the boundary that makes one,
- * and nothing after it has to be able to state it (ADR-0028).
+ * One Channel and the Transport its events arrive over, paired with the event
+ * type erased. Opaque: `bind` is the only way to make one.
  */
 export interface ChannelBinding {
   /**
    * Give this Channel a Core of its own, out of what every Channel shares.
-   *
-   * The Core is built here rather than handed in so that it is built over *this*
-   * binding's Adapter and cannot be built over another's. `build` is everything
-   * a Core is made of except the Channel — see `StartRomaOptions.channels` for
-   * why every one of those is roma-wide.
+   * `build` is everything a Core is made of except the Channel, so the Core can
+   * only be built over this binding's Adapter.
    */
   coreOver(build: (channel: ChannelAdapter) => Core): BoundChannel
 }
@@ -110,12 +87,7 @@ export interface ChannelBinding {
 /** One Channel's Core, and the Transport that has not started delivering yet. */
 export interface BoundChannel {
   readonly core: Core
-  /**
-   * Start delivering this Channel's events into that Core.
-   *
-   * Resolves once roma has subscribed, and hands back the two things shutting
-   * down needs.
-   */
+  /** Start delivering this Channel's events into that Core. Resolves once roma has subscribed. */
   receive(log: ServeLog): Promise<Receiving>
 }
 
@@ -127,24 +99,9 @@ export interface Receiving {
 }
 
 /**
- * Pair one Channel with the Transport its events arrive over.
- *
- * **The one thing assembling roma can get wrong that nothing else would
- * notice.** A Transport delivering events this Adapter cannot read produces a
- * roma that runs perfectly and ignores everything it is sent. Neither `Core` nor
- * `Transport` can see that on its own — this is where the two meet, and one type
- * variable across both parameters is the whole of the check.
- *
- * A function rather than a field on `ServeOptions`, because roma serves several
- * Channels and a list cannot carry a type variable per element: a `readonly
- * { channel: ChannelAdapter<any>; transport: Transport<any> }[]` type-checks and
- * pairs nothing. So the pair is made where it can be stated and `Event` is gone
- * by the time `serve` holds it (ADR-0028).
- *
- * Both passed in rather than built here. What it takes to reach a Channel or a
- * queue — a project, a subscription name, a credential — is the deployment's
- * business, and roma reads what already exists rather than provisioning any of
- * it.
+ * Pair one Channel with the Transport its events arrive over. The one type
+ * variable across both is the whole check that the Adapter can read what the
+ * Transport delivers; a mismatch would otherwise run and ignore everything.
  */
 export function bind<Event>(
   channel: ChannelAdapter<Event>,
@@ -165,13 +122,7 @@ export function bind<Event>(
   }
 }
 
-/**
- * Everything `startRoma` takes, with a log wide enough for the subscriber too.
- *
- * The only member of its own, because the only thing `serve` adds to `startRoma`
- * is the ingress: what roma is assembled out of is already `StartRomaOptions`,
- * and restating any of it here would be a second place to keep it true.
- */
+/** Everything `startRoma` takes, with a log wide enough for the subscriber too. */
 export interface ServeOptions extends Omit<StartRomaOptions, 'log'> {
   readonly log?: ServeLog
 }
@@ -179,25 +130,15 @@ export interface ServeOptions extends Omit<StartRomaOptions, 'log'> {
 /** roma, running and listening. */
 export interface Serving extends Roma {
   /**
-   * Stop taking messages on every Channel, then end every Resident Session.
+   * Stop taking messages on every Channel, then end every Resident Session, in
+   * that order. Sessions survive this: their context is on disk.
    *
-   * In that order, and the order is the point: a roma that killed its processes
-   * while still subscribed would accept a message it had nothing left to serve
-   * it with. Sessions survive this — their context is on disk.
-   *
-   * It does not wait for the Tasks already running. They are killed with the
-   * processes, and their Deliveries are handed back rather than finished with.
-   * That is a deliberate choice between two imperfect endings: waiting would
-   * make a SIGTERM take however long the slowest Turn takes, and finishing with
-   * them would tell somebody their Task failed and then lose it.
-   *
-   * **What handing back buys depends on the Transport.** One with somewhere to
-   * hand a Delivery back to delivers it again to whatever comes up next; one
-   * without loses the work and says nothing to the Conversation, which ADR-0028
-   * accepts and #171 is about. The consequence on the other side is worth
-   * knowing too: where a Delivery is redelivered, a Task that finished in the
-   * moment between the shutdown starting and its answer being posted is answered
-   * *and* run again.
+   * It does not wait for running Tasks. They are killed with the processes and
+   * their Deliveries handed back, rather than finished with, so that a SIGTERM
+   * does not take as long as the slowest Turn and nobody is told their Task
+   * failed and then loses it. Where the Transport cannot redeliver, the work is
+   * lost unannounced. Where it can, a Task that finished between the shutdown
+   * starting and its answer being posted is answered *and* run again.
    */
   shutdown(): Promise<void>
 }
@@ -206,13 +147,9 @@ export interface Serving extends Roma {
  * Start roma and put every Channel on its Transport: the whole program,
  * assembled.
  *
- * Two steps, and the second cannot happen without the first. `startRoma` proves
- * the credential and builds the Cores; only then is anything subscribed. That is
- * the acceptance criterion "the process begins accepting messages only after the
- * startup self-check passes" made structural rather than remembered — a boot
- * that fails the check throws from here with nothing subscribed, so there is no
- * window in which a message can arrive at a roma that has not proved what it
- * runs on.
+ * Nothing is subscribed until `startRoma` has passed the Startup Self-Check and
+ * built the Cores; a boot that fails it throws from here with nothing
+ * subscribed.
  */
 export async function serve(options: ServeOptions): Promise<Serving> {
   const { log = writeToStderr, ...startOptions } = options

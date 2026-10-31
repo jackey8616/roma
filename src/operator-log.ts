@@ -1,35 +1,14 @@
 /**
- * Where roma writes down what it did, for whoever is running it.
- *
- * Distinct from the Audit Record in both audience and lifetime: an Audit Record
- * answers "who spent what" months later and is kept, while this is the running
- * commentary an operator reads when something looks wrong — an eviction, a
- * credential swap, a refusal. Where a figure appears here it is there to explain
- * a decision roma made, and the Audit Records remain the account of the money
- * itself; nothing is totalled from this.
- *
- * A function rather than a logger, so that a caller can hand in an array in a
- * test and nothing has to be configured to keep a test quiet.
+ * The Operator Log. A plain function, so a test can hand in an array's `push`.
  */
 export type OperatorLog<Entry> = (entry: Entry) => void
 
-/**
- * The default everywhere: one JSON object per line on stderr.
- *
- * One line per record, because that is what a log shipper can read back without
- * being taught anything about roma.
- */
+/** The default everywhere: one JSON object per line on stderr. */
 export function writeToStderr(entry: unknown): void {
   process.stderr.write(`${JSON.stringify(entry)}\n`)
 }
 
-/**
- * What went wrong, as a line an operator can read.
- *
- * Here rather than beside each of its callers because a record is only as
- * readable as this is, and four private copies would drift the moment one of
- * them learned to unwrap a `cause` and the others did not.
- */
+/** What went wrong, as a line an operator can read. Use this rather than a private copy. */
 export function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }

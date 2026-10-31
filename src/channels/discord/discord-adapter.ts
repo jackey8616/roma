@@ -22,11 +22,6 @@ import { OVERFLOW_BUTTON, outcomeMessages, progressText, threadName } from './re
  * How many times roma makes one Discord call before it gives up on it.
  *
  * Enforced by `fence:discord-attempts-bounded`.
- *
- * Three, because the failure this exists to repair is a blip: a 503 while
- * Discord moves something, or a bucket roma shares with itself during a split
- * answer. A fault that survives three attempts spread over a wait Discord itself
- * named is not transient, and the honest thing then is to reject.
  */
 export const ATTEMPTS = 3
 
@@ -34,14 +29,9 @@ export const ATTEMPTS = 3
  * How long roma waits before a retry Discord gave it no time for, and the
  * longest wait it will sit through at all.
  *
- * The floor is doubled per attempt, and only ever used where the response
- * carried no `Retry-After` — a 503, or a socket that never answered. Where
- * Discord *did* say how long, that is what roma waits, because its per-route
- * limits are dynamic and its reference says *"rate limits should not be hard
- * coded into your app"*.
- *
- * The ceiling is a limit on roma's patience rather than on Discord's: past it,
- * roma gives up and says so.
+ * The floor is doubled per attempt, and used only where the response carried no
+ * `Retry-After` (a 503, or a socket that never answered); where Discord said how
+ * long, that is what roma waits. Past the ceiling, roma gives up and says so.
  *
  * Enforced by `fence:discord-no-sleeping-through-a-ban`.
  */
@@ -75,26 +65,8 @@ interface Answered {
 export type DiscordAdapterLogRecord = {
   /**
    * roma was refused the thread a Conversation Key names, so it is answering in
-   * the parent channel — and every message in that channel is getting a Session
-   * of its own.
-   *
-   * **The consequence is what this records, not the refusal.** A top-level key
-   * is the message's own id, minted on the promise that the thread about to be
-   * opened will share it; where none is opened the key names nothing, the next
-   * message mints another, and each one is a Session that has never heard of the
-   * last. The reply still arrives and no Task fails, so there is nothing for a
-   * Conversation to notice and nothing anywhere else in roma that says so
-   * (ADR-0029).
-   *
-   * **`status` is Discord's own number rather than roma's reading of it.** A 403
-   * is the dangerous one: roma holds no `CREATE_PUBLIC_THREADS` here, so this is
-   * every message in this channel from now until somebody grants it. A 400 is
-   * the route refusing the channel's type — either a thread read as top level,
-   * which ADR-0029 calls harmless and self-repairing, or a forum, which it
-   * argues is never reached and is a fault in the classifier if it is; `channel`
-   * is what tells those two apart. Anything else is a refusal nobody predicted,
-   * and it is written down as it came rather than filed under a meaning it may
-   * not have.
+   * the parent channel, and every message in that channel is getting a Session
+   * of its own. `status` is Discord's own number, as it came.
    */
   readonly event: 'thread-unopened'
   /** Where roma is answering instead, and where a missing permission would be. */
@@ -103,20 +75,11 @@ export type DiscordAdapterLogRecord = {
 }
 
 export interface DiscordAdapterOptions {
-  /**
-   * How roma reaches Discord over HTTP.
-   *
-   * Both directions: an attachment's bytes are redeemed long after the message
-   * was read (ADR-0011), and everything roma ever says on this Channel is a call
-   * on this port.
-   */
+  /** How roma reaches Discord over HTTP, in both directions: posting, and redeeming attachments. */
   readonly api: DiscordApi
   /**
    * Where to say that a Conversation is being answered somewhere other than
-   * where its key names.
-   *
-   * Optional the way every other log in this repo is, and defaulted to stderr
-   * rather than to silence — which is the one way this differs from Chat's.
+   * where its key names. Defaults to stderr rather than to silence, unlike Chat's.
    *
    * Enforced by `fence:discord-adapter-log-defaults-to-stderr`.
    */
@@ -131,37 +94,15 @@ export interface DiscordAdapterOptions {
 }
 
 /**
- * Discord, and one of the two modules in roma that knows Discord exists.
- *
- * A Discord event goes in and an ingress message comes out; an outbound
- * instruction goes in and a Discord API call comes out. Everything
- * Discord-specific is on this side of it — snowflakes, mentions, guilds, the
- * 2000-character limit, the words roma uses — and nothing on the other side has
- * ever heard of any of it.
- *
- * A Conversation Key needs neither minting nor storage here, which is ADR-0029's
- * claim and survives: a key *is* a channel id, or the id of a message a thread
- * is about to take, because a thread and the message it was started from share
- * one id. So the key minted before the thread exists is the id the thread will
- * have, and no lookup and no state stand behind it.
- *
- * What it does keep is `#answering`, and that is a different thing from
- * identity: a message id and a parent channel, so that an answer can reply to
- * the question and a thread can be opened where the question was asked. Both are
- * facts about the message roma is answering, both are learned at the only moment
- * they are available, and losing either costs no Conversation its Session.
- *
- * The other module is the Transport, unlike Chat, where the Adapter is the whole
- * of the Channel. `GatewayTransport` decides the two things a synchronous reader
+ * Discord, and one of the two modules in roma that knows Discord exists; the
+ * other is `GatewayTransport`, which decides the two things a synchronous reader
  * cannot: whether a channel is one of the guild's, and what a Quotation says.
+ *
+ * It keeps no identity. What it keeps is where to answer each Conversation (the
+ * message and its parent channel), bounded by `REMEMBERED`; losing that costs no
+ * Conversation its Session.
  */
 export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
-  /**
-   * Both true, and both ADR-0029's declarations rather than hopes: Discord can
-   * edit a message it has posted, so progress reporting runs in its full form;
-   * and a channel id and a message id are both permanent, so no Conversation Key
-   * has to be minted or persisted here.
-   */
   readonly capabilities: ChannelCapabilities = {
     messageMutation: true,
     stableConversationKey: true,
@@ -183,14 +124,7 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     this.#wait = wait ?? sleep
   }
 
-  /**
-   * One Discord event as a message for the Core, or null if roma should not
-   * answer it.
-   *
-   * Which events those are is `readIngressMessage`'s business. What matters here
-   * is that the Core never sees an event: by this point a guild, a channel, a
-   * thread and an @-mention have become a key, a Caller and some text.
-   */
+  /** One Discord event as a message for the Core, or null if roma should not answer it. */
   toIngress(event: DiscordEvent): IngressMessage | null {
     const message =
       readChosenOption(event) ??
@@ -202,31 +136,18 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
   }
 
   /**
-   * A press on the Overflow button, as the Task it was about.
-   *
-   * The other half of `offerButton` below: what goes out on the button comes
-   * back on the press, so the Task id makes the round trip and roma needs to
-   * remember nothing between the offer and its being taken.
-   *
-   * Answers null for every press `toIngress` answered, and not because it is
-   * asked second: one reader reads every `custom_id` and answers one kind, so
-   * the order the subscriber asks in decides nothing (`Pressed`).
+   * A press on the Overflow button, as the Task it was about. Answers null for
+   * every press `toIngress` answered, whichever is asked first: one reader reads
+   * every `custom_id` and answers one kind (`Pressed`).
    */
   toOverflowTaken(event: DiscordEvent): string | null {
     return readOverflowTaken(event)
   }
 
   /**
-   * Carry out one instruction, as one or more Discord messages.
-   *
-   * Progress edits the acknowledgement in place; everything else is a new
-   * message, which is the rule ADR-0003 makes unconditional for a result and
-   * this Adapter has no reason to bend for the rest.
-   *
-   * Everything it posts goes through `#retrying`, because ADR-0028 put the
-   * remedy for a failed post here: the Gateway being fine while the REST API
-   * answers 503 is the ordinary shape of a Discord outage, and re-reading a
-   * socket repairs no POST.
+   * Carry out one instruction, as one or more Discord messages. Progress edits the
+   * acknowledgement in place; everything else is a new message. Every post is
+   * retried, up to `ATTEMPTS`.
    *
    * Rejects where the Conversation was not told.
    *

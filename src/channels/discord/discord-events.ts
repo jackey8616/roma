@@ -3,66 +3,37 @@ import { commandFor, type Command } from '../../commands.js'
 import { reasonOf, type OperatorLog } from '../../operator-log.js'
 
 /**
- * One message as Discord sends it.
- *
- * Left open for the reason `ChatEvent` is: the shape is not ours. Discord adds
- * fields, and a message arrives inside a Gateway dispatch rather than on its
- * own. Everything roma reads out of one is read below, so a change in Discord's
- * shape breaks in one place rather than everywhere.
+ * One message as Discord sends it. Left open because the shape is Discord's and
+ * it adds fields; everything roma reads out of one is read in this file, so a
+ * change in Discord's shape breaks in one place.
  */
 export type DiscordMessage = Readonly<Record<string, unknown>>
 
 /**
  * One Discord message with the three things the Adapter cannot work out for
- * itself already answered.
- *
- * All three are the Transport's, which is what makes this Channel's Transport
- * unlike Chat's: that one decodes an envelope, and this one decides things
- * (ADR-0029). Who roma is and which channels the guild has both arrive over the
- * same socket the message did; the Quotation costs a REST call, and `toIngress`
- * does no I/O.
+ * itself already answered by the Transport.
  */
 export interface DiscordEvent {
   readonly message: DiscordMessage
-  /**
-   * roma's own user id, as `READY` named it.
-   *
-   * What the mention is found and stripped by. Never configured: an application
-   * that had to be told its own id is one that can be told the wrong one, and
-   * the Gateway says it on every connection anyway.
-   */
+  /** roma's own user id, as `READY` named it: what the mention is found and stripped by. */
   readonly self: string
   /**
-   * Whether `channel_id` is one of the guild's own channels.
-   *
-   * What the Conversation Key below is derived from, asked in the polarity
-   * ADR-0029 chose: the guild's channel list is complete and its thread list
-   * holds only the *active* threads, so "is this one of the guild's channels" is
-   * answerable and "is this a thread" is not. False for a direct message, which
-   * has no guild to ask about.
+   * Whether `channel_id` is one of the guild's own channels, which is what the
+   * Conversation Key is derived from. False for a direct message.
    */
   readonly guildChannel: boolean
   /** The passage this message quotes, already completed. See `completedQuotation`. */
   readonly quotation: Quotation | null
   /**
-   * The press this event is, or null where it is somebody's own message.
-   *
-   * What tells the two readers below apart, and what a Chat event says with its
-   * `type`. An interaction carries roma's **own** card as its message, so there
-   * is no reading of that message that could answer who chose or which
-   * Conversation they chose in — the person is elsewhere on the event and the
-   * Conversation is on the button (ADR-0023).
+   * The press this event is, or null where it is somebody's own message: what
+   * tells the two readers below apart.
    */
   readonly press: DiscordPress | null
 }
 
 /**
- * A button roma posted, pressed.
- *
- * **A press is a message the Caller did not have to type** (ADR-0023), so what
- * is carried here is what a message carries: who sent it, and what it says. The
- * third thing an ingress message needs — which Conversation — is on the button
- * rather than on the event, which is what makes a press self-describing.
+ * A button roma posted, pressed: who sent it and what it says. Which Conversation
+ * it is in is on the button, in `customId`.
  */
 export interface DiscordPress {
   /**
@@ -80,11 +51,8 @@ export interface DiscordPress {
 }
 
 /**
- * One press off the socket, before roma has answered it.
- *
- * Two fields here are not on a `DiscordEvent` and never become one, because they
- * are the Transport's alone: the interaction's id and its token are what the
- * acknowledgement is sent with, and it has three seconds to go (ADR-0029).
+ * One press off the socket, before roma has answered it. `id` and `token` are the
+ * Transport's alone and never reach a `DiscordEvent`.
  */
 export interface Interaction {
   /**
@@ -103,12 +71,8 @@ export interface Interaction {
 const MESSAGE_COMPONENT = 3
 
 /**
- * How long a `custom_id` may be, which is *"1-100 characters"*.
- *
- * What roma spends is about forty — a tag, a Conversation Key, and a name off a
- * Menu — and nothing here enforces the rest, because there is nothing good to do
- * with one that would not fit: dropped, the button is gone, and truncated, it
- * comes back meaning something else.
+ * How long a `custom_id` may be, which is *"1-100 characters"*. Nothing at runtime
+ * enforces it.
  *
  * Enforced by `fence:discord-custom-id-fits`.
  */
@@ -121,15 +85,10 @@ const FIELD = ':'
 
 /**
  * What one press means, which is the whole of what a `custom_id` carries back.
+ * Every id is written by `pressId` and read by `readPress`, one `switch` over one
+ * tag, so no id is both kinds.
  *
- * **Two kinds no id can be both of, and that is what this type is for.**
- * `Ingress.#workFor` asks `toIngress` first and reaches `toOverflowTaken` only
- * where that answered null (`src/serve.ts`), so an encoding both readers
- * accepted would turn taking an Overflow offer — the one thing in roma nobody
- * can do by typing — into a paid Task. Every id is written by `pressId` and read
- * by `readPress`, and the two kinds are one `switch` over one tag: telling them
- * apart is not a rule either reader has to keep, and a collision is not
- * something to be careful about but something there is nowhere to write.
+ * Enforced by `fence:discord-press-is-one-kind`.
  */
 export type Pressed =
   | {
@@ -142,9 +101,6 @@ export type Pressed =
 
 /**
  * What a Menu button carries, which is the Command and the Conversation both.
- *
- * A self-describing button is what keeps ADR-0023's best property true: the
- * Adapter remembers **nothing** between posting a card and its being pressed.
  * The option goes last, and is rejoined on the way back.
  *
  * Enforced by `fence:discord-press-survives-thread-fallback`.
@@ -215,10 +171,6 @@ function taken(rest: readonly string[]): Pressed | null {
 /**
  * Read one `INTERACTION_CREATE` payload as a press, or null if it is not one
  * roma answers.
- *
- * Everything Discord's shape is, read in the one file that reads Discord's
- * shapes. What the Transport does with it — acknowledge it inside three seconds,
- * then hand it on — is the Transport's.
  */
 export function readInteraction(payload: Readonly<Record<string, unknown>>): Interaction | null {
   if (asNumber(payload['type']) !== MESSAGE_COMPONENT) return null
@@ -246,45 +198,25 @@ export type FetchMessage = (channelId: string, messageId: string) => Promise<Dis
 
 /** What completing a Quotation can tell an operator that a Conversation cannot. */
 export type DiscordEventLogRecord = {
-  /**
-   * A message quoted another and roma could not read the words behind it.
-   *
-   * The one unverified premise ADR-0029 actually rests on, made visible. Without
-   * the message-content intent the quoted message arrives empty, so roma fetches
-   * it over REST — and whether REST reads are gated by that intent is stated
-   * nowhere anybody has read (#170). If they are, every Quotation on this
-   * Channel silently becomes no Quotation, which is a roma answering "what do
-   * you think about this?" without the *this*. This line is the difference
-   * between that and a fault nobody can see.
-   */
+  /** A message quoted another and roma could not fetch the words behind it. */
   readonly event: 'quote-unfetched'
   readonly reason: string
 }
 
 /** What reading an event needs beyond the event. */
 export interface ReadOptions {
-  /**
-   * How to fetch an attachment's bytes, or absent where roma cannot.
-   *
-   * Optional so that reading an event stays a pure function in the tests that
-   * only care about keys and text, exactly as Chat's is. A read with no
-   * downloader produces no Enclosures.
-   */
+  /** How to fetch an attachment's bytes. Absent, a read produces no Enclosures. */
   readonly download?: DownloadAttachment
 }
 
 /**
  * Read one Discord event as a message for the Core, or null if roma should not
- * answer it.
- *
- * This is where a Channel stops existing: a guild, a channel, a thread, an
- * author and an @-mention go in, and what comes out is a key, a Caller and some
- * text.
+ * answer it: a guild, a channel, a thread, an author and an @-mention go in, and
+ * a key, a Caller and some text come out.
  *
  * Null covers everything roma is delivered and does not answer: another app
- * talking — including roma itself, which is how two bots in one channel talk to
- * each other until somebody notices — anything in a guild that did not address
- * roma, and a message with nothing in it.
+ * talking (roma itself included, or two bots in one channel talk to each other),
+ * anything in a guild that did not address roma, and a message with nothing in it.
  */
 export function readIngressMessage(
   event: DiscordEvent,
@@ -331,13 +263,8 @@ export function readIngressMessage(
 
 /**
  * Read a press on a Menu button as the message the Caller would have typed, or
- * null if this event is not one.
- *
- * **Pressing is typing** (ADR-0023). What comes out is an ordinary Ingress
- * Message carrying `/model opus`, so the press goes down the path every typed
- * Command goes down and the Core learns nothing new — which is what makes a card
- * from three weeks ago safe to press, and why nothing has to be remembered
- * between posting one and its being pressed.
+ * null if this event is not one. What comes out is an ordinary Ingress Message
+ * carrying, say, `/model opus`.
  *
  * Enforced by `fence:discord-press-has-its-own-reader`.
  */
@@ -358,13 +285,7 @@ export function readChosenOption(event: DiscordEvent): IngressMessage | null {
   }
 }
 
-/**
- * Read a press on the Overflow button as the Task it was about, or null.
- *
- * The other half of `overflowId`: what goes out on the button comes back on the
- * press, so the Task id makes the round trip and roma remembers nothing between
- * the offer and its being taken.
- */
+/** Read a press on the Overflow button as the Task it was about, or null. */
 export function readOverflowTaken(event: DiscordEvent): string | null {
   const { press } = event
   if (press === null) return null
@@ -373,22 +294,12 @@ export function readOverflowTaken(event: DiscordEvent): string | null {
 }
 
 /**
- * Complete the passage this message quotes, or answer that there is none.
+ * Complete the passage this message quotes, or answer that there is none,
+ * fetching it over REST where it arrived empty. Run it before `toIngress`.
  *
- * Both of ADR-0021's cases exist on Discord and neither arrives usable: the
- * quoted message is somebody else's and does not mention roma, so its content is
- * empty under the no-privileged-intent decision. So roma fetches it over REST
- * and completes the event **before** `toIngress` reads it, which is what keeps
- * that function synchronous and reading a whole event (ADR-0029).
- *
- * **A fetch that fails or is refused yields no Quotation at all.** The fallback
- * and not supporting Quotations are deliberately one code path, which is what
- * makes the unverified premise behind the fetch a question rather than a risk.
- *
- * A forwarded passage carries no author — `message_snapshots` excludes it — and
- * comes back with `author: null` rather than with a guess, because unattributed
- * words in front of the model are read as the Caller's own and an invented
- * attribution is the one thing worse than none.
+ * **A fetch that fails or is refused yields no Quotation at all**, logged as
+ * `quote-unfetched`. A forwarded passage comes back with `author: null`, because
+ * `message_snapshots` excludes the author.
  */
 export async function completedQuotation(
   message: DiscordMessage,
@@ -485,14 +396,9 @@ function first(value: unknown): unknown {
 }
 
 /**
- * The three readings every Discord payload needs, exported for the one other
- * file that reads one.
- *
- * A Gateway frame and a message are the same kind of thing to a reader — fields
- * of unknown type off an object that may not be an object — and the Transport
- * reads frames for the same reason this file reads messages. Two copies of these
- * would be two places for "absent" and "the wrong type" to stop meaning the same
- * thing.
+ * The three readings every Discord payload needs, exported for the Transport,
+ * which reads Gateway frames: one copy, so "absent" and "the wrong type" keep
+ * meaning the same thing in both files.
  */
 export function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null

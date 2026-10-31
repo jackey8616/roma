@@ -544,6 +544,8 @@ insurance ADR-0012 actually bought; what was never bought is the alert.
 Keyed on **model work** rather than on money, because model work is what the
 membership rule is about — "read-only", "drives no Turn". Cost is a downstream
 function of it that moves with pricing, plans and models; output tokens do not.
+Output rather than input, because input moves for reasons that are not the
+entry's doing: a cache read is counted there.
 And it is visible: on the same result where the top-level `usage` reported zeros,
 `modelUsage` moved by `+2,019` input and `+1,978` output tokens. roma already
 reads this object — ADR-0012's rejected alternative measured
@@ -580,7 +582,8 @@ compounds the backlog".
 **`status: "compacting"` is reported as progress.** The Acknowledgement's
 vocabulary is "which tool is running … how much of the answer has been written",
 and a Compaction has neither, so without this the Acknowledgement idles for the
-whole 19,487ms. It is the same shape of dead stream `readToolStarted` already
+whole 19,487ms — up to 28,517ms on the manual path
+(`docs/manual-compaction-verification.md`). It is the same shape of dead stream `readToolStarted` already
 exists for.
 
 ### What the Caller is told

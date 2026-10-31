@@ -1,15 +1,7 @@
 import { createSign } from 'node:crypto'
 import type { MintedToken, MintsTokens } from '../reach.js'
 
-/**
- * A Minter that also knows which identity its tokens act as.
- *
- * Declared here rather than in the Core, because the account is what this
- * directory's Reach announces and proves with, and nothing outside reads it.
- * There is no `installation()` equivalent: a Cloud Reach reports no inventory —
- * roma is told which identity to hand over and nothing about what that identity
- * may do (ADR-0015).
- */
+/** A Minter that also knows which identity its tokens act as. */
 export interface CloudMinter extends MintsTokens {
   /** How the identity names itself, as an operator would recognise it. */
   readonly account: string
@@ -51,11 +43,11 @@ export class CloudRefused extends Error {
 }
 
 export interface GoogleCloudMinterOptions {
-  /** The identity's own name for itself. `client_email`, off the key. */
+  /** `client_email`, off the key. */
   readonly account: string
-  /** The key's private half, PEM. Read from a file by `readCloudEnv`. */
+  /** The key's private half, PEM. */
   readonly privateKey: string
-  /** Where the exchange happens. The key file's `token_uri`. */
+  /** The key file's `token_uri`. */
   readonly tokenEndpoint: string
   /** Injected so that every decision here can be asserted without a network. */
   readonly fetch?: typeof globalThis.fetch
@@ -65,28 +57,8 @@ export interface GoogleCloudMinterOptions {
 /**
  * The only thing in roma that holds the Cloud Reach's key.
  *
- * Everything it does is one documented exchange with a signed assertion in front
- * of it, and it caches nothing: refreshing before expiry, serving concurrent
- * askers from one mint and discarding a rejected token are `FreshTokens`',
- * which is arithmetic rather than product knowledge and is tested against a fake
- * of the port.
- *
- * Signed here rather than with a library, exactly as `appJwt` is.
+ * Caches nothing: refreshing, single-flight and discarding are `FreshTokens`'.
  * Enforced by `fence:cloud-never-resolves-a-credential`.
- *
- * **The key never leaves this object.** What the agent is handed expires within
- * the hour, which is the whole of what ADR-0015 buys: the agent can narrow what
- * it was given and can never widen it, because widening needs the key.
- *
- * It is **not** out of the agent's reach, and neither is the App's PEM — the key
- * is a file mounted into the container roma runs in, the agent's Claude Code
- * process is a child of roma's, and they share a uid. `github-minter.ts` records
- * that gap for the other provider and it is the same gap here.
- *
- * **Nothing here has been measured.** Every behaviour it relies on is Google's
- * documentation and not this repository's observation — no Cloud Reach has ever
- * existed (ADR-0015, Verification status). The one thing that *was* measured is
- * that this endpoint answers a credential-shaped request at all.
  */
 export class GoogleCloudMinter implements CloudMinter {
   readonly account: string

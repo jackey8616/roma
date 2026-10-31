@@ -1,93 +1,30 @@
 /**
  * The Claude Code commands roma hands over as themselves.
  *
- * A Relay is named by what roma does with it rather than by what it costs
- * (ADR-0012, ADR-0018): roma relays it to the Session's process instead of
- * giving it to the model to read. The list spans two cost classes and the name
- * says nothing about either, which is the point — a term defined by one build's
- * behaviour is a term that turns false on somebody else's release, and
- * `shared-window.ts` is already a case of that.
+ * **This list is a person's judgement about Claude Code 2.1.220**, the build
+ * every entry was measured on, and is re-audited by hand for safety and for cost
+ * whenever the pin moves. Naming the version is what lists this file in the
+ * drift report. Enforced by `fence:pin-lists-name-the-version`.
  *
- * **Called a Readout until ADR-0018.** That name was true of four entries that
- * each read a value out, and became a lie the moment one of them discarded sixty
- * thousand tokens of conversation and billed several times a quiet Turn. ADR-0012
- * was careful that the *definition* would not rot and left the *name* naming its
- * members' behaviour; widening the membership is what made the name the exact
- * kind of claim that ADR was written to prevent.
- *
- * **This list is a person's judgement about Claude Code 2.1.220** — the ADR-0007
- * pin, and the build every entry below was measured on. The version is named here
- * so the drift report's working-tree sweep lists this file under what rests on
- * the pin, which is what ADR-0012 left open: "roma now has a list that must be
- * re-audited whenever the ADR-0007 pin moves. Nothing enforces that." It still
- * does not enforce it. What changes is that the re-audit list stops being
- * something somebody has to remember and becomes something the report prints.
- * `src/model-menu.ts` carries the same line for the same reason. Since ADR-0018
- * that re-audit asks each entry a second question — not only "is this still safe"
- * but "does it still cost what the table says".
- *
- * **The membership rule: a Relay is non-interactive, and it changes nothing roma
- * holds a belief about.** ADR-0012's rule said "read-only, non-interactive,
- * drives no Turn, changes no state of the Session or of Claude Code"; two of
- * those four are gone and the last is rewritten, because it was a claim about
- * *Claude Code's* state, which moves on somebody else's release schedule. What
- * roma believes is a list rather than a judgement:
- *
- * | roma believes | broken by |
- * | --- | --- |
- * | which session id this Conversation resumes to | `/clear` |
- * | which model this Session runs on | `/model` |
- * | which effort it runs at | `/effort` |
- * | what the settings file every Session shares says | `/config` |
- * | that auto-compaction is on, as a decision roma made | `/autocompact` |
- * | **what is in the context** | **nobody — roma never reads the Transcript** |
- *
- * The last row is why `/compact` is here, and it is here as a consequence of the
- * rule rather than as an exception carved for it: `/compact` changes Claude
- * Code's state and changes nothing that is roma's.
- *
- * **And a second clause: a Relay's answer must be true of the Session, not
- * merely of the process serving it.** Eviction's promise read as a constraint on
- * what may be relayed rather than a new rule — the first clause is about changes
- * and this one is about answers, which is how `/usage` passed the table above
- * exactly as written while reporting counters that were zeroed at every spawn
- * (ADR-0027). Unlike the first it is a property a machine can be asked — send
- * it, evict, resume, send it again, and the answer should not have moved — and
- * nobody has yet asked it of `/context`, which is now the only free entry there
- * is to ask it of.
- *
- * Applied by a person, and re-applied whenever the pin moves — nothing in the
- * stream marks a command as safe, so the first clause cannot be checked by
- * machine. Exactly one part of it can, and is: that no string here is also a
- * Command.
- *
+ * Nothing in the stream marks a command as safe, so membership is applied by a
+ * person. One part is checked by machine: no string here is also a Command.
  * Enforced by `fence:relays-no-command-overlap` and by `fence:relays-whitelist-fails-closed`.
  */
 
 /**
- * What one entry is expected to cost, which is what decides how it is governed.
- *
- * Not part of what a Relay *is* — ADR-0018's whole argument is that the shape a
- * message takes on the wire and what governs it are different axes — but roma
- * has to hold an expectation in order to be surprised by it, and the drift check
- * in the Core is what does the being surprised.
+ * What one entry is expected to cost, which decides how it is governed. The
+ * Core's drift check is what notices an entry doing otherwise.
  */
 export type RelayCost =
   /**
-   * Answers locally: no model work, no money, milliseconds.
-   *
-   * Governed exactly as ADR-0012 left it — serialised against its Session,
-   * outside the concurrency cap, acknowledged only where it cannot answer at
-   * once, and out of `/stop`'s reach.
+   * Answers locally: no model work, no money, milliseconds. Serialised against
+   * its Session, outside the concurrency cap, acknowledged only where it cannot
+   * answer at once, and out of `/stop`'s reach.
    */
   | 'free'
   /**
    * Drives a Turn, so it is governed as a Task in every respect: queued, counted
    * against the cap of three, stoppable, Parkable, Overflowable and audited.
-   *
-   * Nothing is invented for it. ADR-0012 bought the free entries' exemption from
-   * the cap by arguing "no Turn, no money, no retry", and not one clause of that
-   * survives a twenty-second, five-cent Turn.
    */
   | 'paid'
 
@@ -123,21 +60,9 @@ export interface RelayRequest {
   /** The canonical spelling from the table, which is what goes on the wire. */
   readonly command: string
   /**
-   * What followed the head, **verbatim** — case, newlines and all. Null where
-   * nothing did.
-   *
-   * Unlike a Command's argument, which is lowercased and checked against a Menu.
-   * This one is prose for a summariser and roma validates none of it: `/model
-   * opus` has the Model Menu to check against, and `keep the architecture
-   * decisions` has nothing. Not an escalation — the same person can already put
-   * any text in front of the model as a Task — but a real consequence in a shared
-   * thread, since one person's instructions decide what survives for everybody.
-   * The Audit Record answers it afterwards, and nothing announces it at the time.
-   *
-   * roma does not inspect it for marker-shaped text either. Naming another person
-   * in a compaction instruction — "keep what Bob said about the deploy" — is the
-   * feature working, so a rule that treats a name as suspicious fights the thing
-   * it is protecting.
+   * What followed the head, **verbatim**: case, newlines and all. Null where
+   * nothing did. Unlike a Command's argument, roma neither validates nor
+   * inspects it.
    */
   readonly argument: string | null
   readonly cost: RelayCost
@@ -147,15 +72,9 @@ export interface RelayRequest {
  * Read a message as a Relay, or null if it is not one.
  *
  * Either the whole message is an entry, or it is an argument-taking head and
- * everything after the first run of whitespace is its argument. The whole-message
- * half is ADR-0012's and carries the safety of the marker's placement: because an
- * exact match is required there, what roma puts on the wire is a string from the
- * table above rather than anything a person typed, which is what makes writing
- * the Caller Marker *after* it safe — there is no Caller text for a forged marker
- * to hide in.
- *
- * Case is ignored on the head, and the canonical spelling is what gets sent. The
- * argument is left exactly as it was typed.
+ * everything after the first run of whitespace is its argument. Case is ignored
+ * on the head, and the canonical spelling is what gets sent. The argument is
+ * left exactly as it was typed.
  *
  * Enforced by `fence:relays-argument-verbatim`.
  */
@@ -185,12 +104,8 @@ function entryFor(spelling: string): RelayEntry | undefined {
 }
 
 /**
- * Every spelling on the list, in the order the table declares them.
- *
- * Exported for the two checks that have to read the real table rather than a
- * copy of it: that no string here is also a Command — the one machine-checkable
- * half of the membership rule — and the seam 2 case that asserts each entry's
- * cost class against the pinned build.
+ * Every spelling on the list, in the order the table declares them. For the
+ * checks that must read the real table rather than a copy.
  */
 export function relaySpellings(): readonly string[] {
   return [...RELAYS.keys()]

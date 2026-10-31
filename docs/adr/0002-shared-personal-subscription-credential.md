@@ -128,7 +128,9 @@ valve.
 The valve is **off by default** and offered at the moment a task is blocked,
 rather than as a setting to be enabled in advance — people are poor at
 predicting which work will turn out to be interruptible, and are well placed to
-judge it once blocked.
+judge it once blocked. The button says that it costs money ("Run it on metered
+billing"), because that is the whole of the decision: a button labelled "Run
+anyway" would be the choice made by somebody who did not know they were making it.
 
 **Amended again — only `rejected` is spent.** Enforced by
 `fence:only-rejected-is-spent`. An earlier amendment here read *anything that is

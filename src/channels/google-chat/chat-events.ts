@@ -15,21 +15,8 @@ export type ChatEventLogRecord =
   | {
       /**
        * An event carried a quoted message and roma read no Quotation out of it.
-       *
-       * `attachment-unread`'s argument, and it lands harder here. Chat's
-       * `quotedMessageSnapshot` is documented output-only on the *Message
-       * resource*, and what an interaction event carries is a separate question
-       * this repository cannot answer — so the single reading everything else
-       * rests on, that the words arrive in the payload, is the one nobody has
-       * seen hold. If it does not, roma answers every quoted message as though
-       * the quotation were not there, which is exactly what roma did before this
-       * existed. This line is the difference (ADR-0021).
-       *
-       * `keys` rather than the payload, for the reason below: a quotation is
-       * somebody's words, and the Operator Log is not where roma puts those. The
-       * snapshot's own keys are carried under their path, because "the snapshot
-       * is missing" and "the snapshot is there and empty" are different faults
-       * with different repairs.
+       * Carries the keys that arrived, the snapshot's under their path, and never
+       * the content.
        */
       readonly event: 'quote-unread'
       readonly keys: readonly string[]
@@ -39,31 +26,23 @@ export type ChatEventLogRecord =
        * An event carried something attachment-shaped and roma read no Enclosure
        * out of it.
        *
-       * The one line standing between "roma cannot read this payload" and the bug
-       * it was built to fix. Everything in this file was written from Google's
-       * documentation rather than from a capture, and the envelope depends on how
-       * an event was delivered — roma is on Pub/Sub, not an HTTP webhook — so the
-       * shape below is a guess until a real message proves it. A wrong guess
-       * produces `null` and falls through: no throw, no reply, roma silently
-       * ignoring images, which is indistinguishable from the fault this whole area
-       * exists to remove. This is what makes it distinguishable.
+       * The shape this file reads was written from Google's documentation rather
+       * than from a capture, and the envelope depends on delivery (roma is on
+       * Pub/Sub, not an HTTP webhook). A wrong guess reads as `null` and falls
+       * through with no throw and no reply, which looks exactly like roma ignoring
+       * images; this line is what tells the two apart.
        *
        * `keys` rather than the payload, because an attachment's metadata is
-       * somebody's filename and roma writes an Operator Log it does not otherwise
-       * put user content in. The keys are enough to say which shape arrived.
+       * somebody's filename, and the Operator Log holds no user content.
        */
       readonly event: 'attachment-unread'
       readonly keys: readonly string[]
     }
 
 /**
- * One event as Google Chat delivers it.
- *
- * Left open for the reason `ClaudeEvent` is: the shape is not ours. Chat adds
- * fields, and the envelope an event arrives in depends on how it was delivered —
- * which is the ingress subscriber's business (#13), not this file's. Everything
- * roma reads out of one is read below, so a change in Chat's shape breaks in one
- * place rather than everywhere.
+ * One event as Google Chat delivers it. Left open because the shape is Chat's and
+ * it adds fields; everything roma reads out of one is read in this file, so a
+ * change in Chat's shape breaks in one place.
  */
 export type ChatEvent = Readonly<Record<string, unknown>>
 
@@ -73,10 +52,8 @@ const DM = 'DM'
 
 /**
  * Read one Chat event as a message for the Core, or null if roma should not
- * answer it.
- *
- * This is where a Channel stops existing: a thread, a space, a sender and an
- * @-mention go in, and what comes out is a key, a Caller and some text.
+ * answer it: a thread, a space, a sender and an @-mention go in, and a key, a
+ * Caller and some text come out.
  *
  * Null covers everything roma is delivered and does not answer: the app being
  * added to or removed from a space, a card click, and anything an app said.
@@ -188,13 +165,7 @@ function readQuotation(
 
 /** What reading an event needs beyond the event. */
 export interface ReadOptions {
-  /**
-   * How to fetch an attachment's bytes, or absent where roma cannot.
-   *
-   * Optional so that reading an event stays a pure function in the tests that
-   * only care about keys and text. A read with no downloader produces no
-   * Enclosures, which is what a deployment with no Chat credentials should do.
-   */
+  /** How to fetch an attachment's bytes. Absent, a read produces no Enclosures. */
   readonly download?: DownloadAttachment
   readonly log?: OperatorLog<ChatEventLogRecord>
 }
@@ -277,25 +248,17 @@ export const TAKE_OVERFLOW = 'takeOverflow'
 export const TASK_ID_PARAMETER = 'taskId'
 
 /**
- * The other thing anybody can press: one name off a Menu (ADR-0023).
- *
- * Three constants for one round trip, because this button carries two facts
- * where Overflow's carries one — which Command a press means, and which name off
- * its Menu.
+ * A press on one name off a Menu: three constants for one round trip, because
+ * this button carries which Command a press means and which name off its Menu.
  */
 export const CHOOSE = 'choose'
 export const CHOOSES_PARAMETER = 'chooses'
 export const OPTION_PARAMETER = 'option'
 
 /**
- * Read a click on the Overflow button as the Task it was about, or null.
- *
- * The Task id is one roma minted and put on the offer, so this can only ever
- * answer an offer roma actually made.
- *
- * Written from Google's documented shape rather than from a capture, like every
- * Chat event in this repo: nothing here can produce a real one. `pressed` below
- * carries what that costs and how it is paid for.
+ * Read a click on the Overflow button as the Task it was about, or null. The Task
+ * id is one roma minted and put on the offer, so this only ever answers an offer
+ * roma made. Written from Google's documented shape, not from a capture.
  */
 export function readOverflowTaken(event: ChatEvent): string | null {
   return pressed(event, TAKE_OVERFLOW, TASK_ID_PARAMETER)
@@ -303,21 +266,11 @@ export function readOverflowTaken(event: ChatEvent): string | null {
 
 /**
  * Read a press on a Menu button as the message the Caller would have typed, or
- * null if this event is not one.
- *
- * **Pressing is typing** (ADR-0023). What comes out is an ordinary Ingress
- * Message carrying `/model opus`, so the press goes down the path every typed
- * Command goes down and the Core learns nothing new — which is what makes a card
- * from three weeks ago safe to press, and why nothing has to be remembered
- * between posting one and its being pressed.
+ * null if this event is not one. What comes out is an ordinary Ingress Message
+ * carrying, say, `/model opus`.
  *
  * Whoever pressed is on `event.user`, never on the message's sender.
  * Enforced by `fence:gchat-press-is-read-off-the-presser`.
- *
- * Written from Google's documented shape rather than from a capture, like every
- * other reading in this file, and this one rests on the message travelling with
- * the press — without it there is no thread and so no Conversation Key, and the
- * whole arrangement would need revisiting rather than patching (ADR-0023).
  */
 export function readChosenOption(event: ChatEvent): IngressMessage | null {
   const chooses = pressed(event, CHOOSE, CHOOSES_PARAMETER)

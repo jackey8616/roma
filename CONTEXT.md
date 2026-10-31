@@ -161,7 +161,8 @@ fuller version roma can reach)
 What the Core hands back to an Adapter — the result of a Task, why there isn't
 one, or what the Task is doing meanwhile. It says what happened and whose it is,
 never how either should look: how a failure reads and how a person is addressed
-are the Channel's.
+are the Channel's. The one sentence the Core does write is a failure's reason,
+which every Channel passes through, since it reads the same on all of them.
 _Avoid_: response, reply, command (a command is `/clear`, `/model` or `/stop`)
 
 **Acknowledgement**:
@@ -282,7 +283,7 @@ deletes the first and steps over the second, so a Conversation can go quiet for 
 fortnight, lose the directory it was working in, and still come back on the model
 and the effort somebody chose for it. Six kinds of file rely on that and were
 each added by somebody who had to work it out again — a Session Generation, a
-Chosen Model, a Chosen Effort, the Runtime a Session runs on, the record that a
+Chosen Model, a Chosen Effort, a Chosen Caveman, the record that a
 Session has had its Opening, and the half-written record a machine that lost
 power leaves behind. The Opening record is the one that shows what the rule
 buys: the same Session's spawn file lives *inside* the Working Directory and is
@@ -378,7 +379,8 @@ _Avoid_: timing out, garbage collection, idling out
 **Command**:
 One of the seven messages roma answers itself instead of handing to the Runtime:
 `/stop` ends the work this Conversation has in flight — running, queued, or
-still starting — `/clear` gives the Conversation a fresh Session, `/model` sets
+still starting — and leaves the Session intact, so the next message can
+redirect it rather than start over; `/clear` gives the Conversation a fresh Session, `/model` sets
 its Chosen Model, `/effort` sets its Chosen Effort, `/caveman` sets its Chosen
 Caveman, `/config` says what this Session is set to and refuses to set anything
 else, and `/usage` says what the deployment has spent this calendar month.

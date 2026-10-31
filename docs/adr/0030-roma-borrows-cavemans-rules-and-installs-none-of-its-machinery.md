@@ -404,7 +404,9 @@ exits before filtering for exactly this reason, and roma does the same.
 The **Caveman Menu** offers `off`, `lite`, `full`, `ultra`, `wenyan-full`, and
 `default` — six, the same width as the Effort Menu, and under the ten buttons on
 one message ADR-0023 declines to open. `wenyan` is not on it because it is an
-alias. `commit`, `review` and `compress` are not on it because they defer to
+alias — caveman's hook folds it into `wenyan-full`, and roma relays nothing to that
+hook, so a second accepted spelling would be one roma chose to claim rather than
+inherited, and the Audit Record would carry two spellings for one level. `commit`, `review` and `compress` are not on it because they defer to
 skills roma does not install and would point at nothing.
 
 `wenyan-lite` and `wenyan-ultra` are accepted by `ROMA_CAVEMAN` and never drawn,
@@ -458,7 +460,9 @@ not change what happens, it makes roma able to say what happens.*
 - **A fourth `swap` reason.** `'caveman'` beside `'credential'`, `'model'` and
   `'effort'`. Its `from`/`to` are strings, so it joins the arm that already
   carries two — and an operator reading an unexplained respawn gets a fourth
-  answer to *which*.
+  answer to *which*. Where several terms move at once the swap names the model
+  first, the effort second and the Caveman third: the model is the larger fact,
+  and every term is on the `spawn` record that follows anyway.
 - **A third Chosen Record adapter.** `chosenCavemen` beside `chosenModels` and
   `chosenEfforts`. The entry in `CONTEXT.md` that says "used twice" is amended
   rather than left to rot.

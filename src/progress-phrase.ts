@@ -3,28 +3,13 @@ import type { TaskProgress } from './channel-adapter.js'
 /**
  * What a Task is doing, in the words an acknowledgement says it in.
  *
- * **The Core's sentence rather than a Channel's, on the argument a failure's
- * reason is the Core's too**: every one of these is a fact about the Turn — which
- * phase, how many tokens, which tool, how much has been written — and a fact that
- * reads the same wherever it is drawn is one sentence rather than one per
- * Channel. What stays the Channel's is everything about the message it goes in:
- * how a person is addressed in it, what its limit is, and whether it can be
- * edited at all. A Channel that wants other words is free to write them; two
- * that arrived at the same ones were writing this.
+ * The Core's sentence rather than a Channel's: every phrase is a fact about the
+ * Turn, and a fact that reads the same wherever it is drawn is one sentence.
+ * How a person is addressed, the message's limit and whether it can be edited
+ * stay the Channel's.
  *
- * Deliberately short. The message this goes in is edited every few seconds while
- * a Task runs, so it is read at a glance and never read twice — everything worth
- * keeping is in the Result (ADR-0010).
- *
- * Every phrase is a fixed sentence around a small number except the tool's,
- * which is named by Claude Code's own description of what is running and is
- * therefore the only one with no length of roma's own. `MAX_TOOL_CHARS` is a
- * judgement rather than a measurement — behind it are two recorded
- * `task_started` descriptions at 8 and 56 characters, which says the ordinary
- * case is never cut and says nothing about the tail. It bounds the command
- * alone, and a Channel is still expected to bound the finished string against
- * its own limit: that one is somebody else's hard number where a character over
- * is a refused message, and this one is roma's own reading limit.
+ * Bounds the tool's command to `MAX_TOOL_CHARS`, which is roma's reading limit
+ * and not a Channel's: a Channel still bounds the finished string against its own.
  */
 export function progressPhrase(progress: TaskProgress): string {
   switch (progress.phase) {
