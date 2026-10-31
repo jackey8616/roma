@@ -48,9 +48,9 @@ Single-context — one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/
 
 ### Comments
 
-A guardrail — a plausible change plus the concrete thing it would break — is a **test not yet
-written**, not a comment. Write the check on the highest rung that holds it (type > lint > test >
-`scripts/check-*.ts`), show it red against the re-planted bug, and leave one line citing it:
-`Enforced by` and its name. In `src/` outside tests, `roma/comment-whitelist` allows only that
-line, a `SAFETY:` comment, or a suppression with a `-- reason`; JSDoc on a reachable symbol is out
-of scope. Never use `--no-verify`. See `docs/agents/comment-gradient.md` and ADR-0031.
+**Write no comments.** The only comments allowed are tool directives (`eslint-disable…`,
+`@ts-expect-error`) whose reason after ` -- ` is one name that resolves (`fence:<id>`,
+`roma/<rule>` or `ADR-NNNN`). `roma/comment-whitelist` enforces it in every TS/JS file, and a
+`PostToolUse` hook fails the edit that adds one. A change plus what it would break is a test
+titled `[fence:<id>]`; a reason goes in `docs/adr/`; a term in `CONTEXT.md`. Never use
+`--no-verify`. See `docs/agents/comment-gradient.md` and ADR-0032.
