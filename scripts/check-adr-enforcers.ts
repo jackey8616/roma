@@ -1,11 +1,3 @@
-/**
- * Fails when an ADR names a check that does not exist, or when two test files
- * claim one fence name. The judgement is in `scripts/adr-enforcers.ts` and
- * `scripts/fence-names.ts`.
- *
- *   usage: npm run check:adr-enforcers
- */
-
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'

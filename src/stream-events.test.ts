@@ -8,9 +8,6 @@ import {
 import { GENERATING, recordedStream } from '../test/support/recorded-stream.js'
 
 describe('the prose of a generating Turn', () => {
-  // With `--include-partial-messages` the same 17706 characters arrive twice:
-  // once as 194 `text_delta` events, and once more as the complete `assistant`
-  // message 85ms before the terminal result.
   it('is read once, off the complete message and never off the deltas [fence:stream-assistant-text-once]', () => {
     const why =
       'readAssistantText must read complete `assistant` messages only, never `stream_event` ' +
@@ -26,7 +23,6 @@ describe('the prose of a generating Turn', () => {
 })
 
 describe('the output tokens a terminal event reports', () => {
-  /** The first Turn of a process that names two models: 13 on haiku and 4 on sonnet. */
   const [result] = recordedStream('three-turns-one-process')
     .turn(1)
     .filter((event) => event.type === 'result') as [ClaudeEvent]

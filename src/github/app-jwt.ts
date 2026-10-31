@@ -1,41 +1,18 @@
 import { createSign } from 'node:crypto'
 
-/**
- * How long a JWT roma signs is good for.
- *
- * Nine against a documented maximum of ten, measured from `iat`: a span GitHub
- * reads as over ten minutes is refused outright, and a credential used for one
- * request loses nothing by the margin.
- *
- * Unverified — GitHub's documented behaviour, and nothing here has driven a real
- * App (`docs/github-app-verification.md`).
- */
 const LIFETIME_S = 9 * 60
 
-/** Enforced by `fence:github-jwt-backdated-once`. */
 const BACKDATED_S = 60
 
 export interface AppJwtOptions {
-  /** The GitHub App's id: the JWT's `iss`. */
   readonly appId: string
-  /** The App's private key, PEM as GitHub issued it. */
   readonly privateKey: string
-  /** Epoch milliseconds. Defaults to `Date.now()`. */
   readonly now?: number
 }
 
-/**
- * A JWT the App can exchange for an Installation Token, backdated a minute and
- * good for nine. Use it for one request, inside the Minter: never cache it or
- * hand it on.
- *
- * Signed with `node:crypto` rather than a library, because a dependency that
- * reaches a private key is one somebody has to keep reading.
- */
 export function appJwt({ appId, privateKey, now = Date.now() }: AppJwtOptions): string {
   const issuedAt = Math.floor(now / 1000) - BACKDATED_S
   const header = { alg: 'RS256', typ: 'JWT' }
-  // Enforced by `fence:github-jwt-backdated-once`.
   const payload = { iat: issuedAt, exp: issuedAt + LIFETIME_S, iss: appId }
 
   const signed = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(payload))}`

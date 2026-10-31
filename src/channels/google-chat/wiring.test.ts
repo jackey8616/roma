@@ -24,26 +24,9 @@ import { FakePubSubMessage, FakeSubscription } from '../../../test/support/fake-
 import { romaFixture, teardownRoma, type RomaFixture } from '../../../test/support/roma-fixture.js'
 import { BLOCKED_WITH_OVERAGE, feed, OK } from '../../../test/support/recorded-stream.js'
 
-// The one test where roma is assembled out of its real parts: a Pub/Sub message
-// goes in, `PubSubTransport` decodes it, `GoogleChatAdapter` reads it, the Core
-// runs it, and `HttpChatApi` turns the answer into the request Google would have
-// received. Only two things are doubles, and they are the two nothing here can
-// have: Claude Code (the recorded stream) and the network on either side.
-//
-// It exists because every other test in this repo proves one of these in
-// isolation, and the failure they cannot see is the one at the joins — a
-// Transport emitting events the Adapter cannot read produces a roma that runs
-// perfectly and answers nobody. `bind`'s type parameter catches that at compile
-// time; this catches the rest of it.
-//
-// The Chat event below is still **written from Google's documentation, not
-// captured**. Nothing in this repo can capture one — see ADR-0004, which is
-// explicit that the payload's fields are the thing a real Workspace closes.
-
 const SPACE = 'spaces/AAAA'
 const THREAD = `${SPACE}/threads/thread-1`
 const SENDER = 'users/17'
-/** The mention roma puts in front of every message it posts about a Task. */
 const TO = `<${SENDER}> `
 
 const INSTALLATION = { account: 'a-team', repositories: ['a-team/roma', 'a-team/infra'] }
@@ -51,7 +34,6 @@ const INSTALLATION = { account: 'a-team', repositories: ['a-team/roma', 'a-team/
 const OAUTH: Credential = { kind: 'shared-window', oauthToken: 'oauth-token' }
 const METERED: Credential = { kind: 'overflow', apiKey: 'metered-key' }
 
-/** A message in a space, addressed to roma, as Chat publishes one. */
 function mentioned(text: string): Record<string, unknown> {
   return {
     type: 'MESSAGE',
@@ -76,8 +58,6 @@ async function boot({
   const fixture = romaFixture('wiring')
   fixtures.push(fixture)
 
-  // Chat with the network taken out, and nothing else taken out: the requests
-  // recorded here are the ones Google would have been sent.
   const requests: ChatRequest[] = []
   let posted = 0
   const api = new HttpChatApi({
@@ -91,17 +71,11 @@ async function boot({
 
   const subscription = new FakeSubscription()
   const log: ShimLogRecord[] = []
-  // The real announcement over a Minter with no App behind it: what a Session is
-  // told it can reach is assembled here out of the same two parts production
-  // uses, and only the forge itself is a double.
   const minter = new FakeMinter({ installation: INSTALLATION })
   const shims = fakeShims()
   fixture.alsoRemove(shims.dir)
   const serving = serve({
     credential: OAUTH,
-    // The real Reaches over Minters with no provider behind them: what a Session
-    // is told it can reach is assembled here out of the same parts production
-    // uses, announcement included.
     reaches: {
       code: githubReach(minter),
       cloud: cloud ?? noCloudReach(),
@@ -130,7 +104,6 @@ async function boot({
     shims,
     log,
     roma,
-    /** Everything roma posted into Chat, in order. */
     texts: () =>
       requests.filter(({ method }) => method === 'POST').map(({ body }) => body['text'] as string),
     procFor: (conversationKey = THREAD) => fixture.procFor(conversationKey),
@@ -147,9 +120,6 @@ afterEach(async () => {
 })
 
 describe('a Chat message, all the way through and back', () => {
-  // The first acceptance criterion of #13, asserted against the real parts:
-  // "messages pulled from the subscription reach the Core and produce a reply on
-  // the Channel".
   it('answers in the thread it was asked in, and finishes with the message', async () => {
     const roma = await boot()
 
@@ -158,8 +128,6 @@ describe('a Chat message, all the way through and back', () => {
     feed(roma.procFor(), OK)
     await until(() => message.settlements.length > 0)
 
-    // The answer, as its own message in the caller's thread — with the option
-    // that establishes the thread, which is the only way an app gets one.
     expect(roma.requests).toContainEqual({
       method: 'POST',
       url: expect.stringContaining(
@@ -170,9 +138,6 @@ describe('a Chat message, all the way through and back', () => {
     expect(message.settlements).toEqual(['ack'])
   })
 
-  // The Session is derived from the Conversation Key the Adapter minted out of
-  // the event, with nothing stored in between. Getting this wrong is how every
-  // message in a space would share one context, or each get its own.
   it('runs it on the Session its thread derives to', async () => {
     const roma = await boot()
 
@@ -184,10 +149,6 @@ describe('a Chat message, all the way through and back', () => {
     expect(roma.claude.lastSpawn.cwd).toContain(sessionIdFor(THREAD))
   })
 
-  // ADR-0003's unconditional rule, through the real parts: the result is its own
-  // message, never the acknowledgement edited one last time. The acknowledgement
-  // is the one before it, posted once — a Turn this short never gets a second
-  // update past the throttle, so an edit is not what this can assert.
   it('posts the acknowledgement once and the result as a message of its own', async () => {
     const roma = await boot()
 
@@ -196,11 +157,6 @@ describe('a Chat message, all the way through and back', () => {
     feed(roma.procFor(), OK)
     await until(() => message.settlements.length > 0)
 
-    // Three messages now, and the first is the Session's Opening: this is the one
-    // place the whole of ADR-0024 is proved against a real Chat request rather
-    // than against a recording Adapter, and it is proved by the Opening needing
-    // no rendering of its own — it is a `result`, so `render.ts` was already
-    // finished before this feature existed.
     const texts = roma.texts()
     expect(texts).toHaveLength(3)
     expect(texts.at(0)).toMatch(/This conversation is on /)
@@ -224,16 +180,11 @@ describe('a Chat message, all the way through and back', () => {
 
     expect(message.settlements).toEqual(['ack'])
     expect(roma.requests).toEqual([])
-    // Only the self-check's probe. No Session was ever asked for.
     expect(roma.claude.spawns).toHaveLength(1)
   })
 })
 
 describe('the Overflow offer, out on a card and back on a click', () => {
-  // The whole round trip through the real parts, and the one thing no other test
-  // covers: the Task id goes out inside a `cardsV2` payload and comes back
-  // inside a click event, through two files that have to agree about a shape
-  // neither of them owns.
   it('reruns the Task on metered billing when the button comes back', async () => {
     const roma = await boot()
 
@@ -242,12 +193,10 @@ describe('the Overflow offer, out on a card and back on a click', () => {
     feed(roma.procFor(), BLOCKED_WITH_OVERAGE)
     await flush()
 
-    // The offer, as a button on the message that reports the block.
     const offer = roma.requests.findLast(({ body }) => body['cardsV2'] !== undefined)
     const taskId = buttonTaskIdOf(offer)
     expect(taskId).toMatch(/\S/)
 
-    // The click, in the shape Chat's current interaction event uses.
     roma.subscription.publishJson(
       {
         type: 'CARD_CLICKED',
@@ -260,15 +209,9 @@ describe('the Overflow offer, out on a card and back on a click', () => {
     await until(() => message.settlements.length > 0)
 
     expect(roma.claude.lastSpawn.env).toMatchObject({ ANTHROPIC_API_KEY: 'metered-key' })
-    // What it cost is shown, which is ADR-0002's requirement of a metered reply.
     expect(roma.texts().at(-1)).toMatch(/metered billing/)
   })
 
-  // Chat has two parameter shapes and which one arrives depends on how the event
-  // was delivered — a fact `chat-events.ts` reads both ways for, and one nothing
-  // in this repo can verify against a real Workspace. Both are exercised so that
-  // dropping either would fail here rather than in production, silently, for
-  // half the deliveries.
   it('reads the older click shape too', async () => {
     const roma = await boot()
 
@@ -299,38 +242,20 @@ describe('the Overflow offer, out on a card and back on a click', () => {
 })
 
 describe('a Menu, out on a card and back on a press', () => {
-  /**
-   * The design's whole safety argument, and it crosses both seams: *pressing is
-   * typing* (ADR-0023).
-   *
-   * Neither seam can see it alone. Seam 1 knows the Core answers `/model opus` by
-   * moving the Session; seam 3 knows a press becomes the text `/model opus`. What
-   * neither proves is that the button roma actually posted carries the two
-   * parameters the reader actually reads — an Adapter emitting a button its own
-   * reader cannot read back gives you a roma that runs perfectly and answers
-   * nobody, which is the failure this file exists for.
-   */
   it('moves the Session onto the model whose button came back', async () => {
     const roma = await boot()
-    // Counted rather than assumed zero: booting spawns the Startup Self-Check's
-    // own probe, and what matters here is that answering `/model` adds nothing to
-    // it — roma owns the answer, so no process, no Turn and no money.
     const atBoot = roma.claude.processes.length
 
     roma.subscription.publishJson(mentioned('/model'), 'msg-1')
     await flush()
 
-    // The Menu, as buttons on the message that reports it.
     const card = roma.requests.findLast(({ body }) => body['cardsV2'] !== undefined)
     expect(labelsOf(card)).toEqual(['fable', 'opus', 'sonnet', 'haiku', 'default'])
     expect(roma.claude.processes).toHaveLength(atBoot)
 
-    // The press, in the shape Chat's current interaction event uses. Nothing of
-    // roma's is remembered between the card going out and this arriving.
     roma.subscription.publishJson(pressOf(card, 'opus'), 'msg-2')
     await flush()
 
-    // And the Session is on it, by the same path a typed `/model opus` takes.
     const message = roma.subscription.publishJson(mentioned('hello'), 'msg-3')
     await flush()
     feed(roma.procFor(), OK)
@@ -339,9 +264,6 @@ describe('a Menu, out on a card and back on a press', () => {
     expect(roma.claude.lastSpawn.args).toContain('claude-opus-5')
   })
 
-  // The other half of the same claim: a press is answered in the Conversation it
-  // was pressed in, addressed to whoever pressed, exactly as the typed Command
-  // would have been.
   it('answers the press in the thread, addressed to whoever pressed', async () => {
     const roma = await boot()
 
@@ -357,24 +279,6 @@ describe('a Menu, out on a card and back on a press', () => {
     expect(roma.texts().at(-1)).toContain('xhigh')
   })
 
-  /**
-   * The third Menu, and the reason this file gets a third case rather than the
-   * other two getting a Caveman row.
-   *
-   * `wenyan-full` is the first hyphenated name any roma Menu has carried, and the
-   * whole distance it travels is what nothing else can see: it leaves as a Menu
-   * constant, is posted as a real card by `HttpChatApi`, comes back on a press
-   * `pressOf` builds out of *that card's own parameters*, is read into the text
-   * `/caveman wenyan-full`, and has to survive `readCommand` splitting on
-   * whitespace at the far end. A name that lost the trip anywhere along it would
-   * not fail here as a refusal — it would arrive at the Core as prose, drive a
-   * Turn, and bill the Shared Window for a button roma offered (ADR-0023).
-   *
-   * Asserted through the spawn as well as through the reply, because the reply
-   * is a sentence and the record is the thing a press had to produce: what the
-   * next Session is actually told is the only place a press and a typed Command
-   * can be shown to have ended in the same state.
-   */
   it('moves the Session onto the hyphenated Caveman whose button came back', async () => {
     const roma = await boot()
 
@@ -420,16 +324,11 @@ describe('a message that is not one', () => {
 })
 
 describe('reaching the code, out of the real parts', () => {
-  // The whole credential path, assembled: a Session is spawned with a socket
-  // path and a Session id, roma is listening on that socket, and what comes back
-  // is a token. Only the forge is a double — the Minter is fake and everything
-  // between it and the process environment is the real thing.
   it('gives a Session a socket it can actually get a credential from', async () => {
     const roma = await boot()
     const message = roma.subscription.publishJson(mentioned('have a look at roma'), 'msg-1')
     await flush()
 
-    // Mid-Turn, which is when a `git clone` inside the agent's shell would ask.
     const sessionId = sessionIdFor(THREAD)
     const answer = await askMinter(roma.claude.lastSpawn.env['ROMA_MINTER_SOCKET'] ?? '', {
       session: sessionId,
@@ -441,16 +340,11 @@ describe('reaching the code, out of the real parts', () => {
     await until(() => message.settlements.length > 0)
 
     expect(answer.token).toBe('token-1')
-    // Attribution by Session, resolved to a Task through the Task Queue, which
-    // is the only thing that knows the answer — and it is a real Task id here
-    // rather than a null, because the Turn was in flight when the tool asked.
     const asked = roma.log.find((record) => record.event === 'credential')
     expect(asked).toMatchObject({ sessionId, path: 'a-team/roma.git' })
     expect(asked?.event === 'credential' ? asked.taskId : null).toMatch(/\S/)
   })
 
-  // Story 3 and 4, through the real announcement: a Session that is not told it
-  // has credentials refuses work it is perfectly able to do.
   it('tells the Session which repositories it reaches', async () => {
     const roma = await boot()
     roma.subscription.publishJson(mentioned('have a look at roma'), 'msg-1')
@@ -462,11 +356,6 @@ describe('reaching the code, out of the real parts', () => {
     feed(roma.procFor(), OK)
   })
 
-  // The same join, for the second capability, and deliberately no more than
-  // that: this file is the one place the seams meet, not the place this
-  // feature's behaviour is tested. What it catches is a Cloud Reach configured
-  // and never announced — a roma that mints perfectly and whose agent never
-  // knows it can ask.
   it('tells the Session about the Cloud Reach, where the deployment has one', async () => {
     const roma = await boot({ cloud: cloudReach(new FakeCloudMinter()) })
     roma.subscription.publishJson(mentioned('what is in that bucket'), 'msg-1')
@@ -478,11 +367,6 @@ describe('reaching the code, out of the real parts', () => {
     feed(roma.procFor(), OK)
   })
 
-  // The same join for the third capability, and no more than that: a Document
-  // Reach that does not assemble is what this file catches, and where its
-  // behaviour is asserted is `startup.test.ts` and `src/documents/`. The whole
-  // Reach is real here — both halves of its boot proof run — so a Depot proved at
-  // boot and then never announced would fail here.
   it('tells the Session about the Document Reach, where the deployment has one', async () => {
     const roma = await boot({ documents: documentReach(new FakeDocumentMinter()) })
     roma.subscription.publishJson(mentioned('write that up for us'), 'msg-1')
@@ -491,15 +375,12 @@ describe('reaching the code, out of the real parts', () => {
     const { args } = roma.claude.lastSpawn
     const announced = args[args.indexOf('--append-system-prompt') + 1] ?? ''
     expect(announced).toContain('roma-document-token')
-    // The Depot the proof found, rather than a folder roma was told about and
-    // never reached: `announce` reads what `prove` returned.
     expect(announced).toContain('FOLDER_ID')
 
     feed(roma.procFor(), OK)
   })
 })
 
-/** The Task id off the button in a card roma posted. */
 function buttonTaskIdOf(request: ChatRequest | undefined): string {
   const cards = request?.body['cardsV2'] as
     | [
@@ -529,13 +410,6 @@ function buttonTaskIdOf(request: ChatRequest | undefined): string {
   return taskId
 }
 
-/**
- * Wait for something the subscriber does detached from the call that started it.
- *
- * A Pub/Sub message handler is not awaited by whatever published the message, so
- * there is no promise for a test to hold. Polling the observable result is the
- * honest way to wait for one.
- */
 async function until(condition: () => boolean, attempts = 500): Promise<void> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (condition()) return
@@ -544,7 +418,6 @@ async function until(condition: () => boolean, attempts = 500): Promise<void> {
   throw new Error('gave up waiting')
 }
 
-/** Just enough of a posted card to read its buttons back out. */
 interface PostedCard {
   readonly card: {
     readonly sections: readonly {
@@ -562,7 +435,6 @@ interface PostedCard {
   }
 }
 
-/** What a posted card's buttons say, in the order Chat was asked to show them. */
 function buttonsOf(request: ChatRequest | undefined) {
   const cards = request?.body['cardsV2'] as readonly PostedCard[] | undefined
   const buttons = cards?.[0]?.card.sections[0]?.widgets[0]?.buttonList.buttons
@@ -574,12 +446,6 @@ function labelsOf(request: ChatRequest | undefined): string[] {
   return buttonsOf(request).map(({ text }) => text)
 }
 
-/**
- * A press on one of the buttons roma actually posted.
- *
- * Built from the card's own parameters rather than from strings a test wrote, so
- * that a button carrying something the reader cannot read fails here.
- */
 function pressOf(request: ChatRequest | undefined, label: string): Record<string, unknown> {
   const button = buttonsOf(request).find(({ text }) => text === label)
   if (button === undefined) throw new Error(`no button labelled ${label}`)

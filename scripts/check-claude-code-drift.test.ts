@@ -29,7 +29,6 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-/** An I/O whose registry answers `version`, and whose grep finds the Dockerfile. */
 function io(overrides: Partial<DriftIo> = {}, version = '2.1.220'): DriftIo {
   return {
     root,

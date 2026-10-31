@@ -19,30 +19,6 @@ import { readDiscordEnv } from './discord/env-config.js'
 import { googleChatBinding, type ChatLogRecord } from './google-chat/binding.js'
 import { readChatEnv } from './google-chat/env-config.js'
 
-/**
- * roma as a program: every Channel this deployment configured, over one pool.
- *
- * The composition root. It lives under `src/channels/` and inside no Channel's
- * directory, and both halves of that are forced: assembling roma means naming
- * which Channels it is on and which queues they publish to, `src/` proper is not
- * allowed to know either — `src/core.test.ts` reads the sources and refuses —
- * and a root that names two Channels cannot live in one of their directories
- * (ADR-0028). Each Channel's own half is in its own directory, and this page
- * knows only that it has one.
- *
- * **Which Channels roma serves is the environment's answer, not this file's.**
- * Every Channel is optional and at least one is required, so a deployment that
- * names only Chat runs only Chat and pays nothing for the rest. Discord is the
- * second road (ADR-0029), and it cost this file exactly what the shape predicted
- * it would: one reader in the record handed to `readConfiguration`, and one
- * binding built where its configuration is there to build it from.
- *
- * Nothing is decided here. Every number is `env-config.ts`'s, every rule about
- * what happens to a message is `serve.ts`'s, and every Channel fact is that
- * Channel's. What is left is the wiring and the two things only the process
- * itself can do: exit, and answer a signal.
- */
-
 const EXIT_SIGNALLED = 0
 const EXIT_FAILED = 1
 
@@ -50,15 +26,6 @@ type ProcessLogRecord =
   | { readonly event: 'serving'; readonly selfCheck: StartupSelfCheckReport }
   | { readonly event: 'stopping'; readonly signal: NodeJS.Signals }
 
-/**
- * Everything roma writes to the operator log, from every part of it.
- *
- * Assembled here because this is the only place that knows what every part is:
- * the pool's and the Cores' records, the subscriber's, every Channel's own and
- * its Transport's, and the process's. One log rather than one per component —
- * they describe the same running system, and an operator reading a credential
- * swap wants the refusal that prompted it on the same lines.
- */
 type RomaLog = OperatorLog<
   | PoolLogRecord
   | CoreLogRecord
@@ -71,14 +38,6 @@ type RomaLog = OperatorLog<
   | ProcessLogRecord
 >
 
-/**
- * Build roma over the Channels this environment names, prove the credential, and
- * start receiving.
- *
- * Resolves once roma is receiving on all of them, and everything that can
- * refuse to start has refused by then: one refusal naming every Channel and
- * Reach that is misconfigured, or the Startup Self-Check's.
- */
 export async function startConfiguredRoma(
   env: Environment = process.env,
   log: RomaLog = writeToStderr,
@@ -92,29 +51,10 @@ export async function startConfiguredRoma(
   )
   const { shimDir, ...core } = roma
 
-  // One entry per Channel the deployment configured, built only for those: a
-  // Channel roma was told nothing about has no client to construct and no
-  // credential to resolve, so an unconfigured one costs a boot nothing at all.
   const bound: ChannelBinding[] = []
   if (channels.chat !== null) bound.push(await googleChatBinding(channels.chat, log))
-  // Nothing is awaited here and nothing has connected yet: Discord's credential
-  // is a token roma already holds, and the socket is opened when `serve`
-  // subscribes rather than when the binding is built (ADR-0029).
   if (channels.discord !== null) bound.push(discordBinding(channels.discord, log))
 
-  // The one place a forge is named, the one place the agent's cloud is, and the
-  // one place the team's documents are, for the reason the Channels are named
-  // here and nowhere else: assembling roma means saying what it is assembled out
-  // of, and `src/` proper is not allowed to know any of the answers.
-  // `src/github-containment.test.ts`, `src/cloud-containment.test.ts` and
-  // `src/document-containment.test.ts` are what hold the rest of the tree to that.
-  //
-  // Note what this page does **not** do: construct either Google Minter.
-  // `cloudReachFrom` and `documentReachFrom` each take the key their own reader
-  // read from the path the deployment named and nothing else, and each lives
-  // inside a directory bound against every way of asking a library to find a
-  // credential — so the substitution ADR-0015 §4 forbids cannot be written here,
-  // because neither constructor is named here (ADR-0020 §7).
   return await serve({
     ...core,
     reaches: {
@@ -128,20 +68,12 @@ export async function startConfiguredRoma(
   })
 }
 
-/**
- * Run roma until SIGTERM or SIGINT, installing handlers on `process` and
- * exiting it; a second signal leaves at once. Embedders use
- * `startConfiguredRoma` instead and keep their own idea of when to stop.
- */
 export async function main(): Promise<void> {
   const log = writeToStderr
   let serving: Serving
   try {
     serving = await startConfiguredRoma(process.env, log)
   } catch (error) {
-    // The two refusals roma is designed to make — an incomplete configuration
-    // and a failed self-check — both carry a message written for whoever is
-    // standing roma up, and both are worth more on stderr than as a stack.
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
     process.exit(EXIT_FAILED)
   }
@@ -150,15 +82,6 @@ export async function main(): Promise<void> {
   stopOn(['SIGTERM', 'SIGINT'], serving, log)
 }
 
-/**
- * End roma when the host says so, and end it once.
- *
- * Shutting down takes as long as the running Turns take to be signalled and
- * exit, so a second signal is treated as somebody who is no longer prepared to
- * wait: roma leaves immediately, and the processes are the operating system's to
- * clean up. Better than the alternative, which is two shutdowns racing each
- * other over the same pool.
- */
 function stopOn(signals: readonly NodeJS.Signals[], serving: Serving, log: RomaLog): void {
   let stopping = false
   for (const signal of signals) {
@@ -172,9 +95,6 @@ function stopOn(signals: readonly NodeJS.Signals[], serving: Serving, log: RomaL
       serving.shutdown().then(
         () => process.exit(EXIT_SIGNALLED),
         (error: unknown) => {
-          // Said out loud rather than swallowed: what this failure means is
-          // `claude` processes that may have outlived roma, and that is a thing
-          // somebody has to know to go and look for.
           process.stderr.write(
             `roma did not shut down cleanly: ${error instanceof Error ? error.message : String(error)}\n`,
           )
@@ -185,8 +105,6 @@ function stopOn(signals: readonly NodeJS.Signals[], serving: Serving, log: RomaL
   }
 }
 
-// Run only when this file is the program. Imported — by a test, or by something
-// embedding roma — it defines the pieces and starts nothing.
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
   void main()
 }

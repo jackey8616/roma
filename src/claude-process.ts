@@ -12,13 +12,6 @@ export interface SpawnRequest {
   readonly env: Readonly<Record<string, string>>
 }
 
-/**
- * The whole of the operating system as far as ClaudeSession is concerned: a
- * process it writes lines to and reads lines from. It is the seam a test
- * substitutes at, so it is deliberately narrower than a Node ChildProcess: every
- * stream detail it hides (encodings, nullable stdio, backpressure) is one a fake
- * would otherwise have to imitate.
- */
 export interface ClaudeProcess {
   readonly pid: number | undefined
   write(line: string): void
@@ -32,7 +25,6 @@ export interface ClaudeProcess {
 
 export type SpawnClaudeProcess = (request: SpawnRequest) => ClaudeProcess
 
-/** Spawn a real `claude` process. */
 export const spawnClaudeProcess: SpawnClaudeProcess = ({ command, args, cwd, env }) => {
   const child = spawn(command, [...args], {
     cwd,

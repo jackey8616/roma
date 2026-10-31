@@ -4,7 +4,6 @@ import { commandFor, readCommand } from './commands.js'
 import { EFFORT_NAMES, readEffortRequest } from './effort-menu.js'
 import { MENU_NAMES, readModelRequest } from './model-menu.js'
 
-/** Which Command a message is, ignoring what followed it. */
 function commandIn(text: string): string | null {
   return readCommand(text)?.command ?? null
 }
@@ -20,41 +19,23 @@ describe('reading a message as a Command', () => {
     expect(commandIn('/usage')).toBe('usage')
   })
 
-  // The seventh, and the first claimed spelling that is nobody's build. Every
-  // one above it is Claude Code's own, claimed because a spelling roma leaves
-  // unclaimed is one somebody is billed for; this is a third-party skill's, and
-  // it is claimed because people who met that skill elsewhere arrive already
-  // typing it — the same billing fault by a longer route (ADR-0030). One
-  // spelling, because there is no vendor alias table to inherit from.
   it('claims a spelling that is nobody’s build, and only the one', () => {
     expect(commandIn('/caveman')).toBe('caveman')
     expect(readCommand('/caveman ultra')).toEqual({ command: 'caveman', argument: 'ultra' })
   })
 
-  // ADR-0030 records this rather than fixing it. caveman ships five sibling
-  // commands, each of which defers to a skill roma does not install, so
-  // somebody who knows them from elsewhere types one and is billed for a Task
-  // that explains it. The same idiom as the `/settings key=value` gap below,
-  // and closing it means deciding what roma would answer.
   it('leaves caveman’s five sibling commands unclaimed, which ADR-0030 records rather than fixes', () => {
     for (const sibling of ['stats', 'compress', 'commit', 'review', 'help']) {
       expect(readCommand(`/caveman-${sibling}`)).toBeNull()
     }
   })
 
-  // ADR-0013. `clear` is Claude Code's name for this and `new` is one of its two
-  // aliases, so roma answered to the spelling a person is least likely to reach
-  // for and billed them for a plausible sentence about the other two. Three
-  // spellings, one Command — the count that is three is the Commands, not the
-  // strings.
   it('answers to every spelling of its reset', () => {
     expect(commandIn('/clear')).toBe('clear')
     expect(commandIn('/reset')).toBe('clear')
     expect(commandIn('/new')).toBe('clear')
   })
 
-  // A phone keyboard capitalises the first letter of a message on its own, and
-  // nobody typing "/Stop" meant anything else.
   it('recognises them however they were capitalised', () => {
     expect(commandIn('/Stop')).toBe('stop')
     expect(commandIn('/NEW')).toBe('clear')
@@ -67,39 +48,22 @@ describe('reading a message as a Command', () => {
     expect(readCommand('  /model opus  ')).toEqual({ command: 'model', argument: 'opus' })
   })
 
-  // `/config` answers to `/settings` for `/clear`'s reason, and it is
-  // Claude Code's own declared alias on its own `/config`: a spelling roma
-  // leaves unclaimed is one somebody is billed for (ADR-0017). Two spellings,
-  // one Command — the count that is five is the Commands, not the strings.
   it('answers to both of Claude Code’s spellings for its settings', () => {
     expect(commandIn('/config')).toBe('config')
     expect(commandIn('/settings')).toBe('config')
   })
 
-  // The same rule for a fault it was not written for. These three were free
-  // Relays and answered by the real command, so leaving one behind would cost
-  // nobody a Turn — it would leave a spelling answering about the process that
-  // happens to be serving this Session next to one answering about the
-  // deployment, which is ADR-0013's fault with the money swapped for a number
-  // (ADR-0027). Three spellings, one Command; six is still the Commands.
   it('answers to all three of Claude Code’s spellings for its usage', () => {
     expect(commandIn('/usage')).toBe('usage')
     expect(commandIn('/cost')).toBe('usage')
     expect(commandIn('/stats')).toBe('usage')
   })
 
-  // ADR-0014's rule, now carrying four heads: a listed head may take an
-  // argument and nothing else may. What that keeps out is the prefix match
-  // ADR-0003 refused — a general "begins with a slash and looks like ours" rule
-  // inherits every command a later Claude Code release adds. The list still does
-  // not grow on its own; it has grown by hand, four times, deliberately.
   describe('the Commands that take an argument', () => {
     it('carries the argument it was given', () => {
       expect(readCommand('/model opus')).toEqual({ command: 'model', argument: 'opus' })
     })
 
-    // Not a malformed `/model` — it is the Command asking roma to report, which
-    // is what that gesture can honestly mean in a text channel.
     it('is the same Command with nothing after it [fence:commands-bare-head-is-a-command]', () => {
       const why =
         'An argument-taking head must stay a Command on its own (ADR-0014, ADR-0017): its ' +
@@ -109,10 +73,6 @@ describe('reading a message as a Command', () => {
       expect(readCommand('/model'), why).toEqual({ command: 'model', argument: null })
     })
 
-    // An argument roma does not offer is still a Command, and is refused as one
-    // rather than passed on. Falling through is the exact fault this exists to
-    // fix: the Caller Marker goes above the message, so Claude Code never sees a
-    // command, and somebody is billed for a sentence about their typo.
     it('claims a name roma does not offer, so that it can be refused', () => {
       expect(readCommand('/model gpt-5')).toEqual({ command: 'model', argument: 'gpt-5' })
       expect(readCommand('/model claude-opus-5')).toEqual({
@@ -121,9 +81,6 @@ describe('reading a message as a Command', () => {
       })
     })
 
-    // One argument is an argument; three words are a sentence. This is what
-    // keeps a message somebody meant for the agent from being swallowed by a
-    // Command that would answer it with a refusal.
     it('leaves a message that merely begins with it as work [fence:commands-one-argument-or-none]', () => {
       const why =
         'A head takes one argument or none (ADR-0003, ADR-0014): two words after it are a ' +
@@ -143,9 +100,6 @@ describe('reading a message as a Command', () => {
       })
     })
 
-    // The hyphen is the case that had never existed before ADR-0030's Menu:
-    // `readCommand` splits on whitespace, so a name with one in it is a single
-    // argument and a name with a space in it is a sentence.
     it('carries a hyphenated name as one argument', () => {
       expect(readCommand('/caveman wenyan-full')).toEqual({
         command: 'caveman',
@@ -153,10 +107,6 @@ describe('reading a message as a Command', () => {
       })
     })
 
-    // Each is the Command asking roma to report rather than a malformed one:
-    // Claude Code's no-argument `/config` is a settings panel and a panel has no
-    // form in a chat message, so reporting is what that gesture can honestly
-    // mean in one (ADR-0017).
     it('is the same Command with nothing after it [fence:commands-bare-head-is-a-command]', () => {
       const why =
         'An argument-taking head must stay a Command on its own (ADR-0016, ADR-0017, ADR-0030): ' +
@@ -166,9 +116,6 @@ describe('reading a message as a Command', () => {
       expect(readCommand('/config'), why).toEqual({ command: 'config', argument: null })
     })
 
-    // Claimed so that it can be *refused*: `/config key=value` writes a settings
-    // file every Session in the deployment shares, so falling through is both
-    // the bill nobody wanted and a change nobody made.
     it('claims a /config argument roma will refuse, rather than letting it fall through', () => {
       expect(readCommand('/config model=opusplan')).toEqual({
         command: 'config',
@@ -181,61 +128,36 @@ describe('reading a message as a Command', () => {
       expect(readCommand('/clear foo')).toBeNull()
     })
 
-    // On all three spellings, and the gap is the one `/clear foo` has had since
-    // ADR-0013: roma's `/usage` has nothing to name — not a month, not a person,
-    // not a Session — so each falls through and is billed as prose. Recorded by
-    // ADR-0027 rather than closed, because closing it means deciding what a
-    // shared thread may ask about other people.
     it('does not grant it to the usage Command, which is a gap ADR-0027 left open', () => {
       expect(readCommand('/usage july')).toBeNull()
       expect(readCommand('/cost ada')).toBeNull()
       expect(readCommand('/stats today')).toBeNull()
     })
 
-    // `/settings` is on the whole-message list and deliberately not on this one,
-    // so `/settings key=value` falls through to a Task and is billed as prose.
-    // The same opening `/clear foo` has had since ADR-0013, and ADR-0017 counted
-    // the heads here at three knowing it.
     it('does not grant it to the alias, which is a gap ADR-0017 left open', () => {
       expect(readCommand('/settings theme=dark')).toBeNull()
     })
   })
 
-  // Every slash command that is not roma's is somebody else's — Claude Code's to
-  // answer as a Relay if it is on the ADR-0012 list, and work if it is not.
   it('claims no slash command that is not its own [fence:commands-no-prefix-match]', () => {
     const why =
       'A Command is named exactly, never matched by prefix or by shape (ADR-0003): a rule that ' +
       '"begins with a slash and looks like ours" inherits every command a later Claude Code ' +
       'release adds and swallows it, where a named list fails closed.'
-    // `/compact` is a Relay since ADR-0018 and `/newsletter` is nobody's; both
-    // have to fall through here, and for the same reason.
     expect(readCommand('/compact'), why).toBeNull()
     expect(readCommand('/compact keep the ADRs'), why).toBeNull()
     expect(readCommand('/newsletter'), why).toBeNull()
-    // A Relay, which `readRelay` answers — and only because nothing here did.
-    // Asserted from this side too, since a Command shadows one silently.
     expect(readCommand('/context'), why).toBeNull()
-    // Heads that begin with one of roma's, on both tables: a prefix match on
-    // either would claim them.
     expect(readCommand('/models opus'), why).toBeNull()
     expect(readCommand('/effortless max'), why).toBeNull()
     expect(readCommand('/stopwatch'), why).toBeNull()
   })
 
-  // Claude Code's `/clear` takes a name and roma's reset takes nothing, so the
-  // whole-message rule turns this away and it is billed as prose. Left open
-  // deliberately (ADR-0013): closing it means deciding what a name would mean to
-  // roma. ADR-0014 narrowed the rule rather than dropping it, so this is still
-  // true after `/model` gained an argument.
   it('leaves a reset with an argument to Claude Code', () => {
     expect(readCommand('/clear foo')).toBeNull()
     expect(readCommand('/new deploy branch')).toBeNull()
   })
 
-  // The same opening on `/config`, recorded rather than fixed: closing it means
-  // deciding what a multi-word argument would mean to roma, and it would mean
-  // nothing (ADR-0017).
   it('leaves a /config of two words to Claude Code [fence:commands-one-argument-or-none]', () => {
     const why =
       'A head takes one argument or none (ADR-0017): `/config foo bar` is left open as prose ' +
@@ -248,9 +170,6 @@ describe('reading a message as a Command', () => {
     expect(readCommand('')).toBeNull()
   })
 
-  // The words on their own are things people say to an agent — "stop" mid-Task
-  // is a sentence Claude Code can act on, and roma swallowing it would answer
-  // something nobody asked.
   it('needs the slash', () => {
     expect(readCommand('stop')).toBeNull()
     expect(readCommand('new')).toBeNull()
@@ -262,33 +181,6 @@ describe('reading a message as a Command', () => {
   })
 })
 
-/**
- * Every name roma will put on a button has to survive being written out as a
- * message and read back (ADR-0023).
- *
- * A structural invariant rather than a behaviour test, in the idiom of the
- * Command/Relay overlap check in `relays.test.ts`, the ADR numbering check and
- * the containment checks — a claim about this repository, belonging to none of
- * the three seams.
- *
- * It exists because a button is a *message* here, so a Menu name that does not
- * round-trip does not fail loudly: it produces a message `readCommand` reads as
- * prose, which falls through to Claude Code and bills somebody for a Turn. That
- * is the exact fault ADR-0014 built the `/model` Command to remove, arriving
- * through the door ADR-0023 opened.
- *
- * Driven over the real Menus, never a copy. `relays.test.ts` records what a copy
- * costs: the hardcoded one it replaced held four of eight spellings and went on
- * passing while covering half the table. So this also needs that check's second
- * half — every Menu named outright, so an emptied Menu fails rather than passing
- * vacuously.
- *
- * All three Menus need this and none is stable: the first two declare themselves
- * a person's judgement about one pinned Claude Code build, to be re-audited when
- * the pin moves, and the Caveman Menu is a person's judgement about a
- * third-party repository that no Claude Code version dates (ADR-0030). This is
- * the mechanism `effort-menu.ts` says "somebody remembers" stopped being.
- */
 describe('a Menu name a Caller may press instead of type', () => {
   it('round-trips through the Command reader, for every name on all three Menus [fence:commands-menu-names-round-trip]', () => {
     const why =
@@ -308,9 +200,6 @@ describe('a Menu name a Caller may press instead of type', () => {
     }
   })
 
-  // One step further than the reader: a name that parses as an argument and then
-  // lands in `unknown` would refuse a Caller a model roma had just offered them,
-  // which reads as roma arguing with itself.
   it('resolves back to the very choice the button claimed', () => {
     for (const name of MENU_NAMES) {
       const request = readModelRequest(readCommand(commandFor('model', name))?.argument ?? null)
@@ -329,19 +218,12 @@ describe('a Menu name a Caller may press instead of type', () => {
     }
   })
 
-  // The checks above pass vacuously against an empty Menu, and a re-audit that
-  // dropped a name is exactly how that happens. Named here so losing one is a
-  // failure rather than a silently shorter card.
   it('has all three Menus say what they hold, so none can empty unnoticed', () => {
     expect(MENU_NAMES).toEqual(['fable', 'opus', 'sonnet', 'haiku', 'default'])
     expect(EFFORT_NAMES).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'default'])
     expect(CAVEMAN_NAMES).toEqual(['off', 'lite', 'full', 'ultra', 'wenyan-full', 'default'])
   })
 
-  // The shape that had never been on a Menu until ADR-0030's, asserted rather
-  // than assumed: `readCommand` splits on `/\s+/`, so a hyphen rides through as
-  // part of one argument where a space would have made the message a sentence
-  // and billed somebody for it.
   it('survives the hyphen the Caveman Menu was the first to carry', () => {
     expect(readCommand(commandFor('caveman', 'wenyan-full'))).toEqual({
       command: 'caveman',
@@ -350,12 +232,6 @@ describe('a Menu name a Caller may press instead of type', () => {
     expect(readCavemanRequest('wenyan-full')).toEqual({ kind: 'chosen', level: 'wenyan-full' })
   })
 
-  // The same two shapes as claims about the real Menus, which the round trip
-  // above catches without ever naming. Kept because the person who trips it is
-  // adding a name, and "readCommand answered null" is a worse thing to hand them
-  // than the name that cannot be typed — `readCommand` lowercases the message
-  // before it splits it, so a capital never survives the trip and a space turns
-  // one name into a sentence.
   it('carries no whitespace and no uppercase, on any of the three Menus', () => {
     for (const names of [MENU_NAMES, EFFORT_NAMES, CAVEMAN_NAMES]) {
       for (const name of names) {
@@ -365,10 +241,6 @@ describe('a Menu name a Caller may press instead of type', () => {
     }
   })
 
-  // The two shapes that would break the round trip, spelled out so somebody
-  // adding a name knows what the checks above are watching for. Neither looks
-  // hypothetical once you know a button is a message: a level with a space in it
-  // and a display name that kept its capital are both plausible additions.
   it('would fail on a name with whitespace or the wrong case', () => {
     expect(readCommand(commandFor('model', 'claude opus'))).toBeNull()
     expect(readModelRequest('Opus').kind).toBe('unknown')

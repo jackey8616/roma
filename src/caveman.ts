@@ -1,84 +1,35 @@
-/**
- * The Cavemen an operator may pin, and what roma appends to a Session's system
- * prompt for one.
- */
-
-/** The level that appends no ruleset at all. */
 export const CAVEMAN_OFF = 'off'
 
-/**
- * What the Audit Record carries where nothing on the deployment named a Caveman:
- * not `off`, and not spelled like any level.
- * Enforced by `fence:caveman-not-pinned-is-no-level`.
- */
 export const CAVEMAN_NOT_PINNED = 'not-pinned'
 
-/**
- * Every level a Caller will be able to pick, `off` among them. A name added here
- * is a button wherever a Channel draws the Menu.
- * Enforced by `fence:caveman-menu-round-trips`.
- */
 export const CAVEMAN_MENU: readonly string[] = ['off', 'lite', 'full', 'ultra', 'wenyan-full']
 
-/**
- * The name that means the Pinned Caveman: not a level, but whatever
- * `ROMA_CAVEMAN` resolves to, so a Session that asked for it follows the
- * deployment when the pin moves.
- *
- * Not `off`, which is a level: no ruleset whatever the deployment pinned. The two
- * coincide only on a roma that pinned nothing.
- */
 export const PINNED_CAVEMAN_NAME = 'default'
 
-/** Every name a Caller may type, in the order `/caveman` lists them. */
 export const CAVEMAN_NAMES: readonly string[] = [...CAVEMAN_MENU, PINNED_CAVEMAN_NAME]
 
-/** The two wenyan levels an operator may pin and no Caller may ask for. */
 export const OFF_MENU_WENYAN: readonly string[] = ['wenyan-lite', 'wenyan-ultra']
 
-/**
- * Whether an operator may pin this Caveman, which is a wider question than what
- * a Caller may choose. Asked at boot and answered locally, with no process
- * involved. Enforced by `fence:caveman-pin-refused-at-boot`.
- */
 export function isPinnableCaveman(value: string): boolean {
   return CAVEMAN_MENU.includes(value) || OFF_MENU_WENYAN.includes(value)
 }
 
-/** What a `/caveman` message is asking for. */
 export type CavemanRequest =
   | {
-      /**
-       * What Caveman this Session runs at, and what else it may run at: `/caveman`
-       * with no argument. roma answers it alone, with no process, no Turn and no
-       * money; no Runtime has a command of this name.
-       */
       readonly kind: 'report'
     }
   | {
-      /** A level on the Menu. The name and the level are one string here. */
       readonly kind: 'chosen'
       readonly level: string
     }
   | {
-      /** Back to the Pinned Caveman, whatever this deployment resolved it to. */
       readonly kind: 'default'
     }
   | {
-      /**
-       * A level roma does not offer — a typo, `wenyan`, or one of the two wenyan
-       * levels that are the operator's and not a Caller's. Refused rather than
-       * passed on as work. Enforced by `fence:caveman-unknown-is-refused`.
-       */
       readonly kind: 'unknown'
       readonly name: string
     }
 
-/**
- * Read what a `/caveman` Command was asking for. Total, and it takes the argument
- * `readCommand` already separated rather than the message: which messages are
- * `/caveman` at all is that function's single answer.
- */
 export function readCavemanRequest(argument: string | null): CavemanRequest {
   if (argument === null) return { kind: 'report' }
   if (argument === PINNED_CAVEMAN_NAME) return { kind: 'default' }
@@ -86,18 +37,11 @@ export function readCavemanRequest(argument: string | null): CavemanRequest {
   return { kind: 'chosen', level: argument }
 }
 
-/**
- * What a Session's system prompt carries about how short to be, or no text at all.
- * `off` is the empty string, not `undefined`: the caller joining this to the
- * Reach announcements drops empty parts before the join, and nothing trims after.
- * Enforced by `fence:caveman-one-template`.
- */
 export function cavemanRuleset(level: string): string {
   if (level === CAVEMAN_OFF) return ''
   return `CAVEMAN MODE ACTIVE — level: ${level}\n\n${onlyAtLevel(borrowedRules(level), level)}`
 }
 
-/** Enforced by `fence:caveman-borrowed-text-verbatim`. */
 function borrowedRules(level: string): string {
   return `Respond terse like smart caveman. All technical substance stay. Only fluff die.
 
@@ -179,7 +123,6 @@ Example — destructive op:
 Persisted outside chat: write normal prose — code, comments, commits, docs, issue/PR/MR text, memory files, third-party messages. Level persist until changed or session end.`
 }
 
-/** Enforced by `fence:caveman-filter-keeps-the-table`. */
 function onlyAtLevel(rules: string, level: string): string {
   return rules
     .split('\n')

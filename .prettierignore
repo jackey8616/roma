@@ -26,7 +26,3 @@ test/fixtures/caveman/
 # scoped to code for now; widening it to Markdown is a deliberate change with its own
 # commit, not something that arrives as a side effect of formatting a `.ts` file.
 *.md
-
-# ESLint's file, not ours, for the reason `package-lock.json` is above: every
-# `eslint --prune-suppressions` writes it back in ESLint's own layout (ADR-0031).
-eslint-suppressions.json

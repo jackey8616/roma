@@ -2,9 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { RUNTIME_NAMES, RUNTIMES, type Runtime } from './runtime.js'
 
 describe('the name a Runtime is spelled with', () => {
-  // The type holds it at compile time: `RUNTIME_NAMES` is a `Record<Runtime,
-  // string>`, so a Runtime added without a name does not compile. This holds it
-  // for a table loosened to something that would.
   it('is one a reader can read, for every Runtime roma can name [fence:session-runtime-has-a-name]', () => {
     const why =
       'Every Runtime must have a name of its own in RUNTIME_NAMES (ADR-0025), and the table ' +

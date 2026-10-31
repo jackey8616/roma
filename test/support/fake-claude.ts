@@ -5,14 +5,8 @@ import type {
   SpawnRequest,
 } from '../../src/claude-process.js'
 
-/**
- * One fake `claude` process. It records what was written to its stdin and lets
- * a test push bytes back out of its stdout — bytes, not events, so that framing
- * is exercised rather than assumed.
- */
 export class FakeClaudeProcess implements ClaudeProcess {
   readonly pid: number
-  /** Where this process was spawned — how a test tells one Session's from another's. */
   readonly cwd: string
   readonly written: string[] = []
   readonly signals: NodeJS.Signals[] = []
@@ -32,7 +26,6 @@ export class FakeClaudeProcess implements ClaudeProcess {
     this.#exitOnKill = exitOnKill
   }
 
-  /** Take a signal and do nothing about it, the way a wedged process would. */
   ignore(signal: NodeJS.Signals): void {
     this.#ignored.add(signal)
   }
@@ -48,8 +41,6 @@ export class FakeClaudeProcess implements ClaudeProcess {
   kill(signal: NodeJS.Signals): void {
     this.signals.push(signal)
     if (!this.#exitOnKill || this.#exited || this.#ignored.has(signal)) return
-    // What ADR-0003 measured: SIGTERM exits 143. SIGKILL is not handled by
-    // anything, so it surfaces as a signal instead of a code.
     this.emitExit(signal === 'SIGTERM' ? { code: 143, signal: null } : { code: null, signal })
   }
 
@@ -69,7 +60,6 @@ export class FakeClaudeProcess implements ClaudeProcess {
     this.#error.push(listener)
   }
 
-  /** Everything the Session has sent, parsed back out of its NDJSON frames. */
   get sent(): Record<string, unknown>[] {
     return this.written.flatMap((line) =>
       line
@@ -79,7 +69,6 @@ export class FakeClaudeProcess implements ClaudeProcess {
     )
   }
 
-  /** Push raw bytes out of stdout. Split them however you like. */
   emitStdout(chunk: string): void {
     for (const listener of this.#stdout) listener(chunk)
   }
@@ -98,29 +87,14 @@ export class FakeClaudeProcess implements ClaudeProcess {
   }
 }
 
-/**
- * Let everything already queued run.
- *
- * A fake process cannot be fed until the thing that spawns it has finished
- * spawning it, and spawning settles on the microtask queue — so a test that
- * drives a Turn has to give way once between asking for it and answering.
- */
 export function flush(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve))
 }
 
 export interface FakeClaudeOptions {
-  /**
-   * Whether killing a process makes it exit, the way a real one does.
-   *
-   * Off by default so a test can drive the signal and the exit separately. On
-   * for anything driving the pool: eviction waits for the process to be gone,
-   * and a fake that only records the signal would wait forever.
-   */
   readonly exitOnKill?: boolean
 }
 
-/** A spawner that hands out FakeClaudeProcesses and remembers every request. */
 export class FakeClaude {
   readonly spawns: SpawnRequest[] = []
   readonly processes: FakeClaudeProcess[] = []
@@ -138,7 +112,6 @@ export class FakeClaude {
     return proc
   }
 
-  /** The most recent process spawned for one Session, found by its working directory. */
   processFor(cwd: string): FakeClaudeProcess {
     const proc = this.processes.findLast((candidate) => candidate.cwd === cwd)
     if (proc === undefined) throw new Error(`nothing has been spawned in ${cwd}`)

@@ -10,6 +10,11 @@ sweep*). The comment whitelist and the ADR citation check run in CI, CI is
 required on `main` by a repository ruleset, and a pre-commit hook and a Claude
 Code hook hold the gate.
 
+**Superseded in part by ADR-0032** (2026-10-31). *Comments in `src/` are a
+whitelist*, its JSDoc exemption and `eslint-suppressions.json` are replaced: roma
+now has no comments but tool directives, anywhere, and none are grandfathered.
+The `Enforced by` line in code is gone with them. The rest of this ADR stands.
+
 ## Context
 
 `docs/agents/comment-gradient.md` defined a **guardrail** as a comment with two

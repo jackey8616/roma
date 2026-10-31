@@ -45,9 +45,7 @@ jobs:
 
       - run: npm run typecheck
 
-      # The comment whitelist (ADR-0031). Violations older than the rule are in
-      # eslint-suppressions.json, and a suppression nothing needs any more fails
-      # this step too, so the file only shrinks.
+      # No comments but tool directives, in every TS and JS file (ADR-0032).
       - run: npm run lint
 
       # Every "Enforced by" in docs/adr/ names a check that exists (ADR-0031).

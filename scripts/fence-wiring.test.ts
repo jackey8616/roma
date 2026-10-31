@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 
-/** The steps of the `checks` job, as the text between its header and the next job. */
 function checksJob(): string {
   const ci = readFileSync(`${root}.github/workflows/ci.yml`, 'utf8')
   const start = ci.indexOf('\n  checks:\n')
