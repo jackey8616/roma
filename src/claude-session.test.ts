@@ -95,6 +95,25 @@ describe('how the process is invoked', () => {
     expect(args[args.indexOf('--append-system-prompt') + 1], why).toBe('you can reach a-team/roma')
   })
 
+  // 2.1.319 records the system prompt in the Transcript on a Session's first
+  // request and reuses it on every resume, so `--append-system-prompt` on a
+  // resumed process is ignored. Measured at seam 2 (`append-on-resume.live.test.ts`).
+  it.each([false, true])(
+    'keeps the system prompt fresh on every spawn, resume %s [fence:session-prompt-never-snapshotted]',
+    (resume) => {
+      const why =
+        'Every spawn must pass --system-prompt-snapshot off (ADR-0030). With the snapshot on, ' +
+        'a resumed process keeps the append its Session was first spawned with, so a Caveman ' +
+        'or a Reach announcement changed since then never reaches the model.'
+      const { claude, session } = newSession({ resume, appendSystemPrompt: 'briefing' })
+
+      session.start()
+
+      const args = claude.lastSpawn.args
+      expect(args[args.indexOf('--system-prompt-snapshot') + 1], why).toBe('off')
+    },
+  )
+
   it('says nothing extra where there is nothing to say', () => {
     const { claude, session } = newSession()
 
@@ -424,11 +443,30 @@ describe('per-Turn cost', () => {
     expect(ended[2]?.costUsd, UNREPORTED_IS_NULL).toBeCloseTo(0.0019952, 7)
   })
 
-  // A resumed process counts its own spend from zero rather than continuing the
-  // Session's, which is what lets the baseline live here instead of in whatever
-  // outlives the process. Measured at seam 2; the figures are in ADR-0003's
-  // observability section.
-  it('starts a resumed process from zero rather than from what the Session spent', async () => {
+  // 2.1.319 continues `total_cost_usd` from the total the Transcript saved: this
+  // capture's first result after a resume reads 0.0193519, of which this Turn
+  // spent 0.0028067. `model_usage_since_last_result` is what says so.
+  it('prices a resumed Turn by what it spent, not by the total the Transcript carried [fence:session-cost-since-last-result]', async () => {
+    const why =
+      "A Turn's cost and output tokens come from model_usage_since_last_result where the " +
+      'build sends it (ADR-0003, observability). From 2.1.319 a resumed process continues ' +
+      'the total its Transcript saved, so a delta from zero bills the first Turn after every ' +
+      'Eviction at the Session’s lifetime spend.'
+    const { claude, session } = newSession({ resume: true })
+    session.start()
+
+    const turn = session.send('carrying on after an eviction')
+    feed(claude.process, recordedStream('resumed-cost-carried').turn(1))
+    const ended = await turn
+
+    expect(ended.costUsd, why).toBeCloseTo(0.0028067, 7)
+    expect(ended.outputTokens, why).toBe(76)
+  })
+
+  // Builds without `model_usage_since_last_result` (2.1.220 and earlier) start a
+  // resumed process from zero, so the delta is the Turn's cost there. Measured
+  // at seam 2; the figures are in ADR-0003's observability section.
+  it('starts a resumed process from zero where the build does not say what it spent since', async () => {
     const { claude, session } = newSession({ resume: true })
     const stream = recordedStream('three-turns-one-process')
     session.start()

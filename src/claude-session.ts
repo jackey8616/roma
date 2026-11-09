@@ -211,9 +211,10 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
    * The last `total_cost_usd` seen. Turn cost is the difference between
    * consecutive values.
    *
-   * Zero for every process, resumed ones included: seam 2 measured a Session
-   * that had spent $0.0822846 reporting $0.0105342 on its first Turn after
-   * resuming, so the total is the *process's* and there is nothing to carry.
+   * Zero for every process. 2.1.220 started a resumed process from zero; from
+   * 2.1.319 it continues the Transcript's total, which is why a Turn is priced
+   * off `model_usage_since_last_result` where the build sends it and this
+   * baseline is only the fallback for builds that do not.
    */
   #cumulativeCostUsd = 0
   /** Enforced by `fence:session-output-tokens-never-negative`. */
@@ -242,8 +243,8 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
   /**
    * Everything *this process* has spent, as Claude Code last reported it.
    *
-   * Not the Session's lifetime spend: a resumed process starts counting again
-   * from zero, so a Session that has been evicted has spent more than this.
+   * Not reliably the Session's lifetime spend: 2.1.220 restarts the count on a
+   * resume, and 2.1.319 continues it from the Transcript.
    */
   get cumulativeCostUsd(): number {
     return this.#cumulativeCostUsd
@@ -268,6 +269,9 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
       ...(this.#appendSystemPrompt === undefined
         ? []
         : ['--append-system-prompt', this.#appendSystemPrompt]),
+      // Enforced by `fence:session-prompt-never-snapshotted`.
+      '--system-prompt-snapshot',
+      'off',
       ...(this.#resume ? ['--resume', this.sessionId] : ['--session-id', this.sessionId]),
     ]
   }
@@ -431,16 +435,24 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     }
     if (pending === null) return
 
+    // Enforced by `fence:session-cost-since-last-result`.
+    const own = result.sinceLastResult
     const delta =
-      result.cumulativeCostUsd === null ? null : result.cumulativeCostUsd - previousTotalUsd
+      own !== null
+        ? own.costUsd
+        : result.cumulativeCostUsd === null
+          ? null
+          : result.cumulativeCostUsd - previousTotalUsd
 
     const turn: Turn = {
       text: result.text ?? pending.assistantText.join(''),
       costUsd: delta,
       outputTokens:
-        result.cumulativeOutputTokens === null
-          ? null
-          : Math.max(0, result.cumulativeOutputTokens - previousMark),
+        own !== null
+          ? own.outputTokens
+          : result.cumulativeOutputTokens === null
+            ? null
+            : Math.max(0, result.cumulativeOutputTokens - previousMark),
       durationMs: Date.now() - pending.startedAt,
       isError: result.isError,
       subtype: result.subtype,
