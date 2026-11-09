@@ -2103,11 +2103,13 @@ describe('the effort a Conversation runs at', () => {
  * away something a Caller asked for.
  */
 describe('an effort the model will not use', () => {
+  // Pinned rather than chosen: every Menu model takes an effort on 2.1.319, so
+  // a deployment that pins haiku 4.5 is where this path is reached.
   const HAIKU = 'claude-haiku-4-5'
+  const onHaiku = () => newCore({ pinnedModel: HAIKU })
 
   it('lets the Caller set it, and says it will not apply', async () => {
-    const { adapter, core } = newCore()
-    await core.handle(ingress('/model haiku'))
+    const { adapter, core } = onHaiku()
 
     await core.handle(ingress('/effort max'))
 
@@ -2123,12 +2125,11 @@ describe('an effort the model will not use', () => {
       'account of it is a reading of a minified binary that has already been wrong once. ' +
       'A sentence saying Claude Code ignores, strips or refuses the effort claims something ' +
       'roma never watched.'
-    const { adapter, core } = newCore()
-    await core.handle(ingress('/model haiku'))
+    const { adapter, core } = onHaiku()
 
     await core.handle(ingress('/effort max'))
     await core.handle(ingress('/model opus'))
-    await core.handle(ingress('/model haiku'))
+    await core.handle(ingress('/model default'))
 
     const [setOnHaiku, , movedOntoHaiku] = posted(adapter.instructions).slice(-3)
     expect(setOnHaiku, why).toMatchObject({
@@ -2148,8 +2149,7 @@ describe('an effort the model will not use', () => {
   // Set, not refused. The record is written and applies again the moment the
   // Session goes back onto a model that takes one.
   it('writes the record anyway, so it applies again on a model that takes one', async () => {
-    const { claude, core, say } = newCore()
-    await core.handle(ingress('/model haiku'))
+    const { claude, core, say } = onHaiku()
     await core.handle(ingress('/effort max'))
 
     await core.handle(ingress('/model opus'))
@@ -2163,10 +2163,11 @@ describe('an effort the model will not use', () => {
   // Session that has chosen an effort, is the message where the setting goes
   // inert.
   it('says so on the /model that made it inert', async () => {
-    const { adapter, core } = newCore()
+    const { adapter, core } = onHaiku()
+    await core.handle(ingress('/model opus'))
     await core.handle(ingress('/effort max'))
 
-    await core.handle(ingress('/model haiku'))
+    await core.handle(ingress('/model default'))
 
     expect(posted(adapter.instructions).at(-1)).toMatchObject({
       text: expect.stringContaining('does not apply'),
@@ -2178,9 +2179,10 @@ describe('an effort the model will not use', () => {
   // apply would answer a question they did not ask about a setting they did not
   // make.
   it('says nothing extra on a /model from a Session that chose no effort', async () => {
-    const { adapter, core } = newCore()
+    const { adapter, core } = onHaiku()
+    await core.handle(ingress('/model opus'))
 
-    await core.handle(ingress('/model haiku'))
+    await core.handle(ingress('/model default'))
 
     expect(posted(adapter.instructions).at(-1)).not.toMatchObject({
       text: expect.stringContaining('does not apply'),
@@ -2199,8 +2201,7 @@ describe('an effort the model will not use', () => {
       'The Effort Menu is withheld where the Matrix says the model takes no effort ' +
       '(ADR-0023): buttons beside a sentence calling the effort inert invite the very ' +
       'thing the reply just declined.'
-    const { adapter, core } = newCore()
-    await core.handle(ingress('/model haiku'))
+    const { adapter, core } = onHaiku()
 
     await core.handle(ingress('/effort'))
 
@@ -2240,8 +2241,7 @@ describe('an effort the model will not use', () => {
     const why =
       'The Effort Menu is withheld on a refusal too where the model takes no effort ' +
       '(ADR-0023).'
-    const { adapter, core } = newCore()
-    await core.handle(ingress('/model haiku'))
+    const { adapter, core } = onHaiku()
 
     await core.handle(ingress('/effort ludicrous'))
 
@@ -2282,8 +2282,7 @@ describe('an effort the model will not use', () => {
   // Recorded rather than named: a level nothing ran at would be the ledger
   // asserting the opposite of what roma has read.
   it('records that the effort did not apply, rather than naming a level', async () => {
-    const { audit, core, say } = newCore()
-    await core.handle(ingress('/model haiku'))
+    const { audit, core, say } = onHaiku()
     await core.handle(ingress('/effort max'))
 
     await say('hello')
@@ -2461,8 +2460,7 @@ describe('the Caveman a Conversation runs at', () => {
       'The Caveman Menu is carried unconditionally, never withheld on an #effortApplies of its ' +
       'own (ADR-0023, ADR-0030): there is no Matrix for a ruleset and no model that declines ' +
       'one, so a condition withholds an offer on the strength of nothing.'
-    const { adapter, core } = newCore()
-    await core.handle(ingress('/model haiku'))
+    const { adapter, core } = newCore({ pinnedModel: 'claude-haiku-4-5' })
 
     await core.handle(ingress('/caveman'))
     expect(posted(adapter.instructions).at(-1), why).toMatchObject({

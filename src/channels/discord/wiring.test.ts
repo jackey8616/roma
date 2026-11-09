@@ -463,12 +463,14 @@ describe('a Menu, out as buttons and back as a press', () => {
    * this is not the refusal ADR-0016 forbids.
    */
   it('draws no effort buttons on a model the Matrix says takes none', async () => {
-    const roma = await boot()
+    // Pinned: every Menu model takes an effort, so a deployment on haiku 4.5 is
+    // where the Matrix answers false.
+    const roma = await boot({ model: 'claude-haiku-4-5' })
     await roma.take(HELLO)
     await roma.take(READY)
     await roma.take(GUILD_CREATE)
 
-    await roma.take(mentioned('/model haiku'))
+    await roma.take(mentioned('/effort'))
     await roma.take(inThread('/effort', '700000000000000021'))
 
     expect(said(roma.requests).at(-1)).toContain('takes none')

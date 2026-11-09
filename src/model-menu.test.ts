@@ -33,12 +33,12 @@ describe('reading a /model message', () => {
     expect(read('/model sonnet')).toEqual({
       kind: 'chosen',
       name: 'sonnet',
-      model: 'claude-sonnet-5',
+      model: 'claude-sonnet-5-5',
     })
     expect(read('/model haiku')).toEqual({
       kind: 'chosen',
       name: 'haiku',
-      model: 'claude-haiku-4-5',
+      model: 'claude-haiku-5-5',
     })
   })
 
@@ -137,8 +137,8 @@ describe('naming the model a Session is on', () => {
   it('answers with the name a Caller would have typed', () => {
     expect(menuNameFor('claude-fable-5-1')).toBe('fable')
     expect(menuNameFor('claude-opus-5-5')).toBe('opus')
-    expect(menuNameFor('claude-sonnet-5')).toBe('sonnet')
-    expect(menuNameFor('claude-haiku-4-5')).toBe('haiku')
+    expect(menuNameFor('claude-sonnet-5-5')).toBe('sonnet')
+    expect(menuNameFor('claude-haiku-5-5')).toBe('haiku')
   })
 
   // What a deployment that pinned `ROMA_MODEL` off the Menu has. Null rather than
@@ -149,6 +149,8 @@ describe('naming the model a Session is on', () => {
     // name resolves to them, and a record naming one is refused.
     expect(menuNameFor('claude-fable-5')).toBeNull()
     expect(menuNameFor('claude-opus-5')).toBeNull()
+    expect(menuNameFor('claude-sonnet-5')).toBeNull()
+    expect(menuNameFor('claude-haiku-4-5')).toBeNull()
     expect(menuNameFor('claude-opus-5[1m]')).toBeNull()
   })
 })

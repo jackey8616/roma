@@ -39,7 +39,7 @@ function generations(): SessionGenerations {
 }
 
 /** The model roma runs on where nobody has chosen anything. */
-const PINNED = 'claude-sonnet-5'
+const PINNED = 'claude-sonnet-5-5'
 const SESSION = sessionIdFor(KEY)
 
 function models(pinnedModel = PINNED): ChosenRecord<'model'> {
@@ -387,7 +387,7 @@ describe('the model a Session runs on', () => {
     make: models,
     suffix: '.model',
     pinned: PINNED,
-    otherPinned: 'claude-haiku-4-5',
+    otherPinned: 'claude-haiku-5-5',
     chosen: 'claude-opus-5-5',
     offMenu: 'claude-something-else',
     refusal: /chosen model/i,

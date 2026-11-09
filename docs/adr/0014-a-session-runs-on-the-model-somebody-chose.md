@@ -295,6 +295,13 @@ beside them, for the reason above `MENU` in `src/model-menu.ts`, and a record
 naming one is refused (`ChosenModelNotOffered`). fable's willingness judgement
 now stands at two and a half times Opus 5.5's per-token rate.
 
+**Amended 2026-11-09 — `sonnet` and `haiku` follow, with the pin (#160).** On
+Claude Code 2.1.319, `sonnet` expands to `claude-sonnet-5-5` and `haiku` to
+`claude-haiku-5-5`, so the Menu's two lower names now resolve to those ids, for
+the reason the paragraph above gives for fable and opus. The order holds: the
+2.1.319 bundle's pricing table puts Sonnet 5.5 at $2/$10 per MTok and Haiku 5.5
+at $0.1/$0.5, below Opus 5.5's $4/$20. Seam 2 ran all four ids as themselves.
+
 Not on it: the `[1m]` variants, and arbitrary full model ids. Upstream accepts
 both. The `[1m]` multiplier is context rather than price, and they are off the
 Menu because more context per Turn is still more of a window everybody shares.

@@ -85,8 +85,7 @@ describe('a Session that outlives its process', () => {
     const resumed = turns[2]
     const afterUsd = Number(resumed?.result['total_cost_usd'])
     const own = resumed?.result['model_usage_since_last_result'] as
-      | Record<string, { costUSD?: number }>
-      | undefined
+      Record<string, { costUSD?: number }> | undefined
     const ownUsd = Object.values(own ?? {}).reduce((sum, m) => sum + (m.costUSD ?? 0), 0)
 
     console.log(

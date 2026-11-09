@@ -305,6 +305,15 @@ documentation — `effort` from `low` to `max`, default `high`. Opus 5.5 default
 to `medium` on the API; neither default runs under roma, which passes `--effort`
 on every spawn.
 
+**Amended 2026-11-09 — `claude-sonnet-5-5` and `claude-haiku-5-5` join, and
+the Menu loses its only `no` (#160).** On 2.1.319 the gates' by-name lists are
+unchanged, so both new ids read `—`. The `yes` for each is read off the build's
+own model registry, which lists `effort`, `xhigh_effort` and `max_effort` among
+both models' capabilities — firmer than the inference the other rows rest on.
+`claude-haiku-4-5` stays in `EFFORT_MATRIX` as `no` for a deployment that pins
+it, which is now the only way a Session reaches the takes-none path; the tests
+for that path pin it rather than choose it.
+
 **It reports; it does not gate.** Nothing fails a build on it, nothing in CI
 watches it, and roma refuses nothing because of it. This is `claude-code-drift.ts`'s
 posture — "enumeration rather than enforcement" — and it is not modesty. While

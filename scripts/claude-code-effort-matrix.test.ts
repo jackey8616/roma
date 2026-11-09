@@ -167,7 +167,15 @@ describe('the matrix it reports', () => {
     expect(rows).toEqual([
       { model: 'claude-fable-5-1', takes: { effort: null, xhigh_effort: null, max_effort: null } },
       { model: 'claude-opus-5-5', takes: { effort: null, xhigh_effort: null, max_effort: null } },
-      { model: 'claude-sonnet-5', takes: { effort: null, xhigh_effort: null, max_effort: null } },
+      { model: 'claude-sonnet-5-5', takes: { effort: null, xhigh_effort: null, max_effort: null } },
+      { model: 'claude-haiku-5-5', takes: { effort: null, xhigh_effort: null, max_effort: null } },
+    ])
+  })
+
+  it('reports a model the gates refuse by name as refused', () => {
+    const { rows } = effortMatrix(BUNDLE, ['claude-haiku-4-5'])
+
+    expect(rows).toEqual([
       {
         model: 'claude-haiku-4-5',
         takes: { effort: false, xhigh_effort: false, max_effort: false },
