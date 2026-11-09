@@ -19,7 +19,7 @@
     "check:adr-collision": "tsx scripts/check-adr-collision.ts",
     "check:claude-code-drift": "tsx scripts/check-claude-code-drift.ts",
     "check:claude-code-effort-matrix": "tsx scripts/check-claude-code-effort-matrix.ts",
-    "lint": "eslint src",
+    "lint": "eslint .",
     "check:adr-enforcers": "tsx scripts/check-adr-enforcers.ts",
     "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true"
   },

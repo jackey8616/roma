@@ -10,21 +10,6 @@ import { NO_CLOUD_REACH } from './cloud/reach.js'
 import { ShimServer, type ServedReaches, type ShimLogRecord } from './shim-server.js'
 import { FakeCloudMinter, FakeMinter, fakeServedReaches } from '../test/support/fake-minter.js'
 
-/**
- * roma's side of the credential contract, over a real socket.
- *
- * A real Unix domain socket rather than a stubbed transport, because the socket
- * *is* the decision: a TCP port would be reachable by anything on the host, and
- * "one line in, one line out, then closed" is the protocol both Credential Shims
- * and the Cloud Shortcut are written against. There is nothing slow or
- * unreachable about it — the two ends are in the same process.
- *
- * It is also the highest point at which the whole contract is observable, which
- * is why the Cloud Reach is asserted here rather than against the pieces behind
- * it: what a caller can see is a token, an expiry, an account, or a sentence
- * saying why there is none.
- */
-
 const SESSION = 'a-session'
 
 let dirs: string[] = []
@@ -43,7 +28,6 @@ async function listening({
   taskFor = () => 'the-task' as string | null,
 }: {
   minter?: FakeMinter
-  /** Omitted, this roma has no Cloud Reach — which is the ordinary deployment. */
   cloudMinter?: FakeCloudMinter
   taskFor?: () => string | null
 } = {}) {
@@ -54,9 +38,6 @@ async function listening({
   const server = await ShimServer.listen({
     socketPath: socketPathIn(dir),
     reaches: fakeServedReaches({ minter, cloudMinter: cloudMinter ?? null }),
-    // Every credential the socket serves, filtered here the way `startRoma`
-    // filters it — which is the thing worth asserting now that the socket no
-    // longer decides which one is interesting.
     onCredential: (taskId: string | null, credential: CredentialWanted) => {
       if (credential === 'cloud') cloudTokensFor.push(taskId)
     },
@@ -91,10 +72,6 @@ describe('answering a Credential Shim', () => {
     expect(minter.minted).toHaveLength(2)
   })
 
-  // Nothing special happens when minting fails, and that is the decision: an
-  // Outbound Instruction named after a product would mean the Core knows about
-  // GitHub, and a circuit breaker would turn a forge outage into a roma outage
-  // for the majority of Tasks that touch no repository.
   it('answers with no credential and the reason when minting fails [fence:shim-no-credential-is-an-answer]', async () => {
     const why =
       'roma answering "no credential, and here is why" is a successful exchange, and askMinter ' +
@@ -112,9 +89,6 @@ describe('answering a Credential Shim', () => {
     expect(answer.reason, why).toContain('private key')
   })
 
-  // Anything in the agent's userland can write to this socket, including
-  // programs the agent wrote itself. A cast would turn a malformed line into a
-  // TypeError inside roma.
   it('survives something that is not a Shim talking to it', async () => {
     const { server, log } = await listening()
 
@@ -125,7 +99,6 @@ describe('answering a Credential Shim', () => {
 
     expect(answer.token).toBeNull()
     expect(log).toContainEqual(expect.objectContaining({ event: 'shim-unreadable' }))
-    // Still serving: one bad line is not the end of every credential in roma.
     expect((await askMinter(server.socketPath, { session: SESSION, operation: 'get' })).token).toBe(
       'token-1',
     )
@@ -153,10 +126,6 @@ describe('who a credential request belongs to', () => {
     ])
   })
 
-  // A background process the agent left running, or work that outlived its
-  // Task. Recorded as belonging to no Task rather than to the nearest one: the
-  // same rule the Audit Record applies when it writes a Turn down as unpriced
-  // rather than as free.
   it('records a request that belongs to no running Task as belonging to none', async () => {
     const { server, log } = await listening({ taskFor: () => null })
 
@@ -184,9 +153,6 @@ describe('answering the Cloud Shortcut', () => {
     expect(answer.expiresAt).toBe(cloudMinter.minted[0]?.expiresAt)
   })
 
-  // The whole reason the Shortcut is free to re-run: an agent should ask again
-  // rather than reason about how much of the hour is left, and asking again
-  // must not be a network round trip and a bill.
   it('serves a second request inside the hour without minting again', async () => {
     const cloudMinter = new FakeCloudMinter()
     const { server } = await listening({ cloudMinter })
@@ -206,9 +172,6 @@ describe('answering the Cloud Shortcut', () => {
     expect(cloudMinter.minted).toHaveLength(1)
   })
 
-  // Most deployments have no Cloud Reach and that is not a fault. What must not
-  // happen is a hang, a crash, or a stack trace — the Shortcut is installed on
-  // every image precisely so that this sentence is what an agent reads.
   it('says there is no Cloud Reach rather than hanging or failing', async () => {
     const { server, log } = await listening()
 
@@ -225,10 +188,6 @@ describe('answering the Cloud Shortcut', () => {
     ])
   })
 
-  // The two credentials are different credentials. A `git` asking with a Cloud
-  // Reach configured must not be handed a Cloud Token, and the Shortcut must not
-  // be handed an Installation Token — which is the failure that would look like
-  // everything working right up to the first API call.
   it('leaves a request for the other credential completely alone [fence:shim-each-credential-from-its-own-reach]', async () => {
     const why =
       'Every answer to a request must come from the one Reach the request names, looked up once ' +
@@ -247,11 +206,6 @@ describe('answering the Cloud Shortcut', () => {
 
     expect(code.token, why).toBe('token-1')
     expect(cloud.token, why).toBe('cloud-token-1')
-    // Each answer carries *its own* Reach's account. Stronger than the assertion
-    // this replaces, which only said the forge's answer had none: the mis-pairing
-    // worth catching is a Reach served from another Reach's tokens, and after
-    // ADR-0020 §9 built this record by mapping over the Reaches, nothing else in
-    // the suite stands where the old ternary did.
     expect(code.account, why).toBe('a-team')
     expect(cloud.account, why).toBe('agent@a-project.iam.gserviceaccount.com')
   })
@@ -271,9 +225,6 @@ describe('answering the Cloud Shortcut', () => {
     expect(answer.reason).toContain('revoked')
   })
 
-  // Defaulting an unrecognised name to `code` would answer a request for a
-  // credential roma does not have with one it does — which for the Cloud
-  // Shortcut means printing an Installation Token as if it were a Cloud Token.
   it('refuses a credential it does not recognise rather than defaulting [fence:shim-unknown-credential-refused]', async () => {
     const why =
       'A request naming a credential roma does not know must be refused, never defaulted to ' +
@@ -284,7 +235,6 @@ describe('answering the Cloud Shortcut', () => {
     const answer = await askMinter(server.socketPath, {
       session: SESSION,
       operation: 'get',
-      // Something in the agent's userland can write anything to this socket.
       credential: 'aws' as 'cloud',
     })
 
@@ -325,9 +275,9 @@ describe('answering the Cloud Shortcut', () => {
       'CredentialWanted is a closed union and ServedReaches is total over it, so a new member ' +
       'is a compile error at the composition root until it is wired (ADR-0020 §8, #132). ' +
       'Widened to string, or made partial, a credential member can exist that nothing serves.'
-    // @ts-expect-error -- fence:shim-credential-wanted-is-closed: a credential roma has no Reach for must not compile.
+    // @ts-expect-error -- fence:shim-credential-wanted-is-closed
     const unknown: CredentialWanted = 'drive'
-    // @ts-expect-error -- fence:shim-credential-wanted-is-closed: a ServedReaches missing a Reach must not compile.
+    // @ts-expect-error -- fence:shim-credential-wanted-is-closed
     const partial: ServedReaches = { code: { unavailable: 'x' }, cloud: { unavailable: 'x' } }
 
     expect(Object.keys(fakeServedReaches()).sort(), why).toEqual(['cloud', 'code', 'documents'])
@@ -348,10 +298,6 @@ describe('which Task obtained a Cloud Token', () => {
     expect(cloudTokensFor).toEqual(['the-task'])
   })
 
-  // A Task that reached for the forge and never for the cloud must not be
-  // recorded as having used the Cloud Reach: the field is what narrows
-  // unexplained activity on a service account to the people whose Tasks touched
-  // it, and a false positive there points at the wrong person.
   it('says nothing about a Task that only asked for the other credential', async () => {
     const { server, cloudTokensFor } = await listening({ cloudMinter: new FakeCloudMinter() })
 
@@ -374,10 +320,6 @@ describe('which Task obtained a Cloud Token', () => {
 })
 
 describe('the socket itself', () => {
-  // A container killed rather than stopped leaves the file behind, and `listen`
-  // on an existing path fails with EADDRINUSE — which would present as roma
-  // refusing to boot after every hard restart, for a file nothing is listening
-  // on.
   it('is taken over from a boot that did not clean up [fence:shim-stale-socket-taken-over]', async () => {
     const why =
       'listen must remove a stale socket file before taking the path (#62). A container killed ' +
@@ -385,7 +327,6 @@ describe('the socket itself', () => {
       'EADDRINUSE — roma refusing to boot after every hard restart, over a file nothing serves.'
     const dir = mkdtempSync(join(tmpdir(), 'roma-shim-server-'))
     dirs.push(dir)
-    // What a killed container leaves behind: the file, with nothing listening.
     writeFileSync(socketPathIn(dir), '')
 
     const server = await ShimServer.listen({

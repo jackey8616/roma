@@ -6,7 +6,6 @@ const B = 'session-b'
 const C = 'session-c'
 const D = 'session-d'
 
-/** A Task whose completion the test decides, and which records that it ran. */
 function pending(): {
   readonly run: () => Promise<string>
   readonly started: () => boolean
@@ -31,13 +30,11 @@ function pending(): {
   }
 }
 
-/** Let everything already queued run, so admissions settle before an assertion. */
 function flush(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve))
 }
 
 describe('serialising the Tasks of one Session', () => {
-  // Forced, not chosen: two processes writing one Session file corrupt it.
   it('never runs two Tasks of one Session at the same time', async () => {
     const queue = new TaskQueue()
     const first = pending()
@@ -157,9 +154,6 @@ describe('the global cap', () => {
     await secondTask
   })
 
-  // One busy Conversation must not stall a Conversation that could run right
-  // now. Strict head-of-line order would let a chatty thread hold the whole
-  // queue behind a Session that is simply not free yet.
   it('lets a runnable Task past one waiting on its own Session', async () => {
     const queue = new TaskQueue({ maxConcurrent: 2 })
     const busy = pending()
@@ -182,8 +176,6 @@ describe('the global cap', () => {
     await behindTask
   })
 
-  // Two Tasks waiting on one slot, admitted in one pass of #pump. The slot is
-  // claimed for the first before the second is looked at.
   it('admits one Task, not two, into the one slot that frees [fence:queue-pump-claims-the-slot]', async () => {
     const why =
       'The slot must be claimed in #pump, at admission, never by the admitted Task once it ' +
@@ -230,7 +222,6 @@ describe('the global cap', () => {
 })
 
 describe('telling a waiting caller where it is', () => {
-  // Unacknowledged waiting makes people resend, which compounds the backlog.
   it('tells a Task held by the cap its position', async () => {
     const queue = new TaskQueue({ maxConcurrent: 1 })
     const positions: number[] = []
@@ -261,8 +252,6 @@ describe('telling a waiting caller where it is', () => {
     await secondTask
   })
 
-  // Waiting on the cap and waiting on your own Conversation look the same from
-  // the Conversation: nothing is happening and nobody said so.
   it('tells a Task waiting only on its own Session too', async () => {
     const queue = new TaskQueue()
     const positions: number[] = []
@@ -286,10 +275,6 @@ describe('telling a waiting caller where it is', () => {
     await behindTask
   })
 
-  // The number says how much is ahead, not when this Task will run. Admission
-  // steps over a Task whose Session is busy, so the one told it was first can
-  // be started second — which is why nothing may schedule on this number, and
-  // why an Adapter must not render it as a running order.
   it('is telling a caller the backlog, not a place in a running order [fence:queue-pump-steps-over-a-busy-session]', async () => {
     const why =
       '#pump must admit in arrival order, stepping over a Task whose Session is busy (ADR-0003). ' +
@@ -302,7 +287,6 @@ describe('telling a waiting caller where it is', () => {
     const held = pending()
     const free = pending()
 
-    /** Run under `name`, recording the order it started in and where it queued. */
     const named = (name: string, key: string, task: () => Promise<string>): Promise<string> =>
       queue.run(
         key,
@@ -315,9 +299,7 @@ describe('telling a waiting caller where it is', () => {
 
     const first = queue.run(A, running.a.run)
     const second = queue.run(B, running.b.run)
-    // Waits on its own Session, which is busy with `first`.
     const behindA = named('behind-a', A, held.run)
-    // Waits only on the cap, and its own Session is free.
     const onC = named('on-c', C, free.run)
     await flush()
 
@@ -328,7 +310,6 @@ describe('telling a waiting caller where it is', () => {
       ]),
     )
 
-    // A slot frees, but the Session `behind-a` needs is still busy.
     running.b.finish()
     await second
     await flush()
@@ -362,10 +343,6 @@ describe('telling a waiting caller where it is', () => {
     await running
   })
 
-  // The queue's own answer, not a policy about Channels: a notice that threw
-  // never armed the Task for admission, so leaving it in would be leaving an
-  // entry that can never start and never leaves. Whether the Task deserves to
-  // run regardless is the caller's call — roma's Core decides it does.
   it('drops a Task whose notice threw rather than stranding it in the queue', async () => {
     const queue = new TaskQueue({ maxConcurrent: 1 })
     const running = pending()
@@ -387,8 +364,6 @@ describe('telling a waiting caller where it is', () => {
     expect(never.started()).toBe(false)
   })
 
-  // The caller is told while it waits, so the queue has to give way — and a slot
-  // freeing during that gap must still reach it. Nothing else comes and looks.
   it('admits a Task whose slot freed while its caller was being told', async () => {
     const queue = new TaskQueue({ maxConcurrent: 1 })
     const running = pending()
@@ -423,9 +398,6 @@ describe('which Task a Session is running', () => {
     'Task — another Session’s, or one still waiting — puts somebody else’s name on a ' +
     'credential request in the Audit Record (#62).'
 
-  // The queue is the only thing in roma that already knows a key has exactly one
-  // Task at a time — that is the serialisation rule — so asking anything else
-  // would mean building a second answer that could disagree with this one.
   it('is the running one, while it runs', async () => {
     const queue = new TaskQueue()
     const task = pending()
@@ -443,8 +415,6 @@ describe('which Task a Session is running', () => {
     expect(new TaskQueue().taskFor(A)).toBeNull()
   })
 
-  // A Task waiting for a slot is not running, and a credential request arriving
-  // from its Session belongs to whatever *is* — or to nothing.
   it('follows the Task into the queue rather than answering early [fence:queue-task-for-never-guesses]', async () => {
     const queue = new TaskQueue({ maxConcurrent: 1 })
     const first = pending()
@@ -464,10 +434,6 @@ describe('which Task a Session is running', () => {
     await queued
   })
 
-  // Null covers a key with nothing running and a caller who named no Task, and
-  // it must never guess: attributing a credential request to the nearest Task
-  // would put somebody else's name on it. A named Task runs beside it so that
-  // there is a nearest one to guess.
   it('says nothing rather than guessing when no Task was named [fence:queue-task-for-never-guesses]', async () => {
     const queue = new TaskQueue()
     const task = pending()
@@ -498,10 +464,6 @@ describe('running a free Relay past the cap', () => {
     'uncapped entry behind a full cap is still admissible; stopping holds every free Relay ' +
     'hostage to exactly the busy period it exists to ask about (#81).'
 
-  // The cap is argued entirely in terms of model work — retry storms, a bad
-  // credential holding a slot for three minutes. A free Relay drives no Turn, so
-  // three people asking what is going on must not be able to stop the work they
-  // are asking about.
   it('admits an uncapped entry while the cap is full [fence:queue-free-relay-uncapped]', async () => {
     const queue = new TaskQueue({ maxConcurrent: 2 })
     const first = pending()
@@ -523,8 +485,6 @@ describe('running a free Relay past the cap', () => {
     await Promise.all([...running, relayed])
   })
 
-  // Serialisation is not a choice and does not bend for a Relay: two processes
-  // on one Session's transcript corrupt it, whether or not either drives a Turn.
   it('still waits for its own Session [fence:queue-relay-still-serialised]', async () => {
     const queue = new TaskQueue()
     const task = pending()
@@ -547,8 +507,6 @@ describe('running a free Relay past the cap', () => {
     await relayed
   })
 
-  // What the cap counts is what `running` reports, so a free Relay in flight must
-  // not make a Task look like it is using a slot.
   it('is not counted as a Task while it runs [fence:queue-free-relay-uncapped]', async () => {
     const queue = new TaskQueue({ maxConcurrent: 1 })
     const freeRelay = pending()
@@ -558,7 +516,6 @@ describe('running a free Relay past the cap', () => {
     await flush()
     expect(queue.running, UNCAPPED).toBe(0)
 
-    // And the slot it did not take is still there for real work.
     const running = queue.run(B, task.run)
     await flush()
     expect(task.started(), UNCAPPED).toBe(true)
@@ -569,15 +526,6 @@ describe('running a free Relay past the cap', () => {
     await Promise.all([relayed, running])
   })
 
-  // A free Relay that had to wait for its Session is admitted the moment that
-  // Session frees, even though the cap is still full and stays full. This is
-  // what `#pump` walking its whole waiting list buys: stopping at the cap would
-  // hold every free Relay hostage to exactly the busy period they exist to ask
-  // about.
-  //
-  // The Session is occupied by another free Relay rather than by a Task, so that
-  // freeing it releases no capped slot and the cap is provably still full when
-  // the waiting one is admitted.
   it('is admitted while the cap stays full throughout [fence:queue-pump-walks-past-full-cap]', async () => {
     const queue = new TaskQueue({ maxConcurrent: 1 })
     const task = pending()
@@ -585,13 +533,11 @@ describe('running a free Relay past the cap', () => {
     const waitingOnA = pending()
     const wantsASlot = pending()
 
-    // The cap is full, and nothing in this test ever frees it.
     const running = queue.run(B, task.run)
     const held = queue.run(A, holdingA.run, { uncapped: true })
     await flush()
     expect(queue.running).toBe(1)
 
-    // One free Relay behind a busy Session, and one Task behind a full cap.
     const waiting = queue.run(A, waitingOnA.run, { uncapped: true })
     const denied = queue.run(C, wantsASlot.run)
     await flush()
@@ -603,8 +549,6 @@ describe('running a free Relay past the cap', () => {
     await flush()
 
     expect(waitingOnA.started(), WALKS_PAST).toBe(true)
-    // Still full, and the Task behind it is still waiting — the free Relay was
-    // admitted past the cap rather than into a slot that had come free.
     expect(queue.running, WALKS_PAST).toBe(1)
     expect(wantsASlot.started(), WALKS_PAST).toBe(false)
 

@@ -26,7 +26,6 @@ const MINTED =
   'The extension crosses under a whitelist, never a sanitiser: a bounded charset and length ' +
   'cannot express a separator, a parent or a leading dot, so there is nothing left to strip.'
 
-/** One Enclosure that hands over the bytes it was built with. */
 function sent(name: string, content = 'bytes'): PendingEnclosure {
   return { name, from: null, redeem: () => Promise.resolve(new TextEncoder().encode(content)) }
 }
@@ -49,10 +48,6 @@ describe('writing an Enclosure into a Working Directory', () => {
     expect(written!.path).not.toContain('nginx-error')
   })
 
-  // The reason ADR-0011 mints a path at all. `contentName` is chosen by whoever
-  // sent the message, so a name used as a path is a way out of the Working
-  // Directory — and out of it is where the Transcript and roma's own files are,
-  // which is not somewhere the agent's own shell already reaches.
   it('cannot be walked out of the Working Directory by the sender [fence:enclosures-name-is-minted]', async () => {
     const cwd = workingDirectory()
 
@@ -63,9 +58,6 @@ describe('writing an Enclosure into a Working Directory', () => {
     expect(readdirSync(join(cwd, '.enclosures')), MINTED).toHaveLength(1)
   })
 
-  // Two people in one thread paste `screenshot.png` a minute apart. Under the
-  // sender's name the second would overwrite the first, and the marker naming
-  // the first would then point at somebody else's image.
   it('gives two Enclosures of the same name two files [fence:enclosures-name-is-minted]', async () => {
     const cwd = workingDirectory()
 
@@ -85,7 +77,6 @@ describe('writing an Enclosure into a Working Directory', () => {
       'never its root and never an undotted directory: the root is the agent’s to clone into ' +
       '(ADR-0008), and a repository of the same name would collide with them (ADR-0011; #92).'
     const cwd = workingDirectory()
-    // The agent's clones, under every name the directory could plausibly have had.
     for (const clone of ['enclosures', 'attachments', 'uploads']) {
       mkdirSync(join(cwd, clone))
       writeFileSync(join(cwd, clone, 'README.md'), 'a repository')
@@ -103,8 +94,6 @@ describe('writing an Enclosure into a Working Directory', () => {
     }
   })
 
-  // Carried across because tools dispatch on it, and an image written as `.bin`
-  // may simply not be read as one.
   it('keeps the extension', async () => {
     const cwd = workingDirectory()
 
@@ -113,8 +102,6 @@ describe('writing an Enclosure into a Working Directory', () => {
     expect(written!.path.endsWith('.png')).toBe(true)
   })
 
-  // The whitelist, from the other side: anything that could express a separator,
-  // a parent or a second extension is not one, and gets none.
   it.each([
     ['no dot at all', 'Makefile'],
     ['a separator in it', 'passwd../../etc'],
@@ -135,9 +122,6 @@ describe('writing an Enclosure into a Working Directory', () => {
     expect(readdirSync(cwd)).toEqual([])
   })
 
-  // The failure ADR-0011 routes through the Task rather than swallowing. For a
-  // Channel with a class of attachment it cannot reach — Chat's `driveDataRef` —
-  // this is the normal path, and a Task that ended with a reason is the point.
   it('rejects when an Enclosure cannot be fetched', async () => {
     const cwd = workingDirectory()
     const unreachable: PendingEnclosure = {

@@ -8,23 +8,6 @@ import { MINTER_SOCKET_VAR, SESSION_ID_VAR, socketPathIn } from '../shim-protoco
 import { ShimServer } from '../shim-server.js'
 import { FakeMinter, fakeServedReaches } from '../../test/support/fake-minter.js'
 
-/**
- * The `gh` Shim, against a stub that reports the environment it was started
- * with.
- *
- * A stub rather than the real `gh`, because the repository currently requires
- * only Claude Code on `PATH` and this slice should not add to that — a developer
- * should not have to install a second CLI to run `npm test`. What is being
- * asserted is roma's half of the contract and nothing of GitHub's: that a token
- * is minted per invocation, that it reaches exactly one child process, that
- * arguments and the exit code go straight through, and that a stale token
- * inherited from somewhere else never survives.
- *
- * That `gh` itself authenticates with an Installation Token is not asserted here
- * and cannot be. It is in `docs/github-app-verification.md`, unverified and said
- * so.
- */
-
 const SHIM = fileURLToPath(new URL('./gh-shim.ts', import.meta.url))
 const SESSION = 'a-session'
 
@@ -68,7 +51,6 @@ async function shimInFrontOf(stub: string, minter = new FakeMinter()) {
   }
 }
 
-/** A `gh` that says what it was given, and nothing else. */
 const REPORTS_ITSELF = `#!/bin/sh
 echo "GH_TOKEN=\${GH_TOKEN-<unset>}"
 echo "GITHUB_TOKEN=\${GITHUB_TOKEN-<unset>}"
@@ -86,11 +68,6 @@ describe('the gh Shim', () => {
     expect(ran.stdout).toContain('args=pr create --title a fix')
   })
 
-  // Per invocation rather than per Session, which is the arithmetic the whole
-  // design turns on: an environment fixed at Session spawn is stale within the
-  // hour, and a Resident Session outliving an hour is ordinary. Two invocations
-  // therefore ask twice — that they get the same string is the cache's doing,
-  // and the cache is what decides when the string changes.
   it('asks for a credential on every invocation', async () => {
     const gh = await shimInFrontOf(REPORTS_ITSELF)
 
@@ -99,14 +76,9 @@ describe('the gh Shim', () => {
 
     const asked = await gh.run(['issue', 'list'])
     expect(asked.stdout).toContain('GH_TOKEN=token-1')
-    // One mint behind three invocations: roma mints rarely, and the Shim's
-    // asking often is what keeps the answer fresh rather than what costs.
     expect(gh.minter.minted).toHaveLength(1)
   })
 
-  // A credential nobody chose is worse than none. `gh` reads `GH_TOKEN` and
-  // `GITHUB_TOKEN`, and either could arrive from anywhere — so both are cleared
-  // before anything else happens, and put back only with what roma minted.
   it('never lets a token from somewhere else through [fence:github-gh-runs-on-no-inherited-token]', async () => {
     const why =
       'The gh Shim clears every inherited `GH_TOKEN` and `GITHUB_TOKEN` before it mints, ' +
@@ -124,8 +96,6 @@ describe('the gh Shim', () => {
 
     expect(ran.stdout, why).toContain('GH_TOKEN=<unset>')
     expect(ran.stdout, why).toContain('GITHUB_TOKEN=<unset>')
-    // The tool still runs, and fails in its own words about the command that was
-    // actually attempted. roma's reason is on stderr for the agent to relay.
     expect(ran.stderr).toContain('the App is unreachable')
   })
 

@@ -1,14 +1,3 @@
-// roma's half of the I1 containment check in `scripts/verify-image.sh`
-// (GHSA-v52v-hcv8-cr23, ADR-0032). Runs inside the built image, fed on stdin,
-// and does what roma does at boot with the image's own compiled code: read a
-// key file and keep it in memory, drop root with `dropRoot`, then spawn the
-// agent with `buildEnv` and `spawnClaudeProcess`. The agent here is a probe
-// rather than `claude`, because `claude` needs a credential CI does not have;
-// it is spawned exactly as `claude` would be, as roma's child, as `node`.
-//
-// The probe prints one line per thing the agent tries: `<check> REACHED` or
-// `<check> BLOCKED`. Fake canaries only — nothing here is a credential.
-
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { buildEnv } from '/app/dist/build-env.js'
 import { spawnClaudeProcess } from '/app/dist/claude-process.js'
@@ -17,8 +6,6 @@ import { dropRoot } from '/app/dist/drop-root.js'
 const KEY = '/tmp/roma-secrets/github-app.pem'
 const KEY_CANARY = 'FAKE-CANARY-GITHUB-APP-KEY'
 
-// Made by whoever roma starts as: root in the image as it ships, `node` in the
-// control run that stands in for the image before the fix.
 mkdirSync('/tmp/roma-secrets', { recursive: true, mode: 0o700 })
 writeFileSync(
   KEY,
@@ -27,7 +14,6 @@ writeFileSync(
     mode: 0o400,
   },
 )
-// Held for the life of the process, as `GitHubMinter` holds the PEM.
 globalThis.heldKey = readFileSync(KEY, 'utf8')
 
 const dropped = dropRoot([{ variable: 'ROMA_GITHUB_PRIVATE_KEY_FILE', path: KEY }])

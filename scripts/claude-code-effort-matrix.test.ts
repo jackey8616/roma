@@ -7,16 +7,6 @@ import {
   matrixReport,
 } from './claude-code-effort-matrix.js'
 
-/**
- * The three gates, exactly as they are minified in Claude Code 2.1.220.
- *
- * Copied out of the pinned bundle rather than written to suit the extractor,
- * which is the only way this file proves anything: the reading being asserted is
- * a reading of the real thing, and a fixture somebody tidied would be the
- * extractor testing its own assumptions. Their names are `OI`, `I_e` and `eqe`
- * in this build and will be something else in the next one — which is exactly
- * why nothing here anchors on them.
- */
 const EFFORT_GATE =
   'function OI(e){if(SNr(e))return!1;let t=Ede(e,"effort");if(t!==void 0)return t;let r=lo(e);' +
   'if(r.includes("claude-3-")||r==="claude-opus-4-0"||r==="claude-opus-4-1"||' +
@@ -38,12 +28,6 @@ const MAX_GATE =
   'r==="claude-haiku-4-5")return!1;if(M$(r,"max_effort")||r==="claude-mythos-5")return!0;' +
   'return dj(ny(e))}'
 
-/**
- * The `"effort"` gate as Claude Code 2.1.319 minifies it, copied out of that
- * bundle. Its by-name branches are 2.1.220's; what is new is the two checks in
- * front of them, which read `CLAUDE_CODE_MODEL_CAPABILITIES` and the model's
- * server-side `effort_levels`.
- */
 const EFFORT_GATE_2_1_319 =
   'function Sw(e){if(q$r(e))return!1;let n=mVe(e,"effort");if(n!==void 0)return n;' +
   'let r=rt(e),s=O1t("effort",r);if(s!==void 0)return s;let f=zwo(e,r);' +
@@ -52,25 +36,11 @@ const EFFORT_GATE_2_1_319 =
   'r==="claude-haiku-4-5")return!1;if(i.CLAUDE_CODE_ALWAYS_ENABLE_EFFORT)return!0;' +
   'if(Rw(r,"effort",e)||r==="claude-mythos-5")return!0;return m9(Pd(e))}'
 
-/**
- * A cut of 2.1.319's `/effort` command handler: the second place that bundle
- * passes `"effort"` to a call, as a command name and not a flag.
- */
 const HANDLER_2_1_319 =
   'if(nt.name==="effort"){let it=We.trim(),Ue=jN(it);' +
   'if(/^(default|auto)$/i.test(it)||rAr(it))Ke(),Tr(v,ie,"effort","default");' +
   'else if(Ue)Ke(),Tr(v,ie,"effort",Ue);else if(!it)Ke(),Pd(h,"effort");return}'
 
-/**
- * The gates as they really sit: one after another, with unrelated code around
- * them.
- *
- * The neighbour is the point of the fixture. In the bundle these three functions
- * are adjacent with no separator, so an extractor that reads by byte distance
- * rather than by brace balance walks straight out of one and into the next —
- * which is the failure ADR-0016 records, and which this file exists to keep from
- * recurring.
- */
 const BUNDLE =
   'function pvi(){return Ot.perTurnEffortOkEmitted}' +
   EFFORT_GATE +
@@ -79,10 +49,6 @@ const BUNDLE =
   'function ENr(e){return Ot.inferenceProfileBackingModels.get(e)}'
 
 describe('finding a gate in the bundle', () => {
-  // The whole safety property. Each gate names models the ones beside it do not
-  // — `claude-opus-4-6` is in the xhigh gate and in neither of the others — so a
-  // window that overran would show up here as the neighbour's models appearing
-  // in this one's lists.
   it('reads one gate without reading into the one beside it', () => {
     const gate = gateFor(BUNDLE, 'effort')
 
@@ -90,9 +56,6 @@ describe('finding a gate in the bundle', () => {
     expect(gate.refused).not.toContain('claude-opus-4-6')
   })
 
-  // Two call sites inside one function is the normal shape rather than an
-  // ambiguity: the flag name is asked of the deployment's flag store and then of
-  // the model's entitlements. What must be one is the function, not the site.
   it('accepts a flag passed twice inside one function', () => {
     expect(EFFORT_GATE.match(/"effort"/g)).toHaveLength(2)
     expect(gateFor(BUNDLE, 'effort').source).toBe(EFFORT_GATE)
@@ -102,16 +65,9 @@ describe('finding a gate in the bundle', () => {
     const gate = gateFor(BUNDLE, 'effort')
 
     expect(gate.refused).toContain('claude-haiku-4-5')
-    // The case the first version of this extractor got wrong, and the reason
-    // ADR-0016 will not let it gate anything: read out of the neighbouring
-    // function, `claude-mythos-5` came back as unsupported when it is on the
-    // allowing branch.
     expect(gate.allowed).toEqual(['claude-mythos-5'])
   })
 
-  // A build whose shape has moved is the thing worth being told about. Coping
-  // with it quietly is how an extractor comes to watch nothing while printing a
-  // table that reads as an answer.
   it('refuses a bundle that does not pass the flag at all', () => {
     expect(() => gateFor('function OI(e){return dj(ny(e))}', 'effort')).toThrow(/has moved/)
   })
@@ -122,10 +78,6 @@ describe('finding a gate in the bundle', () => {
     expect(() => gateFor(split, 'effort')).toThrow(/spread across 2 functions/)
   })
 
-  // 2.1.319's shape: the gate, and the `/effort` command's own handler, which
-  // passes the word as the name of a command rather than asking about a flag.
-  // Both are copied out of that bundle. The handler names no model, so it cannot
-  // be the gate, and the one function that does is.
   it('reads past a call that names no model, as 2.1.319’s `/effort` handler does', () => {
     const bundle = HANDLER_2_1_319 + EFFORT_GATE_2_1_319
 
@@ -155,12 +107,6 @@ describe('finding a gate in the bundle', () => {
 })
 
 describe('the matrix it reports', () => {
-  // What the pinned build actually says about roma's own four models, and the
-  // distinction the whole three-valued design exists for: one is refused by
-  // name, and the other three are named on neither branch — so what decides them
-  // is a server-side entitlement this cannot see. `EFFORT_MATRIX` says `true`
-  // for those three on a person's reading of other evidence, which is the
-  // relationship ADR-0016 designed rather than a disagreement.
   it('reports the Menu’s models as the gates name them, and unnamed where they do not', () => {
     const { rows } = effortMatrix(BUNDLE, Object.values(MENU))
 
@@ -195,15 +141,10 @@ describe('the report a person reads', () => {
   const { rows, gates } = effortMatrix(BUNDLE, Object.values(MENU))
   const report = matrixReport(rows, gates)
 
-  // Printed in full, because the table is the part that can be wrong. A table
-  // with no source under it asks to be believed.
   it('prints every gate it read, whole', () => {
     for (const gate of [EFFORT_GATE, XHIGH_GATE, MAX_GATE]) expect(report).toContain(gate)
   })
 
-  // The sentence that stops the next reader making the mistake the extractor
-  // made. An em dash that reads as "no" would put two models on the wrong row of
-  // a constant nothing else checks.
   it('says out loud that an unnamed model is not a refusal', () => {
     expect(report).toContain('is not a no')
   })
@@ -212,8 +153,6 @@ describe('the report a person reads', () => {
     expect(report).toContain('Nothing consumes this')
   })
 
-  // A report with an empty table reads as "nothing takes an effort", which is
-  // the one answer that must never be arrived at by accident.
   it('refuses a report with no models in it', () => {
     expect(() => matrixReport([], gates)).toThrow(/no models/)
   })

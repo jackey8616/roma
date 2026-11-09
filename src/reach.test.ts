@@ -13,13 +13,6 @@ import { eachReach, type Reach, type Reaches } from './reach.js'
 
 const REVOKED = new Error('the key was revoked')
 
-/**
- * The three real Reaches, each with a key that does not work.
- *
- * The real factories rather than the fixtures `startup.test.ts` boots with: the
- * forge's fixture reimplements `prove`, so a `githubReach` that swallowed a
- * failure would pass every boot test there.
- */
 describe('a Reach whose key does not work [fence:reach-a-broken-key-blocks-the-boot]', () => {
   const WHY =
     'prove() must throw for a Reach that is configured and does not work, and never answer ' +
@@ -88,17 +81,14 @@ describe('a deployment with no key [fence:reach-no-key-is-a-reach-that-says-so]'
     expect('unavailable' in reach && reach.unavailable, WHY).toBe(NO_DOCUMENT_REACH)
   })
 
-  // The type half, which is the rung that holds it: if `Reaches` ever let a
-  // member be absent or null, these would compile and the directives would fail
-  // `npm run typecheck`.
   it('cannot be written as a missing Reach', () => {
     const { code, cloud, documents } = fakeReaches()
 
-    // @ts-expect-error -- a deployment with no Cloud Reach still has its unavailable arm
+    // @ts-expect-error -- fence:reach-no-key-is-a-reach-that-says-so
     const noCloud: Reaches = { code, documents }
-    // @ts-expect-error -- null is an absence, and the Reach must be present
+    // @ts-expect-error -- fence:reach-no-key-is-a-reach-that-says-so
     const nullCloud: Reaches = { code, cloud: null, documents }
-    // @ts-expect-error -- a deployment with no Document Reach still has its unavailable arm
+    // @ts-expect-error -- fence:reach-no-key-is-a-reach-that-says-so
     const noDocuments: Reaches = { code, cloud }
 
     expect([noCloud, nullCloud, noDocuments], WHY).toHaveLength(3)
@@ -106,14 +96,12 @@ describe('a deployment with no key [fence:reach-no-key-is-a-reach-that-says-so]'
 })
 
 describe('one Reach per credential [fence:reach-one-per-credential]', () => {
-  // A list cannot say "one per credential". `Reaches` is a record over the
-  // closed `CredentialWanted`, so leaving the forge out does not compile.
   it('cannot be assembled without the forge', () => {
     const { cloud, documents } = fakeReaches()
 
-    // @ts-expect-error -- `code` is required: there is no mode that skips the forge credential
+    // @ts-expect-error -- fence:reach-one-per-credential
     const noCode: Reaches = { cloud, documents }
-    // @ts-expect-error -- the forge's slot takes the forge's Reach and no other
+    // @ts-expect-error -- fence:reach-one-per-credential
     const wrongSlot: Reaches = { code: cloud, cloud, documents }
 
     expect(
@@ -148,7 +136,7 @@ describe('a Reach fills only its own credential slot [fence:reach-typed-by-its-c
     const cloud = cloudReach(new FakeCloudMinter())
     const { documents } = fakeReaches()
 
-    // @ts-expect-error -- a Reach is typed by its credential: the forge's slot refuses an available Cloud Reach
+    // @ts-expect-error -- fence:reach-typed-by-its-credential
     const backwards: Reaches = { code: cloud, cloud: code, documents }
 
     expect(

@@ -2,24 +2,9 @@ import { generateKeyPairSync } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { appJwt } from './app-jwt.js'
 
-/**
- * The JWT, read back apart from its signature.
- *
- * What is asserted is the arithmetic and the claims, because those are the two
- * things GitHub refuses on and the two things nothing else in roma would notice
- * were wrong: a token more than ten minutes long, or one issued in the future
- * against a clock a few seconds fast, is rejected — and the failure surfaces as
- * "roma cannot mint" with no hint that time is the reason.
- *
- * The key is generated here rather than fixtured. It is a real RSA key, so the
- * signature is a real signature; what it is not is a secret anybody has to be
- * careful with.
- */
-
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
 const PEM = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
 
-/** Noon, as a round number, so the arithmetic reads. */
 const NOW = 1_800_000_000_000
 
 function claimsOf(jwt: string): { iat: number; exp: number; iss: string } {
@@ -42,18 +27,12 @@ describe('the JWT roma signs as its App', () => {
     expect(claimsOf(appJwt({ appId: '12345', privateKey: PEM, now: NOW })).iss).toBe('12345')
   })
 
-  // GitHub's own guidance, and the reason is a clock that is a few seconds fast:
-  // a JWT issued "in the future" is rejected outright.
   it('is issued a minute in the past, against a clock that may be fast [fence:github-jwt-backdated-once]', () => {
     expect(claimsOf(appJwt({ appId: '12345', privateKey: PEM, now: NOW })).iat, JWT_WHY).toBe(
       NOW / 1000 - 60,
     )
   })
 
-  // Inside the maximum rather than exactly on it. GitHub validates the span from
-  // `iat`, so a nine-minute span leaves a minute of room; spending that room on
-  // the backdating instead would put every JWT roma signs on the boundary, where
-  // any rounding on GitHub's side is a refusal nobody can diagnose.
   it('spans nine of the ten minutes GitHub allows, not all ten [fence:github-jwt-backdated-once]', () => {
     const { iat, exp } = claimsOf(appJwt({ appId: '12345', privateKey: PEM, now: NOW }))
 

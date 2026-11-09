@@ -3,19 +3,8 @@ import { overflowOffer, spentUntil } from './shared-window.js'
 import { readSharedWindow } from './stream-events.js'
 import { quotaEvent } from '../test/support/recorded-stream.js'
 
-/** The real event every capture carries, and it is always allowed. */
 const ALLOWED = quotaEvent()
 
-/**
- * The same event with a status the captures do not hold.
- *
- * The values are Claude Code 2.1.220's own —
- * `v.enum(["allowed","allowed_warning","rejected"])` in its schema for
- * `rate_limit_info` — rather than invented ones. That distinction is most of
- * what this file got wrong before: it was written against `"blocked"`, a string
- * the provider never sends, so it agreed with the code about a case neither of
- * them had seen and said nothing about the case that actually arrives.
- */
 const withStatus = (status: string, fields: Record<string, unknown> = {}) =>
   quotaEvent({ status, ...fields })
 
@@ -69,9 +58,6 @@ describe('deciding the Shared Window is spent [fence:only-rejected-is-spent]', (
 })
 
 describe('deciding whether Overflow can even be offered', () => {
-  // Asked of the event rather than assumed, so that roma never offers a valve
-  // the provider will refuse — which would spend somebody's attention on a
-  // button and then fail.
   it('is not offered where the event rejects overage', () => {
     expect(overflowOffer(readSharedWindow(withStatus('rejected'))!)).toBe(false)
   })
@@ -97,15 +83,12 @@ describe('deciding whether Overflow can even be offered', () => {
     ).toBe(true)
   })
 
-  // Nothing said about overage is not permission to spend metered money.
   it('is not offered where the event says nothing about overage', () => {
     expect(overflowOffer(readSharedWindow(withStatus('rejected', { overageStatus: null }))!)).toBe(
       false,
     )
   })
 
-  // Already on metered billing: there is nothing left to offer, and offering it
-  // would read as though the spending had not started.
   it('is not offered to a Turn already running on overage', () => {
     expect(
       overflowOffer(

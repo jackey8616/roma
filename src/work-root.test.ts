@@ -12,11 +12,6 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkRoot } from './work-root.js'
 
-/**
- * A write the power cuts halfway through: half the bytes land, then nothing.
- *
- * Off unless a test turns it on, so every other write here is the real one.
- */
 const powerFails = vi.hoisted(() => ({ mid: false }))
 vi.mock('node:fs', async (importOriginal) => {
   const fs = await importOriginal<typeof import('node:fs')>()
@@ -50,18 +45,11 @@ function newRoot(): { root: string; work: WorkRoot } {
   return { root, work: new WorkRoot(root) }
 }
 
-/** Make a directory look as though nothing has touched it for `ageMs`. */
 function age(path: string, ageMs: number): void {
   const seconds = (Date.now() - ageMs) / 1000
   utimesSync(path, seconds, seconds)
 }
 
-/**
- * A Session that has been used, and when.
- *
- * The mtime is moved rather than a clock being handed in, because the mtime is
- * the only clock this module has — see `touch`.
- */
 function sessionUsed(work: WorkRoot, id: string, agoMs: number): string {
   const cwd = work.sessionDir(id)
   mkdirSync(cwd, { recursive: true })
@@ -82,10 +70,6 @@ describe('where a Session works', () => {
     expect(existsSync(work.sessionDir(A))).toBe(false)
   })
 
-  // A pure derivation, which is what lets an Enclosure be written before the
-  // Turn that reads it (ADR-0011). Creating the directory here is what #105 was:
-  // for as long as its existence was the record that a Session had run, asking
-  // where a Session works made it look like one that already had.
   it('makes no directory [fence:workroot-session-dir-makes-nothing]', () => {
     const why =
       'sessionDir must be a pure derivation that creates nothing (#105, #107). For as long as ' +
@@ -109,8 +93,6 @@ describe('marking a Session as used', () => {
     expect(work.reclaimIdle(new Set())).toEqual([])
   })
 
-  // A directory reclaimed underneath us is not worth failing a Turn over, and a
-  // Turn is exactly what is in flight when this is called.
   it('says nothing about a directory that is gone', () => {
     const { work } = newRoot()
 
@@ -135,9 +117,6 @@ describe('reclaiming what nothing has used', () => {
     expect(existsSync(cwd)).toBe(true)
   })
 
-  // A resident process holds its directory open and a Turn in flight is writing
-  // into it. The mtime cannot see either — a Session can be mid-Turn for an hour
-  // without anything touching the directory again.
   it('keeps a Session that is resident, however old its directory looks [fence:workroot-in-use-is-required]', () => {
     const why =
       'reclaimIdle must be told which Sessions are in use, and the type must require it (#105): ' +
@@ -145,7 +124,7 @@ describe('reclaiming what nothing has used', () => {
       'running Turn, whose mtime cannot show that a process holds it open.'
     const { work } = newRoot()
     const cwd = sessionUsed(work, A, 30 * DAY)
-    // @ts-expect-error -- fence:workroot-in-use-is-required: forgetting inUse must not compile.
+    // @ts-expect-error -- fence:workroot-in-use-is-required
     const forgot: () => unknown = () => work.reclaimIdle()
 
     expect(typeof forgot, why).toBe('function')
@@ -153,20 +132,6 @@ describe('reclaiming what nothing has used', () => {
     expect(existsSync(cwd), why).toBe(true)
   })
 
-  /**
-   * The rule this module exists to hold.
-   *
-   * Every record roma keeps about a Conversation sits beside these directories
-   * as a file — a generation, a Chosen Model, a Chosen Effort, a Chosen Caveman,
-   * and the `.pending` a half-written record leaves behind. A sweep that took
-   * them would drop a Session's Chosen Model on the floor while the Session was
-   * still being talked to, and put a Conversation back on the Pinned Model with
-   * nobody told.
-   *
-   * It used to be one line in the Session Pool and three comments in
-   * `session-generation.ts`, in modules that do not import each other. This is
-   * the assertion that holds it now.
-   */
   it('steps over every file, however old [fence:workroot-records-survive-the-sweep]', () => {
     const { root, work } = newRoot()
     const records = [
@@ -216,8 +181,6 @@ describe('reclaiming what nothing has used', () => {
     expect(existsSync(fresh)).toBe(true)
   })
 
-  // How long it had been is what the pool's `reclaim` record carries, and the
-  // directory is gone by the time anybody could ask.
   it('says how idle each one was', () => {
     const { work } = newRoot()
     sessionUsed(work, A, 9 * DAY)
@@ -228,8 +191,6 @@ describe('reclaiming what nothing has used', () => {
     expect(reclaimed?.idleMs).toBeLessThan(10 * DAY)
   })
 
-  // A work root a deployment has not mounted yet, on the first boot. Answering
-  // "nothing" is right; throwing would take the hourly timer down with it.
   it('reclaims nothing when the root is not there', () => {
     const { root, work } = newRoot()
     rmSync(root, { recursive: true, force: true })
@@ -249,9 +210,6 @@ describe('where a record goes', () => {
     expect(work.openedRecord(A)).toBe(join(root, `${A}.opened`))
   })
 
-  // The rule the sweep enforces, read from the other end: a record is a sibling
-  // of the directory it describes and never a child of it, so deleting the
-  // directory cannot take it.
   it('puts no record inside the Session directory it describes', () => {
     const { work } = newRoot()
 
@@ -281,14 +239,6 @@ describe('reading a record', () => {
     expect(work.readRecord(work.modelRecord(A))).toBe('claude-sonnet-5')
   })
 
-  /**
-   * The distinction the whole fallback rule rests on.
-   *
-   * A record that may exist and cannot be read is not the same as one nobody
-   * wrote. Answering "none" to both is how a Chosen Model disappears with nobody
-   * told — the Conversation quietly returns to the Pinned Model, and the only
-   * evidence is a bill.
-   */
   it('throws where a record exists and cannot be read [fence:workroot-unreadable-is-not-missing]', () => {
     const why =
       'readRecord may answer null only for a record that is not there (ENOENT); every other ' +
@@ -311,8 +261,6 @@ describe('writing a record', () => {
     expect(work.readRecord(work.generationRecord(A))).toBe('1')
   })
 
-  // A rename within one directory is atomic, so a reader sees the old record or
-  // the new one and never a part of either.
   it('leaves nothing half-written behind it', () => {
     const { root, work } = newRoot()
 
@@ -359,21 +307,12 @@ describe('forgetting a record', () => {
     expect(work.readRecord(work.modelRecord(A))).toBeNull()
   })
 
-  // `/model default` on a Session nobody ever moved. There is nothing to delete
-  // and that is exactly the state being asked for.
   it('says nothing where there was no record', () => {
     const { work } = newRoot()
 
     expect(() => work.forgetRecord(work.modelRecord(A))).not.toThrow()
   })
 
-  /**
-   * Deliberately not recursive.
-   *
-   * A directory where a record should be is something roma did not put there and
-   * cannot read. Removing it quietly would have the Command answer that it moved
-   * a Session it did not.
-   */
   it('refuses to remove a directory standing where a record should be [fence:workroot-forget-is-not-recursive]', () => {
     const why =
       'forgetRecord must not be recursive: a directory where a record should be is something ' +

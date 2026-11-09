@@ -1,15 +1,5 @@
 import type { Installation } from './installation.js'
 
-/**
- * What every Session is told it can reach.
- *
- * Its own file rather than beside the gitconfig in `shims.ts`. The two are
- * edited for different reasons — one changes when the Shim's wiring does, this
- * one changes when what an agent needs to be told does — and a file that holds
- * both is a file with two reasons to change.
- */
-
-/** Enforced by `fence:github-announcement-caps-the-advertisement`. */
 const NAMED_AT_MOST = 100
 
 export function announce(installation: Installation): string {

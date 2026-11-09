@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// A Claude Code PreToolUse hook: refuse a git command that skips the hooks.
-// Plain JavaScript because it runs under whatever `node` is on PATH.
-// Enforced by `fence:no-verify-is-refused`.
 
 import { readFileSync } from 'node:fs'
 
@@ -19,7 +16,6 @@ if (reason !== null) {
   process.exit(2)
 }
 
-/** Why `command` skips git's hooks, or null when it does not. */
 function bypass(command) {
   for (const segment of command.split(/&&|\|\||[;|\n]/)) {
     const words = segment.trim().split(/\s+/)

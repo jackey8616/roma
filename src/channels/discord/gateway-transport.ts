@@ -14,129 +14,65 @@ import {
   type Interaction,
 } from './discord-events.js'
 
-/**
- * The socket roma holds open to Discord, as much of it as roma uses: narrow, so
- * a test double need not be most of a WebSocket. The close code on both halves
- * is how roma says whether it means to come back, and how Discord says whether
- * it will have it back.
- */
 export interface GatewaySocket {
-  /** Send one frame, already JSON. */
   send(frame: string): void
-  /** Close, with the code that says whether roma means to resume. */
   close(code: number): void
   on(event: 'message', listener: (frame: string) => void): void
   on(event: 'close', listener: (code: number) => void): void
   on(event: 'error', listener: (error: Error) => void): void
 }
 
-/**
- * Open one connection to the Gateway, at `url`: a resume goes to the
- * `resume_gateway_url` that `READY` named, not where a first connection goes.
- */
 export type ConnectGateway = (url: string) => GatewaySocket
 
 const GUILDS = 1 << 0
 const GUILD_MESSAGES = 1 << 9
 const DIRECT_MESSAGES = 1 << 12
 
-/**
- * What roma identifies as. No `MESSAGE_CONTENT` (`1 << 15`). Enforced by
- * `fence:discord-no-privileged-intent`.
- */
 export const INTENTS = GUILDS | GUILD_MESSAGES | DIRECT_MESSAGES
 
-/**
- * How long roma waits before reconnecting, and the ceiling it doubles up to.
- *
- * Enforced by `fence:discord-reconnect-backs-off`.
- */
 export const RECONNECT_FLOOR_MS = 1_000
 export const RECONNECT_CEILING_MS = 60_000
 
-/** One thing the Gateway did that no Conversation will ever hear about. */
 export type GatewayLogRecord =
   | {
-      /**
-       * A frame that is not a Gateway payload, or a payload roma cannot read.
-       * Dropped, so this record is the only trace it leaves.
-       */
       readonly event: 'gateway-undecodable'
       readonly reason: string
     }
   | {
-      /**
-       * The socket itself faulted. Written down, not acted on: the close that
-       * follows is where reconnecting is decided.
-       */
       readonly event: 'gateway-error'
       readonly reason: string
     }
   | {
-      /**
-       * The connection ended and roma is going back. `resuming` says whether
-       * Discord will replay what roma missed, or the gap is lost.
-       */
       readonly event: 'gateway-disconnected'
       readonly code: number
       readonly resuming: boolean
     }
   | {
-      /**
-       * Discord closed the connection with a code that says not to come back (a
-       * bad token, or an intent roma is not approved for), and roma has stopped
-       * reconnecting. Enforced by `fence:discord-refused-for-good-stops`.
-       */
       readonly event: 'gateway-refused'
       readonly code: number
     }
   | {
-      /**
-       * A message arrived before the channel list its Conversation Key is read
-       * against, and is held rather than guessed at.
-       */
       readonly event: 'gateway-held'
-      /** Which guild's state is missing, or null where what is missing is `READY`. */
       readonly guildId: string | null
     }
   | {
-      /**
-       * The receiver rejected, which it must not: a bug on roma's side. There is
-       * nowhere to hand the work back to, so nothing else happens.
-       */
       readonly event: 'gateway-unreceived'
       readonly messageId: string
       readonly reason: string
     }
   | {
-      /**
-       * A press roma could not acknowledge inside Discord's three seconds.
-       * Discord shows the person their press failed while roma goes on and
-       * answers it, so nothing else ever mentions this.
-       */
       readonly event: 'press-unacknowledged'
       readonly reason: string
     }
 
-/**
- * This Transport's own records, and those of the reader it lends its log to.
- * Not the Channel's, which are `binding.ts`'s `DiscordLogRecord`.
- */
 export type GatewayLog = OperatorLog<GatewayLogRecord | DiscordEventLogRecord>
 
 export interface GatewayTransportOptions {
-  /** The bot token, sent on identify and on every resume. */
   readonly token: string
-  /** Where a first connection goes. A resumed one goes where `READY` says. */
   readonly url: string
   readonly connect: ConnectGateway
-  /** How roma reads the message behind a Quotation. */
   readonly api: DiscordApi
   readonly log?: GatewayLog
-  /**
-   * How much of the first heartbeat interval to wait, as a fraction. Only for a
-   * test to pin the moment; nothing else should pass it.
-   */
   readonly jitter?: () => number
 }
 
@@ -154,10 +90,8 @@ const OP = {
 const CLOSED_FOR_GOOD = 1000
 const CLOSED_TO_RESUME = 4000
 
-/** Enforced by `fence:discord-refused-for-good-stops`. */
 const REFUSED_FOR_GOOD = new Set([4004, 4010, 4011, 4012, 4013, 4014])
 
-/** The close codes that mean the session is gone, but the connection may return. */
 const SESSION_LOST = new Set([4007, 4009])
 
 interface Pending {
@@ -166,17 +100,6 @@ interface Pending {
   readonly press: DiscordPress | null
 }
 
-/**
- * Discord's inbound path: one WebSocket, held open.
- *
- * Settling does nothing in either direction, and a resumed session replays what
- * roma missed, so a Delivery is named by the message's own snowflake. Enforced
- * by `fence:discord-settling-does-nothing` and `fence:discord-delivery-named-by-snowflake`.
- *
- * A message that arrives before its guild's channel list is held, never guessed
- * at. A press is acknowledged here, before it reaches the receiver. Enforced by
- * `fence:discord-press-acknowledged-first`.
- */
 export class GatewayTransport implements Transport<DiscordEvent> {
   readonly #token: string
   readonly #url: string
@@ -190,19 +113,15 @@ export class GatewayTransport implements Transport<DiscordEvent> {
   #closing = false
 
   #resumeUrl: string | null = null
-  /** The session a resume names, and the last event it saw. Both, or neither. */
   #session: string | null = null
   #sequence: number | null = null
-  /** roma's own user id, which the Adapter strips the mention by. */
   #self: string | null = null
 
   #beating: ReturnType<typeof setTimeout> | null = null
   #reconnecting: ReturnType<typeof setTimeout> | null = null
-  /** Enforced by `fence:discord-dead-socket-noticed`. */
   #acknowledged = true
   #attempts = 0
 
-  /** Enforced by `fence:discord-key-against-channel-list`. */
   readonly #channels = new Map<string, Set<string>>()
   #held: Pending[] = []
 
@@ -215,17 +134,12 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     this.#jitter = jitter ?? Math.random
   }
 
-  /**
-   * Open the socket and start delivering. Resolves once the socket is open, not
-   * once Discord has said `READY`, so boot does not wait on that round trip.
-   */
   receive(receiver: Receiver<DiscordEvent>): Promise<void> {
     this.#receiver = receiver
     this.#open(this.#url)
     return Promise.resolve()
   }
 
-  /** Stop delivering, and mean it: nothing reconnects after this. */
   close(): Promise<void> {
     this.#closing = true
     this.#receiver = null
@@ -245,7 +159,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
       this.#read(frame)
     })
     socket.on('error', (error) => {
-      // Enforced by `fence:discord-socket-fault-not-thrown`.
       this.#log({ event: 'gateway-error', reason: reasonOf(error) })
     })
     socket.on('close', (code) => {
@@ -268,9 +181,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
       return
     }
 
-    // Every dispatch carries the sequence a resume asks to be replayed from, so
-    // it is kept before anything is done with the payload — including for the
-    // dispatches roma ignores, which are most of them.
     const sequence = asNumber(payload['s'])
     if (sequence !== null) this.#sequence = sequence
 
@@ -282,16 +192,12 @@ export class GatewayTransport implements Transport<DiscordEvent> {
         this.#acknowledged = true
         return
       case OP.heartbeat:
-        // Discord asking for one immediately, which it may do at any time.
         this.#beat()
         return
       case OP.reconnect:
         this.#reopen(CLOSED_TO_RESUME)
         return
       case OP.invalidSession:
-        // The one payload whose whole content is a boolean: whether the session
-        // roma just tried to resume is still there. Where it is not, forgetting
-        // it here is what makes the next connection identify afresh.
         if (payload['d'] !== true) this.#forgetSession()
         this.#reopen(payload['d'] === true ? CLOSED_TO_RESUME : CLOSED_FOR_GOOD)
         return
@@ -374,13 +280,10 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     }
   }
 
-  /** The guild's channels as `GUILD_CREATE` states them: complete, and replacing. */
   #seed(guild: Readonly<Record<string, unknown>>): void {
     const guildId = asString(guild['id'])
     if (guildId === null) return
     this.#channels.set(guildId, new Set(idsIn(guild['channels'])))
-    // The active threads arrive in the same payload and are deliberately not
-    // added — see `#channels`.
     this.#notChannels(guildId, idsIn(guild['threads']))
     this.#release()
   }
@@ -404,7 +307,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     this.#take({ id, message, press: null })
   }
 
-  /** Enforced by `fence:discord-press-acknowledged-first`. */
   async #pressed({ id, token, message, press }: Interaction): Promise<void> {
     try {
       await this.#api.acknowledgePress(id, token)
@@ -434,20 +336,17 @@ export class GatewayTransport implements Transport<DiscordEvent> {
 
   #readable({ message, press }: Pending): boolean {
     if (this.#self === null) return false
-    // Enforced by `fence:discord-press-not-held`.
     if (press !== null) return true
     const guildId = asString(message['guild_id'])
     return guildId === null || this.#channels.has(guildId)
   }
 
-  /** Enforced by `fence:discord-deliver-is-detached`. */
   async #deliver({ id, message, press }: Pending): Promise<void> {
     const receiver = this.#receiver
     const self = this.#self
     if (receiver === null || self === null) return
 
     const guildChannel = this.#guildChannel(message)
-    // Enforced by `fence:discord-press-quotes-nothing`.
     const quotation =
       press !== null
         ? null
@@ -457,10 +356,8 @@ export class GatewayTransport implements Transport<DiscordEvent> {
           })
 
     const delivery: Delivery<DiscordEvent> = {
-      // Enforced by `fence:discord-delivery-named-by-snowflake`.
       id,
       event: { message, self, guildChannel, quotation, press },
-      // Enforced by `fence:discord-settling-does-nothing`.
       ack: () => {},
       nack: () => {},
     }
@@ -497,7 +394,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     this.#send({ op: OP.heartbeat, d: this.#sequence })
   }
 
-  /** Both clears: the handle is a timeout until the first beat and an interval after it. */
   #stopBeating(): void {
     if (this.#beating !== null) {
       clearTimeout(this.#beating)
@@ -514,11 +410,9 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     const socket = this.#socket
     this.#stopBeating()
     socket?.close(code)
-    // Enforced by `fence:discord-reopen-does-not-wait-for-close`.
     this.#closed(socket, code)
   }
 
-  /** Enforced by `fence:discord-stale-close-ignored`. */
   #closed(socket: GatewaySocket | null, code: number): void {
     if (socket !== null && socket !== this.#socket) return
     this.#socket = null
@@ -538,7 +432,6 @@ export class GatewayTransport implements Transport<DiscordEvent> {
     this.#attempts += 1
     this.#reconnecting = setTimeout(() => {
       this.#reconnecting = null
-      // Where `READY` said to go, which is not where the first connection went.
       this.#open((resuming ? this.#resumeUrl : null) ?? this.#url)
     }, delay)
   }

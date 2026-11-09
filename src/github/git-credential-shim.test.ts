@@ -8,29 +8,6 @@ import { ShimServer, type ShimLogRecord } from '../shim-server.js'
 import { FakeMinter, fakeServedReaches } from '../../test/support/fake-minter.js'
 import { gitConfig } from './shims.js'
 
-/**
- * The single most important test in this repository's GitHub work, and the one
- * ADR-0008 was most likely to be wrong about.
- *
- * A **real `git`** is pointed at a **real Credential Shim** talking to a **real
- * socket server**, and only the forge itself is a double. Everything the design
- * rests on is asserted here as behaviour rather than as intent: that `git`
- * invokes the Shim at all, that the answer is in a shape `git` accepts, that the
- * request carries the repository path, and that a rejected credential comes back
- * as `erase` and is discarded.
- *
- * It is in the **default run** deliberately. No network, no credential, no money
- * — `git credential fill` never touches GitHub — so there is nothing to make it
- * opt-in for, and the precedent is `scripts/` being brought into the free run on
- * the same reasoning: it widens what is covered without widening what can be
- * reached.
- *
- * **Nothing here is skipped.** A test that quietly passed when `git` is absent
- * would report green while the contract underneath all of this went unasserted,
- * which is the failure mode this repository already documents for seam 2. If
- * `git` is not installed, `spawn` fails and so does the test.
- */
-
 const SESSION = 'a-session'
 const REPOSITORY = 'a-team/roma.git'
 
@@ -57,25 +34,16 @@ async function pointGitAtRoma(minter = new FakeMinter()) {
   })
   servers.push(server)
 
-  // The real gitconfig, from the real function, with **nothing substituted** —
-  // including the helper command, which is the part this test used to supply for
-  // itself and which was broken in exactly the way that hid: `gitCredentialHelper`
-  // resolved the right `.ts` path and produced a command `node` could not load,
-  // so a from-source roma answered every credential request with a crash. A test
-  // that builds its own command cannot see that.
   const configPath = join(dir, 'gitconfig')
   writeFileSync(configPath, gitConfig())
 
   return {
     minter,
     log,
-    /** Run a real `git credential <operation>` against it. */
     git: (operation: string, input: string) =>
       runGit(operation, input, {
         PATH: process.env['PATH'] ?? '/usr/bin:/bin',
         HOME: dir,
-        // So that a developer's own `~/.gitconfig` and the machine's system
-        // config cannot decide what this test measures.
         GIT_CONFIG_NOSYSTEM: '1',
         GIT_CONFIG_GLOBAL: configPath,
         [MINTER_SOCKET_VAR]: server.socketPath,
@@ -90,18 +58,11 @@ describe('a real git, asking a real Credential Shim', () => {
 
     const filled = await roma.git('fill', `url=https://github.com/${REPOSITORY}\n\n`)
 
-    // `git credential fill` prints the credential it settled on. That it prints
-    // these two lines at all is the whole assertion: git ran the helper, read
-    // its answer, and did not fall through to asking somebody.
     expect(filled.stdout).toContain('username=x-access-token')
     expect(filled.stdout).toContain('password=token-1')
     expect(filled.code).toBe(0)
   })
 
-  // `credential.useHttpPath` is what makes this true, and it is set for exactly
-  // this reason: it is what will let an Audit Record say which repositories a
-  // Task reached for. Nothing is written down here — that is its own ticket —
-  // but the request carrying the path is what keeps it possible.
   it('is told which repository the credential is for', async () => {
     const roma = await pointGitAtRoma()
 
@@ -112,17 +73,10 @@ describe('a real git, asking a real Credential Shim', () => {
       sessionId: SESSION,
       taskId: 'the-task',
       path: REPOSITORY,
-      // `git` asks for the one credential it can use, and says nothing about
-      // which — this is roma reading an absent field as the forge's, which is
-      // what every request written before there was a second credential meant.
       credential: 'code',
     })
   })
 
-  // Measured on git 2.43.0 before any of this existed (ADR-0008's amendment): a
-  // failed authentication calls the helper a second time with `erase`, handing
-  // back the credential that was rejected. That is roma's only signal that a
-  // token it believes in has stopped working.
   it('hands a rejected credential back, and roma stops serving it', async () => {
     const roma = await pointGitAtRoma()
     const first = await roma.git('fill', `url=https://github.com/${REPOSITORY}\n\n`)
@@ -135,16 +89,12 @@ describe('a real git, asking a real Credential Shim', () => {
     )
     const second = await roma.git('fill', `url=https://github.com/${REPOSITORY}\n\n`)
 
-    // A fresh token, not the dead one served for the rest of its hour.
     expect(second.stdout).toContain('password=token-2')
     expect(roma.log).toContainEqual(
       expect.objectContaining({ event: 'credential-rejected', sessionId: SESSION }),
     )
   })
 
-  // The runtime failure that has no special handling by design: the Shim answers
-  // with nothing, git says authentication failed in its own words, and the agent
-  // reports that to the person in the context of what it was attempting.
   it('leaves git with no credential when roma cannot mint one', async () => {
     const minter = new FakeMinter()
     minter.failsWith = new Error('the App private key was rejected')
@@ -153,8 +103,6 @@ describe('a real git, asking a real Credential Shim', () => {
     const filled = await roma.git('fill', `url=https://github.com/${REPOSITORY}\n\n`)
 
     expect(filled.stdout).not.toContain('password=')
-    // And the operator gets the one line that makes three people's Tasks failing
-    // separately recognisable as one cause.
     expect(roma.log).toContainEqual(
       expect.objectContaining({
         event: 'credential-failed',
@@ -176,12 +124,10 @@ describe('a real git, asking a real Credential Shim', () => {
     const filled = await roma.git('fill', `url=https://github.com/${REPOSITORY}\n\n`)
 
     expect(filled.stderr, why).toContain('the App private key was rejected')
-    // What git says when the sentence reached it on stdout: it read it as a field.
     expect(filled.stderr, why).not.toContain('invalid credential line')
   })
 })
 
-/** One `git credential …`, with stdin written and stdout collected. */
 async function runGit(
   operation: string,
   input: string,
@@ -199,7 +145,6 @@ async function runGit(
     git.stderr.on('data', (chunk: string) => {
       stderr += chunk
     })
-    // Never skipped: a missing `git` is a failing test, not a quiet pass.
     git.on('error', failed)
     git.on('close', (code) => finished({ stdout, stderr, code }))
     git.stdin.end(input)

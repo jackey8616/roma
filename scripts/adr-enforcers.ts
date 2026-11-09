@@ -1,21 +1,10 @@
-/**
- * Does every check an ADR says enforces it exist?
- *
- * An ADR Decision marked "Enforced by `X`" has handed its authority to X
- * (ADR-0031). If X is renamed or deleted, the ADR goes on claiming enforcement
- * that nothing performs. This is the judgement; `scripts/check-adr-enforcers.ts`
- * is the I/O.
- */
-
 import { citedIn, unresolved, type Fences } from './fence-names.js'
 
-/** One ADR, by filename, and its text. */
 export interface Adr {
   readonly file: string
   readonly text: string
 }
 
-/** A citation in an ADR that names no check. */
 export interface Dangling {
   readonly file: string
   readonly line: number
@@ -23,7 +12,6 @@ export interface Dangling {
   readonly why: string
 }
 
-/** Every "Enforced by" in these ADRs that does not resolve. */
 export function danglingEnforcers(adrs: readonly Adr[], fences: Fences): Dangling[] {
   return adrs.flatMap(({ file, text }) =>
     citedIn(text).flatMap(({ name, index }) => {
@@ -34,7 +22,6 @@ export function danglingEnforcers(adrs: readonly Adr[], fences: Fences): Danglin
   )
 }
 
-/** The failure a person reads in the CI log. */
 export function danglingMessage(dangling: readonly Dangling[]): string {
   const found = dangling.map((d) => `  ${d.file}:${d.line}  ${d.name} — ${d.why}`).join('\n')
   return `An ADR says a check enforces it, and the check does not exist:

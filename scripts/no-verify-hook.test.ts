@@ -10,7 +10,6 @@ const WHY =
   'A git command that skips the hooks must be refused (ADR-0031): the pre-commit hook runs ' +
   'the checks that hold roma’s guardrails, and a commit that skipped it is one they never saw.'
 
-/** What the hook does with one Bash command: 2 refuses it, 0 lets it run. */
 function verdict(command: string): number | null {
   const run = spawnSync(process.execPath, [HOOK], {
     input: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),

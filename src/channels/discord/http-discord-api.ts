@@ -8,25 +8,12 @@ import { asNumber, asRecord, asString, type DiscordMessage } from './discord-eve
 
 export interface HttpDiscordApiOptions {
   readonly botToken: string
-  /** Where the API lives, version included. See `DEFAULT_API_BASE`. */
   readonly apiBase: string
-  /**
-   * How a request is actually made. The platform's own `fetch` unless a test
-   * hands in another; Node's is why roma reaches Discord with no dependency.
-   */
   readonly fetch?: typeof globalThis.fetch
 }
 
-/** Enforced by `fence:discord-thread-already-created-is-success`. */
 const THREAD_ALREADY_CREATED = 160004
 
-/**
- * The six REST calls, over HTTP. Decides nothing: it puts a token on a request,
- * checks that Discord answered, and hands back what came.
- *
- * Any refusal throws `DiscordRefusal`, carrying how long Discord asked roma to
- * wait where it said. A thread refused because it already exists is a success.
- */
 export class HttpDiscordApi implements DiscordApi {
   readonly #botToken: string
   readonly #apiBase: string
@@ -45,7 +32,6 @@ export class HttpDiscordApi implements DiscordApi {
   }
 
   async download(url: string): Promise<Uint8Array> {
-    // Enforced by `fence:discord-download-carries-no-token`.
     const response = await this.#fetch(url)
     refuseUnless(response, 'an attachment — its links expire, and a Task can wait hours')
     return new Uint8Array(await response.arrayBuffer())
@@ -57,7 +43,6 @@ export class HttpDiscordApi implements DiscordApi {
       ...(replyTo === null
         ? {}
         : {
-            // Enforced by `fence:discord-reply-survives-deleted-message`.
             message_reference: { message_id: replyTo, fail_if_not_exists: false },
           }),
       ...(buttons.length === 0 ? {} : { components: componentRows(buttons) }),
@@ -81,9 +66,6 @@ export class HttpDiscordApi implements DiscordApi {
       'POST',
       { name },
     )
-    // A thread and the message it was started from share one id, so a message
-    // that already has one is the thread roma was asking for — see `startThread`
-    // on the port for why that is a success.
     if (!response.ok && (await codeOf(response)) !== THREAD_ALREADY_CREATED) {
       refuseUnless(response, 'a thread roma tried to open')
     }
@@ -101,7 +83,6 @@ export class HttpDiscordApi implements DiscordApi {
     return this.#fetch(`${this.#apiBase}${path}`, {
       method,
       headers: {
-        // Enforced by `fence:discord-bot-token-scheme`.
         authorization: `Bot ${this.#botToken}`,
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
       },
@@ -116,7 +97,6 @@ const ACTION_ROW = 1
 const BUTTON = 2
 const SECONDARY = 2
 
-/** Enforced by `fence:discord-buttons-fit-one-message`. Enforced by `fence:discord-http-trims-no-menu`. */
 const PER_ROW = 5
 
 function componentRows(buttons: readonly DiscordButton[]): unknown[] {
@@ -135,7 +115,6 @@ function componentRows(buttons: readonly DiscordButton[]): unknown[] {
   return rows
 }
 
-/** Enforced by `fence:discord-text-mentions-nobody`. */
 const ALLOWED_MENTIONS = { allowed_mentions: { parse: [], replied_user: true } } as const
 
 async function codeOf(response: Response): Promise<number | null> {
@@ -146,7 +125,6 @@ async function codeOf(response: Response): Promise<number | null> {
   }
 }
 
-/** Enforced by `fence:discord-retry-after-is-read`. */
 function refuseUnless(response: Response, what: string): void {
   if (response.ok) return
   const seconds =

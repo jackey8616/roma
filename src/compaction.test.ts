@@ -3,9 +3,7 @@ import { severityOf } from './compaction.js'
 import { readCompaction, readCompactionFailure } from './stream-events.js'
 import { ofKind, recordedStream } from '../test/support/recorded-stream.js'
 
-/** The capture that holds a Compaction that happened, and a failed one before it. */
 const AUTO = recordedStream('compaction-auto')
-/** The failure on its own, provoked with the threshold under the floor. */
 const FAILED = recordedStream('compaction-failed')
 
 const SNAKE_CASE =
@@ -27,10 +25,6 @@ describe('reading a Compaction off the stream', () => {
   })
 
   it('is not fooled by the transcript spelling [fence:stream-compaction-snake-case]', () => {
-    // What #98 was written against — Claude Code's own parser, reading its
-    // transcript files, where the field is `compactMetadata`. A reader written
-    // from that quote finds nothing on stdout and reports every Compaction as no
-    // Compaction, while looking like it works.
     const transcript = {
       type: 'system',
       subtype: 'compact_boundary',
@@ -59,9 +53,6 @@ describe('reading a failed Compaction off the stream', () => {
   })
 
   it('ignores the ordinary progress the same event carries', () => {
-    // `system/status` is not the Compaction's event: `requesting` and
-    // `compacting` arrive on it too, and `compacting` is the one that immediately
-    // precedes a failure. Only `compact_result` marks one.
     const statuses = ofKind(AUTO.events, 'system/status')
     const read = statuses.map((event) => readCompactionFailure(event))
 
@@ -70,8 +61,6 @@ describe('reading a failed Compaction off the stream', () => {
   })
 
   it('does not read a success as a failure', () => {
-    // The capture holds one: `compact_result: "success"` arrives just before the
-    // boundary, and the boundary is what roma reads instead.
     const successes = ofKind(AUTO.events, 'system/status').filter(
       (event) => event['compact_result'] === 'success',
     )
@@ -83,8 +72,6 @@ describe('reading a failed Compaction off the stream', () => {
 
 describe('how seriously roma takes one', () => {
   it('says nothing about the failure both captures hold', () => {
-    // Measured benign: the Turn carrying this one cost two cents and answered,
-    // and the Session served the next Turn normally.
     expect(severityOf('too_few_groups')).toBe('benign')
   })
 

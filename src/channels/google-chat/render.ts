@@ -2,51 +2,21 @@ import type { OutboundInstruction, TaskProgress } from '../../channel-adapter.js
 import type { Command } from '../../commands.js'
 import { progressPhrase } from '../../progress-phrase.js'
 
-/** Chat's limit on the text of one message. The API rejects a longer one. */
 export const MAX_TEXT = 4096
 
-/** What the button that takes Overflow says. */
 export const OVERFLOW_BUTTON = 'Run it on metered billing'
 
-/**
- * Everything the Core can say about a Task except that it is still going.
- *
- * Its own type because the two are answered differently in Chat — an outcome is
- * a new message and progress edits one that exists — and because an outcome can
- * be several messages while progress is always exactly one.
- */
 type NotProgress<T> = T extends { readonly kind: 'progress' } ? never : T
 export type TaskOutcome = NotProgress<OutboundInstruction>
 
-/**
- * How Chat says "this message is for you", and the space that separates it from
- * what follows.
- *
- * `caller` is already a Chat user resource name, so the mention is the identity
- * in angle brackets and nothing else — no Conversation Key involved.
- * https://developers.google.com/workspace/chat/identify-reference-users
- *
- * A DM gets one too, though the Adapter could tell from the Conversation Key: a
- * rule with an exception in it is a rule somebody has to remember.
- */
 function addressedTo(caller: string): string {
   return `<${caller}> `
 }
 
-/**
- * How a Task's outcome reads in Chat: one message per string, in the order they
- * should be posted, more than one when it is longer than Chat will take. A
- * failure's reason is the Core's sentence, passed through.
- *
- * The Caller is mentioned on the **first** message only, inside the limit.
- * Enforced by `fence:gchat-split-under-the-limit`.
- * Enforced by `fence:gchat-mention-once-per-answer`.
- */
 export function outcomeMessages(instruction: TaskOutcome): string[] {
   const to = addressedTo(instruction.caller)
   switch (instruction.kind) {
     case 'result': {
-      // Enforced by `fence:gchat-result-is-its-own-message`.
       const messages = split(to, instruction.text)
       if (instruction.overflowCostUsd !== undefined) {
         messages.push(overflowSpentText(instruction.overflowCostUsd))
@@ -54,10 +24,6 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
       return messages
     }
     case 'failure':
-      // Split like a result, because it is one: a failed Turn's reason is the
-      // Turn's own text, and that has no more of a length limit than an answer
-      // does. Posted whole, Chat would refuse it and the Conversation would be
-      // told nothing at all about a Task that is already dead.
       return split(to, instruction.reason)
     case 'choice':
       return split(to, instruction.text)
@@ -68,26 +34,12 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
     case 'blocked':
       return [to + blockedText(instruction.resetsAt)]
     case 'context-full':
-      // Said as the consequence rather than as the cause, because roma has two
-      // codes that arrive here and they have different causes — a context that
-      // will not shrink, and attached media that cannot be stripped out of one.
-      // "This thread is too long" would be false for the second and the person
-      // would act on it anyway.
-      //
-      // Names the Command, because the remedy is the point of the message: a
-      // sentence that only said the Session was finished would leave somebody
-      // stuck with the same fact and nothing to do about it. What it costs is
-      // said too — `/clear` discards, and somebody who found that out afterwards
-      // would have been right to expect a warning.
       return [
         `${to}Claude cannot shorten this conversation any further, so it cannot take ` +
           `another message. Send /clear to start a fresh session — nothing from this one ` +
           `carries over.`,
       ]
     case 'overflow-refused':
-      // What they can still do is the point of the sentence: the Task is not
-      // over, and telling them only that they were refused would read as one
-      // that is.
       return [
         `${to}Overflow is capped at $${money(instruction.capUsd)} a month and this month has ` +
           `spent $${money(instruction.spentUsd)}, so it is off until the month turns. ` +
@@ -96,14 +48,12 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
   }
 }
 
-/** Enforced by `fence:gchat-blocked-says-the-task-is-kept`. */
 function blockedText(resetsAt: number): string {
   const at = new Date(resetsAt * 1000).toISOString().replace('T', ' ').slice(0, 16)
   return `The shared Claude quota is spent. It comes back at ${at} UTC — I have kept your task and will run it then.`
 }
 
 function overflowSpentText(costUsd: number | null): string {
-  // Enforced by `fence:gchat-unpriced-is-not-free`.
   if (costUsd === null) return 'Ran on metered billing. What it cost was never reported.'
   return `Ran on metered billing: $${money(costUsd)}.`
 }
@@ -112,46 +62,23 @@ function money(usd: number): string {
   return usd.toFixed(2)
 }
 
-/**
- * The acknowledgement's text for one phase: `progressPhrase`'s words, with the
- * mention in front and fitted to what it leaves of Chat's limit.
- */
 export function progressText(caller: string, progress: TaskProgress): string {
   const to = addressedTo(caller)
   return to + fitted(progressPhrase(progress), MAX_TEXT - to.length)
 }
 
-/**
- * One acknowledgement phrase, inside what the mention leaves of Chat's limit.
- * The **end** is what goes.
- *
- * It promises exactly `result.length <= budget`, for every budget: it cannot make
- * the message fit when the mention alone has spent the limit, but it adds nothing.
- * Enforced by `fence:gchat-fitted-holds-the-budget`.
- */
 export function fitted(text: string, budget: number): string {
   if (text.length <= budget) return text
-  // A budget that cannot even hold the ellipsis is answered with nothing rather
-  // than with the ellipsis, so that the promise above holds at both ends.
   if (budget < 1) return ''
-  // Clamped because a negative length reads from the *end* in JavaScript, which
-  // is the one input that would turn this from a trim into its own opposite.
   return `${text.slice(0, Math.max(0, budget - 1))}…`
 }
 
 function commandText(command: Command, carriedOut: boolean): string {
   if (command === 'clear') return 'Started a fresh session. Nothing from before this is in it.'
-  // Two messages for one `/stop`, and both earn their place: this one answers
-  // the person who typed it, and the Task's own "Stopped." lands on the
-  // acknowledgement they had been watching.
   return carriedOut ? 'Stopping…' : 'Nothing to stop.'
 }
 
-/** Enforced by `fence:gchat-split-under-the-limit`. */
 function split(prefix: string, text: string): string[] {
-  // A Turn can finish having written nothing. Posting nothing at all would make
-  // it indistinguishable from a Task that died — and it is still somebody's
-  // Task, so it is still addressed to them.
   if (text.trim() === '') return [`${prefix}(roma finished without saying anything.)`]
 
   const messages: string[] = []
@@ -169,7 +96,6 @@ function split(prefix: string, text: string): string[] {
 function breakPoint(window: string): number {
   for (const boundary of ['\n\n', '\n', ' ']) {
     const at = window.lastIndexOf(boundary)
-    // Enforced by `fence:gchat-split-at-a-late-boundary`.
     if (at > MAX_TEXT / 2) return at + boundary.length
   }
   return MAX_TEXT

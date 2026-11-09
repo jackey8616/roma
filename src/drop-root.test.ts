@@ -4,11 +4,6 @@ import { ContainmentRefused, dropRoot, type KeyFile, type RootSystem } from './d
 const PEM: KeyFile = { variable: 'ROMA_EXAMPLE_KEY_FILE', path: '/run/secrets/example.pem' }
 const JSON_KEY: KeyFile = { variable: 'ROMA_OTHER_KEY_FILE', path: '/run/secrets/other.json' }
 
-/**
- * A host where everything goes right unless a test says otherwise: started as
- * root, SIGUSR1 disabled, the drop succeeds, the kernel marks roma
- * non-dumpable, and no key file is readable once roma is `node`.
- */
 function system(overrides: Partial<RootSystem> & { readonly readable?: readonly string[] } = {}) {
   const calls: string[] = []
   let uid = overrides.uid?.() ?? 0

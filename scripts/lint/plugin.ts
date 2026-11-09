@@ -1,5 +1,3 @@
-/** roma's own ESLint rules, as the plugin `roma`. */
-
 import type { ESLint, Rule } from 'eslint'
 import { commentWhitelist, PLUGIN_RULES } from './comment-whitelist.js'
 

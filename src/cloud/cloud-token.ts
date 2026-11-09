@@ -2,8 +2,6 @@ import { fileURLToPath } from 'node:url'
 import { shortcut } from '../shortcut.js'
 import { CLOUD_SHORTCUT } from './announce.js'
 
-/** The Cloud Shortcut: one command, one Cloud Token, nothing to parse. */
-
 export async function main(
   argv: readonly string[] = process.argv.slice(2),
   env: NodeJS.ProcessEnv = process.env,

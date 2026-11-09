@@ -12,24 +12,10 @@ import {
 const PROGRESS_INTERVAL_MS = 5_000
 
 export interface ProgressReporterOptions {
-  /**
-   * Where an update goes. Best-effort: a rejection is swallowed.
-   * Enforced by `fence:progress-deliver-is-best-effort`.
-   */
   readonly deliver: (progress: TaskProgress) => void | Promise<void>
-  /**
-   * Whether anything after the Acknowledgement is sent at all: false for a
-   * Channel that cannot edit a message it has posted. The Acknowledgement still
-   * goes, and everything after it is dropped rather than posted again.
-   */
   readonly updates?: boolean
 }
 
-/**
- * One Task's Acknowledgement, and the throttle that keeps it readable. It reads
- * events into a single "what is happening now", and sends that at most once per
- * interval, the first straight away. The final result is never sent through it.
- */
 export class ProgressReporter {
   readonly #deliver: (progress: TaskProgress) => void | Promise<void>
   readonly #updates: boolean
@@ -39,14 +25,6 @@ export class ProgressReporter {
   #sentAt = 0
   #timer: NodeJS.Timeout | null = null
   #stopped = false
-  /**
-   * Deliveries, chained rather than concurrent.
-   *
-   * An Adapter posts the acknowledgement on the first instruction and edits it
-   * on the rest, so two in flight at once is an edit racing the post it is
-   * meant to be editing. Chaining costs nothing at one update per five seconds
-   * and removes the race entirely.
-   */
   #sending: Promise<void> = Promise.resolve()
   #characters = 0
 
@@ -55,13 +33,6 @@ export class ProgressReporter {
     this.#updates = updates
   }
 
-  /**
-   * Say what the Task is doing now.
-   *
-   * The first call is the acknowledgement and goes immediately; every one after
-   * it is throttled, and a call that says what has already been sent is dropped
-   * rather than sent again.
-   */
   update(progress: TaskProgress): void {
     if (this.#stopped) return
     this.#current = progress
@@ -73,21 +44,11 @@ export class ProgressReporter {
     this.#arm()
   }
 
-  /** Read one stream event, and update if it says something new. */
   observe(event: ClaudeEvent): void {
     const progress = this.#read(event)
     if (progress !== null) this.update(progress)
   }
 
-  /**
-   * The Task is over: nothing more is scheduled, and nothing more is sent. Waits
-   * on nothing, and drops an update still queued behind one the Channel is
-   * taking, which is the guarantee `channel-adapter.ts` states.
-   * Enforced by `fence:progress-stop-waits-on-nothing`.
-   *
-   * Decided here rather than left to the Adapters, where it would be a rule every
-   * Channel has to be told; the first was written without knowing it.
-   */
   stop(): void {
     this.#stopped = true
     if (this.#timer !== null) {
@@ -96,13 +57,6 @@ export class ProgressReporter {
     }
   }
 
-  /**
-   * What one event says the Task is doing, or null if it says nothing about it.
-   *
-   * Arrival order decides, with no precedence between phases: the stream is
-   * already sequential, and a Turn that thinks, calls a tool and then writes
-   * says so in that order.
-   */
   #read(event: ClaudeEvent): TaskProgress | null {
     const text = readTextDelta(event)
     if (text !== '') {
@@ -113,11 +67,7 @@ export class ProgressReporter {
     if (estimatedTokens !== null) return { phase: 'thinking', estimatedTokens }
     const started = readToolStarted(event)
     if (started !== null) return { phase: 'tool', tool: started }
-    // The other dead stream, and the longer one. Nothing arrives between this and
-    // the boundary — 28,517ms in the longest capture — so without it a `/compact`
-    // posts "Working…" and then says nothing at all for half a minute.
     if (readCompacting(event)) return { phase: 'compacting' }
-    // Enforced by `fence:progress-tool-finish-only-closes-a-tool`.
     if (readToolFinished(event)) {
       return this.#current?.phase === 'tool' ? { phase: 'working' } : null
     }
@@ -141,13 +91,6 @@ export class ProgressReporter {
     this.#timer = timer
   }
 
-  /**
-   * The interval has come round. Send whatever the Task is doing *now*, not
-   * whatever armed the timer — a burst of 194 events becomes one update.
-   *
-   * Nothing is rearmed here. A Task that has gone quiet has nothing to send, and
-   * the next thing that does happen arms the timer again from `update`.
-   */
   #tick(): void {
     if (this.#stopped || this.#current === null) return
     if (saysTheSame(this.#current, this.#sent)) return
@@ -160,28 +103,14 @@ export class ProgressReporter {
     this.#sent = progress
     this.#sentAt = Date.now()
     this.#sending = this.#sending.then(async () => {
-      // Queued while the Channel was taking the one before it, and the Task has
-      // ended since. `update` turns new callers away once stopped; this is the
-      // same rule for the ones that were already on the chain.
       if (this.#stopped) return
       try {
         await this.#deliver(progress)
-      } catch {
-        // Best-effort by contract. Nothing to do with it: there is no second
-        // Channel to tell, and a Task that is running fine has no failure to
-        // report yet.
-      }
+      } catch {}
     })
   }
 }
 
-/**
- * Whether two states say the same thing.
- *
- * What keeps a tool window quiet. Twenty-five seconds of a tool running is five
- * ticks of the throttle with nothing new to show, and editing a message to
- * exactly what it already says is five wasted Channel calls.
- */
 function saysTheSame(a: TaskProgress, b: TaskProgress | null): boolean {
   if (b === null) return false
   switch (a.phase) {
@@ -190,17 +119,12 @@ function saysTheSame(a: TaskProgress, b: TaskProgress | null): boolean {
     case 'working':
       return b.phase === 'working'
     case 'compacting':
-      // No number to compare, and none is wanted: a Compaction reports nothing
-      // while it runs, so every moment of one really does say the same thing.
       return b.phase === 'compacting'
     case 'thinking':
       return b.phase === 'thinking' && b.estimatedTokens === a.estimatedTokens
     case 'tool':
       return b.phase === 'tool' && b.tool === a.tool
     case 'writing':
-      // Why `writing` carries a number at all. Compared on the phase alone,
-      // every moment of a generating Turn would say the same thing as the last
-      // and the Acknowledgement would sit still for all 72 seconds of it.
       return b.phase === 'writing' && b.characters === a.characters
   }
 }

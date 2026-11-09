@@ -4,7 +4,6 @@ import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { MINTER_SOCKET_VAR, SESSION_ID_VAR } from './shim-protocol.js'
 
-/** The non-test files under `src/` whose code, not counting comments, spells `text` as a string. */
 function spelledIn(text: string): string[] {
   const src = fileURLToPath(new URL('.', import.meta.url))
   return globSync('**/*.ts', { cwd: src })
