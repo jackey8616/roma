@@ -1,3 +1,4 @@
+import type { Fronted } from './credential-proxy.js'
 import { MINTER_SOCKET_VAR, SESSION_ID_VAR } from './shim-protocol.js'
 
 export type Credential =
@@ -17,7 +18,7 @@ export interface SessionShims {
 }
 
 export interface BuildEnvOptions {
-  readonly credential: Credential
+  readonly credential: Fronted
   readonly configDir: string
   readonly shims?: SessionShims
   readonly inherit?: Readonly<Record<string, string | undefined>>
@@ -41,8 +42,10 @@ export function buildEnv({
   env['CLAUDE_CONFIG_DIR'] = configDir
   env['CLAUDE_SECURESTORAGE_CONFIG_DIR'] = configDir
 
-  if (credential.kind === 'shared-window') env['CLAUDE_CODE_OAUTH_TOKEN'] = credential.oauthToken
-  else env['ANTHROPIC_API_KEY'] = credential.apiKey
+  if (credential.kind === 'shared-window') env['CLAUDE_CODE_OAUTH_TOKEN'] = credential.standIn
+  else env['ANTHROPIC_API_KEY'] = credential.standIn
+  env['ANTHROPIC_BASE_URL'] = credential.baseUrl
+  env['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'] = '1'
 
   if (shims !== undefined) {
     env[SESSION_ID_VAR] = shims.sessionId

@@ -420,7 +420,9 @@ describe('an event that answers an offer rather than asking for work', () => {
     feed(roma.procFor(), OK)
     await delivered
 
-    expect(roma.claude.lastSpawn.env).toMatchObject({ ANTHROPIC_API_KEY: 'metered-key' })
+    expect(roma.claude.lastSpawn.env).toMatchObject({
+      ANTHROPIC_API_KEY: expect.stringMatching(/^sk-ant-api03-roma-stand-in-/),
+    })
     expect(roma.channel.instructions.at(-1)).toMatchObject({ kind: 'result', text: 'ok' })
     expect(roma.transport.acked).toEqual(['m-2', 'm-1'])
   })

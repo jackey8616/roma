@@ -20,6 +20,7 @@ import {
 } from './startup-self-check.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { FakeClaude, flush } from '../test/support/fake-claude.js'
+import { fronted } from '../test/support/fronted.js'
 import {
   EFFORT_ANSWERS,
   FAILED,
@@ -76,7 +77,7 @@ function selfCheck({
 
   const check = startupSelfCheck({
     credential,
-    env: buildEnv({ credential, inherit: {}, configDir: '/work/claude-home' }),
+    env: buildEnv({ credential: fronted(credential), inherit: {}, configDir: '/work/claude-home' }),
     cwd,
     spawn: claude.spawn,
     log: (record) => log.push(record),

@@ -5,6 +5,7 @@ import { spawnClaudeProcess } from './claude-process.js'
 import { ClaudeSession } from './claude-session.js'
 import { startupSelfCheck, StartupSelfCheckFailed } from './startup-self-check.js'
 import { liveSessionDirs, sharedWindowCredential } from '../test/support/live-claude.js'
+import { fronted } from '../test/support/fronted.js'
 
 const BOGUS_KEY = 'sk-ant-not-a-real-key-seam2'
 
@@ -35,7 +36,7 @@ describe('the startup self-check against a real claude -p', () => {
     const refused = await startupSelfCheck({
       credential: sharedWindowCredential(),
       env: buildEnv({
-        credential: { kind: 'overflow', apiKey: BOGUS_KEY },
+        credential: fronted({ kind: 'overflow', apiKey: BOGUS_KEY }),
         configDir,
         inherit: process.env,
       }),

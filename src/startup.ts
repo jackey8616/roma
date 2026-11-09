@@ -10,6 +10,7 @@ import type { SpawnClaudeProcess } from './claude-process.js'
 import type { RetryBudget } from './config.js'
 import { ReachUse } from './reach-use.js'
 import { Core, type CoreLogRecord, type CoreOptions } from './core.js'
+import { CredentialProxy, type Fronted } from './credential-proxy.js'
 import { FreshTokens } from './fresh-tokens.js'
 import { eachReach, type Reach, type Reaches } from './reach.js'
 import type { BoundChannel, ChannelBinding } from './serve.js'
@@ -76,6 +77,7 @@ export interface StartRomaOptions {
   >
   readonly selfCheckCwd?: string
   readonly selfCheckTimeoutMs?: number
+  readonly anthropicApi?: string
 }
 
 export interface Roma {
@@ -88,25 +90,40 @@ export interface Roma {
   shutdown(): Promise<void>
 }
 
-export async function startRoma({
-  credential,
-  overflow,
-  channels,
-  workRoot,
-  auditRoot,
-  configDir,
-  reaches,
-  shims,
-  model,
-  effort,
-  caveman,
-  maxConcurrentTasks,
-  retryBudget,
-  spawn,
-  log,
-  selfCheckCwd,
-  selfCheckTimeoutMs,
-}: StartRomaOptions): Promise<Roma> {
+export async function startRoma(options: StartRomaOptions): Promise<Roma> {
+  const proxy = await CredentialProxy.listen(
+    options.anthropicApi === undefined ? {} : { upstream: options.anthropicApi },
+  )
+  try {
+    return await startBehind(proxy, options)
+  } catch (error) {
+    await proxy.close()
+    throw error
+  }
+}
+
+async function startBehind(
+  proxy: CredentialProxy,
+  {
+    credential,
+    overflow,
+    channels,
+    workRoot,
+    auditRoot,
+    configDir,
+    reaches,
+    shims,
+    model,
+    effort,
+    caveman,
+    maxConcurrentTasks,
+    retryBudget,
+    spawn,
+    log,
+    selfCheckCwd,
+    selfCheckTimeoutMs,
+  }: StartRomaOptions,
+): Promise<Roma> {
   const proved = new Map<CredentialWanted, string | null>()
   for (const reach of eachReach(reaches)) {
     const { account } = await reach.prove()
@@ -118,7 +135,8 @@ export async function startRoma({
   const pinnedEffort = effort ?? PINNED_EFFORT
   const pinnedCaveman = caveman ?? CAVEMAN_OFF
 
-  const env = buildEnv({ credential, configDir })
+  const fronted = proxy.front(credential)
+  const env = buildEnv({ credential: fronted, configDir })
 
   const probeCwd = selfCheckCwd ?? mkdtempSync(join(tmpdir(), 'roma-self-check-'))
   let selfCheck: StartupSelfCheckReport
@@ -158,15 +176,15 @@ export async function startRoma({
     ...(log === undefined ? {} : { log }),
   })
 
-  const sessionEnv = (from: Credential) => (sessionId: string) =>
+  const sessionEnv = (from: Fronted) => (sessionId: string) =>
     buildEnv({
       credential: from,
       configDir,
       shims: { sessionId, socketPath, gitConfigPath },
     })
   const envs: CredentialEnvs = {
-    [credential.kind]: sessionEnv(credential),
-    ...(overflow === undefined ? {} : { overflow: sessionEnv(overflow.credential) }),
+    [credential.kind]: sessionEnv(fronted),
+    ...(overflow === undefined ? {} : { overflow: sessionEnv(proxy.front(overflow.credential)) }),
   }
 
   const work = new WorkRoot(workRoot)
@@ -220,6 +238,7 @@ export async function startRoma({
         await pool.shutdown()
       } finally {
         await shimServer.close()
+        await proxy.close()
       }
     },
   }

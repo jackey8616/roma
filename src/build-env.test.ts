@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { apiKeySourceFor, buildEnv, type BuildEnvOptions, type Credential } from './build-env.js'
+import { fronted } from '../test/support/fronted.js'
 
 const HOST = {
   PATH: '/usr/bin:/bin',
@@ -17,18 +18,22 @@ const HOST = {
   AWS_SECRET_ACCESS_KEY: 'nothing-to-do-with-claude',
 }
 
+const SHARED_WINDOW: Credential = { kind: 'shared-window', oauthToken: 'sk-ant-oat01-REAL-TOKEN' }
+const OVERFLOW: Credential = { kind: 'overflow', apiKey: 'sk-ant-api03-REAL-KEY' }
+
 const CONFIG_DIR = '/work/claude-home'
 
 describe('buildEnv', () => {
   describe('under a Shared Window credential', () => {
     const env = buildEnv({
-      credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
+      credential: fronted(SHARED_WINDOW),
       inherit: HOST,
       configDir: CONFIG_DIR,
     })
 
-    it('passes the OAuth token', () => {
-      expect(env['CLAUDE_CODE_OAUTH_TOKEN']).toBe('oauth-token')
+    it('passes a stand-in where the OAuth token would be, pointed at the proxy', () => {
+      expect(env['CLAUDE_CODE_OAUTH_TOKEN']).toMatch(/^sk-ant-oat01-roma-stand-in-/)
+      expect(env['ANTHROPIC_BASE_URL']).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
     })
 
     it('leaves ANTHROPIC_API_KEY absent rather than empty [fence:buildenv-no-stray-key]', () => {
@@ -43,13 +48,14 @@ describe('buildEnv', () => {
 
   describe('under an Overflow credential', () => {
     const env = buildEnv({
-      credential: { kind: 'overflow', apiKey: 'api-key' },
+      credential: fronted(OVERFLOW),
       inherit: HOST,
       configDir: CONFIG_DIR,
     })
 
-    it('passes the API key', () => {
-      expect(env['ANTHROPIC_API_KEY']).toBe('api-key')
+    it('passes a stand-in where the API key would be, pointed at the proxy', () => {
+      expect(env['ANTHROPIC_API_KEY']).toMatch(/^sk-ant-api03-roma-stand-in-/)
+      expect(env['ANTHROPIC_BASE_URL']).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
     })
 
     it('leaves CLAUDE_CODE_OAUTH_TOKEN absent rather than empty', () => {
@@ -57,9 +63,44 @@ describe('buildEnv', () => {
     })
   })
 
+  it('carries neither real credential, under either kind [fence:buildenv-never-the-real-credential]', () => {
+    const why =
+      'A Claude Code process must never hold the Shared Window token or the Overflow key. Its ' +
+      'own Bash tool shares its uid and reads /proc/<claude>/environ, and what it prints lands ' +
+      'in a Transcript roma never deletes (GHSA-wqj9-8qq4-w466, ADR-0034). buildEnv takes only ' +
+      'a Fronted credential, which only CredentialProxy.front makes, so the call below does ' +
+      'not compile and the environments built here hold stand-ins.'
+    const envs = [SHARED_WINDOW, OVERFLOW].map((credential) =>
+      buildEnv({ credential: fronted(credential), inherit: HOST, configDir: CONFIG_DIR }),
+    )
+    // @ts-expect-error -- fence:buildenv-never-the-real-credential
+    const real: BuildEnvOptions = { credential: SHARED_WINDOW, configDir: CONFIG_DIR }
+
+    expect(real.configDir, why).toBe(CONFIG_DIR)
+    for (const env of envs) {
+      expect(JSON.stringify(env), why).not.toContain('REAL-TOKEN')
+      expect(JSON.stringify(env), why).not.toContain('REAL-KEY')
+    }
+  })
+
+  it('keeps Claude Code from calling the API around the proxy [fence:buildenv-no-traffic-around-the-proxy]', () => {
+    const why =
+      'Claude Code 2.1.319 sends its Messages API calls to ANTHROPIC_BASE_URL, and six more to ' +
+      'api.anthropic.com directly unless nonessential traffic is off — measured against the ' +
+      'image (ADR-0034). Those carry the stand-in, which only the proxy accepts, so they would ' +
+      'fail with a 401 on every Turn and serve nothing.'
+    const env = buildEnv({
+      credential: fronted(SHARED_WINDOW),
+      inherit: HOST,
+      configDir: CONFIG_DIR,
+    })
+
+    expect(env['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'], why).toBe('1')
+  })
+
   it('carries only the named passthrough variables from the host', () => {
     const env = buildEnv({
-      credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
+      credential: fronted(SHARED_WINDOW),
       inherit: HOST,
       configDir: CONFIG_DIR,
     })
@@ -77,7 +118,7 @@ describe('buildEnv', () => {
       'so it would beat every --effort roma passes while roma went on reporting and recording ' +
       'the level it asked for. PASSTHROUGH is about effort now as well as credentials.'
     const env = buildEnv({
-      credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
+      credential: fronted(SHARED_WINDOW),
       inherit: HOST,
       configDir: CONFIG_DIR,
     })
@@ -92,12 +133,14 @@ describe('buildEnv', () => {
       'precedence, which is the difference between "resolve the next credential" and "fail with ' +
       'this one" (ADR-0002, ADR-0003; #19).'
     const env = buildEnv({
-      credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
+      credential: fronted(SHARED_WINDOW),
       inherit: { PATH: '/usr/bin' },
       configDir: CONFIG_DIR,
     })
 
     expect(Object.keys(env).sort(), why).toEqual([
+      'ANTHROPIC_BASE_URL',
+      'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
       'CLAUDE_CODE_OAUTH_TOKEN',
       'CLAUDE_CONFIG_DIR',
       'CLAUDE_SECURESTORAGE_CONFIG_DIR',
@@ -120,7 +163,11 @@ describe('buildEnv', () => {
     // @ts-expect-error -- fence:buildenv-one-credential-at-a-time
     const credential: Credential = { kind: 'overflow', apiKey: 'k', oauthToken: 't' }
 
-    const env = buildEnv({ credential: both as Credential, inherit: HOST, configDir: CONFIG_DIR })
+    const env = buildEnv({
+      credential: fronted(both as Credential),
+      inherit: HOST,
+      configDir: CONFIG_DIR,
+    })
 
     expect(credential.kind, why).toBe('overflow')
     expect(
@@ -136,12 +183,12 @@ describe('buildEnv', () => {
       'whatever the host has, keychain included (ADR-0002), and writes its Transcript under the ' +
       'passthrough HOME rather than somewhere roma named (ADR-0005; #37).'
     const env = buildEnv({
-      credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
+      credential: fronted(SHARED_WINDOW),
       inherit: HOST,
       configDir: CONFIG_DIR,
     })
     // @ts-expect-error -- fence:buildenv-config-dir-is-required
-    const unnamed: BuildEnvOptions = { credential: { kind: 'shared-window', oauthToken: 'x' } }
+    const unnamed: BuildEnvOptions = { credential: fronted(SHARED_WINDOW) }
 
     expect(unnamed.credential.kind, why).toBe('shared-window')
     expect(env['CLAUDE_CONFIG_DIR'], why).toBe(CONFIG_DIR)
@@ -155,7 +202,7 @@ describe('buildEnv', () => {
       gitConfigPath: '/run/roma/gitconfig',
     }
     const env = buildEnv({
-      credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
+      credential: fronted(SHARED_WINDOW),
       inherit: HOST,
       configDir: CONFIG_DIR,
       shims: SHIMS,
@@ -177,7 +224,7 @@ describe('buildEnv', () => {
 
   it('leaves the Shim variables out where there is no Session', () => {
     const env = buildEnv({
-      credential: { kind: 'shared-window', oauthToken: 'oauth-token' },
+      credential: fronted(SHARED_WINDOW),
       inherit: HOST,
       configDir: CONFIG_DIR,
     })

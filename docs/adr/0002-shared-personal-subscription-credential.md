@@ -101,6 +101,14 @@ version control. Enforced by `fence:buildenv-no-stray-key`.
 A consequence worth noting: the overflow valve stops being a special mode and
 becomes just a different environment map.
 
+**Amended 2026-11-09 by ADR-0034 — the maps above hold stand-ins now, not the
+secrets.** The agent's Bash tool shares `claude`'s uid and read the token out of
+`/proc/<claude>/environ` into a Transcript (GHSA-wqj9-8qq4-w466). Each map now
+carries a stand-in in the same variable, the other variable still **absent**, and
+`ANTHROPIC_BASE_URL` pointed at roma's credential proxy, which puts the real
+credential back on the way out. Everything above about precedence and absence
+holds unchanged.
+
 **Amended — one map per credential, chosen per Turn.** The Session Pool holds
 both maps and picks between them for each Turn. Both reach the same Credential
 Shim socket: a credential for reaching the code has nothing to do with which bill

@@ -413,7 +413,9 @@ describe('the Overflow offer, out as a button and back as a press', () => {
     feed(roma.procFor(), OK)
     await until(() => said(roma.requests).includes('ok'))
 
-    expect(roma.claude.lastSpawn.env).toMatchObject({ ANTHROPIC_API_KEY: 'metered-key' })
+    expect(roma.claude.lastSpawn.env).toMatchObject({
+      ANTHROPIC_API_KEY: expect.stringMatching(/^sk-ant-api03-roma-stand-in-/),
+    })
     expect(said(roma.requests).at(-1)).toMatch(/metered billing/)
   })
 })

@@ -34,7 +34,8 @@ import type { ReachLogRecord } from './startup.js'
 import { romaFixture, teardownRoma, type RomaFixture } from '../test/support/roma-fixture.js'
 import { feed, OK, STRAY_KEY } from '../test/support/recorded-stream.js'
 
-const OAUTH: Credential = { kind: 'shared-window', oauthToken: 'token' }
+const OAUTH: Credential = { kind: 'shared-window', oauthToken: 'sk-ant-oat01-REAL-TOKEN' }
+const OVERFLOW_KEY: Credential = { kind: 'overflow', apiKey: 'sk-ant-api03-REAL-KEY' }
 const KEY = 'conversation-one'
 
 const BEFORE_THE_CHECK =
@@ -62,11 +63,13 @@ function boot({
   cloudMinter,
   documentMinter,
   caveman,
+  overflow,
 }: {
   minter?: FakeMinter
   cloudMinter?: FakeCloudMinter
   documentMinter?: FakeDocumentMinter
   caveman?: string
+  overflow?: StartRomaOptions['overflow']
 } = {}) {
   const fixture = romaFixture('startup')
   fixtures.push(fixture)
@@ -90,6 +93,7 @@ function boot({
     log: (record) => log.push(record as ReachLogRecord),
     selfCheckTimeoutMs: 1_000,
     ...(caveman === undefined ? {} : { caveman }),
+    ...(overflow === undefined ? {} : { overflow }),
   }).then((roma) => {
     resolved = true
     started.push(roma)
@@ -155,6 +159,60 @@ describe('starting roma', () => {
 
     await expect(roma.starting).rejects.toThrow(StartupSelfCheckFailed)
     expect(roma.claude.spawns).toHaveLength(1)
+  })
+
+  it('hands no Claude Code process either real credential [fence:startup-no-credential-in-any-claude-env]', async () => {
+    const why =
+      'Every Claude Code process roma spawns — the probe and every Session — must hold a stand-in fronted by roma’s credential proxy, never the ' +
+      'token or the key. Its Bash tool reads /proc/<claude>/environ as the same uid and the ' +
+      'Transcript keeps what it prints (GHSA-wqj9-8qq4-w466, ADR-0034).'
+    const roma = boot({ overflow: { credential: OVERFLOW_KEY, monthlyCapUsd: 10 } })
+    await roma.answerProbe()
+    const { core } = await roma.starting
+    const handled = core.handle({
+      conversationKey: KEY,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
+    await flush()
+    feed(roma.procFor(KEY), OK)
+    await handled
+    const envs = roma.claude.spawns.map(({ env }) => env)
+
+    expect(envs, why).toHaveLength(2)
+    for (const env of envs) {
+      expect(JSON.stringify(env), why).not.toMatch(/REAL-TOKEN|REAL-KEY/)
+      expect(env['ANTHROPIC_BASE_URL'], why).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
+    }
+  })
+
+  it('stops the credential proxy when it refuses to start [fence:startup-proxy-closed-on-refusal]', async () => {
+    const why =
+      'A boot the self-check refused must leave nothing behind that would still exchange a ' +
+      'stand-in for the real credential (ADR-0034): the proxy is roma’s, and roma is not running.'
+    const roma = boot()
+    await flush()
+    const proxy = roma.claude.spawns[0]!.env['ANTHROPIC_BASE_URL']!
+
+    await roma.answerProbe(STRAY_KEY)
+    await expect(roma.starting).rejects.toThrow(StartupSelfCheckFailed)
+
+    await expect(fetch(`${proxy}/v1/messages`), why).rejects.toThrow()
+  })
+
+  it('stops the credential proxy on shutdown', async () => {
+    const roma = boot()
+    await roma.answerProbe()
+    const running = await roma.starting
+    const proxy = roma.claude.spawns[0]!.env['ANTHROPIC_BASE_URL']!
+
+    await running.shutdown()
+    started = started.filter((r) => r !== running)
+
+    await expect(fetch(`${proxy}/v1/messages`)).rejects.toThrow()
   })
 
   it('reports what the self-check found', async () => {

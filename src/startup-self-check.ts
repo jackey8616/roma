@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { apiKeySourceFor, type Credential } from './build-env.js'
+import { apiKeySourceFor, type CredentialKind } from './build-env.js'
 import type { SpawnClaudeProcess } from './claude-process.js'
 import { ClaudeSession, PINNED_EFFORT, PINNED_MODEL, TurnFailedError } from './claude-session.js'
 import { writeToStderr, type OperatorLog } from './operator-log.js'
@@ -48,7 +48,7 @@ export class StartupSelfCheckFailed extends Error {
 }
 
 export interface StartupSelfCheckOptions {
-  readonly credential: Credential
+  readonly credential: { readonly kind: CredentialKind }
   readonly env: Readonly<Record<string, string>>
   readonly cwd: string
   readonly model?: string
@@ -165,7 +165,11 @@ function names(message: string, word: string): boolean {
   return new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(message)
 }
 
-function checkInit(init: SystemInit, credential: Credential, model: string): SelfCheckFailure[] {
+function checkInit(
+  init: SystemInit,
+  credential: { readonly kind: CredentialKind },
+  model: string,
+): SelfCheckFailure[] {
   const failures: SelfCheckFailure[] = []
   const expectedSource = apiKeySourceFor(credential.kind)
 

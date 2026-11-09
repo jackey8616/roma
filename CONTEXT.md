@@ -891,6 +891,17 @@ Task that hits its window fails with the reason instead, and ADR-0026 is where
 that asymmetry is argued rather than an oversight.
 _Avoid_: fallback, API mode, paid mode, spillover
 
+**Credential Proxy**:
+roma's own loopback HTTP proxy, and the only thing that holds the Shared Window
+token or the Overflow key once roma is serving. A Claude Code process is handed a
+**stand-in** in their place and sends every API call through the proxy, which
+swaps the stand-in for the real credential on the way out. The stand-in is new on
+every boot and worth nothing once roma stops, so the agent, which can read
+everything `claude` holds, can spend the credential while roma runs but cannot
+take it away (ADR-0034).
+_Avoid_: gateway, API proxy (it proxies nothing but credentials), and calling
+the stand-in a token
+
 **Parked**:
 What a Task is while it waits on something that is neither roma nor the queue:
 kept, said out loud, holding no concurrency slot and no process, and stoppable

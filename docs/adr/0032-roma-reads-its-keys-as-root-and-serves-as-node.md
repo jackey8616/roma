@@ -75,7 +75,8 @@ roma holds.
   by Google's libraries after the drop, so it has to stay readable by `node` and therefore by
   the agent. On a Google host it is the metadata server instead, and there is no file.
 - **Not covered:** the agent's own credential is in the agent's own environment (finding I2),
-  and the agent can still signal roma — stop it, not read it.
+  and the agent can still signal roma — stop it, not read it. **Amended by ADR-0034:** I2 is
+  closed; `claude` holds a stand-in, and the credential is in roma, behind this boundary.
 
 ## Considered and rejected
 

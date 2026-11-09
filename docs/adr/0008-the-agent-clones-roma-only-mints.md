@@ -162,7 +162,14 @@ helper buys is freshness against the one-hour clock, and keeping the token out o
 the process environment — where `env`, a stack trace, or a diagnostic command
 would write it into a **Transcript roma has promised never to delete**
 (ADR-0006). The hour is what bounds that; nothing longer-lived than an hour could
-be allowed anywhere near an append-only record. Enforced by
+be allowed anywhere near an append-only record.
+
+**Amended 2026-11-09 by ADR-0034 — that sentence was not true of the deployment
+until now.** ADR-0002 had put the year-long Shared Window token in the very
+environment it describes, and the agent printed it into a Transcript
+(GHSA-wqj9-8qq4-w466). Claude Code now holds a stand-in, and the token stays in
+roma behind a credential proxy — the option rejected below, taken up for the
+Messages API credential only. Enforced by
 `fence:startup-no-forge-token-in-env`.
 
 **Amended — one helper is not the whole mechanism, because `gh` is not `git`.**

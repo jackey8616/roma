@@ -3,7 +3,8 @@ import { mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Credential } from '../../src/build-env.js'
+import type { Fronted } from '../../src/credential-proxy.js'
+import { fronted } from './fronted.js'
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url))
 
@@ -12,7 +13,7 @@ const SEAM2_ROOT = join(
   `roma-seam2-${createHash('sha256').update(REPO_ROOT).digest('hex').slice(0, 12)}`,
 )
 
-export function sharedWindowCredential(): Credential {
+export function sharedWindowCredential(): Fronted {
   const token = process.env['CLAUDE_CODE_OAUTH_TOKEN'] ?? readDotEnv()['CLAUDE_CODE_OAUTH_TOKEN']
   if (token === undefined || token === '') {
     throw new Error(
@@ -20,7 +21,7 @@ export function sharedWindowCredential(): Credential {
         'repo root (get one with `claude setup-token`), or export it.',
     )
   }
-  return { kind: 'shared-window', oauthToken: token }
+  return fronted({ kind: 'shared-window', oauthToken: token })
 }
 
 export function liveSessionDirs(name: string): { configDir: string; cwd: string } {

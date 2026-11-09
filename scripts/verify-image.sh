@@ -205,3 +205,48 @@ for check in key-file roma-environ roma-inspector; do
   expect_line control "${control}" "${check} REACHED"
 done
 echo "the agent reaches none of roma's keys, which it does when roma is started as node"
+
+# ---------------------------------------------------------------------------
+# 6. The agent cannot recover the Shared Window token: not from its own
+#    environment, not from `claude`'s environment, memory or files, not from
+#    roma, and not by printing it into the Transcript.
+#
+# GHSA-wqj9-8qq4-w466, ADR-0034. Claude Code strips the token from the Bash
+# tool's environment, but the tool shares `claude`'s uid and reads
+# `/proc/<claude>/environ` — so the token must never be in `claude` at all. roma
+# holds it behind its credential proxy and hands `claude` a stand-in.
+#
+# Run against the image's real pinned `claude`, roma's real compiled
+# `CredentialProxy`, `buildEnv` and `dropRoot`, and a fake Messages API, so it
+# needs no credential and spends nothing. `api-auth REAL` is the half that says
+# the contained run still works: the fake API was sent the real token.
+#
+# The control runs `claude` with the token in its environment, as roma did
+# before the fix, and must reach it — otherwise a probe that silently stopped
+# working would report containment it is not checking. Memory is asserted only
+# in the contained run, for the Yama reason section 5 gives.
+# ---------------------------------------------------------------------------
+proxy_harness="$(dirname "$0")/credential-proxy-harness.mjs"
+
+i2() {
+  # $1: mode. The contained run starts as the image's own user, root, as roma does.
+  local user=''
+  [ "$1" = control ] && user=node
+  docker run --rm -i ${user:+--user "${user}"} --entrypoint node "${image}" \
+    --disable-sigusr1 --input-type=module - "$1" < "${proxy_harness}"
+}
+
+i2_contained="$(i2 contained)"
+i2_control="$(i2 control)"
+
+expect_line contained "${i2_contained}" 'turns 2'
+expect_line contained "${i2_contained}" 'api-auth REAL'
+expect_line contained "${i2_contained}" 'transcript-written YES'
+for route in tool-env claude-environ claude-memory claude-fds roma-environ roma-memory transcript config-dir; do
+  expect_line contained "${i2_contained}" "${route} BLOCKED"
+done
+expect_line control "${i2_control}" 'turns 2'
+for route in claude-environ transcript; do
+  expect_line control "${i2_control}" "${route} REACHED"
+done
+echo "the agent recovers no Shared Window token, which it does when claude holds one"

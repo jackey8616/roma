@@ -208,7 +208,9 @@ describe('the Overflow offer, out on a card and back on a click', () => {
     feed(roma.procFor(), OK)
     await until(() => message.settlements.length > 0)
 
-    expect(roma.claude.lastSpawn.env).toMatchObject({ ANTHROPIC_API_KEY: 'metered-key' })
+    expect(roma.claude.lastSpawn.env).toMatchObject({
+      ANTHROPIC_API_KEY: expect.stringMatching(/^sk-ant-api03-roma-stand-in-/),
+    })
     expect(roma.texts().at(-1)).toMatch(/metered billing/)
   })
 
@@ -237,7 +239,9 @@ describe('the Overflow offer, out on a card and back on a click', () => {
     feed(roma.procFor(), OK)
     await until(() => message.settlements.length > 0)
 
-    expect(roma.claude.lastSpawn.env).toMatchObject({ ANTHROPIC_API_KEY: 'metered-key' })
+    expect(roma.claude.lastSpawn.env).toMatchObject({
+      ANTHROPIC_API_KEY: expect.stringMatching(/^sk-ant-api03-roma-stand-in-/),
+    })
   })
 })
 
