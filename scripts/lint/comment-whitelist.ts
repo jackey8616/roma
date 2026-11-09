@@ -9,7 +9,11 @@ const ROOT = fileURLToPath(new URL('../..', import.meta.url))
 const DIRECTIVE =
   /^\s*(?:eslint-disable(?:-next-line|-line)?|eslint-enable|@ts-expect-error)(?=\s|$)/
 const REFERENCE = /^\/\s*<reference\s/
-const REASON = /\s--\s+(\S+)\s*$/
+const RULE = String.raw`[@\w][@\w/.-]*`
+const REASON = new RegExp(
+  String.raw`^\s*(?:(?:eslint-disable(?:-next-line|-line)?|eslint-enable)` +
+    String.raw`(?:\s+${RULE}(?:\s*,\s*${RULE})*)?|@ts-expect-error)\s+--\s+(\S+)\s*$`,
+)
 
 export const MESSAGES = {
   prose:
@@ -51,7 +55,10 @@ export const commentWhitelist: Rule.RuleModule = {
             ...problem,
             fix:
               problem.messageId === 'prose'
-                ? (fixer) => fixer.removeRange(spanOf(comment, source.text))
+                ? (fixer) => {
+                    const { range, keep } = spanOf(comment, source.text)
+                    return fixer.replaceTextRange(range, keep)
+                  }
                 : null,
           })
         }
@@ -88,7 +95,7 @@ function resolve(name: string): string | null {
   return why === null ? null : `${name}: ${why}`
 }
 
-function spanOf(comment: Comment, text: string): [number, number] {
+function spanOf(comment: Comment, text: string): { range: [number, number]; keep: string } {
   const [start, end] = comment.range!
   const blank = (i: number) => text[i] === ' ' || text[i] === '\t'
   let before = start
@@ -97,8 +104,13 @@ function spanOf(comment: Comment, text: string): [number, number] {
   while (after < text.length && blank(after)) after += 1
   const lineStart = before === 0 || text[before - 1] === '\n'
   const lineEnd = after === text.length || text[after] === '\n'
-  if (lineStart && lineEnd) return [before, Math.min(after + 1, text.length)]
-  if (lineEnd) return [before, end]
-  if (lineStart || before === start) return [start, after]
-  return [before, end]
+  if (lineStart && lineEnd) return { range: [before, Math.min(after + 1, text.length)], keep: '' }
+  if (lineEnd) return { range: [before, end], keep: '' }
+  if (lineStart) return { range: [start, after], keep: '' }
+  if (/[\n\r\u2028\u2029]/.test(comment.value)) return { range: [before, after], keep: '\n' }
+  const tight = /[()[\]{},;]/
+  return {
+    range: [before, after],
+    keep: tight.test(text[before - 1]!) || tight.test(text[after]!) ? '' : ' ',
+  }
 }

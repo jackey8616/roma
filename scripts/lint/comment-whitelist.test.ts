@@ -16,6 +16,8 @@ tester.run('roma/comment-whitelist [fence:comment-whitelist]', commentWhitelist,
   valid: [
     `// eslint-disable-next-line no-console -- ${REAL}\nconsole.log(1)`,
     `/* eslint-disable no-console -- roma/comment-whitelist */\nconsole.log(1)`,
+    `// eslint-disable-next-line no-console, no-debugger -- ${REAL}\nconsole.log(1)`,
+    `/* eslint-enable -- ${REAL} */\nconsole.log(1)`,
     '// @ts-expect-error -- ADR-0031\nconst x: number = "a"',
     '/// <reference types="node" />\nconst y = 1',
     '#!/usr/bin/env node\nconst z = 1',
@@ -44,6 +46,21 @@ tester.run('roma/comment-whitelist [fence:comment-whitelist]', commentWhitelist,
     {
       code: 'f(/* inline */ 1)',
       output: 'f(1)',
+      errors: [{ messageId: 'prose' }],
+    },
+    {
+      code: 'typeof/* why */missing',
+      output: 'typeof missing',
+      errors: [{ messageId: 'prose' }],
+    },
+    {
+      code: 'const n = a/* why */instanceof B',
+      output: 'const n = a instanceof B',
+      errors: [{ messageId: 'prose' }],
+    },
+    {
+      code: 'function f() {\n  return /* why\n */ 42\n}',
+      output: 'function f() {\n  return\n42\n}',
       errors: [{ messageId: 'prose' }],
     },
     {
@@ -78,6 +95,16 @@ tester.run('roma/comment-whitelist [fence:comment-whitelist]', commentWhitelist,
     },
     {
       code: '// @ts-expect-error -- the fixture is the wrong shape on purpose\nconst x: number = "a"',
+      output: null,
+      errors: [{ messageId: 'reason' }],
+    },
+    {
+      code: '// @ts-expect-error -- arbitrary explanatory prose -- ADR-0031\nconst x: number = "a"',
+      output: null,
+      errors: [{ messageId: 'reason' }],
+    },
+    {
+      code: '// @ts-expect-error arbitrary explanatory prose -- ADR-0031\nconst x: number = "a"',
       output: null,
       errors: [{ messageId: 'reason' }],
     },
