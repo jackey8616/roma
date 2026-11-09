@@ -18,10 +18,10 @@ import { liveSessionDirs, sharedWindowCredential } from '../test/support/live-cl
 // ask it what it resolved to — the same `system/init.model` the Startup
 // Self-Check asserts on, parsed by the same reader.
 //
-// If the live build disagrees with the bundle about what a Menu entry resolves
-// to, the Menu is what changes. It offers what roma is willing to put the shared
-// window behind, and an entry that does not resolve is an entry that will present
-// as a process refusing to start on somebody's next message.
+// If the live build refuses an id the Menu holds, the Menu is what changes. It
+// offers what roma is willing to put the shared window behind, and an id that
+// does not run is an entry that will present as a process refusing to start on
+// somebody's next message.
 
 /**
  * The message each probe sends.
@@ -31,6 +31,11 @@ import { liveSessionDirs, sharedWindowCredential } from '../test/support/live-cl
  * wait forever rather than measure anything.
  */
 const PROBE = 'Reply with OK and nothing else. Do not use any tools.'
+
+/** The line an id belongs to: `claude-opus-5-5` is `claude-opus`. */
+function lineOf(model: string): string {
+  return model.replace(/(-\d+)+$/, '')
+}
 
 /** What one spawn on one model reported about itself. */
 async function initOn(model: string): Promise<SystemInit> {
@@ -102,27 +107,31 @@ describe('every model on the Menu, against the pinned build', () => {
     )
   })
 
-  // What roma read rather than measured: that the name a Caller types and the id
-  // roma sends are the same model. ADR-0014 took this from a minified object
-  // literal, which is a reading of a build and not a fact about one.
+  // What roma read rather than measured: that the name a Caller types reaches
+  // the line the Menu means by it. ADR-0014 took the alias table from a minified
+  // object literal, which is a reading of a build and not a fact about one.
   //
-  // The id, or a dated snapshot of it — asserted that way rather than as equality
-  // because the two are not one string here and the difference is not drift. What
-  // this still refuses is the thing worth knowing: an alias re-pointed at another
-  // model, which is the day the Menu — one person's judgement about one build —
-  // starts handing people a model they did not ask for while roma reports the one
-  // they did.
-  it.each(Object.entries(MENU))('means by %s the model the Menu names', async (name, model) => {
-    const init = await initOn(name)
+  // The line and not the id, because the Menu may run ahead of the pinned
+  // build's alias table on purpose (ADR-0014, amended 2026-10-29): `opus` means
+  // the current Opus, and a build older than that release expands the alias to
+  // the one it shipped with. What this still refuses is the thing worth knowing:
+  // an alias re-pointed at another line, which is the day the Menu starts
+  // handing people a model they did not ask for while roma reports the one they
+  // did.
+  it.each(Object.entries(MENU))(
+    'means by %s a model of the line the Menu names',
+    async (name, model) => {
+      const init = await initOn(name)
 
-    expect(String(init.model)).toMatch(new RegExp(`^${model}(-\\d{8})?$`))
-    // Recorded as well as asserted: everything here is version-specific, so the
-    // day this starts failing the first question is what moved underneath it.
-    console.log(
-      `seam 2: --model ${name} expanded to ${String(init.model)} ` +
-        `on Claude Code ${String(init.claudeCodeVersion)}`,
-    )
-  })
+      expect(String(init.model)).toMatch(new RegExp(`^${lineOf(model)}-`))
+      // Recorded as well as asserted: everything here is version-specific, so the
+      // day this starts failing the first question is what moved underneath it.
+      console.log(
+        `seam 2: --model ${name} expanded to ${String(init.model)} ` +
+          `on Claude Code ${String(init.claudeCodeVersion)}`,
+      )
+    },
+  )
 })
 
 /**

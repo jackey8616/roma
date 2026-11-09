@@ -109,23 +109,25 @@ describe('reading an /effort message', () => {
 })
 
 describe('which models take an effort', () => {
-  // The one row the pinned build refuses by name. Asserted as a literal rather
-  // than read out of the Matrix, so a Matrix edited by accident fails here.
-  it('says haiku takes none', () => {
+  // The one row the pinned build refuses by name, kept off the Menu for a
+  // deployment that pins it. Asserted as a literal rather than read out of the
+  // Matrix, so a Matrix edited by accident fails here.
+  it('says haiku 4.5 takes none', () => {
     expect(takesEffort('claude-haiku-4-5')).toBe(false)
   })
 
   // Literals for the same reason haiku is one: the loop below only asks that
   // every Menu model has *an* answer, which `false` would satisfy.
-  it('says the other three Menu models take one [fence:menu-fable-takes-effort]', () => {
+  it('says every Menu model takes one [fence:menu-fable-takes-effort]', () => {
     const why =
-      'fable, opus and sonnet must read as taking an effort (ADR-0016). The extractor reports ' +
-      'all three as unnamed on every gate, and fable most easily flips to false on a re-audit; ' +
+      'Every Menu model must read as taking an effort (ADR-0016). The extractor reports ' +
+      'all four as unnamed on every gate, and fable most easily flips to false on a re-audit; ' +
       'flipped, roma tells every Caller on fable their /effort does not apply, and nothing ' +
       'else would catch it.'
-    expect(takesEffort('claude-fable-5'), why).toBe(true)
-    expect(takesEffort('claude-opus-5'), why).toBe(true)
-    expect(takesEffort('claude-sonnet-5'), why).toBe(true)
+    expect(takesEffort('claude-fable-5-1'), why).toBe(true)
+    expect(takesEffort('claude-opus-5-5'), why).toBe(true)
+    expect(takesEffort('claude-sonnet-5-5'), why).toBe(true)
+    expect(takesEffort('claude-haiku-5-5'), why).toBe(true)
   })
 
   // Three answers rather than two, and this is the third. A deployment that
@@ -143,9 +145,8 @@ describe('which models take an effort', () => {
     expect(takesEffort('constructor'), why).toBeNull()
   })
 
-  // The Matrix covers the Menu and nothing else: it exists to say what a Session
-  // roma serves runs at, and a model no Caller can reach is not one roma has
-  // anything to record about.
+  // The Matrix covers the Menu, plus the one model the build refuses by name,
+  // for a deployment that pins it.
   it('covers every model a Caller may choose', () => {
     for (const model of Object.values(MENU)) expect(takesEffort(model)).not.toBeNull()
   })

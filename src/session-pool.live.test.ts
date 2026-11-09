@@ -68,35 +68,33 @@ describe('a Session that outlives its process', () => {
     expect(spawns.map((record) => record.resume)).toEqual([false, true])
   })
 
-  // The trap #4 walks into first, settled here. If `total_cost_usd` carried
-  // forward from the transcript, the first Turn after every eviction would be
-  // recorded at the price of the whole Session so far — the exact failure the
-  // per-Turn delta exists to prevent, arriving at the point where eviction makes
+  // The trap #4 walks into first. If the first Turn after an eviction were priced
+  // off a total that carried forward from the Transcript, it would be recorded at
+  // the price of the whole Session so far — at the point where eviction makes
   // resume routine rather than rare.
   //
-  // It does not carry forward: the total is cumulative for the *process*, so a
-  // resumed one starts again from zero and the cost baseline never has to cross
-  // an eviction. First measured here on v2.1.220, $0.0822846 before the eviction
-  // and $0.0105342 after it.
+  // 2.1.220 started a resumed process from zero ($0.0822846 before, $0.0105342
+  // after). 2.1.319 carries the Transcript's total forward, so roma prices a Turn
+  // off `model_usage_since_last_result` instead (ADR-0003, observability).
   //
-  // Asserted rather than merely reported, because the whole cost model rests on
-  // it: a Claude Code version that changed this would silently start billing
-  // every post-eviction Turn at the Session's lifetime spend, and this is the
-  // only place that can go red instead.
-  it("counts the resumed process's cost from zero rather than carrying it forward", () => {
+  // Asserted on roma's figure, not on the CLI's total: what must hold is that
+  // the Audit Record gets this Turn's own spend, whatever the CLI did with its
+  // running total.
+  it('prices the first Turn after an eviction at its own spend, not the Session’s', () => {
     const beforeUsd = Number(turns[1]?.result['total_cost_usd'])
     const resumed = turns[2]
     const afterUsd = Number(resumed?.result['total_cost_usd'])
+    const own = resumed?.result['model_usage_since_last_result'] as
+      Record<string, { costUSD?: number }> | undefined
+    const ownUsd = Object.values(own ?? {}).reduce((sum, m) => sum + (m.costUSD ?? 0), 0)
 
-    console.log(`seam 2: total_cost_usd ${beforeUsd} before the eviction, ${afterUsd} after it`)
+    console.log(
+      `seam 2: total_cost_usd ${beforeUsd} before the eviction, ${afterUsd} after it ` +
+        `(${afterUsd > beforeUsd ? 'carried forward' : 'restarted'}); the Turn's own ${ownUsd}`,
+    )
 
-    // This is the assertion that reads the CLI rather than roma: a total that
-    // had carried forward could only have grown, so a smaller one after the
-    // resume means the new process is counting its own spend.
-    expect(afterUsd).toBeGreaterThan(0)
-    expect(afterUsd).toBeLessThan(beforeUsd)
-    // And this is what that buys — the Turn's own figure, with no baseline
-    // carried across the eviction to subtract.
-    expect(resumed?.costUsd).toBeCloseTo(afterUsd, 9)
+    expect(resumed?.costUsd).toBeGreaterThan(0)
+    expect(resumed?.costUsd).toBeLessThan(beforeUsd)
+    expect(resumed?.costUsd).toBeCloseTo(own === undefined ? afterUsd : ownUsd, 9)
   })
 })

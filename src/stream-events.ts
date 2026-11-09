@@ -37,6 +37,15 @@ export interface TerminalResult {
    */
   readonly cumulativeOutputTokens: number | null
   /**
+   * What this result's own calls spent, off `model_usage_since_last_result`:
+   * nothing carried from an earlier process. Null on builds that do not send it
+   * (2.1.220 and earlier). Enforced by `fence:session-cost-since-last-result`.
+   */
+  readonly sinceLastResult: {
+    readonly costUsd: number
+    readonly outputTokens: number
+  } | null
+  /**
    * What went wrong, in Claude Code's own words, or `[]` where it said nothing.
    * Tells a Turn that failed from one that never ran: a 401 has `is_error` and
    * its message in `result` with no `errors`, and a refused `--resume` has its
@@ -221,8 +230,18 @@ export function readTerminalResult(event: ClaudeEvent): TerminalResult | null {
     terminalReason: asString(event['terminal_reason']),
     turns: asNumber(event['num_turns']),
     cumulativeOutputTokens: outputTokensIn(event['modelUsage']),
+    sinceLastResult: sinceLastResultIn(event['model_usage_since_last_result']),
     errors: asStrings(event['errors']),
   }
+}
+
+function sinceLastResultIn(value: unknown): TerminalResult['sinceLastResult'] {
+  if (typeof value !== 'object' || value === null) return null
+  let costUsd = 0
+  for (const model of Object.values(value as Record<string, unknown>)) {
+    costUsd += asNumber(fieldsOf(model)['costUSD']) ?? 0
+  }
+  return { costUsd, outputTokens: outputTokensIn(value) ?? 0 }
 }
 
 /** Enforced by `fence:stream-output-tokens-summed-across-models`. */

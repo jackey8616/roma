@@ -16,7 +16,7 @@
 # red, and `docs/adr/0007-a-container-image-pinned-to-one-claude-code.md` says
 # what the re-verification is. Named exactly rather than globbed: `0006-*` used
 # to match this file and matches a different decision now.
-ARG CLAUDE_CODE_VERSION=2.1.220
+ARG CLAUDE_CODE_VERSION=2.1.319
 
 # The GitHub CLI the image carries, and the checksum of the tarball it comes in.
 #

@@ -9,9 +9,10 @@ channel-agnostic core) and ADR-0004 (Google Chat) before changing anything here.
 ## Requirements
 
 - **Node 22** — `.nvmrc` pins it; `nvm use` picks it up.
-- **Claude Code v2.1.220** on `PATH`, for the seam 2 tests. Behaviour is version-specific
-  and every measurement in `docs/` is against that build — which is why the image pins the
-  same version exactly, and why moving it is a re-verification event (ADR-0007).
+- **Claude Code v2.1.319** on `PATH`, for the seam 2 tests. Behaviour is version-specific:
+  the measurements in `docs/` were taken on v2.1.220 and seam 2 re-verified them on
+  v2.1.319 — which is why the image pins the same version exactly, and why moving it is a
+  re-verification event (ADR-0007).
 - **Docker**, only to build or run the image.
 
 ```bash
@@ -126,9 +127,10 @@ not do.
   -v /path/to/document-reach.json:/run/secrets/document-reach.json:ro \
 ```
 
-It carries **its own Claude Code, pinned to v2.1.220** — the version every measurement in
-`docs/` was taken against. Moving that pin is a re-verification event that costs Shared
-Window money, not a dependency bump, and nothing automated will ever move it for you.
+It carries **its own Claude Code, pinned to v2.1.319** — the version seam 2 last
+re-verified the measurements in `docs/` against (they were taken on v2.1.220). Moving that
+pin is a re-verification event that costs Shared Window money, not a dependency bump, and
+nothing automated will ever move it for you.
 ADR-0007 is why, and `src/packaging.test.ts` is what keeps it.
 
 Something does say when it has fallen behind. `.github/workflows/claude-code-drift.yml`

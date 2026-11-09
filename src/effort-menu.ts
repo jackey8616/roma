@@ -2,7 +2,7 @@
  * The efforts a Caller may put a Session at, which models take one at all, and
  * how `/effort`'s argument is read.
  *
- * This Menu and this Matrix are read out of Claude Code 2.1.220 (the ADR-0007
+ * This Menu and this Matrix are read out of Claude Code 2.1.319 (the ADR-0007
  * pin), and both must be re-audited when the pin moves. Nothing enforces that:
  * the version is named here so the drift report's working-tree sweep lists this
  * file.
@@ -40,9 +40,10 @@ export const ULTRACODE = 'ultracode'
  * It reports and never gates: roma refuses nothing because of it.
  */
 export const EFFORT_MATRIX: Readonly<Record<string, boolean>> = {
-  'claude-fable-5': true,
-  'claude-opus-5': true,
-  'claude-sonnet-5': true,
+  'claude-fable-5-1': true,
+  'claude-opus-5-5': true,
+  'claude-sonnet-5-5': true,
+  'claude-haiku-5-5': true,
   'claude-haiku-4-5': false,
 }
 

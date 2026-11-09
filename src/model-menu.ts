@@ -1,6 +1,6 @@
 /**
  * The Model Menu, and how `/model`'s argument is read. A person's judgement
- * about Claude Code 2.1.220, re-audited when the pin moves.
+ * about Claude Code 2.1.319, re-audited when the pin moves.
  * Enforced by `fence:pin-lists-name-the-version`.
  */
 
@@ -13,10 +13,10 @@
  * Enforced by `fence:menu-model-ordered-by-cost`.
  */
 export const MENU: Readonly<Record<string, string>> = {
-  fable: 'claude-fable-5',
-  opus: 'claude-opus-5',
-  sonnet: 'claude-sonnet-5',
-  haiku: 'claude-haiku-4-5',
+  fable: 'claude-fable-5-1',
+  opus: 'claude-opus-5-5',
+  sonnet: 'claude-sonnet-5-5',
+  haiku: 'claude-haiku-5-5',
 }
 
 /**

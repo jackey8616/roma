@@ -22,12 +22,12 @@ import { describe, expect, it } from 'vitest'
  * The Claude Code every measurement in this repo was taken against.
  *
  * A second copy of the number in the Dockerfile, on purpose. ADR-0003 holds that
- * a capture is evidence about v2.1.220 and nothing else; moving the pin is a
+ * a capture is evidence about the build it was taken on; moving the pin is a
  * re-verification event that costs Shared Window money, so the two copies
  * disagreeing is the whole point — editing the Dockerfile alone turns the run
  * red and this file is where the reason is written down.
  */
-const CLAUDE_CODE_VERSION = '2.1.220'
+const CLAUDE_CODE_VERSION = '2.1.319'
 
 /**
  * The `gh` the image carries.

@@ -4,7 +4,6 @@ import { cavemanRuleset } from '../../caveman.js'
 import { PINNED_MODEL } from '../../claude-session.js'
 import { bind, serve, type IngressLogRecord, type Serving } from '../../serve.js'
 import { sessionIdFor } from '../../session-id.js'
-import type { ClaudeEvent } from '../../stream-events.js'
 import type { DiscordLogRecord } from './binding.js'
 import { DiscordAdapter } from './discord-adapter.js'
 import { GatewayTransport, RECONNECT_FLOOR_MS } from './gateway-transport.js'
@@ -16,7 +15,7 @@ import { githubReach } from '../../github/reach.js'
 import { noCloudReach } from '../../cloud/reach.js'
 import { noDocumentReach } from '../../documents/reach.js'
 import { romaFixture, teardownRoma, type RomaFixture } from '../../../test/support/roma-fixture.js'
-import { BLOCKED_WITH_OVERAGE, feed, kindOf, OK } from '../../../test/support/recorded-stream.js'
+import { BLOCKED_WITH_OVERAGE, feed, OK, withInit } from '../../../test/support/recorded-stream.js'
 
 // The one place the Discord seams meet: roma assembled out of its real parts. A
 // Gateway frame goes in, `GatewayTransport` decodes it, `DiscordAdapter` reads
@@ -157,19 +156,6 @@ function pressing(customId: string, id = INTERACTION): unknown {
   })
 }
 
-/**
- * The same recorded probe Turn reporting a different model on its `system/init`.
- *
- * `withApiKeySource`'s discipline, for the one deployment this file needs and no
- * capture holds: the startup self-check compares the model the stream reports
- * against the one roma pinned, so pinning something off the Model Menu means the
- * probe has to report it. The stream is real and the one field under test is the
- * only thing changed.
- */
-function reporting(model: string): readonly ClaudeEvent[] {
-  return OK.map((event) => (kindOf(event) === 'system/init' ? { ...event, model } : event))
-}
-
 let running: Serving[] = []
 let fixtures: RomaFixture[] = []
 
@@ -235,7 +221,9 @@ async function boot({ model = PINNED_MODEL }: { model?: string } = {}) {
     selfCheckTimeoutMs: 1_000,
   })
 
-  await fixture.answerProbe(model === PINNED_MODEL ? OK : reporting(model))
+  // The probe has to report the model roma pinned, whichever it is: no recording
+  // ran on the current pin, and none on a model off the Menu.
+  await fixture.answerProbe(withInit(OK, { model }))
   const roma = await serving
   running.push(roma)
 
@@ -424,7 +412,7 @@ describe('a Menu, out as buttons and back as a press', () => {
     await roma.take(inThread('hello', '700000000000000020'))
     await flush()
 
-    expect(roma.claude.lastSpawn.args).toContain('claude-opus-5')
+    expect(roma.claude.lastSpawn.args).toContain('claude-opus-5-5')
   })
 
   // The other half of the same claim: a press is answered in the Conversation it
@@ -475,12 +463,14 @@ describe('a Menu, out as buttons and back as a press', () => {
    * this is not the refusal ADR-0016 forbids.
    */
   it('draws no effort buttons on a model the Matrix says takes none', async () => {
-    const roma = await boot()
+    // Pinned: every Menu model takes an effort, so a deployment on haiku 4.5 is
+    // where the Matrix answers false.
+    const roma = await boot({ model: 'claude-haiku-4-5' })
     await roma.take(HELLO)
     await roma.take(READY)
     await roma.take(GUILD_CREATE)
 
-    await roma.take(mentioned('/model haiku'))
+    await roma.take(mentioned('/effort'))
     await roma.take(inThread('/effort', '700000000000000021'))
 
     expect(said(roma.requests).at(-1)).toContain('takes none')

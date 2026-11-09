@@ -242,21 +242,19 @@ function figures(label: string, turn: Turn): string {
   )
 }
 
-describe('a manual /compact with too little conversation to summarise', () => {
-  // The failure a real person is most likely to hit on day one, because typing
-  // `/compact` into a short thread *is* "not enough conversation to summarise" —
-  // and the cheapest of the three unknowns, because a Session with one exchange
-  // in it is already in the state under test.
+describe('a manual /compact with one exchange in the Session', () => {
+  // Typing `/compact` into a short thread is what a person is most likely to do
+  // on day one. On 2.1.220 one exchange was too few groups: the manual path threw
+  // "Not enough messages to compact.", free, and the Session carried on. That
+  // reading is kept in `manual-compaction-too-few-groups.jsonl`, and roma's
+  // handling of it is tested off that capture in the free run.
   //
-  // #98 measured this code on the *auto* path, where it arrives on
-  // `system/status` as `compact_result: "failed"` / `compact_error:
-  // "too_few_groups"` while the Turn stays healthy and answers. ADR-0018 carries
-  // that reading forward into a table of what the Caller is told. Whether the
-  // manual path reports it the same way is the question: its own switch throws
-  // rather than returning a result, and what a thrown error does to a
-  // non-interactive Turn is not something the auto path can answer.
-  it('says so, and what it says is the whole of what roma gets', async () => {
-    const { session, events, capture, say } = probe('manual-compact-too-few-groups')
+  // From 2.1.319 the same Session compacts. This asserts that, so a pin that
+  // moves back to failing here goes red instead of drifting. What roma rests on
+  // is unchanged either way: a `/compact` is governed as a paid Relay (ADR-0018),
+  // and the Session is still usable afterwards.
+  it('compacts it, says what it cost, and leaves the Session usable', async () => {
+    const { session, capture, say } = probe('manual-compact-one-exchange')
 
     try {
       session.start()
@@ -265,7 +263,7 @@ describe('a manual /compact with too little conversation to summarise', () => {
 
       console.log(
         [
-          `seam 2: manual /compact, too little conversation — capture ${capture}`,
+          `seam 2: manual /compact, one exchange — capture ${capture}`,
           figures('setup', setup),
           figures('/compact', compact),
           `  result text ${JSON.stringify(compact.text)}`,
@@ -275,39 +273,13 @@ describe('a manual /compact with too little conversation to summarise', () => {
         ].join('\n'),
       )
 
-      // Nothing was summarised, so nothing may claim to have been.
-      expect(boundaries(during)).toHaveLength(0)
-
-      // The manual path's own switch throws — `case"too_few_groups":throw
-      // Error(whr)` — and the frame above it catches that one error by identity
-      // and returns it as ordinary command text: `S_e(i,whr)` →
-      // `{type:"text",value:whr}`, where `whr` is the sentence below. So the
-      // Caller is answered by the command itself rather than by a failed Turn.
+      expect(boundaries(during)).toHaveLength(1)
       expect(compact.isError).toBe(false)
-      expect(compact.text).toContain('Not enough messages to compact')
-
-      // The finding, and it is the one ADR-0018's failure table is built on.
-      // #100 measured `compact_error` on the auto path as a machine-readable
-      // **code** — `too_few_groups` — and both #98 and ADR-0018 lean on that
-      // being a code rather than a sentence, explicitly so as not to repeat the
-      // `shared-window.ts` mistake of building on one build's strings. On this
-      // path the same failure puts the *thrown error's message* there instead.
-      //
-      // Asserted rather than only logged, and asserted on the exact string on
-      // purpose: this is a measurement of the pinned build, and a pin that moves
-      // should go red here. Nothing in roma may key behaviour on it.
-      const [failure] = compactResults(during)
-      expect(failure, 'no compact_result reached stdout').toBeDefined()
-      expect(failure?.['compact_result']).toBe('failed')
-      expect(failure?.['compact_error']).toBe('Not enough messages to compact.')
-
-      // Free, and the reason `too_few_groups` is the cheap unknown: the manual
-      // path bails before it calls anything (`attempts: 0`).
+      expect(compactResults(during).map((e) => e['compact_result'])).toEqual(['success'])
+      // Local to the CLI, so no model Turn is counted, but the summary is paid for.
       expect(compact.turns).toBe(0)
-      expect(compact.costUsd).toBe(0)
+      expect(compact.costUsd).toBeGreaterThan(0)
 
-      // The Session is not spent. #100 found the same on the auto path — a
-      // failed Compaction is not a dead Session — and ADR-0018 leans on it.
       const { turn: after } = await say(CHAT[1] ?? '')
       expect(after.isError).toBe(false)
     } finally {

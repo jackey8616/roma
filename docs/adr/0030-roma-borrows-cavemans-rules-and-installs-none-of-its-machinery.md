@@ -222,6 +222,15 @@ survived the Eviction here is the channel itself, and ADR-0020's capabilities
 survive it with the ruleset. `docs/append-on-resume-verification.md` is the
 method and the reading in full.
 
+**Amended 2026-11-09 — on 2.1.319 the append did not survive, until roma turned
+the snapshot off (#160).** 2.1.319 records the rendered system prompt in the
+Transcript (`prompt_snapshot`) on a Session's first request and reuses it on
+every resume, so a resumed process answered with the **first** codeword
+(`original-persists`, twice). The build's own flag, `--system-prompt-snapshot
+off`, renders the prompt fresh on every request, which is what 2.1.220 did; with
+it on every spawn the verdict is `append-applies` again. Enforced by
+`fence:session-prompt-never-snapshotted`.
+
 **Not measured — that any of this saves a token.** The 65% is caveman's own
 number, measured by a third party on prompts nobody here has seen, and it is
 cited in this file as caveman's claim and never as roma's. What roma will be able
@@ -564,7 +573,9 @@ Ordered by how much falls if the answer is no.
    `src/append-on-resume.live.test.ts` is the instrument and
    `docs/append-on-resume-verification.md` the reading. Moving the pin re-opens
    it — that is what ADR-0007 means by a re-verification event — and re-running
-   that one file is the whole of what re-opening costs.
+   that one file is the whole of what re-opening costs. Moving to 2.1.319
+   re-opened it and the answer was no, until every spawn passed
+   `--system-prompt-snapshot off` (amended above).
 6. **Does the app-server take a system-prompt append, and is any of this
    measurable on Codex?** ADR-0026's agenda gains this item; nothing here is
    blocked on it.
