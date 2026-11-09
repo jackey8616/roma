@@ -1,6 +1,6 @@
 /**
  * The Model Menu, and how `/model`'s argument is read. A person's judgement
- * about Claude Code 2.1.220, re-audited when the pin moves.
+ * about Claude Code 2.1.319, re-audited when the pin moves.
  * Enforced by `fence:pin-lists-name-the-version`.
  */
 

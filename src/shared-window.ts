@@ -3,7 +3,7 @@ import type { SharedWindow } from './stream-events.js'
 /**
  * The three things `status` says on the pinned build, and what each one means.
  *
- * Read out of Claude Code 2.1.220's own schema for `rate_limit_info`, which
+ * Read out of Claude Code 2.1.319's own schema for `rate_limit_info`, which
  * declares `v.enum(["allowed","allowed_warning","rejected"])`. Named here
  * because the middle one is the whole of why this file was wrong: it is not a
  * degree of `rejected`, it is a degree of `allowed`.

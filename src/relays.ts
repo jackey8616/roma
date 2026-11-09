@@ -1,7 +1,7 @@
 /**
  * The Claude Code commands roma hands over as themselves.
  *
- * **This list is a person's judgement about Claude Code 2.1.220**, the build
+ * **This list is a person's judgement about Claude Code 2.1.319**, the build
  * every entry was measured on, and is re-audited by hand for safety and for cost
  * whenever the pin moves. Naming the version is what lists this file in the
  * drift report. Enforced by `fence:pin-lists-name-the-version`.
