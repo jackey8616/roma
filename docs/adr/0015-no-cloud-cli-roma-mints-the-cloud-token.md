@@ -199,6 +199,13 @@ key, and produces a Cloud Token from it on request. One component and one term
 for both, because it is one rule: a long-lived key never enters the space the
 agent can reach.
 
+**Amended 2026-11-09 by ADR-0032.** When this was written the rule did not hold
+— the agent shared roma's uid and could read the key file, roma's environment and
+roma's memory (GHSA-v52v-hcv8-cr23). It holds now because roma reads the key as
+root and drops to `node` before an agent exists, which only works if
+`ROMA_CLOUD_KEY_FILE` is mounted 0400 and owned by root; roma refuses to start
+when it is not.
+
 A Cloud Token is what the agent gets — an hour long, obtained when something
 needs one, never written into a process environment fixed at spawn, and never
 persisted anywhere that outlives the command it was made for. Enforced by

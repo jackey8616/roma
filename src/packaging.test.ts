@@ -208,6 +208,38 @@ describe('the image defaults the one path whose loss is by design', () => {
   )
 })
 
+describe('the image starts roma as root so roma can stop being root (ADR-0032)', () => {
+  /** Every instruction of the stage that ships, which is the last one. */
+  const runtime = () => {
+    const all = instructions()
+    const last = all.map((line) => /^FROM\b/i.test(line)).lastIndexOf(true)
+    return all.slice(last)
+  }
+
+  it('sets no USER, so roma reads the key files as root before it drops [fence:image-starts-as-root]', () => {
+    const why =
+      'The runtime stage must not set USER (ADR-0032, GHSA-v52v-hcv8-cr23). roma reads the ' +
+      'key files as root and then becomes node itself; started as node, it cannot drop, the ' +
+      'agent shares its uid with nothing between them, and it reads every key and roma’s memory.'
+
+    expect(
+      runtime().filter((line) => /^USER\b/i.test(line)),
+      why,
+    ).toEqual([])
+  })
+
+  it('runs node with SIGUSR1 disabled [fence:image-disables-sigusr1]', () => {
+    const why =
+      'The CMD must pass --disable-sigusr1 (ADR-0032). The agent runs as roma’s uid and may ' +
+      'signal it; SIGUSR1 opens an inspector that reads roma’s memory. roma refuses to start ' +
+      'as root without the flag, so dropping it here is an image that never starts.'
+    const cmd = runtime().filter((line) => /^CMD\b/i.test(line))
+
+    expect(cmd, why).toHaveLength(1)
+    expect(cmd[0], why).toContain('"--disable-sigusr1"')
+  })
+})
+
 describe('the image keeps out of what Claude Code reads [fence:image-adds-no-skills-or-volumes]', () => {
   it('declares no VOLUME', () => {
     const why =

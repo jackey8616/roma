@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { ConfigurationMissing, envValue, required, type Environment } from '../env-config.js'
 
+/** Where the deployment names the App's private key file. */
+export const PRIVATE_KEY_FILE_VAR = 'ROMA_GITHUB_PRIVATE_KEY_FILE'
+
 export interface MinterEnv {
   readonly appId: string
   /** The App's private key as PEM text, already read off disk. */
@@ -16,7 +19,7 @@ export function readMinterEnv(env: Environment): MinterEnv {
   const problems: string[] = []
 
   const appId = required(env, 'ROMA_GITHUB_APP_ID', problems)
-  const keyFile = required(env, 'ROMA_GITHUB_PRIVATE_KEY_FILE', problems)
+  const keyFile = required(env, PRIVATE_KEY_FILE_VAR, problems)
 
   let privateKey: string | null = null
   if (keyFile !== null) {

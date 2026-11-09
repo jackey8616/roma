@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { ContainmentRefused, type RootSystem } from '../drop-root.js'
 import { ConfigurationMissing } from '../env-config.js'
 import { startConfiguredRoma } from './main.js'
 
@@ -49,5 +53,87 @@ describe('which Channels this deployment serves', () => {
     const half = { ...MINIMAL, ROMA_DISCORD_API_BASE: 'https://discord.internal/api/v10' }
 
     await expect(startConfiguredRoma(half, () => {})).rejects.toThrow(/ROMA_DISCORD_BOT_TOKEN/)
+  })
+})
+
+describe('the keys roma reads at boot', () => {
+  const dirs: string[] = []
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+  })
+
+  /** Every key file a deployment can name, real enough for its reader to accept. */
+  function keyed() {
+    const dir = mkdtempSync(join(tmpdir(), 'roma-main-keys-'))
+    dirs.push(dir)
+    const serviceAccount = JSON.stringify({
+      client_email: 'reach@a-project.iam.gserviceaccount.com',
+      private_key: 'not-a-real-key',
+    })
+    const files = {
+      ROMA_GITHUB_PRIVATE_KEY_FILE: join(dir, 'github-app.pem'),
+      ROMA_CLOUD_KEY_FILE: join(dir, 'cloud.json'),
+      ROMA_DOCUMENT_KEY_FILE: join(dir, 'documents.json'),
+    }
+    writeFileSync(files.ROMA_GITHUB_PRIVATE_KEY_FILE, 'not-a-real-pem')
+    writeFileSync(files.ROMA_CLOUD_KEY_FILE, serviceAccount)
+    writeFileSync(files.ROMA_DOCUMENT_KEY_FILE, serviceAccount)
+    return {
+      files,
+      env: {
+        ...MINIMAL,
+        ...files,
+        ROMA_DOCUMENT_DEPOT: 'a-folder-id',
+        ROMA_DISCORD_BOT_TOKEN: 'a-bot-token',
+      },
+    }
+  }
+
+  /** Started as root, and after the drop `node` can still read every one of them. */
+  const rootThatLeavesKeysReadable = (): RootSystem => {
+    let uid = 0
+    return {
+      uid: () => uid,
+      becomeUser: () => {
+        uid = 1000
+      },
+      procOwner: () => 0,
+      canRead: () => true,
+      nodeFlags: () => ['--disable-sigusr1'],
+    }
+  }
+
+  it('are checked against the agent once roma is no longer root, every one of them [fence:main-drops-root-after-reading-keys]', async () => {
+    const { env, files } = keyed()
+    const logged: unknown[] = []
+
+    const started = startConfiguredRoma(
+      env,
+      (record) => logged.push(record),
+      rootThatLeavesKeysReadable(),
+    )
+
+    await expect(started).rejects.toThrow(ContainmentRefused)
+    const message = await started.catch((error: unknown) => (error as Error).message)
+    for (const [variable, path] of Object.entries(files)) {
+      expect(message).toContain(`${variable} is "${path}"`)
+    }
+    // Refused before anything was built: nothing at all reached the log.
+    expect(logged).toEqual([])
+  })
+
+  it('are read before the drop, so an unreadable one is a configuration problem rather than a containment one', async () => {
+    const { env } = keyed()
+    const missing = { ...env, ROMA_GITHUB_PRIVATE_KEY_FILE: '/nonexistent/github-app.pem' }
+    let becameUser = false
+    const root: RootSystem = {
+      ...rootThatLeavesKeysReadable(),
+      becomeUser: () => {
+        becameUser = true
+      },
+    }
+
+    await expect(startConfiguredRoma(missing, () => {}, root)).rejects.toThrow(ConfigurationMissing)
+    expect(becameUser).toBe(false)
   })
 })
