@@ -80,19 +80,20 @@ describe('reading an /effort message', () => {
 })
 
 describe('which models take an effort', () => {
-  it('says haiku takes none', () => {
+  it('says haiku 4.5 takes none', () => {
     expect(takesEffort('claude-haiku-4-5')).toBe(false)
   })
 
-  it('says the other three Menu models take one [fence:menu-fable-takes-effort]', () => {
+  it('says every Menu model takes one [fence:menu-fable-takes-effort]', () => {
     const why =
-      'fable, opus and sonnet must read as taking an effort (ADR-0016). The extractor reports ' +
-      'all three as unnamed on every gate, and fable most easily flips to false on a re-audit; ' +
+      'Every Menu model must read as taking an effort (ADR-0016). The extractor reports ' +
+      'all four as unnamed on every gate, and fable most easily flips to false on a re-audit; ' +
       'flipped, roma tells every Caller on fable their /effort does not apply, and nothing ' +
       'else would catch it.'
-    expect(takesEffort('claude-fable-5'), why).toBe(true)
-    expect(takesEffort('claude-opus-5'), why).toBe(true)
-    expect(takesEffort('claude-sonnet-5'), why).toBe(true)
+    expect(takesEffort('claude-fable-5-1'), why).toBe(true)
+    expect(takesEffort('claude-opus-5-5'), why).toBe(true)
+    expect(takesEffort('claude-sonnet-5-5'), why).toBe(true)
+    expect(takesEffort('claude-haiku-5-5'), why).toBe(true)
   })
 
   it('says nothing at all about a model it has not been read about [fence:menu-effort-unread-model-says-nothing]', () => {

@@ -53,4 +53,4 @@ Single-context — one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/
 `roma/<rule>` or `ADR-NNNN`). `roma/comment-whitelist` enforces it in every TS/JS file, and a
 `PostToolUse` hook fails the edit that adds one. A change plus what it would break is a test
 titled `[fence:<id>]`; a reason goes in `docs/adr/`; a term in `CONTEXT.md`. Never use
-`--no-verify`. See `docs/agents/comment-gradient.md` and ADR-0032.
+`--no-verify`. See `docs/agents/comment-gradient.md` and ADR-0033.

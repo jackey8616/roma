@@ -1,10 +1,10 @@
-export const JUDGED_AGAINST_CLAUDE_CODE = '2.1.220'
+export const JUDGED_AGAINST_CLAUDE_CODE = '2.1.319'
 
 export const MENU: Readonly<Record<string, string>> = {
-  fable: 'claude-fable-5',
-  opus: 'claude-opus-5',
-  sonnet: 'claude-sonnet-5',
-  haiku: 'claude-haiku-4-5',
+  fable: 'claude-fable-5-1',
+  opus: 'claude-opus-5-5',
+  sonnet: 'claude-sonnet-5-5',
+  haiku: 'claude-haiku-5-5',
 }
 
 export const PINNED_NAME = 'default'

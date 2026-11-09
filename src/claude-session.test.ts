@@ -85,6 +85,22 @@ describe('how the process is invoked', () => {
     expect(args[args.indexOf('--append-system-prompt') + 1], why).toBe('you can reach a-team/roma')
   })
 
+  it.each([false, true])(
+    'keeps the system prompt fresh on every spawn, resume %s [fence:session-prompt-never-snapshotted]',
+    (resume) => {
+      const why =
+        'Every spawn must pass --system-prompt-snapshot off (ADR-0030). With the snapshot on, ' +
+        'a resumed process keeps the append its Session was first spawned with, so a Caveman ' +
+        'or a Reach announcement changed since then never reaches the model.'
+      const { claude, session } = newSession({ resume, appendSystemPrompt: 'briefing' })
+
+      session.start()
+
+      const args = claude.lastSpawn.args
+      expect(args[args.indexOf('--system-prompt-snapshot') + 1], why).toBe('off')
+    },
+  )
+
   it('says nothing extra where there is nothing to say', () => {
     const { claude, session } = newSession()
 
@@ -104,7 +120,7 @@ describe('how the process is invoked', () => {
     session.start()
 
     const args = claude.lastSpawn.args
-    expect(args[args.indexOf('--model') + 1], why).toBe('claude-sonnet-5')
+    expect(args[args.indexOf('--model') + 1], why).toBe('claude-opus-5-5')
   })
 
   it('pins the effort, because omitting it falls back to a file every Session shares [fence:session-effort-always-passed]', () => {
@@ -369,7 +385,24 @@ describe('per-Turn cost', () => {
     expect(ended[2]?.costUsd, UNREPORTED_IS_NULL).toBeCloseTo(0.0019952, 7)
   })
 
-  it('starts a resumed process from zero rather than from what the Session spent', async () => {
+  it('prices a resumed Turn by what it spent, not by the total the Transcript carried [fence:session-cost-since-last-result]', async () => {
+    const why =
+      "A Turn's cost and output tokens come from model_usage_since_last_result where the " +
+      'build sends it (ADR-0003, observability). From 2.1.319 a resumed process continues ' +
+      'the total its Transcript saved, so a delta from zero bills the first Turn after every ' +
+      'Eviction at the Session’s lifetime spend.'
+    const { claude, session } = newSession({ resume: true })
+    session.start()
+
+    const turn = session.send('carrying on after an eviction')
+    feed(claude.process, recordedStream('resumed-cost-carried').turn(1))
+    const ended = await turn
+
+    expect(ended.costUsd, why).toBeCloseTo(0.0028067, 7)
+    expect(ended.outputTokens, why).toBe(76)
+  })
+
+  it('starts a resumed process from zero where the build does not say what it spent since', async () => {
     const { claude, session } = newSession({ resume: true })
     const stream = recordedStream('three-turns-one-process')
     session.start()

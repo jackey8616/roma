@@ -13,17 +13,17 @@ const REASON = /\s--\s+(\S+)\s*$/
 
 export const MESSAGES = {
   prose:
-    'roma has no comments, only tool directives (ADR-0032). The code is the context: an agent ' +
+    'roma has no comments, only tool directives (ADR-0033). The code is the context: an agent ' +
     'copies what it reads, so a comment is copied forward long after it stops being true. If ' +
     'this names a change and what would break, write it as a test titled [fence:<id>]. If it ' +
     'is a reason, it belongs in docs/adr/; a definition, in CONTEXT.md. Otherwise delete it. ' +
     'Allowed: eslint-disable/-enable, @ts-expect-error (each with " -- <name>"), ' +
     '/// <reference>, and a #! line.',
   reason:
-    'A directive gives its reason as one name a check can resolve, after " -- " (ADR-0032): ' +
+    'A directive gives its reason as one name a check can resolve, after " -- " (ADR-0033): ' +
     'fence:<id>, roma/<rule> or ADR-NNNN. Free text would be a comment that rots; a name ' +
     'fails lint the day what it names is gone.',
-  unresolved: 'This directive cites {{why}} (ADR-0032). Cite something that exists.',
+  unresolved: 'This directive cites {{why}} (ADR-0033). Cite something that exists.',
 } as const
 
 let fences: Fences | undefined
@@ -34,7 +34,7 @@ export const PLUGIN_RULES = new Set<string>()
 export const commentWhitelist: Rule.RuleModule = {
   meta: {
     type: 'problem',
-    docs: { description: 'Allow no comments but tool directives (ADR-0032)' },
+    docs: { description: 'Allow no comments but tool directives (ADR-0033)' },
     fixable: 'code',
     messages: MESSAGES,
     schema: [],

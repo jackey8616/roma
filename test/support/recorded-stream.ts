@@ -124,6 +124,13 @@ export const THREE_TURNS = recordedStream('three-turns-one-process')
 
 export const OK: readonly ClaudeEvent[] = THREE_TURNS.turn(1)
 
+export function withInit(
+  events: readonly ClaudeEvent[],
+  patch: Record<string, unknown>,
+): ClaudeEvent[] {
+  return events.map((event) => (kindOf(event) === 'system/init' ? { ...event, ...patch } : event))
+}
+
 export const FAILED: readonly ClaudeEvent[] = recordedStream('auth-failure').turn(1)
 
 export const FAILED_OUTRIGHT: readonly ClaudeEvent[] = FAILED.filter(

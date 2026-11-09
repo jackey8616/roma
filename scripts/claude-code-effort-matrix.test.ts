@@ -28,6 +28,19 @@ const MAX_GATE =
   'r==="claude-haiku-4-5")return!1;if(M$(r,"max_effort")||r==="claude-mythos-5")return!0;' +
   'return dj(ny(e))}'
 
+const EFFORT_GATE_2_1_319 =
+  'function Sw(e){if(q$r(e))return!1;let n=mVe(e,"effort");if(n!==void 0)return n;' +
+  'let r=rt(e),s=O1t("effort",r);if(s!==void 0)return s;let f=zwo(e,r);' +
+  'if(f!==void 0)return f.length>0;if(r.includes("claude-3-")||r==="claude-opus-4-0"||' +
+  'r==="claude-opus-4-1"||r==="claude-sonnet-4-0"||r==="claude-sonnet-4-5"||' +
+  'r==="claude-haiku-4-5")return!1;if(i.CLAUDE_CODE_ALWAYS_ENABLE_EFFORT)return!0;' +
+  'if(Rw(r,"effort",e)||r==="claude-mythos-5")return!0;return m9(Pd(e))}'
+
+const HANDLER_2_1_319 =
+  'if(nt.name==="effort"){let it=We.trim(),Ue=jN(it);' +
+  'if(/^(default|auto)$/i.test(it)||rAr(it))Ke(),Tr(v,ie,"effort","default");' +
+  'else if(Ue)Ke(),Tr(v,ie,"effort",Ue);else if(!it)Ke(),Pd(h,"effort");return}'
+
 const BUNDLE =
   'function pvi(){return Ot.perTurnEffortOkEmitted}' +
   EFFORT_GATE +
@@ -65,6 +78,21 @@ describe('finding a gate in the bundle', () => {
     expect(() => gateFor(split, 'effort')).toThrow(/spread across 2 functions/)
   })
 
+  it('reads past a call that names no model, as 2.1.319’s `/effort` handler does', () => {
+    const bundle = HANDLER_2_1_319 + EFFORT_GATE_2_1_319
+
+    const gate = gateFor(bundle, 'effort')
+
+    expect(gate.source).toBe(EFFORT_GATE_2_1_319)
+    expect(gate.allowed).toEqual(['claude-mythos-5'])
+  })
+
+  it('still refuses two functions that both name models, since either could be the gate', () => {
+    const twice = EFFORT_GATE_2_1_319 + EFFORT_GATE.replace('function OI', 'function OJ')
+
+    expect(() => gateFor(twice, 'effort')).toThrow(/spread across 2 functions/)
+  })
+
   it('refuses a call site that is not inside a block at all', () => {
     expect(() => enclosingFunction('let t=Ede(e,"effort")', 12, 'effort')).toThrow(
       /not inside a block/,
@@ -83,9 +111,17 @@ describe('the matrix it reports', () => {
     const { rows } = effortMatrix(BUNDLE, Object.values(MENU))
 
     expect(rows).toEqual([
-      { model: 'claude-fable-5', takes: { effort: null, xhigh_effort: null, max_effort: null } },
-      { model: 'claude-opus-5', takes: { effort: null, xhigh_effort: null, max_effort: null } },
-      { model: 'claude-sonnet-5', takes: { effort: null, xhigh_effort: null, max_effort: null } },
+      { model: 'claude-fable-5-1', takes: { effort: null, xhigh_effort: null, max_effort: null } },
+      { model: 'claude-opus-5-5', takes: { effort: null, xhigh_effort: null, max_effort: null } },
+      { model: 'claude-sonnet-5-5', takes: { effort: null, xhigh_effort: null, max_effort: null } },
+      { model: 'claude-haiku-5-5', takes: { effort: null, xhigh_effort: null, max_effort: null } },
+    ])
+  })
+
+  it('reports a model the gates refuse by name as refused', () => {
+    const { rows } = effortMatrix(BUNDLE, ['claude-haiku-4-5'])
+
+    expect(rows).toEqual([
       {
         model: 'claude-haiku-4-5',
         takes: { effort: false, xhigh_effort: false, max_effort: false },

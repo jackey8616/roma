@@ -1,7 +1,7 @@
 # Comment Gradient
 
 There is no gradient any more: roma has no comments, only tool directives.
-ADR-0032 is the decision; this is how to apply it.
+ADR-0033 is the decision; this is how to apply it.
 
 ## What a comment may be
 

@@ -49,15 +49,21 @@ describe('a Session that outlives its process', () => {
     expect(spawns.map((record) => record.resume)).toEqual([false, true])
   })
 
-  it("counts the resumed process's cost from zero rather than carrying it forward", () => {
+  it('prices the first Turn after an eviction at its own spend, not the Session’s', () => {
     const beforeUsd = Number(turns[1]?.result['total_cost_usd'])
     const resumed = turns[2]
     const afterUsd = Number(resumed?.result['total_cost_usd'])
+    const own = resumed?.result['model_usage_since_last_result'] as
+      Record<string, { costUSD?: number }> | undefined
+    const ownUsd = Object.values(own ?? {}).reduce((sum, m) => sum + (m.costUSD ?? 0), 0)
 
-    console.log(`seam 2: total_cost_usd ${beforeUsd} before the eviction, ${afterUsd} after it`)
+    console.log(
+      `seam 2: total_cost_usd ${beforeUsd} before the eviction, ${afterUsd} after it ` +
+        `(${afterUsd > beforeUsd ? 'carried forward' : 'restarted'}); the Turn's own ${ownUsd}`,
+    )
 
-    expect(afterUsd).toBeGreaterThan(0)
-    expect(afterUsd).toBeLessThan(beforeUsd)
-    expect(resumed?.costUsd).toBeCloseTo(afterUsd, 9)
+    expect(resumed?.costUsd).toBeGreaterThan(0)
+    expect(resumed?.costUsd).toBeLessThan(beforeUsd)
+    expect(resumed?.costUsd).toBeCloseTo(own === undefined ? afterUsd : ownUsd, 9)
   })
 })

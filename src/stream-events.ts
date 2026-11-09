@@ -9,6 +9,10 @@ export interface TerminalResult {
   readonly terminalReason: string | null
   readonly turns: number | null
   readonly cumulativeOutputTokens: number | null
+  readonly sinceLastResult: {
+    readonly costUsd: number
+    readonly outputTokens: number
+  } | null
   readonly errors: readonly string[]
 }
 
@@ -116,8 +120,18 @@ export function readTerminalResult(event: ClaudeEvent): TerminalResult | null {
     terminalReason: asString(event['terminal_reason']),
     turns: asNumber(event['num_turns']),
     cumulativeOutputTokens: outputTokensIn(event['modelUsage']),
+    sinceLastResult: sinceLastResultIn(event['model_usage_since_last_result']),
     errors: asStrings(event['errors']),
   }
+}
+
+function sinceLastResultIn(value: unknown): TerminalResult['sinceLastResult'] {
+  if (typeof value !== 'object' || value === null) return null
+  let costUsd = 0
+  for (const model of Object.values(value as Record<string, unknown>)) {
+    costUsd += asNumber(fieldsOf(model)['costUSD']) ?? 0
+  }
+  return { costUsd, outputTokens: outputTokensIn(value) ?? 0 }
 }
 
 function outputTokensIn(value: unknown): number | null {

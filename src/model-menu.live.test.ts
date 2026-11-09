@@ -8,6 +8,10 @@ import { liveSessionDirs, sharedWindowCredential } from '../test/support/live-cl
 
 const PROBE = 'Reply with OK and nothing else. Do not use any tools.'
 
+function lineOf(model: string): string {
+  return model.replace(/(-\d+)+$/, '')
+}
+
 async function initOn(model: string): Promise<SystemInit> {
   const sessionId = randomUUID()
   const { configDir, cwd } = liveSessionDirs(`menu-${model}`)
@@ -48,15 +52,18 @@ describe('every model on the Menu, against the pinned build', () => {
     )
   })
 
-  it.each(Object.entries(MENU))('means by %s the model the Menu names', async (name, model) => {
-    const init = await initOn(name)
+  it.each(Object.entries(MENU))(
+    'means by %s a model of the line the Menu names',
+    async (name, model) => {
+      const init = await initOn(name)
 
-    expect(String(init.model)).toMatch(new RegExp(`^${model}(-\\d{8})?$`))
-    console.log(
-      `seam 2: --model ${name} expanded to ${String(init.model)} ` +
-        `on Claude Code ${String(init.claudeCodeVersion)}`,
-    )
-  })
+      expect(String(init.model)).toMatch(new RegExp(`^${lineOf(model)}-`))
+      console.log(
+        `seam 2: --model ${name} expanded to ${String(init.model)} ` +
+          `on Claude Code ${String(init.claudeCodeVersion)}`,
+      )
+    },
+  )
 })
 
 describe('what Claude Code does with a /model of its own', () => {

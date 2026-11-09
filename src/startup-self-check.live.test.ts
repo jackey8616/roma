@@ -20,7 +20,7 @@ describe('the startup self-check against a real claude -p', () => {
     })
 
     expect(report.apiKeySource).toBe('none')
-    expect(report.model).toBe('claude-sonnet-5')
+    expect(report.model).toBe('claude-opus-5-5')
     expect(report.costUsd).toBeGreaterThan(0)
     console.log(
       `seam 2 ran against Claude Code ${String(report.claudeCodeVersion)} — ` +

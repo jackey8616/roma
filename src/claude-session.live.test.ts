@@ -65,7 +65,7 @@ describe('a Session over a real claude -p', () => {
   it('resolves the Shared Window credential without falling through to an API key', () => {
     const init = events.find((e) => e.type === 'system' && e['subtype'] === 'init')
     expect(init?.['apiKeySource']).toBe('none')
-    expect(init?.['model']).toBe('claude-sonnet-5')
+    expect(init?.['model']).toBe('claude-opus-5-5')
     console.log(`seam 2 ran against Claude Code ${String(init?.['claude_code_version'])}`)
   })
 

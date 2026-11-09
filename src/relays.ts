@@ -1,4 +1,4 @@
-export const JUDGED_AGAINST_CLAUDE_CODE = '2.1.220'
+export const JUDGED_AGAINST_CLAUDE_CODE = '2.1.319'
 
 export type RelayCost = 'free' | 'paid'
 

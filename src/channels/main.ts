@@ -1,11 +1,12 @@
 import { fileURLToPath } from 'node:url'
-import { readCloudEnv } from '../cloud/env-config.js'
+import { CLOUD_KEY_FILE_VAR, readCloudEnv } from '../cloud/env-config.js'
 import { cloudReachFrom } from '../cloud/reach.js'
 import type { CoreLogRecord } from '../core.js'
-import { readDocumentEnv } from '../documents/env-config.js'
+import { DOCUMENT_KEY_FILE_VAR, readDocumentEnv } from '../documents/env-config.js'
 import { documentReachFrom } from '../documents/reach.js'
-import { readConfiguration, type Environment } from '../env-config.js'
-import { readMinterEnv } from '../github/env-config.js'
+import { dropRoot, realRootSystem, type Dropped, type RootSystem } from '../drop-root.js'
+import { envValue, readConfiguration, type Environment } from '../env-config.js'
+import { PRIVATE_KEY_FILE_VAR, readMinterEnv } from '../github/env-config.js'
 import { githubReachFrom } from '../github/reach.js'
 import { gitConfig } from '../github/shims.js'
 import { writeToStderr, type OperatorLog } from '../operator-log.js'
@@ -25,6 +26,7 @@ const EXIT_FAILED = 1
 type ProcessLogRecord =
   | { readonly event: 'serving'; readonly selfCheck: StartupSelfCheckReport }
   | { readonly event: 'stopping'; readonly signal: NodeJS.Signals }
+  | ({ readonly event: 'privileges' } & Dropped)
 
 type RomaLog = OperatorLog<
   | PoolLogRecord
@@ -41,6 +43,7 @@ type RomaLog = OperatorLog<
 export async function startConfiguredRoma(
   env: Environment = process.env,
   log: RomaLog = writeToStderr,
+  rootSystem: RootSystem = realRootSystem(),
 ): Promise<Serving> {
   const { roma, channels, minterEnv, cloudEnv, documentEnv } = readConfiguration(
     env,
@@ -49,6 +52,7 @@ export async function startConfiguredRoma(
     readCloudEnv,
     readDocumentEnv,
   )
+  log({ event: 'privileges', ...dropRoot(keyFilesIn(env), rootSystem) })
   const { shimDir, ...core } = roma
 
   const bound: ChannelBinding[] = []
@@ -65,6 +69,13 @@ export async function startConfiguredRoma(
     shims: { dir: shimDir, gitConfig: gitConfig() },
     channels: bound,
     log,
+  })
+}
+
+function keyFilesIn(env: Environment): { variable: string; path: string }[] {
+  return [PRIVATE_KEY_FILE_VAR, CLOUD_KEY_FILE_VAR, DOCUMENT_KEY_FILE_VAR].flatMap((variable) => {
+    const path = envValue(env, variable)
+    return path === null ? [] : [{ variable, path }]
   })
 }
 

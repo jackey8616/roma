@@ -4,6 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import { monthOf, type AuditRecord } from './audit-log.js'
 import type { Credential } from './build-env.js'
+import { PINNED_MODEL } from './claude-session.js'
 import {
   CAVEMAN_MENU,
   CAVEMAN_NOT_PINNED,
@@ -161,7 +162,7 @@ describe('starting roma', () => {
     await roma.answerProbe()
 
     await expect(roma.starting).resolves.toMatchObject({
-      selfCheck: { apiKeySource: 'none', model: 'claude-sonnet-5' },
+      selfCheck: { apiKeySource: 'none', model: PINNED_MODEL },
     })
   })
 
@@ -232,9 +233,9 @@ describe('starting roma', () => {
 
   it.each([
     [
-      '/model opus',
+      '/model fable',
       (spawn: { args: readonly string[] }) => spawn.args[spawn.args.indexOf('--model') + 1],
-      'claude-opus-5',
+      'claude-fable-5-1',
     ],
     [
       '/effort low',

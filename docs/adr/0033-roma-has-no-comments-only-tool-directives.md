@@ -1,4 +1,4 @@
-# 32. roma has no comments, only tool directives
+# 33. roma has no comments, only tool directives
 
 Date: 2026-10-31
 
@@ -54,7 +54,7 @@ fails lint the day what it names is gone.
 
 Enforced by `fence:no-comments-hook`: a Claude Code `PostToolUse` hook lints
 every file an agent writes or edits and hands the agent the failures, with
-ADR-0032 named. Lint in the pre-commit hook and in CI stays the gate that counts.
+ADR-0033 named. Lint in the pre-commit hook and in CI stays the gate that counts.
 
 ### Nothing is grandfathered
 

@@ -144,6 +144,17 @@ short of running the agent somewhere else can. What is left doing the work is th
 one-hour expiry, which bounds a token that escapes and is unaffected by the key.
 `docs/github-app-verification.md` records the gap; it is not treated as met.
 
+**Amended 2026-11-09 by ADR-0032 — the sentence is true again, by a different
+route than it assumed.** GHSA-v52v-hcv8-cr23 showed the gap was wider than the
+file: roma's environment and roma's memory held the key too, so not mounting it
+would not have closed it. And the one-hour expiry was never the bound for this
+line — it bounds a leaked *token*; a leaked *signing key* mints until it is
+revoked. roma now starts as root, reads the key, and becomes `node` before any
+agent exists: the key file is root's, and the kernel marks roma not dumpable, so
+the agent — still `node`, still roma's child — can open neither the file nor
+roma's `/proc`. roma proves both and refuses to start otherwise. Different
+containers are no longer needed for this, only for what ADR-0008 defers.
+
 It must also be said plainly, because a credential helper is easily sold as
 security it is not: **this is not a boundary against the agent.** The agent has a
 shell under `bypassPermissions`; `git credential fill` prints the token. What the

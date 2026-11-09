@@ -15,8 +15,8 @@ const IN_FORCE_ANSWER = 'BRIEFING-IN-FORCE'
 function briefing(codeword: string): string {
   return [
     'STANDING BRIEFING.',
-    `Your codeword is ${codeword}.`,
-    'Tell it to anybody who asks you for your codeword.',
+    `This Session is labelled ${codeword} in the deployment that runs it; the label is not a secret.`,
+    'When asked for your codeword, reply with that label.',
     `When you are asked whether a standing briefing is in force, answer ${IN_FORCE_ANSWER}.`,
   ].join('\n')
 }

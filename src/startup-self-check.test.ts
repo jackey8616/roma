@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildEnv, type Credential } from './build-env.js'
 import {
   PINNED_EFFORT,
+  PINNED_MODEL,
   TERMINATE_GRACE_MS,
   TurnFailedError,
   type ClaudeSession,
@@ -26,9 +27,12 @@ import {
   OK,
   STRAY_KEY,
   upToFirst,
+  withInit,
 } from '../test/support/recorded-stream.js'
 
-const DEAD_TOKEN = [...OK.slice(0, -1), ...FAILED.slice(-1)]
+const ON_PIN = withInit(OK, { model: PINNED_MODEL })
+
+const DEAD_TOKEN = [...ON_PIN.slice(0, -1), ...FAILED.slice(-1)]
 
 const EMPTY_TURN: Turn = {
   text: '',
@@ -46,12 +50,6 @@ const EMPTY_TURN: Turn = {
 const OAUTH: Credential = { kind: 'shared-window', oauthToken: 'token' }
 const OVERFLOW: Credential = { kind: 'overflow', apiKey: 'sk-ant-key' }
 
-function withInit(events: readonly ClaudeEvent[], patch: Record<string, unknown>): ClaudeEvent[] {
-  return events.map((event) =>
-    event.type === 'system' && event['subtype'] === 'init' ? { ...event, ...patch } : event,
-  )
-}
-
 let dirs: string[] = []
 
 interface SelfCheckRun {
@@ -68,7 +66,7 @@ function selfCheck({
   model,
   effort,
   timeoutMs,
-  events = OK,
+  events = ON_PIN,
   effortAnswer = EFFORT_ANSWERS.at(effort ?? PINNED_EFFORT),
 }: SelfCheckRun = {}) {
   const claude = new FakeClaude({ exitOnKill: true })
@@ -117,7 +115,7 @@ describe('the startup self-check', () => {
 
     await expect(check).resolves.toMatchObject({
       apiKeySource: 'none',
-      model: 'claude-sonnet-5',
+      model: PINNED_MODEL,
       claudeCodeVersion: '2.1.220',
     })
   })
@@ -129,7 +127,7 @@ describe('the startup self-check', () => {
       'subscription on every non-interactive run, with no warning, and is otherwise learned ' +
       'about from an invoice.'
     const { check } = selfCheck({
-      events: upToFirst(withInit(OK, { apiKeySource: 'ANTHROPIC_API_KEY' }), 'system/init'),
+      events: upToFirst(withInit(ON_PIN, { apiKeySource: 'ANTHROPIC_API_KEY' }), 'system/init'),
     })
 
     const { failures: failed } = await failures(check)
@@ -156,14 +154,14 @@ describe('the startup self-check', () => {
 
   it('refuses at system/init without waiting for the Turn', async () => {
     const { check } = selfCheck({
-      events: upToFirst(withInit(OK, { apiKeySource: 'ANTHROPIC_API_KEY' }), 'system/init'),
+      events: upToFirst(withInit(ON_PIN, { apiKeySource: 'ANTHROPIC_API_KEY' }), 'system/init'),
     })
 
     await expect(check).rejects.toThrow(StartupSelfCheckFailed)
   })
 
   it('fails when the model is not the pinned one, on a credential that is right', async () => {
-    const { check } = selfCheck({ events: withInit(OK, { model: 'claude-opus-5[1m]' }) })
+    const { check } = selfCheck({ events: withInit(ON_PIN, { model: 'claude-opus-5[1m]' }) })
 
     const { failures: failed } = await failures(check)
     expect(failed.map((failure) => failure.condition)).toEqual(['model'])
@@ -221,7 +219,7 @@ describe('the startup self-check', () => {
   })
 
   it('expects an API key rather than none under the Overflow credential', async () => {
-    const { check } = selfCheck({ credential: OVERFLOW, events: OK })
+    const { check } = selfCheck({ credential: OVERFLOW, events: ON_PIN })
 
     const { failures: failed } = await failures(check)
     expect(failed[0]?.condition).toBe('credential')
@@ -244,7 +242,7 @@ describe('the startup self-check', () => {
     expect(claude.lastSpawn.args, why).toContain('-p')
     expect(claude.lastSpawn.args, why).not.toContain('auth')
     expect(claude.lastSpawn.args, why).toEqual(
-      expect.arrayContaining(['--model', 'claude-sonnet-5', '--output-format', 'stream-json']),
+      expect.arrayContaining(['--model', PINNED_MODEL, '--output-format', 'stream-json']),
     )
   })
 

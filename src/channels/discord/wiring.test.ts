@@ -4,7 +4,6 @@ import { cavemanRuleset } from '../../caveman.js'
 import { PINNED_MODEL } from '../../claude-session.js'
 import { bind, serve, type IngressLogRecord, type Serving } from '../../serve.js'
 import { sessionIdFor } from '../../session-id.js'
-import type { ClaudeEvent } from '../../stream-events.js'
 import type { DiscordLogRecord } from './binding.js'
 import { DiscordAdapter } from './discord-adapter.js'
 import { GatewayTransport, RECONNECT_FLOOR_MS } from './gateway-transport.js'
@@ -16,7 +15,7 @@ import { githubReach } from '../../github/reach.js'
 import { noCloudReach } from '../../cloud/reach.js'
 import { noDocumentReach } from '../../documents/reach.js'
 import { romaFixture, teardownRoma, type RomaFixture } from '../../../test/support/roma-fixture.js'
-import { BLOCKED_WITH_OVERAGE, feed, kindOf, OK } from '../../../test/support/recorded-stream.js'
+import { BLOCKED_WITH_OVERAGE, feed, OK, withInit } from '../../../test/support/recorded-stream.js'
 
 const TOKEN = 'a-bot-token'
 const GATEWAY = 'wss://gateway.example/?v=10&encoding=json'
@@ -105,10 +104,6 @@ function pressing(customId: string, id = INTERACTION): unknown {
   })
 }
 
-function reporting(model: string): readonly ClaudeEvent[] {
-  return OK.map((event) => (kindOf(event) === 'system/init' ? { ...event, model } : event))
-}
-
 let running: Serving[] = []
 let fixtures: RomaFixture[] = []
 
@@ -167,7 +162,7 @@ async function boot({ model = PINNED_MODEL }: { model?: string } = {}) {
     selfCheckTimeoutMs: 1_000,
   })
 
-  await fixture.answerProbe(model === PINNED_MODEL ? OK : reporting(model))
+  await fixture.answerProbe(withInit(OK, { model }))
   const roma = await serving
   running.push(roma)
 
@@ -308,7 +303,7 @@ describe('a Menu, out as buttons and back as a press', () => {
     await roma.take(inThread('hello', '700000000000000020'))
     await flush()
 
-    expect(roma.claude.lastSpawn.args).toContain('claude-opus-5')
+    expect(roma.claude.lastSpawn.args).toContain('claude-opus-5-5')
   })
 
   it('answers the press in the Conversation the button named', async () => {
@@ -346,12 +341,12 @@ describe('a Menu, out as buttons and back as a press', () => {
   })
 
   it('draws no effort buttons on a model the Matrix says takes none', async () => {
-    const roma = await boot()
+    const roma = await boot({ model: 'claude-haiku-4-5' })
     await roma.take(HELLO)
     await roma.take(READY)
     await roma.take(GUILD_CREATE)
 
-    await roma.take(mentioned('/model haiku'))
+    await roma.take(mentioned('/effort'))
     await roma.take(inThread('/effort', '700000000000000021'))
 
     expect(said(roma.requests).at(-1)).toContain('takes none')

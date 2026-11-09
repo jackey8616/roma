@@ -112,6 +112,12 @@ Two things about roma shape everything below.
 key never enters the space the agent can reach, and that what the agent gets is
 hour-long. That rule is not reopened here.
 
+**Amended 2026-11-09 by ADR-0032.** The rule was a premise rather than a fact when this was
+written: the agent shared roma's uid and could read the Document key from its file, from
+roma's environment and from roma's memory (GHSA-v52v-hcv8-cr23). ADR-0032 is what makes it
+hold, and it asks one thing of this Reach: `ROMA_DOCUMENT_KEY_FILE` mounted 0400 and owned by
+root.
+
 **roma has no database.** The Session id derives from the Conversation Key and the Session
 Generation, which is why. Anything this record needs to remember across Tasks has to live
 somewhere that is not roma.

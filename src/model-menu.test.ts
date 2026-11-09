@@ -15,17 +15,21 @@ const UNKNOWN_IS_REFUSED =
 
 describe('reading a /model message', () => {
   it('recognises every name on the Menu', () => {
-    expect(read('/model fable')).toEqual({ kind: 'chosen', name: 'fable', model: 'claude-fable-5' })
-    expect(read('/model opus')).toEqual({ kind: 'chosen', name: 'opus', model: 'claude-opus-5' })
+    expect(read('/model fable')).toEqual({
+      kind: 'chosen',
+      name: 'fable',
+      model: 'claude-fable-5-1',
+    })
+    expect(read('/model opus')).toEqual({ kind: 'chosen', name: 'opus', model: 'claude-opus-5-5' })
     expect(read('/model sonnet')).toEqual({
       kind: 'chosen',
       name: 'sonnet',
-      model: 'claude-sonnet-5',
+      model: 'claude-sonnet-5-5',
     })
     expect(read('/model haiku')).toEqual({
       kind: 'chosen',
       name: 'haiku',
-      model: 'claude-haiku-4-5',
+      model: 'claude-haiku-5-5',
     })
   })
 
@@ -44,7 +48,7 @@ describe('reading a /model message', () => {
   })
 
   it('offers neither a full model id nor the 1M variants', () => {
-    expect(read('/model claude-opus-5')).toEqual({ kind: 'unknown', name: 'claude-opus-5' })
+    expect(read('/model claude-opus-5-5')).toEqual({ kind: 'unknown', name: 'claude-opus-5-5' })
     expect(read('/model opus[1m]')).toEqual({ kind: 'unknown', name: 'opus[1m]' })
     expect(read('/model sonnet[1m]')).toEqual({ kind: 'unknown', name: 'sonnet[1m]' })
     expect(read('/model fable[1m]')).toEqual({ kind: 'unknown', name: 'fable[1m]' })
@@ -58,13 +62,13 @@ describe('reading a /model message', () => {
     expect(read('  /model opus\n')).toEqual({
       kind: 'chosen',
       name: 'opus',
-      model: 'claude-opus-5',
+      model: 'claude-opus-5-5',
     })
     expect(read('  /model  ')).toEqual({ kind: 'report' })
   })
 
   it('ignores case, in the head and in the name', () => {
-    expect(read('/Model Opus')).toEqual({ kind: 'chosen', name: 'opus', model: 'claude-opus-5' })
+    expect(read('/Model Opus')).toEqual({ kind: 'chosen', name: 'opus', model: 'claude-opus-5-5' })
     expect(read('/MODEL')).toEqual({ kind: 'report' })
   })
 
@@ -90,14 +94,18 @@ describe('reading a /model message', () => {
 
 describe('naming the model a Session is on', () => {
   it('answers with the name a Caller would have typed', () => {
-    expect(menuNameFor('claude-fable-5')).toBe('fable')
-    expect(menuNameFor('claude-opus-5')).toBe('opus')
-    expect(menuNameFor('claude-sonnet-5')).toBe('sonnet')
-    expect(menuNameFor('claude-haiku-4-5')).toBe('haiku')
+    expect(menuNameFor('claude-fable-5-1')).toBe('fable')
+    expect(menuNameFor('claude-opus-5-5')).toBe('opus')
+    expect(menuNameFor('claude-sonnet-5-5')).toBe('sonnet')
+    expect(menuNameFor('claude-haiku-5-5')).toBe('haiku')
   })
 
   it('says nothing for a model no name on the Menu resolves to', () => {
     expect(menuNameFor('claude-mythos-5')).toBeNull()
+    expect(menuNameFor('claude-fable-5')).toBeNull()
+    expect(menuNameFor('claude-opus-5')).toBeNull()
+    expect(menuNameFor('claude-sonnet-5')).toBeNull()
+    expect(menuNameFor('claude-haiku-4-5')).toBeNull()
     expect(menuNameFor('claude-opus-5[1m]')).toBeNull()
   })
 })

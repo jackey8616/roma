@@ -11,7 +11,7 @@ const probes = mkdtempSync(join(root, 'scripts', '.hook-probe-'))
 afterAll(() => rmSync(probes, { recursive: true, force: true }))
 
 const WHY =
-  'An agent copies the comments it reads, so roma keeps none (ADR-0032), and the agent must ' +
+  'An agent copies the comments it reads, so roma keeps none (ADR-0033), and the agent must ' +
   'hear about a comment in the same turn it wrote one. A hook that lets one through leaves it ' +
   'for the next agent to copy; a hook that refuses a tool directive blocks work that is allowed.'
 
@@ -39,7 +39,7 @@ describe('a comment written by an agent is reported at once [fence:no-comments-h
     const { status, stderr } = verdict(name, text)
 
     expect(status, WHY).toBe(2)
-    expect(stderr, WHY).toContain('ADR-0032')
+    expect(stderr, WHY).toContain('ADR-0033')
   })
 
   it.each([

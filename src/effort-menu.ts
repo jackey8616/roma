@@ -7,9 +7,10 @@ export const EFFORT_NAMES: readonly string[] = [...EFFORT_MENU, PINNED_EFFORT_NA
 export const ULTRACODE = 'ultracode'
 
 export const EFFORT_MATRIX: Readonly<Record<string, boolean>> = {
-  'claude-fable-5': true,
-  'claude-opus-5': true,
-  'claude-sonnet-5': true,
+  'claude-fable-5-1': true,
+  'claude-opus-5-5': true,
+  'claude-sonnet-5-5': true,
+  'claude-haiku-5-5': true,
   'claude-haiku-4-5': false,
 }
 

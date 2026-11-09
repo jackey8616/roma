@@ -115,9 +115,9 @@ function figures(label: string, turn: Turn): string {
   )
 }
 
-describe('a manual /compact with too little conversation to summarise', () => {
-  it('says so, and what it says is the whole of what roma gets', async () => {
-    const { session, events, capture, say } = probe('manual-compact-too-few-groups')
+describe('a manual /compact with one exchange in the Session', () => {
+  it('compacts it, says what it cost, and leaves the Session usable', async () => {
+    const { session, capture, say } = probe('manual-compact-one-exchange')
 
     try {
       session.start()
@@ -126,7 +126,7 @@ describe('a manual /compact with too little conversation to summarise', () => {
 
       console.log(
         [
-          `seam 2: manual /compact, too little conversation — capture ${capture}`,
+          `seam 2: manual /compact, one exchange — capture ${capture}`,
           figures('setup', setup),
           figures('/compact', compact),
           `  result text ${JSON.stringify(compact.text)}`,
@@ -136,18 +136,11 @@ describe('a manual /compact with too little conversation to summarise', () => {
         ].join('\n'),
       )
 
-      expect(boundaries(during)).toHaveLength(0)
-
+      expect(boundaries(during)).toHaveLength(1)
       expect(compact.isError).toBe(false)
-      expect(compact.text).toContain('Not enough messages to compact')
-
-      const [failure] = compactResults(during)
-      expect(failure, 'no compact_result reached stdout').toBeDefined()
-      expect(failure?.['compact_result']).toBe('failed')
-      expect(failure?.['compact_error']).toBe('Not enough messages to compact.')
-
+      expect(compactResults(during).map((e) => e['compact_result'])).toEqual(['success'])
       expect(compact.turns).toBe(0)
-      expect(compact.costUsd).toBe(0)
+      expect(compact.costUsd).toBeGreaterThan(0)
 
       const { turn: after } = await say(CHAT[1] ?? '')
       expect(after.isError).toBe(false)

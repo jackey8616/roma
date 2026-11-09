@@ -18,6 +18,8 @@ const MODEL_ID = /"(claude-[a-z0-9.-]+)"/g
 
 const RETURNS = /return\s*(!0|!1|true|false)\b/g
 
+const NAMES_A_MODEL = /"claude-/
+
 export function gateFor(bundle: string, flag: EffortFlag): FlagGate {
   const sites = callSites(bundle, flag)
 
@@ -25,7 +27,9 @@ export function gateFor(bundle: string, flag: EffortFlag): FlagGate {
     throw new Error(`no call passes the feature flag "${flag}" — this build's gate has moved`)
   }
 
-  const bodies = unique(sites.map((site) => enclosingFunction(bundle, site, flag)))
+  const all = unique(sites.map((site) => enclosingFunction(bundle, site, flag)))
+  const naming = all.filter((body) => NAMES_A_MODEL.test(body))
+  const bodies = all.length > 1 && naming.length === 1 ? naming : all
   if (bodies.length > 1) {
     throw new Error(
       `the ${sites.length} calls passing "${flag}" are spread across ${bodies.length} functions; ` +

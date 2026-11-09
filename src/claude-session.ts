@@ -94,7 +94,7 @@ interface PendingTurn {
   readonly fail: (error: Error) => void
 }
 
-export const PINNED_MODEL = 'claude-sonnet-5'
+export const PINNED_MODEL = 'claude-opus-5-5'
 
 export const PINNED_EFFORT = 'high'
 const COMMAND = 'claude'
@@ -163,6 +163,8 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
       ...(this.#appendSystemPrompt === undefined
         ? []
         : ['--append-system-prompt', this.#appendSystemPrompt]),
+      '--system-prompt-snapshot',
+      'off',
       ...(this.#resume ? ['--resume', this.sessionId] : ['--session-id', this.sessionId]),
     ]
   }
@@ -288,16 +290,23 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     }
     if (pending === null) return
 
+    const own = result.sinceLastResult
     const delta =
-      result.cumulativeCostUsd === null ? null : result.cumulativeCostUsd - previousTotalUsd
+      own !== null
+        ? own.costUsd
+        : result.cumulativeCostUsd === null
+          ? null
+          : result.cumulativeCostUsd - previousTotalUsd
 
     const turn: Turn = {
       text: result.text ?? pending.assistantText.join(''),
       costUsd: delta,
       outputTokens:
-        result.cumulativeOutputTokens === null
-          ? null
-          : Math.max(0, result.cumulativeOutputTokens - previousMark),
+        own !== null
+          ? own.outputTokens
+          : result.cumulativeOutputTokens === null
+            ? null
+            : Math.max(0, result.cumulativeOutputTokens - previousMark),
       durationMs: Date.now() - pending.startedAt,
       isError: result.isError,
       subtype: result.subtype,

@@ -153,3 +153,55 @@ if printf '%s\n' "${refusal}" | grep -qF -- 'ROMA_SHIM_DIR'; then
   exit 1
 fi
 echo "an empty environment is refused, naming the durable paths and the GitHub App"
+
+# ---------------------------------------------------------------------------
+# 5. The agent cannot reach roma's keys: not on disk, not in roma's environment,
+#    not in roma's memory, and not through an inspector it signals open.
+#
+# GHSA-v52v-hcv8-cr23, ADR-0032. The agent runs as roma's uid, so the boundary
+# is roma starting as root, reading the keys, and dropping to `node` — after
+# which the key file is root's and the kernel has marked roma not dumpable. This
+# is the only place that can be proved: it takes the image's real CMD flags, its
+# real compiled `dropRoot`, `buildEnv` and `spawnClaudeProcess`, a real kernel,
+# and the agent spawned as roma's real child. `scripts/containment-harness.mjs`
+# is roma's half; the probe it spawns is the agent's.
+#
+# Run twice, and the second run is what makes the first one mean anything. The
+# control starts roma the way the image did before the fix — as `node`, with
+# SIGUSR1 live — and must reach the key file, the environment and the inspector.
+# Without it, a probe that silently stopped working would report containment it
+# is not checking. Memory is asserted only in the contained run: whether the
+# control reaches it depends on the host's Yama ptrace_scope, which CI's kernel
+# decides and this script does not.
+# ---------------------------------------------------------------------------
+harness="$(dirname "$0")/containment-harness.mjs"
+contained_flags=(--disable-sigusr1)
+
+containment() {
+  # $1: the `docker run` user, or empty for the image's own. $2...: node flags.
+  local user="$1"; shift
+  docker run --rm -i ${user:+--user "${user}"} \
+    -e ROMA_OVERFLOW_API_KEY=FAKE-CANARY-ROMA-ENV \
+    --entrypoint node "${image}" "$@" --input-type=module - < "${harness}"
+}
+
+contained="$(containment '' "${contained_flags[@]}")"
+control="$(containment node)"
+
+expect_line() {
+  # $1: run name, $2: output, $3: the line it must contain.
+  if ! printf '%s\n' "$2" | grep -qx -- "$3"; then
+    echo "the $1 run did not report: $3" >&2
+    echo "$2" >&2
+    exit 1
+  fi
+}
+
+expect_line contained "${contained}" 'uid 1000'
+for check in key-file roma-environ roma-memory roma-inspector; do
+  expect_line contained "${contained}" "${check} BLOCKED"
+done
+for check in key-file roma-environ roma-inspector; do
+  expect_line control "${control}" "${check} REACHED"
+done
+echo "the agent reaches none of roma's keys, which it does when roma is started as node"

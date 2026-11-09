@@ -45,7 +45,7 @@ jobs:
 
       - run: npm run typecheck
 
-      # No comments but tool directives, in every TS and JS file (ADR-0032).
+      # No comments but tool directives, in every TS and JS file (ADR-0033).
       - run: npm run lint
 
       # Every "Enforced by" in docs/adr/ names a check that exists (ADR-0031).

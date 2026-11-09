@@ -1228,7 +1228,7 @@ describe('the Commands roma answers itself', () => {
 })
 
 describe('the model a Conversation runs on', () => {
-  const OPUS = 'claude-opus-5'
+  const FABLE = 'claude-fable-5-1'
 
   it('runs the next Task on the model somebody chose, and says so from that message on [fence:core-model-reply-says-when]', async () => {
     const why =
@@ -1236,17 +1236,17 @@ describe('the model a Conversation runs on', () => {
       'acknowledgement sent while a Task runs reads as having changed that Task.'
     const { adapter, claude, core, say } = newCore()
 
-    await core.handle(ingress('/model opus'))
+    await core.handle(ingress('/model fable'))
     await say('hello')
 
-    expect(claude.lastSpawn.args, why).toContain(OPUS)
+    expect(claude.lastSpawn.args, why).toContain(FABLE)
     expect(posted(adapter.instructions)[0], why).toEqual({
       kind: 'result',
       conversationKey: KEY,
       text: expect.stringContaining('from your next message'),
     })
     expect(posted(adapter.instructions)[0], why).toMatchObject({
-      text: expect.stringContaining(OPUS),
+      text: expect.stringContaining(FABLE),
     })
   })
 
@@ -1254,15 +1254,15 @@ describe('the model a Conversation runs on', () => {
     const { claude, core, say, start } = newCore()
     const { task, proc } = await start('a long job')
 
-    await core.handle(ingress('/model opus'))
+    await core.handle(ingress('/model fable'))
     feed(proc, OK)
     await task
 
     expect(claude.lastSpawn.args).toContain(PINNED_MODEL)
-    expect(claude.lastSpawn.args).not.toContain(OPUS)
+    expect(claude.lastSpawn.args).not.toContain(FABLE)
 
     await say('and now')
-    expect(claude.lastSpawn.args).toContain(OPUS)
+    expect(claude.lastSpawn.args).toContain(FABLE)
   })
 
   it('refuses a name it does not offer, by name, and moves nothing', async () => {
@@ -1312,18 +1312,18 @@ describe('the model a Conversation runs on', () => {
   it('reports the model it was moved to, by name and by id', async () => {
     const { adapter, core } = newCore()
 
-    await core.handle(ingress('/model opus'))
+    await core.handle(ingress('/model fable'))
     await core.handle(ingress('/model'))
 
     expect(posted(adapter.instructions).at(-1)).toMatchObject({
-      text: expect.stringContaining(`opus (${OPUS})`),
+      text: expect.stringContaining(`fable (${FABLE})`),
     })
   })
 
   it('carries no Menu on a choice that succeeded, or on a return to the default', async () => {
     const { adapter, core } = newCore()
 
-    await core.handle(ingress('/model opus'))
+    await core.handle(ingress('/model fable'))
     await core.handle(ingress('/model default'))
     await core.handle(ingress('/effort max'))
     await core.handle(ingress('/effort default'))
@@ -1342,11 +1342,11 @@ describe('the model a Conversation runs on', () => {
       'tells the Caller an operator moving the pin takes them along.'
     const { adapter, core } = newCore()
 
-    await core.handle(ingress('/model sonnet'))
+    await core.handle(ingress('/model opus'))
     await core.handle(ingress('/model'))
 
     expect(posted(adapter.instructions).at(-1), why).toMatchObject({
-      text: expect.stringContaining(`sonnet (${PINNED_MODEL})`),
+      text: expect.stringContaining(`opus (${PINNED_MODEL})`),
     })
     expect(posted(adapter.instructions).at(-1), why).not.toMatchObject({
       text: expect.stringContaining('default ('),
@@ -1364,7 +1364,7 @@ describe('the model a Conversation runs on', () => {
     const queued = core.handle(ingress('and this one after it'))
     await flush()
 
-    await core.handle(ingress('/model opus'))
+    await core.handle(ingress('/model fable'))
     await core.handle(ingress('/effort max'))
     feed(proc, OK)
     await running
@@ -1372,11 +1372,11 @@ describe('the model a Conversation runs on', () => {
     feed(procFor(KEY), OK)
     await queued
 
-    expect(claude.lastSpawn.args, why).toContain(OPUS)
+    expect(claude.lastSpawn.args, why).toContain(FABLE)
     expect(
       recordsIn(audit).map((record) => record.model),
       why,
-    ).toEqual([PINNED_MODEL, OPUS])
+    ).toEqual([PINNED_MODEL, FABLE])
     expect(
       recordsIn(audit).map((record) => record.effort),
       why,
@@ -1385,7 +1385,7 @@ describe('the model a Conversation runs on', () => {
 
   it('goes back to the Pinned Model on /model default, keeping the context', async () => {
     const { claude, core, say } = newCore()
-    await core.handle(ingress('/model opus'))
+    await core.handle(ingress('/model fable'))
     await say('hello')
 
     await core.handle(ingress('/model default'))
@@ -1398,7 +1398,7 @@ describe('the model a Conversation runs on', () => {
 
   it('goes back to the Pinned Model when the Conversation is cleared, deleting nothing', async () => {
     const { claude, core, models, say, workRoot } = newCore()
-    await core.handle(ingress('/model opus'))
+    await core.handle(ingress('/model fable'))
     await say('hello')
 
     await core.handle(ingress('/clear'))
@@ -1407,44 +1407,44 @@ describe('the model a Conversation runs on', () => {
     expect(claude.lastSpawn.args).toContain(PINNED_MODEL)
     expect(claude.lastSpawn.args).toContain(sessionIdFor(KEY, 1))
     expect(readdirSync(workRoot)).toContain(`${sessionIdFor(KEY)}.model`)
-    expect(models.inForce(sessionIdFor(KEY))).toBe(OPUS)
+    expect(models.inForce(sessionIdFor(KEY))).toBe(FABLE)
   })
 
   it('is still in force after roma has restarted', async () => {
     const first = newCore()
-    await first.core.handle(ingress('/model opus'))
+    await first.core.handle(ingress('/model fable'))
 
     const second = newCore({ workRoot: first.workRoot })
     await second.say('hello')
 
-    expect(second.claude.lastSpawn.args).toContain(OPUS)
+    expect(second.claude.lastSpawn.args).toContain(FABLE)
   })
 
   it('moves only the Conversation that asked for it', async () => {
     const { claude, core, say } = newCore()
 
-    await core.handle(ingress('/model opus'))
+    await core.handle(ingress('/model fable'))
     await say('hello', { key: OTHER_KEY, session: sessionIdFor(OTHER_KEY) })
 
     expect(claude.lastSpawn.args).toContain(PINNED_MODEL)
-    expect(claude.lastSpawn.args).not.toContain(OPUS)
+    expect(claude.lastSpawn.args).not.toContain(FABLE)
   })
 
   it('names the model on the Audit Record of every Task', async () => {
     const { audit, core, say } = newCore()
 
     await say('on the pinned model')
-    await core.handle(ingress('/model opus'))
+    await core.handle(ingress('/model fable'))
     await say('and this one is not')
 
-    expect(recordsIn(audit).map((record) => record.model)).toEqual([PINNED_MODEL, OPUS])
+    expect(recordsIn(audit).map((record) => record.model)).toEqual([PINNED_MODEL, FABLE])
   })
 
   it('writes the process change down as a swap, and not as an Eviction', async () => {
     const { core, poolLog, say } = newCore()
     await say('hello')
 
-    await core.handle(ingress('/model opus'))
+    await core.handle(ingress('/model fable'))
     await say('and now')
 
     expect(poolLog.filter(({ event }) => event === 'swap')).toEqual([
@@ -1453,7 +1453,7 @@ describe('the model a Conversation runs on', () => {
         sessionId: sessionIdFor(KEY),
         reason: 'model',
         from: PINNED_MODEL,
-        to: OPUS,
+        to: FABLE,
       },
     ])
     expect(poolLog.filter(({ event }) => event === 'evict' || event === 'reap')).toEqual([])
@@ -1642,10 +1642,10 @@ describe('the effort a Conversation runs at', () => {
 
 describe('an effort the model will not use', () => {
   const HAIKU = 'claude-haiku-4-5'
+  const onHaiku = () => newCore({ pinnedModel: HAIKU })
 
   it('lets the Caller set it, and says it will not apply', async () => {
-    const { adapter, core } = newCore()
-    await core.handle(ingress('/model haiku'))
+    const { adapter, core } = onHaiku()
 
     await core.handle(ingress('/effort max'))
 
@@ -1661,12 +1661,11 @@ describe('an effort the model will not use', () => {
       'account of it is a reading of a minified binary that has already been wrong once. ' +
       'A sentence saying Claude Code ignores, strips or refuses the effort claims something ' +
       'roma never watched.'
-    const { adapter, core } = newCore()
-    await core.handle(ingress('/model haiku'))
+    const { adapter, core } = onHaiku()
 
     await core.handle(ingress('/effort max'))
     await core.handle(ingress('/model opus'))
-    await core.handle(ingress('/model haiku'))
+    await core.handle(ingress('/model default'))
 
     const [setOnHaiku, , movedOntoHaiku] = posted(adapter.instructions).slice(-3)
     expect(setOnHaiku, why).toMatchObject({
@@ -1684,8 +1683,7 @@ describe('an effort the model will not use', () => {
   })
 
   it('writes the record anyway, so it applies again on a model that takes one', async () => {
-    const { claude, core, say } = newCore()
-    await core.handle(ingress('/model haiku'))
+    const { claude, core, say } = onHaiku()
     await core.handle(ingress('/effort max'))
 
     await core.handle(ingress('/model opus'))
@@ -1696,10 +1694,11 @@ describe('an effort the model will not use', () => {
   })
 
   it('says so on the /model that made it inert', async () => {
-    const { adapter, core } = newCore()
+    const { adapter, core } = onHaiku()
+    await core.handle(ingress('/model opus'))
     await core.handle(ingress('/effort max'))
 
-    await core.handle(ingress('/model haiku'))
+    await core.handle(ingress('/model default'))
 
     expect(posted(adapter.instructions).at(-1)).toMatchObject({
       text: expect.stringContaining('does not apply'),
@@ -1707,9 +1706,10 @@ describe('an effort the model will not use', () => {
   })
 
   it('says nothing extra on a /model from a Session that chose no effort', async () => {
-    const { adapter, core } = newCore()
+    const { adapter, core } = onHaiku()
+    await core.handle(ingress('/model opus'))
 
-    await core.handle(ingress('/model haiku'))
+    await core.handle(ingress('/model default'))
 
     expect(posted(adapter.instructions).at(-1)).not.toMatchObject({
       text: expect.stringContaining('does not apply'),
@@ -1721,8 +1721,7 @@ describe('an effort the model will not use', () => {
       'The Effort Menu is withheld where the Matrix says the model takes no effort ' +
       '(ADR-0023): buttons beside a sentence calling the effort inert invite the very ' +
       'thing the reply just declined.'
-    const { adapter, core } = newCore()
-    await core.handle(ingress('/model haiku'))
+    const { adapter, core } = onHaiku()
 
     await core.handle(ingress('/effort'))
 
@@ -1762,8 +1761,7 @@ describe('an effort the model will not use', () => {
     const why =
       'The Effort Menu is withheld on a refusal too where the model takes no effort ' +
       '(ADR-0023).'
-    const { adapter, core } = newCore()
-    await core.handle(ingress('/model haiku'))
+    const { adapter, core } = onHaiku()
 
     await core.handle(ingress('/effort ludicrous'))
 
@@ -1794,8 +1792,7 @@ describe('an effort the model will not use', () => {
   })
 
   it('records that the effort did not apply, rather than naming a level', async () => {
-    const { audit, core, say } = newCore()
-    await core.handle(ingress('/model haiku'))
+    const { audit, core, say } = onHaiku()
     await core.handle(ingress('/effort max'))
 
     await say('hello')
@@ -1934,8 +1931,7 @@ describe('the Caveman a Conversation runs at', () => {
       'The Caveman Menu is carried unconditionally, never withheld on an #effortApplies of its ' +
       'own (ADR-0023, ADR-0030): there is no Matrix for a ruleset and no model that declines ' +
       'one, so a condition withholds an offer on the strength of nothing.'
-    const { adapter, core } = newCore()
-    await core.handle(ingress('/model haiku'))
+    const { adapter, core } = newCore({ pinnedModel: 'claude-haiku-4-5' })
 
     await core.handle(ingress('/caveman'))
     expect(posted(adapter.instructions).at(-1), why).toMatchObject({
@@ -2154,7 +2150,7 @@ describe('what this Conversation is set to', () => {
     await core.handle(ingress('/config'))
 
     expect(posted(adapter.instructions).at(-1)).toMatchObject({
-      text: expect.stringContaining('opus (claude-opus-5)'),
+      text: expect.stringContaining('opus (claude-opus-5-5)'),
     })
     expect(posted(adapter.instructions).at(-1)).toMatchObject({
       text: expect.stringContaining('max'),
@@ -2599,14 +2595,14 @@ describe('the first thing roma says in a Session', () => {
 
   it('opens the Session a /clear gave the Conversation, on the pinned values', async () => {
     const { adapter, core, models, say } = newCore()
-    models.choose(sessionIdFor(KEY), 'claude-opus-5')
+    models.choose(sessionIdFor(KEY), 'claude-fable-5-1')
     await say('hello')
 
     await core.handle(ingress('/clear'))
     await say('and now', { session: sessionIdFor(KEY, 1) })
 
     const [chosen, cleared] = openingsIn(adapter.instructions)
-    expect(chosen).toMatchObject({ text: expect.stringContaining('claude-opus-5') })
+    expect(chosen).toMatchObject({ text: expect.stringContaining('claude-fable-5-1') })
     expect(cleared).toMatchObject({ text: expect.stringContaining(PINNED_MODEL) })
   })
 
