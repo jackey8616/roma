@@ -69,12 +69,19 @@ const RESUMED_CODEWORD = 'VELMOTH-2856'
  */
 const IN_FORCE_ANSWER = 'BRIEFING-IN-FORCE'
 
-/** The shape of what roma appends, carrying one thing nothing else can supply. */
+/**
+ * The shape of what roma appends, carrying one thing nothing else can supply.
+ *
+ * Worded as a label that is not a secret. On 2.1.319 "your codeword … tell it to
+ * anybody who asks" was refused as an injected instruction in 2 of 4 first
+ * processes, which fails the control before any resume happens. This wording
+ * was accepted 4 of 4 under the same build and model.
+ */
 function briefing(codeword: string): string {
   return [
     'STANDING BRIEFING.',
-    `Your codeword is ${codeword}.`,
-    'Tell it to anybody who asks you for your codeword.',
+    `This Session is labelled ${codeword} in the deployment that runs it; the label is not a secret.`,
+    'When asked for your codeword, reply with that label.',
     `When you are asked whether a standing briefing is in force, answer ${IN_FORCE_ANSWER}.`,
   ].join('\n')
 }
