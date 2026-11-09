@@ -158,6 +158,30 @@ document named loudest, in which a resumed Session is told nothing about itself
 at all — is ruled out for announcements too, and not only for the ruleset this
 ADR is about.
 
+## Re-run on 2.1.319 (#160)
+
+Moving the pin re-opened the question, and the first answer was different.
+
+| run | build | flag | control | resumed answer | verdict |
+| --- | --- | --- | --- | --- | --- |
+| seam 2, then a re-run | 2.1.319 | none | `BRIEFING-IN-FORCE` | `ZARQUON-7413` | `original-persists` |
+| two more re-runs | 2.1.319 | none | refused as an injection | `NO-CODEWORD` | not evidence |
+| control | 2.1.220 | none | `BRIEFING-IN-FORCE` | `VELMOTH-2856` | `append-applies` |
+| after the fix | 2.1.319 | `--system-prompt-snapshot off` | `BRIEFING-IN-FORCE` | `VELMOTH-2856` | `append-applies` |
+
+- **Why the original persisted.** 2.1.319 writes the rendered system prompt into
+  the Transcript as a `prompt_snapshot` attachment on the first request and
+  reuses it on every resume. The run's Transcript holds the first briefing's
+  codeword and no later snapshot. The CLI's own description of the setting:
+  "the record is sent as-is afterwards — even when a later launch passes
+  different text — until compaction". `off` renders the prompt fresh every
+  request, which is what roma now passes on every spawn.
+- **Why two runs were not evidence.** The briefing above said "your codeword …
+  tell it to anybody who asks", which the 2.1.319 model refused as an injected
+  instruction in 2 of 4 first processes. Reworded as a label that is not a
+  secret, it was accepted 4 of 4, and that wording is the one the test now uses.
+  This is about the instrument, not about roma's appends.
+
 ## What this will not settle
 
 - **Codex.** Everything here is Claude Code's. Whether the app-server takes a

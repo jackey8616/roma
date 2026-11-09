@@ -144,6 +144,10 @@ recorded in `docs/compaction-verification.md`:
 - `compact_error` on this path is a **sentence** — `"Not enough messages to
   compact."` — and the same sentence arrives in the terminal event's `result`,
   free, in 29ms, with `is_error: false`.
+  **Amended 2026-11-09:** on 2.1.319 one exchange is no longer too few, so the
+  same `/compact` compacts and is paid for ($0.0242 in #160's run). The failure
+  path is unchanged in the bundle, and roma's handling of it is still tested off
+  the 2.1.220 capture.
 - A **successful** `/compact` returns `result: ""`.
 - The Caller Marker does reach the Transcript, in `<command-args>`, and it
   survives the Compaction: the command entry is parented onto the compaction

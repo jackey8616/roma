@@ -551,6 +551,18 @@ wrapper.
     rather than only reporting it, because a version that changed it would
     resurrect that failure silently.
 
+    **Amended 2026-11-09 — 2.1.319 changed it, and seam 2 went red (#160).** A
+    resumed process now continues `total_cost_usd` from a `cost-state` record
+    the Transcript saves: $0.0822364 before an Eviction, $0.085977 after it, for
+    a Turn that spent $0.0037406. The same build adds
+    `model_usage_since_last_result` to every `result` — per-model usage and
+    `costUSD` for the calls since the previous result, with nothing carried from
+    an earlier process — and documents it as the field to sum. So a Turn's cost
+    and output tokens are read from it where it is present, and the delta above
+    is the fallback for builds that do not send it. The field is marked
+    `@internal` in the CLI's schema; seam 2 is what notices if it moves.
+    Enforced by `fence:session-cost-since-last-result`.
+
 ### Commands
 
 `/new` and `/stop` only.
