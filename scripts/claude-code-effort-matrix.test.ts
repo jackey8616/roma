@@ -39,6 +39,29 @@ const MAX_GATE =
   'return dj(ny(e))}'
 
 /**
+ * The `"effort"` gate as Claude Code 2.1.319 minifies it, copied out of that
+ * bundle. Its by-name branches are 2.1.220's; what is new is the two checks in
+ * front of them, which read `CLAUDE_CODE_MODEL_CAPABILITIES` and the model's
+ * server-side `effort_levels`.
+ */
+const EFFORT_GATE_2_1_319 =
+  'function Sw(e){if(q$r(e))return!1;let n=mVe(e,"effort");if(n!==void 0)return n;' +
+  'let r=rt(e),s=O1t("effort",r);if(s!==void 0)return s;let f=zwo(e,r);' +
+  'if(f!==void 0)return f.length>0;if(r.includes("claude-3-")||r==="claude-opus-4-0"||' +
+  'r==="claude-opus-4-1"||r==="claude-sonnet-4-0"||r==="claude-sonnet-4-5"||' +
+  'r==="claude-haiku-4-5")return!1;if(i.CLAUDE_CODE_ALWAYS_ENABLE_EFFORT)return!0;' +
+  'if(Rw(r,"effort",e)||r==="claude-mythos-5")return!0;return m9(Pd(e))}'
+
+/**
+ * A cut of 2.1.319's `/effort` command handler: the second place that bundle
+ * passes `"effort"` to a call, as a command name and not a flag.
+ */
+const HANDLER_2_1_319 =
+  'if(nt.name==="effort"){let it=We.trim(),Ue=jN(it);' +
+  'if(/^(default|auto)$/i.test(it)||rAr(it))Ke(),Tr(v,ie,"effort","default");' +
+  'else if(Ue)Ke(),Tr(v,ie,"effort",Ue);else if(!it)Ke(),Pd(h,"effort");return}'
+
+/**
  * The gates as they really sit: one after another, with unrelated code around
  * them.
  *
@@ -97,6 +120,25 @@ describe('finding a gate in the bundle', () => {
     const split = `function a(e){return Ede(e,"effort")}function b(e){return M$(e,"effort")}`
 
     expect(() => gateFor(split, 'effort')).toThrow(/spread across 2 functions/)
+  })
+
+  // 2.1.319's shape: the gate, and the `/effort` command's own handler, which
+  // passes the word as the name of a command rather than asking about a flag.
+  // Both are copied out of that bundle. The handler names no model, so it cannot
+  // be the gate, and the one function that does is.
+  it('reads past a call that names no model, as 2.1.319’s `/effort` handler does', () => {
+    const bundle = HANDLER_2_1_319 + EFFORT_GATE_2_1_319
+
+    const gate = gateFor(bundle, 'effort')
+
+    expect(gate.source).toBe(EFFORT_GATE_2_1_319)
+    expect(gate.allowed).toEqual(['claude-mythos-5'])
+  })
+
+  it('still refuses two functions that both name models, since either could be the gate', () => {
+    const twice = EFFORT_GATE_2_1_319 + EFFORT_GATE.replace('function OI', 'function OJ')
+
+    expect(() => gateFor(twice, 'effort')).toThrow(/spread across 2 functions/)
   })
 
   it('refuses a call site that is not inside a block at all', () => {

@@ -100,6 +100,9 @@ const MODEL_ID = /"(claude-[a-z0-9.-]+)"/g
  */
 const RETURNS = /return\s*(!0|!1|true|false)\b/g
 
+/** A model id compared by name, which only a gate does. */
+const NAMES_A_MODEL = /"claude-/
+
 /**
  * The gate for one flag, cut out of the bundle at brace balance.
  *
@@ -111,8 +114,14 @@ const RETURNS = /return\s*(!0|!1|true|false)\b/g
  * a build where they do not is one whose gate has been split or duplicated, which
  * is precisely a change somebody has to look at.
  *
+ * 2.1.319 added a second shape: the `/effort` command's handler passes the same
+ * word as a command name (`Pd(h,"effort")`), in a function that names no model.
+ * So where the sites span several functions and exactly one of them compares a
+ * model id, that one is the gate. None, or more than one, is still a refusal.
+ *
  * @throws if the flag is passed nowhere, if its call sites are in more than one
- * function, or if a site cannot be resolved to a balanced body. Every one of
+ * function and not exactly one of those names a model, or if a site cannot be
+ * resolved to a balanced body. Every one of
  * those is a build whose shape has moved, and a build whose shape has moved is
  * the case this file exists to be told about rather than to cope with.
  */
@@ -123,7 +132,9 @@ export function gateFor(bundle: string, flag: EffortFlag): FlagGate {
     throw new Error(`no call passes the feature flag "${flag}" — this build's gate has moved`)
   }
 
-  const bodies = unique(sites.map((site) => enclosingFunction(bundle, site, flag)))
+  const all = unique(sites.map((site) => enclosingFunction(bundle, site, flag)))
+  const naming = all.filter((body) => NAMES_A_MODEL.test(body))
+  const bodies = all.length > 1 && naming.length === 1 ? naming : all
   if (bodies.length > 1) {
     throw new Error(
       `the ${sites.length} calls passing "${flag}" are spread across ${bodies.length} functions; ` +
