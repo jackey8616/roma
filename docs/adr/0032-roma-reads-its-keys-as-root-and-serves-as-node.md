@@ -33,9 +33,14 @@ Directories, the Claude config dir, the Shim socket or the Audit Log changes own
 
 Two things then keep the agent out, and roma proves both after the drop or refuses to start:
 
-1. **The key files are root's.** The operator mounts them 0400 and owned by root (any uid
-   but 1000 works). roma read them while it was root; `node` cannot open them now.
-   Enforced by `fence:drop-root-refuses-readable-key`.
+1. **The key files are root's.** The operator mounts them 0400 and owned by root. roma read
+   them while it was root; `node` cannot open them now. Enforced by
+   `fence:drop-root-refuses-readable-key`. **Amended:** this first said "any uid but 1000
+   works", which stopped being true when ADR-0036 moved every agent onto a Seat uid of its
+   own: a 0400 key owned by uid 20000 passed the `node` check and Seat 0 read it. roma now
+   also refuses, while still root, any key file not owned by root or with a group or other
+   bit set — no Seat, and no ACL entry under a zero group mask, reaches one that passes.
+   Enforced by `fence:drop-root-requires-root-owned-key`.
 2. **roma is not dumpable.** When a root process changes uid, the kernel marks it not
    dumpable, and a process that is not dumpable has its `/proc` entries owned by root and
    refuses ptrace — `environ`, `mem`, `maps`, `process_vm_readv` — to anything without
@@ -61,6 +66,9 @@ known to work.
 `{ "event": "privileges", "dropped": false }` with the reason. That is roma from source on a
 developer's machine, or the image under `--user`. In both, the agent can reach everything
 roma holds.
+**Amended by ADR-0036:** roma started as anything but root now refuses to start, since
+without root there is no Launcher to give a Session its Seat; the agent no longer runs as
+`node` either, but as that Seat.
 
 ## Consequences
 
@@ -74,6 +82,10 @@ roma holds.
 - **Not covered:** `GOOGLE_APPLICATION_CREDENTIALS`, roma's own Channel identity. It is read
   by Google's libraries after the drop, so it has to stay readable by `node` and therefore by
   the agent. On a Google host it is the metadata server instead, and there is no file.
+  **Amended:** since ADR-0036 no agent is `node`, so this file can be kept from the agent
+  after all. roma refuses to start unless it is owned by `node` with no group or other bit
+  set, which leaves it to roma alone. Enforced by
+  `fence:drop-root-requires-node-only-served-key`.
 - **Not covered:** the agent's own credential is in the agent's own environment (finding I2),
   and the agent can still signal roma — stop it, not read it. **Amended by ADR-0034:** I2 is
   closed; `claude` holds a stand-in, and the credential is in roma, behind this boundary.

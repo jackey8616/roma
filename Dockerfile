@@ -244,15 +244,15 @@ RUN mkdir -p /var/lib/roma/work /var/lib/roma/claude /var/lib/roma/audit /run/ro
 # No `USER node`, and that is the containment rather than a lapse of it
 # (ADR-0032, GHSA-v52v-hcv8-cr23). roma starts as root for exactly as long as it
 # takes to read the key files, then becomes `node` before it builds a Channel or
-# spawns an agent — so roma serves as `node` and every agent runs as `node`, as
-# before. What starting as root buys is two things the agent, also `node`, then
-# cannot reach: key files that only root can read (mount them 0400, owned by
+# spawns an agent — so roma serves as `node`, and every agent runs as a Seat of
+# its own uid through the Launcher below (ADR-0036). What starting as root buys
+# is two things no agent can then reach: key files that only root can read (mount them 0400, owned by
 # root), and a roma the kernel has marked not dumpable because it changed uid, so
 # `/proc/<roma>/environ`, `/proc/<roma>/mem` and ptrace are closed to it. roma
 # checks both after the drop and refuses to start if either does not hold.
 #
-# `--disable-sigusr1` is part of the same boundary. The agent may signal roma —
-# same uid — and SIGUSR1 would otherwise open a Node inspector on 127.0.0.1:9229
+# `--disable-sigusr1` is part of the same boundary. Anything that runs as roma's
+# uid may signal it, and SIGUSR1 would otherwise open a Node inspector on 127.0.0.1:9229
 # that reads roma's memory regardless of what the kernel says; roma refuses to
 # start as root without it. `scripts/verify-image.sh` proves all of it against
 # the built image.

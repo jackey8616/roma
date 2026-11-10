@@ -25,6 +25,7 @@ function sealable(calls: string[] = [], uid: () => number = () => 1000): AuditSe
     owner: () => 0,
     mountPoint: () => false,
     realPath: (path) => path,
+    entries: () => [],
     tighten: () => {},
   }
 }
@@ -37,6 +38,7 @@ const MINIMAL = {
   ROMA_SHIM_DIR: '/run/roma',
   ROMA_GITHUB_APP_ID: '1234',
   ROMA_GITHUB_PRIVATE_KEY_FILE: '/run/secrets/github-app.pem',
+  ROMA_EGRESS_GATEWAY: 'none',
 }
 
 describe('which Channels this deployment serves', () => {
@@ -104,6 +106,7 @@ describe('the keys roma reads at boot', () => {
       },
       procOwner: () => 0,
       canRead: () => true,
+      keyFileMode: () => ({ uid: 0, mode: 0o100400 }),
       nodeFlags: () => ['--disable-sigusr1'],
     }
   }
@@ -185,6 +188,7 @@ describe('the network roma is started on', () => {
       },
       procOwner: () => 0,
       canRead: () => false,
+      keyFileMode: () => ({ uid: 0, mode: 0o100400 }),
       nodeFlags: () => ['--disable-sigusr1'],
     }
   }
@@ -253,6 +257,7 @@ describe('the Audit Records', () => {
       },
       procOwner: () => 0,
       canRead: () => false,
+      keyFileMode: () => ({ uid: 0, mode: 0o100400 }),
       nodeFlags: () => ['--disable-sigusr1'],
     }
     const logged: unknown[] = []

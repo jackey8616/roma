@@ -1,29 +1,52 @@
 import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { buildEnv } from '/app/dist/build-env.js'
+import { ClaudeSession } from '/app/dist/claude-session.js'
 import { CredentialProxy } from '/app/dist/credential-proxy.js'
 import { dropRoot } from '/app/dist/drop-root.js'
+import { realLauncher } from '/app/dist/launcher.js'
 
-const mode = process.argv[2]
-const CANARY = 'sk-ant-oat01-FAKECANARY' + 'A'.repeat(83)
+const [mode, kind = 'shared-window'] = process.argv.slice(2)
+const overflow = kind === 'overflow'
+const PREFIX = overflow ? 'sk-ant-api03-FAKECANARY' : 'sk-ant-oat01-FAKECANARY'
+const CANARY =
+  process.env[overflow ? 'ROMA_OVERFLOW_API_KEY' : ['CLAUDE_CODE', 'OAUTH', 'TOKEN'].join('_')] ??
+  ''
+if (!CANARY.startsWith(PREFIX)) {
+  throw new Error(`the harness needs a fake ${kind} credential in roma's own environment`)
+}
 globalThis.heldToken = CANARY
 
-if (mode === 'contained') {
+const ROUTES = [
+  'tool-env',
+  'claude-environ',
+  'claude-memory',
+  'claude-fds',
+  'roma-environ',
+  'roma-memory',
+]
+
+const roots = { work: '/var/lib/roma/work', config: '/var/lib/roma/claude', shim: '/run/roma' }
+const launcher = mode === 'contained' ? realLauncher() : null
+if (launcher !== null) {
+  launcher.writeRoots(roots)
   process.stderr.write(`harness: ${JSON.stringify(dropRoot([]))}\n`)
+  await launcher.sweep()
 }
 
-const root = `/tmp/i2-${mode}`
-mkdirSync(`${root}/claude`, { recursive: true })
-mkdirSync(`${root}/work`, { recursive: true })
+const scratch = `/tmp/i2-${mode}`
+mkdirSync(`${scratch}/claude`, { recursive: true })
+mkdirSync(`${scratch}/work`, { recursive: true })
 
-const PROBE = `${root}/probe.sh`
+const PROBE = `${scratch}/probe.sh`
 writeFileSync(
   PROBE,
   String.raw`
 claude=${'$'}{CLAUDE_PID:-$PPID}
-roma=$(awk '{ print $4 }' /proc/$claude/stat)
-hunt() { grep -aoE 'sk-ant-oat01-FAKECANARY[A-Z]+' | head -n 1; }
+roma=${process.pid}
+hunt() { grep -aoE '${PREFIX}[A-Z]+' | head -n 1; }
 memory() { node -e '
 const fs = require("fs"); const pid = process.argv[1]; let fd
 try { fd = fs.openSync("/proc/" + pid + "/mem", "r") } catch { process.exit(0) }
@@ -32,14 +55,17 @@ for (const line of fs.readFileSync("/proc/" + pid + "/maps", "utf8").split("\n")
   const a = BigInt("0x" + m[1]), b = BigInt("0x" + m[2]); if (b - a > 64n << 20n) continue
   const buf = Buffer.alloc(Number(b - a))
   try { fs.readSync(fd, buf, 0, buf.length, a) } catch { continue }
-  const at = buf.indexOf("sk-ant-oat01-FAKECANARY"); if (at >= 0) { console.log(buf.toString("latin1", at, at + 106)); break }
+  const at = buf.indexOf("${PREFIX}"); if (at >= 0) { console.log(buf.toString("latin1", at, at + ${String(CANARY.length)})); break }
 }' "$1" 2>/dev/null; }
+echo "probe-uid=$(id -u)"
+echo "claude-uid=$(awk '/^Uid:/ { print $2 }' /proc/$claude/status)"
 echo "tool-env=$(env | hunt)"
 echo "claude-environ=$(tr '\0' '\n' < /proc/$claude/environ 2>/dev/null | hunt)"
 echo "claude-memory=$(memory $claude)"
 echo "claude-fds=$(for f in /proc/$claude/fd/*; do [ -f "$f" ] && cat "$f" 2>/dev/null; done | hunt)"
 echo "roma-environ=$(tr '\0' '\n' < /proc/$roma/environ 2>/dev/null | hunt)"
 echo "roma-memory=$(memory $roma)"
+echo "probe-complete=yes"
 `,
   { mode: 0o755 },
 )
@@ -57,7 +83,7 @@ const api = createServer(async (req, res) => {
     res.end('{"input_tokens":1}')
     return
   }
-  apiAuth = req.headers.authorization ?? null
+  apiAuth = (overflow ? req.headers['x-api-key'] : req.headers.authorization) ?? null
   const body = JSON.parse(text)
   for (const message of body.messages ?? [])
     for (const block of Array.isArray(message.content) ? message.content : [])
@@ -102,53 +128,6 @@ const api = createServer(async (req, res) => {
 await new Promise((resolve) => api.listen(0, '127.0.0.1', resolve))
 const apiUrl = `http://127.0.0.1:${api.address().port}`
 
-let env
-let proxy = null
-if (mode === 'contained') {
-  proxy = await CredentialProxy.listen({ upstream: apiUrl })
-  env = buildEnv({
-    credential: proxy.front({ kind: 'shared-window', oauthToken: CANARY }),
-    configDir: `${root}/claude`,
-  })
-} else {
-  env = {
-    PATH: process.env.PATH,
-    HOME: process.env.HOME,
-    CLAUDE_CONFIG_DIR: `${root}/claude`,
-    CLAUDE_SECURESTORAGE_CONFIG_DIR: `${root}/claude`,
-    [['CLAUDE_CODE', 'OAUTH', 'TOKEN'].join('_')]: CANARY,
-    ANTHROPIC_BASE_URL: apiUrl,
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-  }
-}
-
-const args = [
-  '-p',
-  '--input-format',
-  'stream-json',
-  '--output-format',
-  'stream-json',
-  '--verbose',
-  '--permission-mode',
-  'bypassPermissions',
-  '--model',
-  'claude-sonnet-5',
-]
-const child = spawn('claude', args, { env, cwd: `${root}/work`, stdio: ['pipe', 'pipe', 'pipe'] })
-child.stdout.resume()
-child.stderr.on('data', (chunk) => process.stderr.write(chunk))
-child.stdin.end(
-  JSON.stringify({
-    type: 'user',
-    message: { role: 'user', content: [{ type: 'text', text: 'Run the probe.' }] },
-    parent_tool_use_id: null,
-    session_id: '',
-  }) + '\n',
-)
-const timeout = setTimeout(() => child.kill('SIGKILL'), 90_000)
-const code = await new Promise((resolve) => child.on('exit', resolve))
-clearTimeout(timeout)
-
 const walk = (dir) => {
   try {
     return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
@@ -158,31 +137,122 @@ const walk = (dir) => {
     return []
   }
 }
-const kept = walk(`${root}/claude`)
-const transcripts = kept.filter((file) => file.endsWith('.jsonl'))
 
-process.stderr.write(`harness: claude exited ${code}, ${turns} API calls\n`)
-console.log(`turns ${turns}`)
-console.log(`api-auth ${apiAuth === `Bearer ${CANARY}` ? 'REAL' : 'NOT-REAL'}`)
-const results = toolResult.replace(/\\n/g, '\n')
-for (const route of [
-  'tool-env',
-  'claude-environ',
-  'claude-memory',
-  'claude-fds',
-  'roma-environ',
-  'roma-memory',
-]) {
-  const found = new RegExp(`${route}=(\\S*)`).exec(results)?.[1] ?? ''
-  console.log(`${route} ${found.includes(CANARY) ? 'REACHED' : 'BLOCKED'}`)
+const SCAN = `
+const fs = require('fs')
+const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+  e.isDirectory() ? walk(dir + '/' + e.name) : [dir + '/' + e.name])
+const files = walk(process.env.CLAUDE_CONFIG_DIR)
+const leaks = (f) => fs.readFileSync(f, 'latin1').includes(process.argv[1])
+const transcripts = files.filter((f) => f.endsWith('.jsonl'))
+console.log(JSON.stringify({ transcripts: transcripts.length,
+  transcriptLeak: transcripts.some(leaks), configLeak: files.some(leaks) }))
+`
+
+let proxy = null
+let turnOk = false
+let scan
+if (launcher !== null) {
+  proxy = await CredentialProxy.listen({ upstream: apiUrl })
+  const credential = overflow
+    ? { kind: 'overflow', apiKey: CANARY }
+    : { kind: 'shared-window', oauthToken: CANARY }
+  const env = buildEnv({ credential: proxy.front(credential), configDir: `${scratch}/claude` })
+  const sessionId = randomUUID()
+  const seat = { seat: 0, sessionId }
+  const session = new ClaudeSession({
+    sessionId,
+    cwd: `${roots.work}/${sessionId}`,
+    env,
+    spawn: (request) => launcher.spawn({ ...request, seat }),
+  })
+  session.on('stderr', (chunk) => process.stderr.write(chunk))
+  session.start()
+  const timeout = setTimeout(() => {
+    process.stderr.write('harness: the Turn timed out\n')
+    process.exit(1)
+  }, 90_000)
+  const turn = await session.send('Run the probe.')
+  turnOk = !turn.isError
+  const exit = await session.terminate()
+  clearTimeout(timeout)
+  process.stderr.write(`harness: claude ${JSON.stringify(exit)}, ${turns} API calls\n`)
+
+  const scanner = launcher.spawn({
+    command: 'node',
+    args: ['-e', SCAN, CANARY],
+    cwd: `${roots.work}/${sessionId}`,
+    env,
+    seat,
+  })
+  let scanned = ''
+  scanner.onStdout((chunk) => (scanned += chunk))
+  scanner.onStderr((chunk) => process.stderr.write(chunk))
+  const scanExit = await new Promise((resolve) => scanner.onExit(resolve))
+  if (scanExit.code !== 0) throw new Error(`the config scan failed: ${JSON.stringify(scanExit)}`)
+  scan = JSON.parse(scanned)
+  await launcher.reclaim(sessionId)
+} else {
+  const env = {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    CLAUDE_CONFIG_DIR: `${scratch}/claude`,
+    CLAUDE_SECURESTORAGE_CONFIG_DIR: `${scratch}/claude`,
+    [overflow ? 'ANTHROPIC_API_KEY' : ['CLAUDE_CODE', 'OAUTH', 'TOKEN'].join('_')]: CANARY,
+    ANTHROPIC_BASE_URL: apiUrl,
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+  }
+  const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json']
+  const child = spawn('claude', [...args, '--verbose', '--permission-mode', 'bypassPermissions'], {
+    env,
+    cwd: `${scratch}/work`,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+  child.stdout.resume()
+  child.stderr.on('data', (chunk) => process.stderr.write(chunk))
+  child.stdin.end(
+    JSON.stringify({
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'text', text: 'Run the probe.' }] },
+      parent_tool_use_id: null,
+      session_id: '',
+    }) + '\n',
+  )
+  const timeout = setTimeout(() => child.kill('SIGKILL'), 90_000)
+  const code = await new Promise((resolve) => child.on('exit', resolve))
+  clearTimeout(timeout)
+  turnOk = code === 0
+  process.stderr.write(`harness: claude exited ${code}, ${turns} API calls\n`)
+  const files = walk(`${scratch}/claude`)
+  const transcripts = files.filter((file) => file.endsWith('.jsonl'))
+  const leaks = (file) => readFileSync(file, 'latin1').includes(CANARY)
+  scan = {
+    transcripts: transcripts.length,
+    transcriptLeak: transcripts.some(leaks),
+    configLeak: files.some(leaks),
+  }
 }
-console.log(`transcript-written ${transcripts.length > 0 ? 'YES' : 'NO'}`)
+
+const results = toolResult.replace(/\\n/g, '\n')
+const field = (name) => new RegExp(`(?:^|[\\s"])${name}=([^\\s"]*)`).exec(results)?.[1]
+const complete = field('probe-complete') === 'yes'
+console.log(`turns ${turns}`)
+console.log(`turn ${turnOk ? 'OK' : 'FAILED'}`)
+console.log(`probe ${complete ? 'COMPLETE' : 'INCOMPLETE'}`)
+console.log(`probe-uid ${field('probe-uid') ?? 'MISSING'}`)
+console.log(`claude-uid ${field('claude-uid') ?? 'MISSING'}`)
 console.log(
-  `transcript ${transcripts.some((file) => readFileSync(file, 'utf8').includes(CANARY)) ? 'REACHED' : 'BLOCKED'}`,
+  `api-auth ${apiAuth === (overflow ? CANARY : `Bearer ${CANARY}`) ? 'REAL' : 'NOT-REAL'}`,
 )
-console.log(
-  `config-dir ${kept.some((file) => readFileSync(file, 'latin1').includes(CANARY)) ? 'REACHED' : 'BLOCKED'}`,
-)
+for (const route of ROUTES) {
+  const found = field(route)
+  const verdict =
+    found === undefined || !complete ? 'MISSING' : found.includes(CANARY) ? 'REACHED' : 'BLOCKED'
+  console.log(`${route} ${verdict}`)
+}
+console.log(`transcript-written ${scan.transcripts > 0 ? 'YES' : 'NO'}`)
+console.log(`transcript ${scan.transcriptLeak ? 'REACHED' : 'BLOCKED'}`)
+console.log(`config-dir ${scan.configLeak ? 'REACHED' : 'BLOCKED'}`)
 
 await proxy?.close()
 api.close()

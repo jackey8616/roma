@@ -2,12 +2,14 @@
 #
 # `inside` is created with `internal: true`, so it has no route out at all: the
 # only thing on it that can reach the internet is `egress`, which is also on
-# `outside`. roma refuses to start if it can get out without the gateway.
+# `outside`. roma refuses to start if it can reach any of several hosts without
+# the gateway; that check catches a misconfiguration, and `internal: true` is
+# what does the isolating.
 #
 # The gateway lets through whoever carries the token in `egress.token`, and
-# nobody else. roma reads it as root before it drops to `node`, so the agent,
-# which runs as `node` beside it, cannot. The agent's own requests go to a
-# proxy inside roma, which forwards only the hosts on the agent's allowlist —
+# nobody else. It must be 0400 and root's: roma reads it as root before it
+# drops to `node`, and every agent runs as a Seat of its own uid, so none can.
+# The agent's own requests go to a proxy inside roma, which forwards only the hosts on the agent's allowlist —
 # GitHub, the npm registry, Google's APIs when a Google Reach is configured,
 # and whatever ROMA_EGRESS_ALLOW adds.
 #
@@ -17,8 +19,9 @@
 #   sudo chown root secrets/egress.token secrets/github-app.pem
 #   sudo chmod 0400 secrets/egress.token secrets/github-app.pem
 #
-# ROMA_VERSION is required and is a release, such as 0.1.0. Releases publish
-# that tag alone and never `latest` (ADR-0006).
+# ROMA_VERSION is required and is a release, such as 0.11.0 — the first with
+# this file's hardening. Releases publish that tag alone and never `latest`
+# (ADR-0006).
 #
 # Every variable is read from the shell or `.env` under the name the README
 # gives it. The three key files are given as paths on the host, and mounted at
@@ -27,19 +30,20 @@
 #   GOOGLE_APPLICATION_CREDENTIALS  roma's own identity, for Google Chat. It must
 #     be a key file here: the metadata server is an address on the host's
 #     network, which `inside` cannot reach. Google's libraries read it after
-#     roma drops to `node`, so it stays readable by uid 1000 (ADR-0032).
+#     roma drops to `node`, so it must be 0400 and owned by uid 1000 — roma
+#     refuses any other owner or a group or other bit (ADR-0032).
 #   ROMA_CLOUD_KEY_FILE, ROMA_DOCUMENT_KEY_FILE  the agent's Reaches. 0400 and
 #     owned by root, like the App's key.
 #
-# The gateway reads the same token file. It runs as root only to read it; it
-# has no agent beside it, and needs no capability and no setuid program, so it
+# The gateway reads the same token file. It runs as root because that file is
+# root's, and stays root, with no capability at all; it has no agent beside it, and needs no capability and no setuid program, so it
 # also runs with no-new-privileges. roma cannot: its Launcher is setuid, and
 # sets no_new_privs on every agent itself (ADR-0036, ADR-0038). Both run on a
 # read-only root with tmpfs where they write, as the README's `docker run` does.
 
 name: roma
 
-x-image: &image ghcr.io/jackey8616/roma:${ROMA_VERSION:?set ROMA_VERSION to a release, such as 0.1.0}
+x-image: &image ghcr.io/jackey8616/roma:${ROMA_VERSION:?set ROMA_VERSION to a release, such as 0.11.0}
 
 services:
   roma:
@@ -48,14 +52,15 @@ services:
     networks: [inside]
     depends_on: [egress]
     read_only: true
+    pids_limit: 512
     cap_drop: [ALL]
     cap_add: [SETUID, SETGID, CHOWN, FOWNER, KILL, DAC_OVERRIDE]
     tmpfs:
-      - /tmp:exec,mode=1777
-      - /var/tmp:mode=1777
-      - /run/roma:uid=1000,gid=1000,mode=0711
-      - /run/roma-launch:mode=0755
-      - /var/lib/roma/work:exec,uid=1000,gid=1000,mode=0711
+      - /tmp:exec,nosuid,nodev,mode=1777
+      - /var/tmp:nosuid,nodev,mode=1777
+      - /run/roma:nosuid,nodev,uid=1000,gid=1000,mode=0711
+      - /run/roma-launch:nosuid,nodev,mode=0755
+      - /var/lib/roma/work:exec,nosuid,nodev,uid=1000,gid=1000,mode=0711
     environment:
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       ROMA_PUBSUB_PROJECT_ID: ${ROMA_PUBSUB_PROJECT_ID:-}
@@ -93,6 +98,7 @@ services:
     entrypoint: ['/usr/bin/tini', '--']
     command: ['node', '/app/dist/egress/gateway.js']
     read_only: true
+    pids_limit: 512
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     environment:

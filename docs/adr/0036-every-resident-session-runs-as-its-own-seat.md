@@ -4,7 +4,7 @@ Date: 2026-11-09
 
 ## Status
 
-Proposed. Would close GHSA-mqhq-64x8-xj73 (finding I4: one Session's agent reads another
+Accepted, and implemented. Closes GHSA-mqhq-64x8-xj73 (finding I4: one Session's agent reads another
 Session's Working Directory, Enclosures and Transcript) and GHSA-4vw6-r2rj-xcqf (finding
 I6: a credential request names any Session it likes, and the Minter believes it).
 Amends ADR-0032, which rejected *a second uid for the agent*, and ADR-0011, ADR-0003 and
@@ -63,14 +63,28 @@ succeed:
    next Session on that Seat could otherwise read it, signal it, or inherit what it holds
    open. The Launcher becomes the Seat and calls `kill(-1, SIGKILL)`, and checks that
    nothing of that uid remains. Then it removes whatever the Seat left in `/tmp`,
-   `/var/tmp` and `/dev/shm` — a file there, or a hard link to one of the Session's own,
-   would otherwise still be the uid's when the next Session holds it. Those three are made
-   `1733` at boot, so a Seat can create in them but list nobody's names, its own included;
-   the Launcher lists them as root.
+   `/var/tmp`, `/dev/shm` and `/dev/mqueue` — a file there, or a hard link to one of the
+   Session's own, would otherwise still be the uid's when the next Session holds it. Those
+   four are made `1733` at boot, so a Seat can create in them but list nobody's names, its
+   own included; the Launcher lists them as root.
+   **Amended:** the first version looked only at the top level of each, so a Seat's 0600
+   file inside a directory someone else owned survived the return and was the next
+   holder's to read; and it never touched System V IPC, which is kernel state rather than
+   a file, so a 0600 shared memory segment did the same. The Launcher now walks each
+   directory to any depth for entries the Seat owns, and, as the Seat, removes every
+   System V shared memory segment, message queue and semaphore set it owns or created.
+   A directory it cannot read fails the return and quarantines the Seat rather than being
+   skipped, and so does a tree of the Seat's own deeper than it walks. A tree someone
+   *else* owns deeper than that is skipped and reported instead: otherwise any resident
+   Seat could build one and have every other Seat quarantined on its return. The cost is a
+   file of the returning Seat's own hidden more than 512 directories down inside another
+   Seat's tree, which survives the return. Enforced by
+   `fence:seat-is-emptied-before-reuse`, whose harness now plants both before the return.
 2. **Park what it owned.** Every file and directory in the Session's Working Directory and
    Claude config directory that the Seat owns is given to **`roma-parked`** (uid 19999),
-   and the two directories are made 0700. `roma-parked` is a uid nothing ever runs as, so a
-   parked Session is readable by no Seat, and the next holder of the same uid finds
+   and the two directories are made 0700. No agent ever runs as `roma-parked` — only
+   the Launcher's own reclaim, deleting a parked tree — so a parked Session is readable by
+   no Seat, and the next holder of the same uid finds
    nothing. Not root, because preparing a Session gives the Seat exactly what is
    `roma-parked`'s and nothing else — and a hard link to a file of root's, should one be
    in the tree, is then left root's rather than handed over.
@@ -183,6 +197,16 @@ and the lease says which Session holds it. A request naming any other Session is
 and logged as one. `/run/roma` becomes 0711 so a Seat can reach its socket without listing
 the others. Enforced by `fence:shim-identity-is-the-socket`.
 
+**Amended:** "the lease says which Session holds it" was asked at the wrong moment. It
+was asked when a request arrived, so a connection opened while one Session held the Seat,
+and passed to another Seat before the return, spoke for whichever Session held the Seat
+next; and it was not asked again after a mint, so a request that began under one holder
+was answered under the next. A connection now belongs to the lease under which roma
+accepted it — not merely the Session, since a Session can come back to the same Seat — and
+that lease must still be current when the token is in hand, or when minting fails; any
+change is a refusal. Enforced by `fence:shim-connection-belongs-to-its-holder`,
+`fence:shim-connection-belongs-to-its-lease` and `fence:shim-holder-rechecked-after-mint`.
+
 This is chosen over `SO_PEERCRED` because Node exposes no peer credentials without native
 code, and because it needs nothing new in roma's own privileges: roma keeps ADR-0032's
 empty supplementary groups.
@@ -230,10 +254,12 @@ drops, since as `node` it could write no file root owns; Enforced by
   anyone who guesses the name. Listing is closed and the file is gone once the Seat is
   returned; only a mount namespace per Session would close the rest.
 - Cross-Session `/proc/<pid>/environ` and signals close as a side effect. The agent's
-  *own* environment still holds its credential (GHSA-wqj9-8qq4-w466); this does not touch
-  that.
-- Agent-to-agent communication, if it is ever wanted, has a trustworthy identity to build
-  on — the Seat's socket — and must go through roma rather than through the filesystem.
+  *own* environment is outside this decision; since ADR-0034 it holds only a stand-in, and
+  the credential stays in roma (GHSA-wqj9-8qq4-w466).
+- Agent-to-agent communication, if it is ever wanted, has an identity to build on — the
+  Seat's socket and the lease a connection was accepted under — and must go through roma
+  rather than through the filesystem. A connection's descriptor can be handed to another
+  process during its lease; the socket says which lease, not which process.
   Not decided here.
 
 ## Considered and rejected

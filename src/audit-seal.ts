@@ -1,5 +1,13 @@
-import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { ContainmentRefused } from './drop-root.js'
 
 const SEALED_MODE = 0o700
@@ -19,6 +27,13 @@ export interface Inode {
   readonly mode: number
 }
 
+export interface AuditEntry {
+  readonly name: string
+  readonly kind: 'file' | 'link' | 'other'
+  readonly uid: number
+  readonly links: number
+}
+
 export interface AuditSealSystem {
   self(): Ids
   seats(): readonly Ids[]
@@ -27,6 +42,7 @@ export interface AuditSealSystem {
   owner(path: string): number | null
   mountPoint(path: string): boolean
   realPath(path: string): string
+  entries(path: string): readonly AuditEntry[]
   tighten(path: string, mode: number): void
 }
 
@@ -38,6 +54,7 @@ export interface Sealed {
 export interface Exposed {
   readonly path: string
   readonly parent: string
+  readonly seatOwned?: boolean
 }
 
 export function sealAudit(
@@ -58,6 +75,16 @@ export function sealAudit(
 
   system.makeDirectory(auditRoot)
   const root = system.realPath(auditRoot)
+  if (root !== resolve(auditRoot)) {
+    throw new ContainmentRefused(
+      [
+        `${auditRoot} passes through a symbolic link and resolves to ${root}. roma reads the ` +
+          'records by that path every time, and a link on the way is one more thing a Seat ' +
+          'could swap for a ledger of its own. Set ROMA_AUDIT_ROOT to the real directory.',
+      ],
+      HEADLINE,
+    )
+  }
   const found = system.inspect(root)
   if (found === null || found.uid !== self.uid) {
     throw new ContainmentRefused(
@@ -70,18 +97,36 @@ export function sealAudit(
     )
   }
 
+  const strays = system
+    .entries(root)
+    .filter(({ kind, uid, links }) => kind !== 'file' || uid !== self.uid || links !== 1)
+  if (strays.length > 0) {
+    throw new ContainmentRefused(
+      strays.map(
+        ({ name, kind, uid, links }) =>
+          `${join(root, name)} is ${kind === 'link' ? 'a symbolic link' : kind === 'other' ? 'not a regular file' : uid !== self.uid ? `owned by uid ${uid}` : `one of ${links} hard links`}. ` +
+          'The seal closes the directory, not what a name in it points at; every month has to ' +
+          `be a plain file of roma's own (uid ${self.uid}). Move it out, or replace it with a copy.`,
+      ),
+      HEADLINE,
+    )
+  }
+
   const tightened = (found.mode & 0o7777) !== SEALED_MODE
   if (tightened) system.tighten(root, SEALED_MODE)
 
   const exposed = exposedAncestors(auditRoot, system, seats)
   if (exposed.length > 0) {
     throw new ContainmentRefused(
-      exposed.map(
-        ({ path, parent }) =>
-          `${path} can be renamed away by a Seat, because ${parent} is writable by one and ` +
-          `${path} is not a mount point; an agent could put a ledger of its own where the ` +
-          'Audit Records were. Put the audit root on its own mount, or under directories no ' +
-          'Seat can write.',
+      exposed.map(({ path, parent, seatOwned }) =>
+        seatOwned === true
+          ? `${path} can be cut off or renamed away by a Seat, because ${parent} is owned by ` +
+            'one, which can change its mode whatever it is now — a mount point included. ' +
+            'Put the audit root under directories owned by root or by roma.'
+          : `${path} can be renamed away by a Seat, because ${parent} is writable by one and ` +
+            `${path} is not a mount point; an agent could put a ledger of its own where the ` +
+            'Audit Records were. Put the audit root on its own mount, or under directories no ' +
+            'Seat can write.',
       ),
       HEADLINE,
     )
@@ -110,6 +155,10 @@ export function exposedAncestors(
     let child = path
     for (let parent = dirname(child); parent !== child; child = parent, parent = dirname(child)) {
       const above = system.inspect(parent)
+      if (above !== null && isSeat(above.uid)) {
+        found.set(child, { path: child, parent, seatOwned: true })
+        continue
+      }
       if (above === null || !seatCanWrite(above) || system.mountPoint(child)) continue
       const sticky = (above.mode & 0o1000) !== 0
       if (sticky && !isSeat(system.owner(child) ?? undefined) && !isSeat(above.uid)) continue
@@ -173,6 +222,16 @@ export function realAuditSealSystem(): AuditSealSystem {
         return resolve(path)
       }
     },
+    entries: (path) =>
+      readdirSync(path).map((name) => {
+        const found = lstatSync(join(path, name))
+        return {
+          name,
+          kind: found.isSymbolicLink() ? 'link' : found.isFile() ? 'file' : 'other',
+          uid: found.uid,
+          links: found.nlink,
+        }
+      }),
     tighten: (path, mode) => chmodSync(path, mode),
   }
 }

@@ -61,6 +61,7 @@ describe('the Launcher refuses anyone but roma [fence:launcher-refuses-anyone-bu
       'refuses-writable-roots',
       'enclose-refuses-another-seats',
       'enclose-refuses-a-path-name',
+      'enclose-target-is-writable-by-the-seat',
       'enclose-follows-no-symlink',
       'symlink-target-untouched',
       'runs-with-no-new-privs',
@@ -77,8 +78,14 @@ describe('a Seat is emptied before anyone holds it again [fence:seat-is-emptied-
       'orphan-is-killed',
       'seat-is-empty',
       'shared-tmp-is-purged',
+      'runtime-made-ipc',
+      'sysv-ipc-is-removed',
+      'nested-tmp-is-purged',
+      'deep-tree-is-built',
+      'another-seats-deep-tree-quarantines-nobody',
       'work-is-parked',
       'transcript-is-parked',
+      'reused-seat-ran',
       'reused-seat-reads-no-work',
       'reused-seat-lists-no-work',
       'reused-seat-reads-no-transcript',
@@ -165,6 +172,17 @@ describe('the documented run is proved on a read-only root [fence:documented-run
       ['--cap-drop=ALL', '--read-only', '--security-opt', 'no-new-privileges'].sort(),
     )
     expect(verifyImage(), why).toMatch(/docker run -d [^\n]*"\$\{gateway_hardening\[@\]\}"/)
+  })
+
+  it('caps the number of processes in every documented run, and proves the image on that cap [fence:documented-run-caps-processes]', () => {
+    const why =
+      'GHSA-g6cx-6wcm-4hqw: a read-only root and six capabilities do not stop an agent ' +
+      'forking until the host has nothing left for roma or anyone else.'
+    const egressService = /^ {2}egress:$([\s\S]*?)^networks:$/m.exec(compose())?.[1] ?? ''
+    expect(read('../README.md'), why).toContain('--pids-limit=512')
+    expect(romaService(), why).toContain('pids_limit: 512')
+    expect(egressService, why).toContain('pids_limit: 512')
+    expect(verifyImage(), why).toContain('expect_line hardened "${hardened}" \'pids-max 512\'')
   })
 
   it('never gives roma no-new-privileges, which would void the Launcher', () => {

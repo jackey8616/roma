@@ -250,6 +250,7 @@ async function startBehind(
         },
         taskFor: (sessionId) => queue.taskFor(sessionId),
         holder: () => holders.pool?.sessionOn(seat) ?? null,
+        lease: () => holders.pool?.leaseOn(seat) ?? null,
         ...(log === undefined ? {} : { log }),
       }),
     )

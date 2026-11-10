@@ -45,6 +45,7 @@ function system(
     owner: (path) => tree[path]?.uid ?? null,
     mountPoint: (path) => (overrides.mounts ?? []).includes(path),
     realPath: (path) => path,
+    entries: () => [{ name: '2026-11.jsonl', kind: 'file', uid: ROMA, links: 1 }],
     tighten: (path, mode) => tightened.push(`${path}:${mode.toString(8)}`),
     ...overrides,
   }
@@ -102,19 +103,64 @@ describe('sealAudit', () => {
     )
   })
 
-  it('follows a link to where the records really are [fence:audit-seal-follows-links]', () => {
-    const real = '/home/seat/audit'
-    const { host } = system({
+  it('refuses a path that passes through any link, wherever it ends [fence:audit-seal-follows-links]', () => {
+    const why =
+      'GHSA-g6x2-mcq8-3hm3: roma checked the path it was given and the one it ends at, and ' +
+      'neither shows a link in between. /srv/alias -> /srv/switch/bridge -> /srv/trusted, ' +
+      'with /srv/switch world-writable, passed the seal; a Seat swapped the bridge and roma ' +
+      'read its ledger.'
+    const real = '/srv/trusted/audit'
+    const { host, tightened } = system({
       realPath: (path) => (path === ROOT ? real : path),
       tree: {
         ...STANDARD,
-        '/home': directory(0, 0o755),
-        '/home/seat': directory(SEAT.uid, 0o755),
+        '/srv': directory(0, 0o755),
+        '/srv/trusted': directory(0, 0o755),
         [real]: directory(ROMA, 0o700),
       },
     })
 
-    expect(() => sealAudit(ROOT, host)).toThrow('/home/seat/audit can be renamed away')
+    expect(() => sealAudit(ROOT, host), why).toThrow(/passes through a symbolic link/)
+    expect(tightened, why).toEqual([])
+  })
+
+  it('refuses an ancestor a Seat owns, whatever its mode, a mount point included [fence:audit-seal-refuses-seat-owned-ancestor]', () => {
+    const why =
+      'GHSA-g6x2-mcq8-3hm3: a Seat-owned 0555 parent passed as "not writable", and its owner ' +
+      'made it 0755 and swapped the records; a Seat-owned parent of a mount was made 0700 ' +
+      'and roma read the month as empty.'
+    for (const mounts of [[], ['/srv/parent/audit']]) {
+      const root = '/srv/parent/audit'
+      const { host } = system({
+        mounts,
+        tree: {
+          '/': directory(0, 0o755),
+          '/srv': directory(0, 0o755),
+          '/srv/parent': directory(SEAT.uid, 0o555),
+          [root]: directory(ROMA, 0o700),
+        },
+      })
+
+      expect(() => sealAudit(root, host), why).toThrow(/\/srv\/parent is owned by one/)
+    }
+  })
+
+  it("refuses a month that is a link, not a file, or not roma's alone [fence:audit-seal-refuses-stray-months]", () => {
+    const why =
+      'GHSA-g6x2-mcq8-3hm3: sealing the directory does not seal what a name in it points at. ' +
+      "A month left as a link to a shared directory took roma's records there, and a Seat " +
+      'replaced them.'
+    const strays = [
+      { name: '2026-11.jsonl', kind: 'link', uid: ROMA, links: 1 },
+      { name: '2026-11.jsonl', kind: 'other', uid: ROMA, links: 1 },
+      { name: '2026-11.jsonl', kind: 'file', uid: SEAT.uid, links: 1 },
+      { name: '2026-11.jsonl', kind: 'file', uid: ROMA, links: 2 },
+    ] as const
+    for (const stray of strays) {
+      const { host } = system({ entries: () => [stray] })
+
+      expect(() => sealAudit(ROOT, host), why).toThrow(/2026-11\.jsonl is/)
+    }
   })
 })
 

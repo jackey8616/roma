@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { chmodSync, chownSync, mkdirSync } from 'node:fs'
+import { chmodSync, chownSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { AuditLog, monthOf } from '/app/dist/audit-log.js'
 import { sealAudit } from '/app/dist/audit-seal.js'
@@ -50,7 +50,10 @@ let sealed
 try {
   sealed = sealAudit(auditRoot)
 } catch (error) {
-  console.log('audit refused')
+  const expected =
+    error?.name === 'ContainmentRefused' &&
+    error.message.includes('/srv/shared/roma can be renamed away by a Seat')
+  console.log(expected ? 'audit refused' : `audit failed ${error?.name}`)
   process.stderr.write(`${error.message}\n`)
   process.exit(0)
 }
@@ -94,6 +97,8 @@ await new Promise((resolve) => control.onExit(resolve))
 
 const audit = new AuditLog({ auditRoot })
 audit.record(record('before', 'users/harness-before', 2))
+const ledger = join(auditRoot, `${month}.jsonl`)
+const written = readFileSync(ledger)
 
 const sessionId = randomUUID()
 const seated = launcher.spawn({
@@ -111,9 +116,11 @@ seated.onStdout((chunk) => process.stdout.write(chunk))
 seated.onStderr((chunk) => process.stderr.write(chunk))
 await new Promise((resolve) => seated.onExit(resolve))
 
+const untouched = readFileSync(ledger).equals(written)
 audit.record(record('after', 'users/harness-after', 4))
 const callers = audit.readMonth(month).map(({ caller }) => caller)
 const intact =
+  untouched &&
   callers.join(',') === 'users/harness-seeded,users/harness-before,users/harness-after' &&
   audit.totalFor(month).costUsd === 7
 console.log(intact ? 'ledger intact' : `ledger changed ${JSON.stringify(callers)}`)

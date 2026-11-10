@@ -54,22 +54,40 @@ it, or refuses to start.**
    point, which `rename` refuses, or if its parent is sticky and neither is a Seat's.
    Enforced by `fence:audit-seal-refuses-seat-writable-ancestor` and
    `fence:audit-seal-follows-links`.
+   **Amended:** three paths got past that walk, each with a working Seat on the far side.
+   A directory a Seat *owns* passed whenever its mode was not writable, and its owner can
+   change the mode — so it could rename the records away, or, above a mount, take away
+   roma's way in so the month read as empty. Two pathnames do not show a link *between*
+   them, so a chain of links through a world-writable directory passed. And a month left as
+   a link out of the directory took roma's own writes to a place a Seat could reach. Now
+   roma refuses an ancestor any Seat owns, whatever its mode and whether or not the child
+   is a mount; refuses an audit root that passes through any symbolic link at all; and
+   refuses a root holding anything but plain files of its own, each with one link. Enforced
+   by `fence:audit-seal-refuses-seat-owned-ancestor`, `fence:audit-seal-follows-links` and
+   `fence:audit-seal-refuses-stray-months`.
 4. **It happens after the drop.** As root, roma would check the wrong owner. Enforced by
    `fence:main-seals-audit-after-drop`.
 
-`scripts/verify-image.sh` §11 proves it against the built image: a volume left 0755 is sealed
+`scripts/verify-image.sh` §11 checks it against the built image: a volume left 0755 is sealed
 by roma's real compiled `sealAudit`, a Seat spawned through the real Launcher fails to read,
 append, rewrite, add a month, delete or rename the directory or anything above it, and the
-month reads back exactly what roma wrote. The same probe run as roma against a ledger of
+month is byte for byte what roma wrote before the Seat ran. The same probe run as roma against a ledger of
 its own must reach all six, so the probe is known to work. A second run puts the root under
-a directory every Seat can write, and roma must refuse.
+a directory every Seat can write, and roma must refuse for that reason and no other.
+
+A month roma cannot read is no longer read as an empty one. Anything but a missing file is
+an error: `/usage` says spending is unknown, and the Overflow cap refuses rather than
+counting the month as nothing spent. Enforced by
+`fence:overflow-cap-fails-closed-on-unreadable-audit`.
 
 ## Consequences
 
-- **Upgrading needs nothing** on the image's path or a volume mounted there: roma tightens
-  the mode itself.
-- **A custom `ROMA_AUDIT_ROOT` under a directory a Seat can write is refused.** Mount it, or
-  put it under directories only root or `node` can write.
+- **Upgrading needs nothing** on the image's path or a volume mounted there, provided what is
+  in it is plain files: roma tightens the mode itself, and refuses, naming it, a month that
+  is a link or another uid's.
+- **A custom `ROMA_AUDIT_ROOT` under a directory a Seat can write or owns, or reached
+  through a link, is refused.** Mount it, or put it under directories owned by root or
+  `node`, and name the real path.
 - **Not covered:** roma itself. It writes the records and can rewrite them; it is the
   component the rest of this design trusts, and a hash chain keyed in its memory would be
   rewritten by the same compromise.

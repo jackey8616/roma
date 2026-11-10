@@ -29,6 +29,19 @@ function isCompaction(value: unknown): boolean {
   )
 }
 
+export class AuditUnreadable extends Error {
+  readonly month: string
+
+  constructor(month: string, cause: unknown) {
+    super(
+      `roma could not read the Audit Records for ${month}: ` +
+        `${cause instanceof Error ? cause.message : String(cause)}`,
+    )
+    this.name = 'AuditUnreadable'
+    this.month = month
+  }
+}
+
 export type AuditKind = 'task' | 'relay'
 
 const KINDS: readonly AuditKind[] = ['task', 'relay']
@@ -205,8 +218,9 @@ export class AuditLog {
     let contents: string
     try {
       contents = readFileSync(this.#fileFor(month), 'utf8')
-    } catch {
-      return []
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+      throw new AuditUnreadable(month, error)
     }
     return contents.split('\n').filter((line) => line.trim() !== '')
   }

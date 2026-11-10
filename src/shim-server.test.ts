@@ -421,3 +421,125 @@ describe('when a credential is written down', () => {
     expect(log, why).toEqual([expect.objectContaining({ event: 'credential', taskId: 'task-2' })])
   })
 })
+
+describe('a Seat socket handed from one Session to the next', () => {
+  async function seated(
+    holder: () => string | null,
+    minter: { mint: FakeMinter['mint'] },
+    lease: () => object | null = () => null,
+  ) {
+    const dir = mkdtempSync(join(tmpdir(), 'roma-shim-server-'))
+    dirs.push(dir)
+    const credited: (string | null)[] = []
+    const log: ShimLogRecord[] = []
+    const server = await ShimServer.listen({
+      socketPath: socketPathIn(dir),
+      reaches: {
+        ...fakeServedReaches(),
+        cloud: { account: null, tokens: new FreshTokens({ minter }) },
+      },
+      onCredential: (taskId) => credited.push(taskId),
+      taskFor: (sessionId) => `task-of-${sessionId}`,
+      holder,
+      lease,
+      log: (record) => log.push(record),
+    })
+    servers.push(server)
+    return { server, credited, log }
+  }
+
+  it('refuses a connection from an earlier lease, even when the same Session holds the Seat again [fence:shim-connection-belongs-to-its-lease]', async () => {
+    const why =
+      'GHSA-4vw6-r2rj-xcqf: a Session can come back to the Seat it had. A connection from ' +
+      'its first lease, kept by another Seat, would speak for it again unless the lease ' +
+      'itself, not just the Session it names, is what the connection belongs to.'
+    let current: object | null = {}
+    const { server, credited, log } = await seated(
+      () => 'session-a',
+      new FakeCloudMinter(),
+      () => current,
+    )
+
+    const held = connect(server.socketPath)
+    await new Promise<void>((ready) => held.once('connect', () => ready()))
+    await sleep(20)
+    current = {}
+    let reply = ''
+    held.setEncoding('utf8')
+    held.on('data', (chunk: string) => (reply += chunk))
+    const ended = new Promise<void>((done) => held.on('end', () => done()))
+    held.write(
+      `${JSON.stringify({ session: 'session-a', operation: 'get', credential: 'cloud' })}\n`,
+    )
+    await ended
+
+    expect(JSON.parse(reply), why).toMatchObject({ token: null })
+    expect(credited, why).toEqual([])
+    expect(log, why).toEqual([
+      expect.objectContaining({ event: 'credential-refused', claimed: 'session-a' }),
+    ])
+  })
+
+  it('refuses a connection opened under the last holder, whoever it names now [fence:shim-connection-belongs-to-its-holder]', async () => {
+    const why =
+      'GHSA-4vw6-r2rj-xcqf: a Session opened connections before its Seat was returned and ' +
+      'passed them to another Seat; once the Seat was the next Session’s, every request on ' +
+      'them was written down as that Session’s Task.'
+    let holder: string | null = 'session-a'
+    const { server, credited, log } = await seated(() => holder, new FakeCloudMinter())
+
+    const held = connect(server.socketPath)
+    await new Promise<void>((ready) => held.once('connect', () => ready()))
+    await sleep(20)
+    holder = 'session-c'
+    let reply = ''
+    held.setEncoding('utf8')
+    held.on('data', (chunk: string) => (reply += chunk))
+    const ended = new Promise<void>((done) => held.on('end', () => done()))
+    held.write(
+      `${JSON.stringify({ session: 'session-c', operation: 'get', credential: 'cloud' })}\n`,
+    )
+    await ended
+
+    expect(JSON.parse(reply), why).toMatchObject({ token: null })
+    expect(credited, why).toEqual([])
+    expect(log, why).toEqual([
+      expect.objectContaining({ event: 'credential-refused', claimed: 'session-c' }),
+    ])
+  })
+
+  it('refuses a token whose Seat changed hands while it was being minted [fence:shim-holder-rechecked-after-mint]', async () => {
+    const why =
+      'GHSA-4vw6-r2rj-xcqf: a mint can take seconds. A request that began under one holder ' +
+      'and was answered under the next was handed the token and written down for nobody.'
+    let holder: string | null = 'session-a'
+    let release: () => void = () => {}
+    const minted = new Promise<void>((done) => (release = done))
+    const { server, credited, log } = await seated(() => holder, {
+      mint: async () => {
+        await minted
+        return { token: 'gated-token', expiresAt: Date.now() + 3_600_000 }
+      },
+    })
+
+    const asking = askMinter(server.socketPath, {
+      session: 'session-a',
+      operation: 'get',
+      credential: 'cloud',
+    })
+    await sleep(20)
+    holder = 'session-b'
+    release()
+    const answer = await asking
+
+    expect(answer.token, why).toBeNull()
+    expect(credited, why).toEqual([])
+    expect(log, why).toEqual([
+      expect.objectContaining({
+        event: 'credential-refused',
+        claimed: 'session-a',
+        holder: 'session-b',
+      }),
+    ])
+  })
+})

@@ -1,4 +1,11 @@
-import { appendFileSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import { join, sep } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -3763,6 +3770,32 @@ describe('the monthly Overflow cap', () => {
     await task
 
     expect(posted(adapter.instructions).at(-1)).toMatchObject({ kind: 'result' })
+  })
+
+  it('refuses Overflow when the month cannot be read, rather than counting it as nothing spent [fence:overflow-cap-fails-closed-on-unreadable-audit]', async () => {
+    const why =
+      'GHSA-g6x2-mcq8-3hm3: a month roma could not read was read as an empty one, so a Seat ' +
+      'that cut roma off from the ledger reset the cap to zero with no warning.'
+    const { adapter, auditRoot, core, log, start } = newCore({ overflow: { monthlyCapUsd: 5 } })
+    mkdirSync(join(auditRoot, `${MONTH}.jsonl`))
+
+    const { task, proc } = await start('hello')
+    feed(proc, BLOCKED_WITH_OVERAGE)
+    await flush()
+    await core.takeOverflow(taskIdOf(adapter))
+    await flush()
+
+    expect(posted(adapter.instructions).at(-1), why).toEqual({
+      kind: 'overflow-refused',
+      conversationKey: KEY,
+      capUsd: 5,
+      spentUsd: null,
+    })
+    expect(log, why).toContainEqual(
+      expect.objectContaining({ event: 'overflow-refused', spentUsd: null }),
+    )
+
+    leftParked(task)
   })
 
   it('writes the refusal down for an operator', async () => {

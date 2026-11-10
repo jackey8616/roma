@@ -1,4 +1,4 @@
-import { connect } from 'node:net'
+import { connect, type Socket } from 'node:net'
 import { Agent, Dispatcher, ProxyAgent, setGlobalDispatcher } from 'undici'
 import { proxyUrl, type Gateway } from './egress-proxy.js'
 
@@ -47,13 +47,34 @@ class GatewayDispatcher extends Dispatcher {
   }
 }
 
-export const DIRECT_PROBE = { host: 'api.anthropic.com', port: 443 } as const
+export const DIRECT_PROBES = [
+  { host: 'api.anthropic.com', port: 443 },
+  { host: 'example.com', port: 443 },
+  { host: '1.1.1.1', port: 443 },
+  { host: '8.8.8.8', port: 443 },
+] as const
+
+export interface ProbeTarget {
+  readonly host: string
+  readonly port: number
+}
 
 export type DirectProbe = () => Promise<boolean>
 
-export const probeDirectEgress: DirectProbe = () =>
-  new Promise((resolve) => {
-    const socket = connect(DIRECT_PROBE.port, DIRECT_PROBE.host)
+export type Dial = (port: number, host: string) => Socket
+
+export function probeDirectEgress(
+  targets: readonly ProbeTarget[] = DIRECT_PROBES,
+  dial: Dial = (port, host) => connect(port, host),
+): Promise<boolean> {
+  return Promise.all(targets.map((target) => reaches(target, dial))).then((reached) =>
+    reached.some(Boolean),
+  )
+}
+
+function reaches({ host, port }: ProbeTarget, dial: Dial): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = dial(port, host)
     const settle = (reached: boolean) => {
       socket.destroy()
       resolve(reached)
@@ -62,6 +83,7 @@ export const probeDirectEgress: DirectProbe = () =>
     socket.once('connect', () => settle(true))
     socket.once('error', () => settle(false))
   })
+}
 
 export class EgressRefused extends Error {
   constructor(gateway: string) {
@@ -69,8 +91,8 @@ export class EgressRefused extends Error {
       [
         'roma refused to start — it was told to send everything through an egress gateway, ' +
           'and the network lets it out without one.',
-        `  It connected straight to ${DIRECT_PROBE.host}:${String(DIRECT_PROBE.port)} without ` +
-          `going through ${gateway}. Anything roma can reach directly the agent can too, so the ` +
+        `  It connected straight to one of ${DIRECT_PROBES.map((t) => t.host).join(', ')} ` +
+          `without going through ${gateway}. Anything roma can reach directly the agent can too, so the ` +
           'allowlist would hold nothing. Put roma on a network with no route out but the ' +
           'gateway, such as a Docker network created with --internal, as compose.yaml does.',
       ].join('\n'),

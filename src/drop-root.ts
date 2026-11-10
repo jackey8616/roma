@@ -10,7 +10,13 @@ export interface RootSystem {
   becomeUser(user: string): void
   procOwner(): number | null
   canRead(path: string): boolean
+  keyFileMode(path: string): KeyFileMode | null
   nodeFlags(): readonly string[]
+}
+
+export interface KeyFileMode {
+  readonly uid: number
+  readonly mode: number
 }
 
 export type Dropped = { readonly dropped: true; readonly user: string }
@@ -35,6 +41,7 @@ const DISABLE_SIGUSR1 = '--disable-sigusr1'
 export function dropRoot(
   keyFiles: readonly KeyFile[],
   system: RootSystem = realRootSystem(),
+  servedKeyFiles: readonly KeyFile[] = [],
 ): Dropped {
   if (system.uid() !== 0) {
     throw new ContainmentRefused([
@@ -52,6 +59,18 @@ export function dropRoot(
     ])
   }
 
+  const exposed = keyFiles.flatMap(({ variable, path }) => {
+    const found = system.keyFileMode(path)
+    if (found === null) return []
+    if (found.uid === 0 && (found.mode & 0o077) === 0) return []
+    return [
+      `${variable} is "${path}", owned by uid ${String(found.uid)} with mode ` +
+        `${(found.mode & 0o777).toString(8).padStart(4, '0')}. Every agent runs as a Seat of its ` +
+        'own uid (ADR-0036), and a key a Seat owns, or one any group or other can read, ' +
+        'reaches that agent whatever node can do. Make it 0400 and owned by root.',
+    ]
+  })
+
   try {
     system.becomeUser(SERVING_USER)
   } catch (error) {
@@ -62,7 +81,7 @@ export function dropRoot(
     ])
   }
 
-  const problems: string[] = []
+  const problems: string[] = [...exposed]
   if (system.uid() === 0) {
     problems.push(`roma asked to become ${SERVING_USER} and is still root.`)
   }
@@ -80,12 +99,24 @@ export function dropRoot(
     )
   }
 
+  const served = system.uid()
+  for (const { variable, path } of servedKeyFiles) {
+    const found = system.keyFileMode(path)
+    if (found === null || (found.uid === served && (found.mode & 0o077) === 0)) continue
+    problems.push(
+      `${variable} is "${path}", owned by uid ${String(found.uid)} with mode ` +
+        `${(found.mode & 0o777).toString(8).padStart(4, '0')}. roma reads it after the drop, so ` +
+        `it has to be ${SERVING_USER}'s, and every agent runs as a Seat of its own uid ` +
+        `(ADR-0036), which a group or other bit lets in. Make it 0400 and owned by ` +
+        `${SERVING_USER} (uid ${String(served)}).`,
+    )
+  }
+
   for (const { variable, path } of keyFiles) {
     if (system.canRead(path)) {
       problems.push(
-        `${variable} is "${path}", which ${SERVING_USER} — and so the agent — can still read. ` +
-          'Make it 0400 and owned by root (or any uid but 1000); roma reads it as root ' +
-          'before it drops.',
+        `${variable} is "${path}", which ${SERVING_USER} can still read. ` +
+          'Make it 0400 and owned by root; roma reads it as root before it drops.',
       )
     }
   }
@@ -122,6 +153,14 @@ export function realRootSystem(): RootSystem {
         return true
       } catch {
         return false
+      }
+    },
+    keyFileMode: (path) => {
+      try {
+        const { uid, mode } = statSync(path)
+        return { uid, mode }
+      } catch {
+        return null
       }
     },
     nodeFlags: () => [

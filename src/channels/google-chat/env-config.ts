@@ -1,6 +1,7 @@
 import {
   ConfigurationMissing,
   certain,
+  envValue,
   required,
   unconfigured,
   wholeNumber,
@@ -8,6 +9,13 @@ import {
 } from '../../env-config.js'
 
 export const DEFAULT_MAX_MESSAGES = 20
+
+const IDENTITY_KEY_FILE_VAR = 'GOOGLE_APPLICATION_CREDENTIALS'
+
+export function chatIdentityKeyFileIn(env: Environment): { variable: string; path: string }[] {
+  const path = envValue(env, IDENTITY_KEY_FILE_VAR)
+  return path === null ? [] : [{ variable: IDENTITY_KEY_FILE_VAR, path }]
+}
 
 export const DEFAULT_MAX_LEASE_MINUTES = 60
 

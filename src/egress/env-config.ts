@@ -7,6 +7,8 @@ export const EGRESS_GATEWAY_VAR = 'ROMA_EGRESS_GATEWAY'
 export const EGRESS_TOKEN_FILE_VAR = 'ROMA_EGRESS_TOKEN_FILE'
 export const EGRESS_ALLOW_VAR = 'ROMA_EGRESS_ALLOW'
 
+export const NO_GATEWAY = 'none'
+
 export interface EgressEnv {
   readonly gateway: Gateway
   readonly extra: readonly string[]
@@ -16,7 +18,23 @@ export function readEgressEnv(env: Environment): EgressEnv | null {
   const url = envValue(env, EGRESS_GATEWAY_VAR)
   const tokenFile = envValue(env, EGRESS_TOKEN_FILE_VAR)
   const allow = envValue(env, EGRESS_ALLOW_VAR)
-  if (url === null && tokenFile === null && allow === null) return null
+  if (url === null && tokenFile === null && allow === null) {
+    throw new ConfigurationMissing([
+      `${EGRESS_GATEWAY_VAR} is not set. Without an egress gateway the agent reaches any host ` +
+        'on the internet, and anything it can read can leave with it (ADR-0035). Run roma ' +
+        'with compose.yaml, which starts the gateway, or set ' +
+        `${EGRESS_GATEWAY_VAR}=${NO_GATEWAY} to run with no allowlist on purpose.`,
+    ])
+  }
+  if (url === NO_GATEWAY) {
+    if (tokenFile === null && allow === null) return null
+    throw new ConfigurationMissing([
+      `${EGRESS_GATEWAY_VAR} is "${NO_GATEWAY}", but ${[EGRESS_TOKEN_FILE_VAR, EGRESS_ALLOW_VAR]
+        .filter((name) => envValue(env, name) !== null)
+        .join(' and ')} is set — with no gateway nothing is enforced. Name the gateway, ` +
+        'or unset the rest.',
+    ])
+  }
 
   const problems: string[] = []
   if (url === null) {

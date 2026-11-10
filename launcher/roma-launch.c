@@ -12,7 +12,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
 #include <sys/prctl.h>
+#include <sys/sem.h>
+#include <sys/shm.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -35,7 +39,7 @@
 
 extern char **environ;
 
-static const char *const SHARED_WRITABLE[] = {"/tmp", "/var/tmp", "/dev/shm"};
+static const char *const SHARED_WRITABLE[] = {"/tmp", "/var/tmp", "/dev/shm", "/dev/mqueue"};
 
 struct roots {
   char work[PATH_MAX];
@@ -359,7 +363,7 @@ static int remove_tree(int dir, int depth) {
   }
   int result = 0;
   struct dirent *entry;
-  while (result == 0 && (entry = readdir(entries)) != NULL) {
+  while (result == 0 && (errno = 0, entry = readdir(entries)) != NULL) {
     if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
     struct stat st;
     if (fstatat(dir, entry->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0) {
@@ -379,6 +383,51 @@ static int remove_tree(int dir, int depth) {
       result = unlinkat(dir, entry->d_name, 0);
     }
   }
+  if (result == 0 && entry == NULL && errno != 0) result = -1;
+  closedir(entries);
+  return result;
+}
+
+static int purge_owned(int dir, uid_t uid, int depth) {
+  if (depth > MAX_DEPTH) {
+    report("skipped a tree deeper than %d that seat uid %u does not own\n", MAX_DEPTH, (unsigned)uid);
+    return 0;
+  }
+  int listing = dup(dir);
+  DIR *entries = listing < 0 ? NULL : fdopendir(listing);
+  if (entries == NULL) {
+    if (listing >= 0) close(listing);
+    return -1;
+  }
+  int result = 0;
+  struct dirent *entry;
+  while (result == 0 && (errno = 0, entry = readdir(entries)) != NULL) {
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+    struct stat st;
+    if (fstatat(dir, entry->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0) {
+      if (errno == ENOENT) continue;
+      result = -1;
+      break;
+    }
+    if (S_ISDIR(st.st_mode)) {
+      int sub = openat(dir, entry->d_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+      if (sub < 0) {
+        result = -1;
+        break;
+      }
+      if (st.st_uid == uid) {
+        if (fchmod(sub, 0700) != 0 || remove_tree(sub, depth + 1) != 0) result = -1;
+        close(sub);
+        if (result == 0 && unlinkat(dir, entry->d_name, AT_REMOVEDIR) != 0) result = -1;
+      } else {
+        result = purge_owned(sub, uid, depth + 1);
+        close(sub);
+      }
+    } else if (st.st_uid == uid && unlinkat(dir, entry->d_name, 0) != 0) {
+      result = -1;
+    }
+  }
+  if (result == 0 && entry == NULL && errno != 0) result = -1;
   closedir(entries);
   return result;
 }
@@ -391,29 +440,88 @@ static int purge_shared(uid_t uid) {
       if (errno == ENOENT) continue;
       return -1;
     }
-    int listing = dup(dir);
-    DIR *entries = listing < 0 ? NULL : fdopendir(listing);
-    if (entries == NULL) {
-      close(dir);
-      return -1;
-    }
-    struct dirent *entry;
-    while ((entry = readdir(entries)) != NULL) {
-      if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
-      struct stat st;
-      if (fstatat(dir, entry->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0 || st.st_uid != uid) continue;
-      if (S_ISDIR(st.st_mode)) {
-        int sub = openat(dir, entry->d_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-        if (sub < 0 || fchmod(sub, 0700) != 0 || remove_tree(sub, 0) != 0) result = -1;
-        if (sub >= 0) close(sub);
-        if (unlinkat(dir, entry->d_name, AT_REMOVEDIR) != 0) result = -1;
-      } else if (unlinkat(dir, entry->d_name, 0) != 0) {
-        result = -1;
-      }
-    }
-    closedir(entries);
+    if (purge_owned(dir, uid, 0) != 0) result = -1;
     close(dir);
   }
+  return result;
+}
+
+static int ipc_column(const char *header, const char *name) {
+  int column = 0;
+  bool in_word = false;
+  const char *word = NULL;
+  for (const char *c = header;; c++) {
+    bool space = *c == ' ' || *c == '\t' || *c == '\n' || *c == '\0';
+    if (!space && !in_word) {
+      in_word = true;
+      word = c;
+    } else if (space && in_word) {
+      in_word = false;
+      if ((size_t)(c - word) == strlen(name) && strncmp(word, name, strlen(name)) == 0) return column;
+      column++;
+    }
+    if (*c == '\0') return -1;
+  }
+}
+
+static bool ipc_field(const char *line, int column, long *value) {
+  const char *c = line;
+  for (int i = 0;; i++) {
+    while (*c == ' ' || *c == '\t') c++;
+    if (*c == '\0' || *c == '\n') return false;
+    if (i == column) {
+      char *end;
+      errno = 0;
+      long parsed = strtol(c, &end, 10);
+      if (errno != 0 || end == c) return false;
+      *value = parsed;
+      return true;
+    }
+    while (*c != ' ' && *c != '\t' && *c != '\0' && *c != '\n') c++;
+  }
+}
+
+static int remove_ipc_kind(uid_t uid, const char *table, const char *id_name, int (*remove)(int)) {
+  FILE *file = fopen(table, "re");
+  if (file == NULL) return errno == ENOENT ? 0 : -1;
+  char line[512];
+  int result = 0;
+  if (fgets(line, sizeof line, file) == NULL) {
+    result = ferror(file) ? -1 : 0;
+    fclose(file);
+    return result;
+  }
+  int id_at = ipc_column(line, id_name);
+  int uid_at = ipc_column(line, "uid");
+  int cuid_at = ipc_column(line, "cuid");
+  if (id_at < 0 || uid_at < 0 || cuid_at < 0) {
+    fclose(file);
+    return -1;
+  }
+  while (fgets(line, sizeof line, file) != NULL) {
+    long id, owner, creator;
+    if (!ipc_field(line, id_at, &id) || !ipc_field(line, uid_at, &owner) ||
+        !ipc_field(line, cuid_at, &creator)) {
+      result = -1;
+      continue;
+    }
+    if ((uid_t)owner != uid && (uid_t)creator != uid) continue;
+    if (remove((int)id) != 0 && errno != EINVAL && errno != EIDRM) result = -1;
+  }
+  if (ferror(file)) result = -1;
+  fclose(file);
+  return result;
+}
+
+static int remove_shm(int id) { return shmctl(id, IPC_RMID, NULL); }
+static int remove_msg(int id) { return msgctl(id, IPC_RMID, NULL); }
+static int remove_sem(int id) { return semctl(id, 0, IPC_RMID); }
+
+static int remove_ipc(uid_t uid) {
+  int result = 0;
+  if (remove_ipc_kind(uid, "/proc/sysvipc/shm", "shmid", remove_shm) != 0) result = -1;
+  if (remove_ipc_kind(uid, "/proc/sysvipc/msg", "msqid", remove_msg) != 0) result = -1;
+  if (remove_ipc_kind(uid, "/proc/sysvipc/sem", "semid", remove_sem) != 0) result = -1;
   return result;
 }
 
@@ -433,7 +541,7 @@ static int as_user(uid_t uid, int (*work)(uid_t, const void *), const void *cont
   return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
 }
 
-static int empty_seat_as_seat(uid_t uid, const void *unused) {
+static int kill_seat_as_seat(uid_t uid, const void *unused) {
   (void)unused;
   struct timespec pause = {0, 20 * 1000 * 1000};
   for (int attempt = 0; attempt < 250; attempt++) {
@@ -444,15 +552,22 @@ static int empty_seat_as_seat(uid_t uid, const void *unused) {
   return -1;
 }
 
-static int empty_seat(int seat) {
+static int remove_ipc_as_seat(uid_t uid, const void *unused) {
+  (void)unused;
+  return remove_ipc(uid);
+}
+
+static const char *empty_seat(int seat) {
   uid_t uid = seat_uid(seat);
-  if (as_user(uid, empty_seat_as_seat, NULL) != 0) return -1;
+  if (as_user(uid, kill_seat_as_seat, NULL) != 0) return "its processes could not all be killed";
   for (;;) {
     pid_t reaped = waitpid(-1, NULL, WNOHANG);
     if (reaped <= 0) break;
   }
-  if (uid_running(uid, getpid())) return -1;
-  return purge_shared(uid);
+  if (uid_running(uid, getpid())) return "its processes could not all be killed";
+  if (as_user(uid, remove_ipc_as_seat, NULL) != 0) return "its System V IPC could not all be removed";
+  if (purge_shared(uid) != 0) return "what it left in the shared directories could not all be removed";
+  return NULL;
 }
 
 static int park(const struct roots *roots, const char *session, const struct owners *from) {
@@ -595,8 +710,9 @@ static int run(const struct roots *roots, const char *session, int seat, char **
   runtime_pid = 0;
 
   struct owners seat_owner = {{seat_uid(seat)}, 1};
-  if (empty_seat(seat) != 0) {
-    report("quarantine seat %02d: its processes could not all be killed\n", seat);
+  const char *unemptied = empty_seat(seat);
+  if (unemptied != NULL) {
+    report("quarantine seat %02d: %s\n", seat, unemptied);
   } else if (park(roots, session, &seat_owner) != 0) {
     report("quarantine seat %02d: session %s could not be parked: %s\n", seat, session, strerror(errno));
   } else {
@@ -676,15 +792,22 @@ static int park_every_session(int root, const struct owners *from) {
   if (entries == NULL) return -1;
   int result = 0;
   struct dirent *entry;
-  while ((entry = readdir(entries)) != NULL) {
+  while ((errno = 0, entry = readdir(entries)) != NULL) {
     if (!is_session(entry->d_name)) continue;
     struct stat st;
-    if (fstatat(root, entry->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISDIR(st.st_mode)) continue;
+    if (fstatat(root, entry->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0) {
+      if (errno == ENOENT) continue;
+      fprintf(stderr, "roma-launch: cannot inspect %s: %s\n", entry->d_name, strerror(errno));
+      result = -1;
+      continue;
+    }
+    if (!S_ISDIR(st.st_mode)) continue;
     if (hand_over(root, entry->d_name, from, PARKED_UID, false) != 0) {
       fprintf(stderr, "roma-launch: cannot park %s: %s\n", entry->d_name, strerror(errno));
       result = -1;
     }
   }
+  if (entry == NULL && errno != 0) result = -1;
   closedir(entries);
   return result;
 }
@@ -701,7 +824,8 @@ static int sweep(const struct roots *roots) {
   struct owners anyone = {{0}, 0};
   anyone.ids[anyone.count++] = serving_uid;
   for (int seat = 0; seat < SEATS; seat++) {
-    if (empty_seat(seat) != 0) fail(EXIT_SOFTWARE, "cannot empty seat %02d", seat);
+    const char *unemptied = empty_seat(seat);
+    if (unemptied != NULL) fail(EXIT_SOFTWARE, "cannot empty seat %02d: %s", seat, unemptied);
     anyone.ids[anyone.count++] = seat_uid(seat);
   }
   int work = open_dir(roots->work);

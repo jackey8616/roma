@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Attempts, waitMsUntil } from './attempts.js'
 import {
+  AuditUnreadable,
   monthOf,
   type AuditBreakdown,
   type AuditLog,
@@ -75,9 +76,10 @@ export type CoreLogRecord =
       readonly taskId: string
       readonly month: string
       readonly capUsd: number
-      readonly spentUsd: number
-      readonly unpriced: number
-      readonly unreadable: number
+      readonly spentUsd: number | null
+      readonly unpriced: number | null
+      readonly unreadable: number | null
+      readonly reason?: string
     }
   | {
       readonly event: 'free-relay-did-model-work'
@@ -511,11 +513,14 @@ export class Core {
   }
 
   #answerUsage(address: TaskAddress): OutboundInstruction {
-    return {
-      kind: 'result',
-      ...address,
-      text: monthReport(this.#audit.breakdownFor(monthOf(new Date()))),
+    let text: string
+    try {
+      text = monthReport(this.#audit.breakdownFor(monthOf(new Date())))
+    } catch (error) {
+      if (!(error instanceof AuditUnreadable)) throw error
+      text = `${error.message}. Spending this month is unknown until the Operator fixes it.`
     }
+    return { kind: 'result', ...address, text }
   }
 
   #settingsReport(sessionId: string): string {
@@ -749,7 +754,29 @@ export class Core {
     if (task === undefined || overflow === null) return false
 
     const month = monthOf(new Date())
-    const spent = this.#audit.totalFor(month, 'overflow')
+    let spent
+    try {
+      spent = this.#audit.totalFor(month, 'overflow')
+    } catch (error) {
+      if (!(error instanceof AuditUnreadable)) throw error
+      this.#log({
+        event: 'overflow-refused',
+        taskId,
+        month,
+        capUsd: overflow.monthlyCapUsd,
+        spentUsd: null,
+        unpriced: null,
+        unreadable: null,
+        reason: error.message,
+      })
+      await this.#tell(task, {
+        kind: 'overflow-refused',
+        ...addressOf(task),
+        capUsd: overflow.monthlyCapUsd,
+        spentUsd: null,
+      })
+      return true
+    }
     if (spent.costUsd >= overflow.monthlyCapUsd) {
       this.#log({
         event: 'overflow-refused',

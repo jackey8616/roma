@@ -92,26 +92,27 @@ in it — and the image runs `node dist/channels/main.js` under `npm ci --omit=d
 docker run --rm \
   --cap-drop=ALL --cap-add=SETUID --cap-add=SETGID --cap-add=CHOWN \
   --cap-add=FOWNER --cap-add=KILL --cap-add=DAC_OVERRIDE \
-  --read-only \
-  --tmpfs /tmp:exec,mode=1777 --tmpfs /var/tmp:mode=1777 \
-  --tmpfs /run/roma:uid=1000,gid=1000,mode=0711 --tmpfs /run/roma-launch:mode=0755 \
-  --tmpfs /var/lib/roma/work:exec,uid=1000,gid=1000,mode=0711 \
+  --read-only --pids-limit=512 \
+  --tmpfs /tmp:exec,nosuid,nodev,mode=1777 --tmpfs /var/tmp:nosuid,nodev,mode=1777 \
+  --tmpfs /run/roma:nosuid,nodev,uid=1000,gid=1000,mode=0711 --tmpfs /run/roma-launch:nosuid,nodev,mode=0755 \
+  --tmpfs /var/lib/roma/work:exec,nosuid,nodev,uid=1000,gid=1000,mode=0711 \
   -e CLAUDE_CODE_OAUTH_TOKEN -e ROMA_PUBSUB_PROJECT_ID -e ROMA_PUBSUB_SUBSCRIPTION \
   -e ROMA_AUDIT_ROOT=/var/lib/roma/audit \
   -e ROMA_CLAUDE_CONFIG_DIR=/var/lib/roma/claude \
   -e ROMA_GITHUB_APP_ID -e ROMA_GITHUB_PRIVATE_KEY_FILE=/run/secrets/github-app.pem \
+  -e ROMA_EGRESS_GATEWAY=none \
   -v roma-audit:/var/lib/roma/audit \
   -v roma-claude:/var/lib/roma/claude \
   -v /path/to/github-app.pem:/run/secrets/github-app.pem:ro \
-  ghcr.io/jackey8616/roma:0.1.0
+  ghcr.io/jackey8616/roma:0.11.0
 ```
 
 **The key files must be `0400` and owned by root on the host** (`sudo chown root
 /path/to/github-app.pem && sudo chmod 0400 /path/to/github-app.pem`), and the same for the two
 optional keys below. The container starts as root, roma reads the keys, and then it becomes
-`node` — the uid every agent runs as — before it builds a Channel or spawns anything. After
-that the agent can open neither the key files nor roma's `/proc`, and roma checks both and
-refuses to start if either does not hold (ADR-0032). Each agent then runs as a Seat — a uid
+`node` before it builds a Channel or spawns anything. After that no agent can open the key
+files or roma's `/proc`, and roma checks both and refuses to start if either does not hold
+(ADR-0032). Each agent then runs as a Seat — a uid
 of its own, leased while its Session is resident — through the image's setuid Launcher, so
 no agent reaches another's Working Directory, Enclosures or Transcript (ADR-0036). So do not
 add `--user`: roma refuses to start without root.
@@ -175,15 +176,16 @@ nothing from (ADR-0006).
 roma runs as `node`, uid 1000. **Named volumes** at `/var/lib/roma/audit` and
 `/var/lib/roma/claude` inherit that ownership, because the image makes both directories
 even though it points nothing at either. A **bind mount** brings the host's own ownership
-instead, so `chown 1000:1000` each host directory first — otherwise roma starts, clears the
-refusal, and then loses the first Audit Record or the first Transcript to a permission
-error, which is the same data gone by a longer route.
+instead, so `chown 1000:1000` each host directory first — otherwise roma refuses to start on
+the audit root, and loses the first Transcript to a permission error, which is the same data
+gone by a longer route.
 
 The audit root is roma's alone: at boot, as `node`, roma makes it 0700 — closing a volume an
-earlier image left 0755 — and refuses to start if `node` does not own it, or if any directory
-above it is one a Seat could rename it out of (ADR-0037). The image's path and any volume
-mounted there pass; a custom `ROMA_AUDIT_ROOT` should be a mount point, or sit under
-directories no Seat can write.
+earlier image left 0755 — and refuses to start if `node` does not own it, if any directory
+above it is one a Seat could rename it out of or owns, if the path passes through a
+symbolic link, or if anything in it is not a plain file of roma's own (ADR-0037). The
+image's path and any volume mounted there pass; a custom `ROMA_AUDIT_ROOT` should be a mount
+point, or sit under directories owned by root or `node`, and be named by its real path.
 
 It also carries **`gh`, pinned to v2.96.0** by release tarball and hardcoded sha256. That
 pin exists so that a rebuild cannot move it with nobody deciding to, and for no stronger
@@ -214,7 +216,7 @@ offering a whitelist of verbs was the stronger boundary and was dropped: every v
 not think of would have been an image change with nothing behind it, and the destruction it
 would have prevented is refused by the Drive role anyway (ADR-0022 §4).
 
-The image is `node:22-slim`, `linux/amd64`, non-root, with `git`, `gh`, `curl`,
+The image is `node:22-slim`, `linux/amd64`, started as root only to read its keys and drop (ADR-0032), with `git`, `gh`, `curl`,
 `ca-certificates` and `tini` and nothing else. roma's agent runs arbitrary shell commands, so that list is a
 decision rather than an accident — and `tini` is there because roma spawns `claude`
 children, which a PID 1 that does not reap would leave as zombies.
@@ -274,18 +276,18 @@ Terraform cannot do, in the order they have to happen.
 | `ROMA_AUDIT_ROOT` | **Required.** Where Audit Records go, one file per calendar month. Refused under `ROMA_WORK_ROOT`, which is reclaimed. |
 | `ROMA_CLAUDE_CONFIG_DIR` | **Required**, and it decides two separate things. `CLAUDE_SECURESTORAGE_CONFIG_DIR` is what keeps a host keychain login out of a Claude Code process; `CLAUDE_CONFIG_DIR` is where that process writes the Transcript — the only account there is of what an agent did (ADR-0005). **Give it durable storage that only grows**: roma deletes nothing from here (ADR-0006), so unlike `ROMA_WORK_ROOT` it is never reclaimed. About **1 GB a year** at a hundred Tasks a day, plus 7.7 kB for every Session ever started (`/clear` starts another) — measured on the pinned build, two tool-using Turns on one Session (`docs/transcript-growth-verification.md`). One Task shape, so size the disk for the magnitude rather than the number (#41). **Both figures are stale on any deployment that sets `ROMA_CAVEMAN`**: they were measured with nothing asking the model to be short, and asking moves them in a direction nobody has quantified (ADR-0030). |
 | `ROMA_GITHUB_APP_ID` | **Required.** roma's GitHub App. There is no installation id to set: roma lists the App's installations and refuses to start if there is anything but one, naming all of them. |
-| `ROMA_GITHUB_PRIVATE_KEY_FILE` | **Required.** A path to the App's private key, PEM. A path rather than the key inline, following `GOOGLE_APPLICATION_CREDENTIALS`: multi-line secrets belong in mounts. **Mount it read-only, 0400 and owned by root** (any uid but 1000). roma reads it as root and then drops to `node`, the uid the agent runs as, and refuses to start if `node` can still read it (ADR-0032). |
-| `ROMA_SHIM_DIR` | **Required**, and **defaulted in the image** to `/run/roma`. Where the Credential Shim socket and the gitconfig every Session runs under live. Holds nothing that outlives a boot, which is why it has a default at all — and it is deliberately not under `ROMA_WORK_ROOT`, whose weekly reclaim would take the socket with it. Set it when running from source; `/run` is not writable on a developer's machine. |
+| `ROMA_GITHUB_PRIVATE_KEY_FILE` | **Required.** A path to the App's private key, PEM. A path rather than the key inline, following `GOOGLE_APPLICATION_CREDENTIALS`: multi-line secrets belong in mounts. **Mount it read-only, 0400 and owned by root** — no other owner will do, since every agent runs as a Seat uid of its own. roma reads it as root, then drops to `node`, and refuses to start if the file is not root's, if any group or other bit is set, or if `node` can still read it (ADR-0032). |
+| `ROMA_SHIM_DIR` | **Required**, and **defaulted in the image** to `/run/roma`. Where the Credential Shim socket and the gitconfig every Session runs under live. Holds nothing that outlives a boot, which is why it has a default at all — and it is deliberately not under `ROMA_WORK_ROOT`, whose weekly reclaim would take the socket with it. Tests set it, since `/run` is not writable on a developer's machine; roma itself runs only as the image (ADR-0036). |
 | `ROMA_PUBSUB_PROJECT_ID` | **Required to serve Google Chat.** The project the subscription lives in. Name none of the four `ROMA_PUBSUB_` variables and roma serves no Chat at all; name some of them and it refuses, rather than starting and ignoring the ones you set. At least one Channel is required, so a deployment serving no Discord needs these. |
 | `ROMA_PUBSUB_SUBSCRIPTION` | Required on the same terms as the line above. The subscription's name. Read, never created. |
 | `ROMA_DISCORD_BOT_TOKEN` | **Required to serve Discord**, on the same terms: name none of the three `ROMA_DISCORD_` variables and roma serves no Discord at all; name some and it refuses. The bot token roma identifies with, and the whole of what it needs — the guilds the application has been added to are the entire boundary, and that membership is administered by whoever holds Manage Server rather than by an offboarding process (ADR-0029). roma asks for the `GUILDS` and message intents and **not** `MESSAGE_CONTENT`, so in a guild it reads only what @-mentions it. |
 | `ROMA_DISCORD_GATEWAY_URL` | Where a first connection goes. Discord's own address by default; a resumed connection goes wherever `READY` said instead. |
 | `ROMA_DISCORD_API_BASE` | Where the REST calls go — the words behind a Quotation, and the bytes behind an attachment. Discord's own address by default, on the same API version as the Gateway URL above. |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Google's own, not roma's: a service account key file, or nothing at all on a Google host with a metadata server. This is the identity **roma** runs as — not the agent's. |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Google's own, not roma's: a service account key file, or nothing at all on a Google host with a metadata server. This is the identity **roma** runs as — not the agent's. A key file must be **0400 and owned by uid 1000**: roma reads it after it drops to `node`, and refuses to start if any group or other bit would let a Seat read it (ADR-0032). |
 | `ROMA_CLOUD_KEY_FILE` | A path to a service account key file, and the whole of what gives the agent a **Cloud Reach**. Unset — the usual case — roma starts normally, announces nothing about the cloud, and `roma-cloud-token` says this deployment has none. Set, roma reads the key at boot **by exactly that path**, mints one token with it and throws it away, and refuses to start if any of that fails; it never falls back to another identity, because the fallback on a Google host is roma's own. The roles on that identity are the entire boundary — every Conversation reaches all of it, and so does everyone who can message roma. It must not be the identity above. `infra/README.md` has the steps and says which project to put it in. **Mount it read-only, 0400 and owned by root**, for `ROMA_GITHUB_PRIVATE_KEY_FILE`'s reason; roma refuses to start if the agent could read it. |
 | `ROMA_DOCUMENT_KEY_FILE` | A path to a service account key file, and half of what gives the agent a **Document Reach** — the identity it creates the team's Docs and Sheets as. Unset, roma starts normally, announces nothing about documents, and `roma-document-token` says this deployment has none. Set, roma reads the key at boot **by exactly that path**, proves it, and refuses to start if that fails; it never falls back to another identity, for `ROMA_CLOUD_KEY_FILE`'s reason. Required **whenever** the line below is set, and vice versa. What has been shared with that identity is the entire boundary — every Conversation reaches all of it, and so does everyone who can message roma. **Mount it read-only, 0400 and owned by root**, for `ROMA_GITHUB_PRIVATE_KEY_FILE`'s reason; roma refuses to start if the agent could read it. |
 | `ROMA_DOCUMENT_DEPOT` | The id of the folder roma works in — the **Depot**. It must be a folder in a **shared drive**, with the identity above as a **Contributor**: that role can create and edit and cannot move, trash or delete, which is what makes "roma leaves work there and a person takes it away" the permission model rather than a convention. A folder in somebody's My Drive does not work, and fails in two ways at once (`infra/README.md`). roma proves at boot that the folder exists **and** that the account can add to it, so a typo, an account never added, and an account added as Viewer are three different refusals rather than one failure inside somebody's first Task. **One Depot for the whole deployment**: everything in it is readable by every Conversation and by everyone who can message roma, and it grows monotonically because nothing roma has can empty it (ADR-0022). |
-| `ROMA_EGRESS_GATEWAY` | The Egress Gateway, as `http://<host>:<port>` — `http://egress:3128` in `compose.yaml`. Set, every connection roma makes goes through it, the agent's only through roma's own proxy and only to its allowlist, and **roma refuses to start if it can reach the internet without it**: a network with another way out would make the allowlist hold nothing. Unset, roma has no egress control and says so in its log (ADR-0035). Requires the next line, and vice versa. |
+| `ROMA_EGRESS_GATEWAY` | The Egress Gateway, as `http://<host>:<port>` — `http://egress:3128` in `compose.yaml`. Set, every connection roma makes goes through it, the agent's only through roma's own proxy and only to its allowlist, and **roma refuses to start if it can reach any of several hosts without it**: a network with another way out would make the allowlist hold nothing. That check catches a misconfigured network; it cannot prove every destination closed, so the isolation itself has to come from the network, as `compose.yaml`'s `internal: true` gives it. Unset, roma refuses to start; `none` runs it with no egress control, on purpose, and says so in its log (ADR-0035). Anything but `none` requires the next line, and vice versa. |
 | `ROMA_EGRESS_TOKEN_FILE` | A path to the token the gateway accepts, and nobody else may present — `openssl rand -hex 32`. The gateway reads the same file. **Mount it read-only, 0400 and owned by root**, for `ROMA_GITHUB_PRIVATE_KEY_FILE`'s reason; roma refuses to start if the agent could read it, because with it the agent could use the gateway as roma. |
 | `ROMA_EGRESS_ALLOW` | Hosts the agent may reach beyond its default list, comma-separated: `pypi.org,*.pythonhosted.org`. A `*.` pattern matches subdomains, not the name itself. Names only — an address or a port is refused, since the gateway connects only to names on 443. The whole list is written to the operator log at boot. |
 | `ROMA_OVERFLOW_API_KEY` | Metered billing. Absent, roma has no Overflow and never offers it. |
@@ -310,13 +312,13 @@ on a network with no route out and starts the **Egress Gateway** beside it, whic
 egress allowlist ADR-0003 describes as the only protection still doing real work under
 `bypassPermissions` (ADR-0035). The agent then reaches GitHub, the npm registry, Google's
 APIs when it has a Google Reach, and whatever `ROMA_EGRESS_ALLOW` adds — and nothing else.
-roma refuses to start if the network lets it out some other way.
+roma refuses to start if it can reach the internet some other way it checks for.
 
 ```bash
 openssl rand -hex 32 > secrets/egress.token
 sudo chown root secrets/egress.token secrets/github-app.pem
 sudo chmod 0400 secrets/egress.token secrets/github-app.pem
-ROMA_VERSION=0.1.0 docker compose up -d
+ROMA_VERSION=0.11.0 docker compose up -d
 ```
 
 `ROMA_VERSION` is required: releases publish their version and no `latest`. Every other
@@ -329,8 +331,9 @@ reach.
 Know what that does not stop. An agent reachable by any Workspace member can still push to a
 repository an attacker owns on `github.com`, or publish to npm with an attacker's token: a
 shared host on the list is open to everyone's resources on it. And the plain `docker run`
-above has **no allowlist at all** — roma logs `"gateway":null` to say so, and the agent then
-has unrestricted network access.
+above has **no allowlist at all**, so roma refuses to start from it until you add
+`-e ROMA_EGRESS_GATEWAY=none` — the written-down choice that the agent gets unrestricted
+network access. roma then logs `"gateway":null` to say so.
 
 ## Where the Channel-specific code goes
 

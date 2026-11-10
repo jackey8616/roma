@@ -24,9 +24,9 @@ minimum_caps=(--cap-drop=ALL --cap-add=SETUID --cap-add=SETGID --cap-add=CHOWN -
 # Operator's durable audit and Claude config volumes. §5, §6, §9, §10, §11 and
 # §12 run on it, so a path roma starts writing that is missing here fails first.
 read_only_root=(--read-only
-  --tmpfs /tmp:exec,mode=1777 --tmpfs /var/tmp:mode=1777
-  --tmpfs /run/roma:uid=1000,gid=1000,mode=0711 --tmpfs /run/roma-launch:mode=0755
-  --tmpfs /var/lib/roma/work:exec,uid=1000,gid=1000,mode=0711
+  --tmpfs /tmp:exec,nosuid,nodev,mode=1777 --tmpfs /var/tmp:nosuid,nodev,mode=1777
+  --tmpfs /run/roma:nosuid,nodev,uid=1000,gid=1000,mode=0711 --tmpfs /run/roma-launch:nosuid,nodev,mode=0755
+  --tmpfs /var/lib/roma/work:exec,nosuid,nodev,uid=1000,gid=1000,mode=0711
   -v /var/lib/roma/audit -v /var/lib/roma/claude)
 
 # ---------------------------------------------------------------------------
@@ -231,9 +231,13 @@ echo "the agent reaches none of roma's keys, which it does when roma is started 
 # holds it behind its credential proxy and hands `claude` a stand-in.
 #
 # Run against the image's real pinned `claude`, roma's real compiled
-# `CredentialProxy`, `buildEnv` and `dropRoot`, and a fake Messages API, so it
-# needs no credential and spends nothing. `api-auth REAL` is the half that says
-# the contained run still works: the fake API was sent the real token.
+# `CredentialProxy`, `buildEnv`, `dropRoot`, `ClaudeSession` and Launcher — the
+# agent on Seat 0, uid 20000, as production runs it — and a fake Messages API, so
+# it needs no credential and spends nothing. Both credential kinds, each held in
+# roma's own environment as the real one is. `api-auth REAL` is the half that
+# says the contained run still works: the fake API was sent the real credential.
+# `probe COMPLETE` is the half that says the probe ran: a route it never printed
+# is MISSING, never BLOCKED.
 #
 # The control runs `claude` with the token in its environment, as roma did
 # before the fix, and must reach it — otherwise a probe that silently stopped
@@ -241,29 +245,35 @@ echo "the agent reaches none of roma's keys, which it does when roma is started 
 # in the contained run, for the Yama reason section 5 gives.
 # ---------------------------------------------------------------------------
 proxy_harness="$(dirname "$0")/credential-proxy-harness.mjs"
+canary_tail="$(printf 'A%.0s' $(seq 1 83))"
 
 i2() {
-  # $1: mode. The contained run starts as the image's own user, root, as roma does.
-  local user=''
+  # $1: mode, $2: credential kind. The fake credential is in roma's own environment,
+  # as the real one is, so roma-environ has something to find.
+  local user='' variable="CLAUDE_CODE_OAUTH_$(printf TOKEN)" prefix=sk-ant-oat01
   [ "$1" = control ] && user=node
-  docker run --rm -i ${user:+--user "${user}"} "${minimum_caps[@]}" "${read_only_root[@]}" --entrypoint node "${image}" \
-    --disable-sigusr1 --input-type=module - "$1" < "${proxy_harness}"
+  [ "$2" = overflow ] && variable=ROMA_OVERFLOW_API_KEY prefix=sk-ant-api03
+  docker run --rm -i ${user:+--user "${user}"} "${minimum_caps[@]}" "${read_only_root[@]}" \
+    -e "${variable}=${prefix}-FAKECANARY${canary_tail}" --entrypoint node "${image}" \
+    --disable-sigusr1 --input-type=module - "$1" "$2" < "${proxy_harness}"
 }
 
-i2_contained="$(i2 contained)"
-i2_control="$(i2 control)"
+for kind in shared-window overflow; do
+  i2_contained="$(i2 contained "${kind}")"
+  i2_control="$(i2 control "${kind}")"
 
-expect_line contained "${i2_contained}" 'turns 2'
-expect_line contained "${i2_contained}" 'api-auth REAL'
-expect_line contained "${i2_contained}" 'transcript-written YES'
-for route in tool-env claude-environ claude-memory claude-fds roma-environ roma-memory transcript config-dir; do
-  expect_line contained "${i2_contained}" "${route} BLOCKED"
+  for line in 'turns 2' 'turn OK' 'probe COMPLETE' 'probe-uid 20000' 'claude-uid 20000' \
+    'api-auth REAL' 'transcript-written YES'; do
+    expect_line "contained ${kind}" "${i2_contained}" "${line}"
+  done
+  for route in tool-env claude-environ claude-memory claude-fds roma-environ roma-memory transcript config-dir; do
+    expect_line "contained ${kind}" "${i2_contained}" "${route} BLOCKED"
+  done
+  for line in 'turns 2' 'probe COMPLETE' 'claude-environ REACHED' 'roma-environ REACHED' 'transcript REACHED'; do
+    expect_line "control ${kind}" "${i2_control}" "${line}"
+  done
 done
-expect_line control "${i2_control}" 'turns 2'
-for route in claude-environ transcript; do
-  expect_line control "${i2_control}" "${route} REACHED"
-done
-echo "the agent recovers no Shared Window token, which it does when claude holds one"
+echo "the agent recovers no Shared Window token or Overflow key, which it does when claude holds one"
 
 # ---------------------------------------------------------------------------
 # 7. The agent reaches only what its allowlist names, and only through roma's
@@ -288,17 +298,21 @@ echo "the agent recovers no Shared Window token, which it does when claude holds
 # ---------------------------------------------------------------------------
 egress_harness="$(dirname "$0")/egress-harness.mjs"
 egress_tag="roma-verify-$$"
-egress_dir="$(mktemp -d)"
 
 egress_cleanup() {
   docker rm -f "${egress_tag}-gateway" >/dev/null 2>&1 || true
   docker network rm "${egress_tag}-inside" "${egress_tag}-outside" >/dev/null 2>&1 || true
-  rm -rf "${egress_dir}"
+  docker volume rm "${egress_tag}-secrets" >/dev/null 2>&1 || true
 }
 trap egress_cleanup EXIT
 
-od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > "${egress_dir}/egress.token"
-chmod 0644 "${egress_dir}/egress.token"
+# The token as the README asks for it: 0400 and root's. A Docker volume rather
+# than a bind mount, because Docker Desktop's file sharing does not keep a host
+# file's owner and mode, and a token the agent could read would pass every check
+# below while handing it the gateway.
+docker volume create "${egress_tag}-secrets" >/dev/null
+docker run --rm -v "${egress_tag}-secrets:/secrets" --entrypoint sh "${image}" -c \
+  'umask 077; od -An -tx1 -N32 /dev/urandom | tr -d " \n" > /secrets/egress.token; chmod 0400 /secrets/egress.token'
 
 docker network create --internal "${egress_tag}-inside" >/dev/null
 docker network create "${egress_tag}-outside" >/dev/null
@@ -306,30 +320,38 @@ docker network create "${egress_tag}-outside" >/dev/null
 # read-only root (ADR-0038).
 gateway_hardening=(--read-only --cap-drop=ALL --security-opt no-new-privileges)
 docker run -d --name "${egress_tag}-gateway" --network "${egress_tag}-outside" "${gateway_hardening[@]}" \
-  -v "${egress_dir}/egress.token:/run/secrets/egress.token:ro" \
+  -v "${egress_tag}-secrets:/run/secrets:ro" \
   -e ROMA_EGRESS_TOKEN_FILE=/run/secrets/egress.token \
   --entrypoint node "${image}" /app/dist/egress/gateway.js >/dev/null
 docker network connect --alias egress "${egress_tag}-inside" "${egress_tag}-gateway"
+gateway_status="$(docker exec "${egress_tag}-gateway" sh -c 'grep -E "^(NoNewPrivs|Seccomp|CapEff):" /proc/1/status' | tr -s '\t ' ' ')"
+for line in 'NoNewPrivs: 1' 'Seccomp: 2' 'CapEff: 0000000000000000'; do
+  expect_line gateway "${gateway_status}" "${line}"
+done
 
 egress() {
-  # $1: mode.
-  local network=()
-  [ "$1" = contained ] && network=(
+  # $1: mode. The contained run starts as root, as roma does, reads the token,
+  # drops, and runs the agent on a Seat; the control runs as node with no gateway.
+  local run=(--user node)
+  [ "$1" = contained ] && run=(
+    "${minimum_caps[@]}" "${read_only_root[@]}"
     --network "${egress_tag}-inside"
-    -v "${egress_dir}/egress.token:/run/secrets/egress.token:ro"
+    -v "${egress_tag}-secrets:/run/secrets:ro"
     -e ROMA_EGRESS_TOKEN_FILE=/run/secrets/egress.token
     -e EGRESS_GATEWAY=http://egress:3128
   )
-  docker run --rm -i --user node ${network[@]+"${network[@]}"} \
+  docker run --rm -i "${run[@]}" \
     -e EGRESS_LISTED_REPO=https://github.com/jackey8616/roma \
-    --entrypoint node "${image}" --input-type=module - "$1" < "${egress_harness}"
+    --entrypoint node "${image}" --disable-sigusr1 --input-type=module - "$1" < "${egress_harness}"
 }
 
 egress_contained="$(egress contained)"
 egress_control="$(egress control)"
 
-expect_line contained "${egress_contained}" 'turns 2'
-for check in roma-direct direct unlisted exfiltrate gateway-without-token; do
+for line in 'turns 2' 'probe COMPLETE' 'probe-uid 20000' 'token-readable NO'; do
+  expect_line contained "${egress_contained}" "${line}"
+done
+for check in roma-direct direct unlisted exfiltrate gateway-without-token stolen-token; do
   expect_line contained "${egress_contained}" "${check} BLOCKED"
 done
 for check in roma-through-gateway listed; do
@@ -337,6 +359,7 @@ for check in roma-through-gateway listed; do
 done
 expect_line contained "${egress_contained}" 'gateway-answer 407'
 expect_line control "${egress_control}" 'turns 2'
+expect_line control "${egress_control}" 'probe COMPLETE'
 for check in roma-direct direct unlisted exfiltrate listed; do
   expect_line control "${egress_control}" "${check} REACHED"
 done
@@ -513,14 +536,24 @@ echo "no Seat reaches the Audit Records, which roma itself does"
 # setuid and would be voided; it sets no_new_privs on every Runtime instead,
 # which §10's runs-with-no-new-privs proves.
 # ---------------------------------------------------------------------------
-hardened="$(docker run --rm "${minimum_caps[@]}" "${read_only_root[@]}" --entrypoint sh "${image}" -c '
+hardened="$(docker run --rm "${minimum_caps[@]}" "${read_only_root[@]}" --pids-limit=512 --entrypoint sh "${image}" -c '
   awk '\''$5 == "/" { split($6, o, ","); print "root-mount " o[1] }'\'' /proc/self/mountinfo
   grep -E "^CapBnd:" /proc/self/status | tr -s "\t " " "
+  grep -E "^Seccomp:" /proc/self/status | tr -s "\t " " "
+  echo "pids-max $(cat /sys/fs/cgroup/pids.max)"
+  for d in /tmp /var/tmp /run/roma /run/roma-launch /var/lib/roma/work; do
+    awk -v d="$d" '\''$5 == d { print "tmpfs " d " " $6 }'\'' /proc/self/mountinfo
+  done
+  touch /run/roma-launch/.probe && rm /run/roma-launch/.probe && echo "root-writable /run/roma-launch"
   find / -xdev -type f -perm /6000 -printf "privileged %m %u:%g %p\n"
   setpriv --reuid=node --regid=node --clear-groups sh -c "
     touch /home/node/.probe 2>&1 | grep -q \"Read-only file system\" && echo \"home EROFS\"
-    for d in /tmp /var/lib/roma/work /run/roma /var/lib/roma/audit /var/lib/roma/claude; do
+    for d in /tmp /var/tmp /var/lib/roma/work /run/roma /var/lib/roma/audit /var/lib/roma/claude; do
       touch \"\$d/.probe\" && rm \"\$d/.probe\" && echo \"writable \$d\"
+    done
+    for d in /tmp /var/lib/roma/work; do
+      printf \"#!/bin/sh\\necho ran\\n\" > \"\$d/.exec\" && chmod 0755 \"\$d/.exec\" &&
+        [ \"\$(\"\$d/.exec\")\" = ran ] && echo \"executable \$d\"; rm -f \"\$d/.exec\"
     done"
 ' 2>&1)"
 
@@ -533,7 +566,21 @@ if [ "$(printf '%s\n' "${hardened}" | grep -c '^privileged ')" -ne 1 ]; then
   exit 1
 fi
 expect_line hardened "${hardened}" 'home EROFS'
-for d in /tmp /var/lib/roma/work /run/roma /var/lib/roma/audit /var/lib/roma/claude; do
+for d in /tmp /var/tmp /var/lib/roma/work /run/roma /var/lib/roma/audit /var/lib/roma/claude; do
   expect_line hardened "${hardened}" "writable ${d}"
+done
+for d in /tmp /var/lib/roma/work; do
+  expect_line hardened "${hardened}" "executable ${d}"
+done
+expect_line hardened "${hardened}" 'root-writable /run/roma-launch'
+expect_line hardened "${hardened}" 'Seccomp: 2'
+expect_line hardened "${hardened}" 'pids-max 512'
+for d in /tmp /var/tmp /run/roma /run/roma-launch /var/lib/roma/work; do
+  if ! printf '%s\n' "${hardened}" | grep -E "^tmpfs ${d} " | grep -q 'nosuid' ||
+    ! printf '%s\n' "${hardened}" | grep -E "^tmpfs ${d} " | grep -q 'nodev'; then
+    echo "the documented run mounts ${d} without nosuid and nodev:" >&2
+    echo "${hardened}" >&2
+    exit 1
+  fi
 done
 echo "the documented run has a read-only root, six capabilities, and no setuid file but the Launcher"

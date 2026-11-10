@@ -55,6 +55,8 @@ check sweep 'launch sweep'
 check sweep-parks-legacy '[ "$(owner "$WORK/$LEGACY")" = 19999 ] && [ "$(owner "$WORK/$LEGACY/notes.txt")" = 19999 ] && [ "$(mode "$WORK/$LEGACY")" = 700 ]'
 check sweep-closes-tmp-listing '[ "$(mode /tmp)" = 1733 ]'
 
+mkdir /tmp/shared-parent && chown node:node /tmp/shared-parent && chmod 0733 /tmp/shared-parent
+
 AGENT='
 echo "uid $(id -u)"; echo "groups $(id -G)"; grep NoNewPrivs /proc/self/status
 echo "home $HOME"; echo "tmp $TMPDIR"; echo "config $CLAUDE_CONFIG_DIR"; echo "socket $ROMA_MINTER_SOCKET"; echo "cwd $(pwd)"
@@ -63,6 +65,9 @@ echo FAKE-TMP > "$TMPDIR/tmp.txt"; echo FAKE-SHARED > "/tmp/leak-$ROMA_SESSION_I
 mkdir -p "$CLAUDE_CONFIG_DIR/projects" && echo FAKE-TRANSCRIPT > "$CLAUDE_CONFIG_DIR/projects/t.jsonl"
 ln -s /etc/passwd evil
 if ln /etc/shadow hard 2>/dev/null; then echo "hardlink made"; fi
+echo FAKE-NESTED > "/tmp/shared-parent/nested-$ROMA_SESSION_ID"; chmod 0600 "/tmp/shared-parent/nested-$ROMA_SESSION_ID"
+perl -MIPC::SysV=IPC_PRIVATE,IPC_CREAT -e "\$id = shmget(IPC_PRIVATE, 64, IPC_CREAT | 0600); shmwrite(\$id, q(FAKE-SHM), 0, 8) and print qq(shm \$id\n)"
+perl -MIPC::SysV=IPC_PRIVATE,IPC_CREAT -e "\$id = msgget(IPC_PRIVATE, IPC_CREAT | 0600); msgsnd(\$id, pack(q(l! a*), 1, q(FAKE-MSG)), 0) and print qq(msg \$id\n)"
 setsid sleep 300 >/dev/null 2>&1 < /dev/null &
 echo "orphan $!"
 '
@@ -82,6 +87,9 @@ orphan="$(echo "$out" | sed -n 's/^orphan //p')"
 check orphan-is-killed '! kill -0 "$orphan"'
 check seat-is-empty '! grep -Eqs "^Uid:\s+20003\s" /proc/[0-9]*/status'
 check shared-tmp-is-purged '[ ! -e "/tmp/leak-$FIRST" ]'
+check runtime-made-ipc 'echo "$out" | grep -Eqx "shm [0-9]+" && echo "$out" | grep -Eqx "msg [0-9]+"'
+check sysv-ipc-is-removed '! awk "NR > 1 && (\$8 == 20003 || \$10 == 20003)" /proc/sysvipc/shm | grep -q . && ! awk "NR > 1 && (\$8 == 20003 || \$10 == 20003)" /proc/sysvipc/msg | grep -q .'
+check nested-tmp-is-purged '[ ! -e "/tmp/shared-parent/nested-$FIRST" ] && [ "$(owner /tmp/shared-parent)" = "$(id -u node)" ]'
 check work-is-parked '[ "$(owner "$WORK/$FIRST")" = 19999 ] && [ "$(mode "$WORK/$FIRST")" = 700 ] && [ "$(owner "$WORK/$FIRST/secret.txt")" = 19999 ]'
 check transcript-is-parked '[ "$(owner "$CONFIG/sessions/$FIRST")" = 19999 ] && [ "$(owner "$CONFIG/sessions/$FIRST/projects/t.jsonl")" = 19999 ]'
 check symlink-target-untouched '[ "$(owner /etc/passwd)" = 0 ] && [ -L "$WORK/$FIRST/evil" ]'
@@ -96,14 +104,29 @@ wait "${held}"
 termed=$?
 check roma-signal-reaches-the-runtime '[ "$termed" -eq 143 ]'
 
+DEEP='mkdir /tmp/deep-tree && cd /tmp/deep-tree && i=0
+while [ $i -lt 515 ]; do mkdir d && cd d || exit 1; i=$((i + 1)); done
+touch /tmp/deep-tree-built; sleep 8'
+DEEPER=55555555-5555-4555-8555-555555555551
+INNOCENT=55555555-5555-4555-8555-555555555552
+launch run 08 "${DEEPER}" -- sh -c "${DEEP}" &
+deep=$!
+waited=0
+while [ ! -e /tmp/deep-tree-built ] && [ "${waited}" -lt 120 ]; do sleep 0.5; waited=$((waited + 1)); done
+check deep-tree-is-built '[ -e /tmp/deep-tree-built ]'
+launch run 09 "${INNOCENT}" -- true 3>"${REPORT}"
+check another-seats-deep-tree-quarantines-nobody 'grep -qx "returned seat 09" "$REPORT"'
+wait "${deep}"
+
 REUSE='
 cat '"${WORK}/${FIRST}"'/secret.txt && echo "read work"
 ls '"${WORK}/${FIRST}"' && echo "listed work"
 cat '"${CONFIG}/sessions/${FIRST}"'/projects/t.jsonl && echo "read transcript"
 echo planted >> '"${CONFIG}/sessions/${FIRST}"'/projects/t.jsonl && echo "wrote transcript"
-true
+echo "reuse ran as $(id -u)"
 '
 reuse="$(launch run 03 "${SECOND}" -- sh -c "${REUSE}" 2>/dev/null)"
+check reused-seat-ran 'echo "$reuse" | grep -qx "reuse ran as 20003"'
 check reused-seat-reads-no-work '! echo "$reuse" | grep -q "read work"'
 check reused-seat-lists-no-work '! echo "$reuse" | grep -q "listed work"'
 check reused-seat-reads-no-transcript '! echo "$reuse" | grep -q "read transcript"'
@@ -123,11 +146,14 @@ check enclose-refuses-another-seats 'printf x | launch enclose 07 "$ENCLOSED" 66
 check enclose-refuses-a-path-name 'printf x | launch enclose 06 "$ENCLOSED" ../../etc/x; [ $? -eq 64 ]'
 wait "${resident}"
 
-launch run 06 "${ENCLOSED}" -- sh -c 'rm -rf .enclosures; ln -s /etc .enclosures; sleep 4' &
+mkdir /tmp/enclose-target && chmod 0777 /tmp/enclose-target
+check enclose-target-is-writable-by-the-seat 'setpriv --reuid=20006 --regid=20006 --clear-groups touch /tmp/enclose-target/control && rm /tmp/enclose-target/control'
+launch run 06 "${ENCLOSED}" -- sh -c 'rm -rf .enclosures; ln -s /tmp/enclose-target .enclosures; sleep 4' &
 resident=$!
 sleep 1
 printf x | launch enclose 06 "${ENCLOSED}" 77777777-7777-4777-8777-777777777777.txt >/dev/null 2>&1
-check enclose-follows-no-symlink '[ ! -e /etc/77777777-7777-4777-8777-777777777777.txt ]'
+enclosed=$?
+check enclose-follows-no-symlink '[ "$enclosed" -ne 0 ] && [ ! -e /tmp/enclose-target/77777777-7777-4777-8777-777777777777.txt ]'
 wait "${resident}"
 
 launch run 07 "${SECOND}" -- sleep 4 &

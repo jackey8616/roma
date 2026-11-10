@@ -151,8 +151,8 @@ would not have closed it. And the one-hour expiry was never the bound for this
 line — it bounds a leaked *token*; a leaked *signing key* mints until it is
 revoked. roma now starts as root, reads the key, and becomes `node` before any
 agent exists: the key file is root's, and the kernel marks roma not dumpable, so
-the agent — still `node`, still roma's child — can open neither the file nor
-roma's `/proc`. roma proves both and refuses to start otherwise. Different
+the agent — `node` then, a Seat of its own uid since ADR-0036 — can open neither
+the file nor roma's `/proc`. roma proves both and refuses to start otherwise. Different
 containers are no longer needed for this, only for what ADR-0008 defers.
 
 It must also be said plainly, because a credential helper is easily sold as

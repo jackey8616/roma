@@ -38,7 +38,9 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
     case 'overflow-refused':
       return [
         `Overflow is capped at $${money(instruction.capUsd)} a month and this month has ` +
-          `spent $${money(instruction.spentUsd)}, so it is off until the month turns. ` +
+          (instruction.spentUsd === null
+            ? `spending roma could not read, so it is off until that is fixed. `
+            : `spent $${money(instruction.spentUsd)}, so it is off until the month turns. `) +
           `Your task is still waiting for the shared quota to reset.`,
       ]
   }

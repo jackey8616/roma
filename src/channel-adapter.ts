@@ -70,7 +70,7 @@ export type OutboundInstruction = TaskAddress &
     | {
         readonly kind: 'overflow-refused'
         readonly capUsd: number
-        readonly spentUsd: number
+        readonly spentUsd: number | null
       }
     | {
         readonly kind: 'context-full'

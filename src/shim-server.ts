@@ -56,6 +56,7 @@ export interface ShimServerOptions {
   ) => void
   readonly taskFor: (sessionId: string) => string | null
   readonly holder?: () => string | null
+  readonly lease?: () => object | null
   readonly log?: OperatorLog<ShimLogRecord>
 }
 
@@ -70,6 +71,7 @@ export class ShimServer {
   ) => void
   readonly #taskFor: (sessionId: string) => string | null
   readonly #holder: (() => string | null) | undefined
+  readonly #lease: () => object | null
   readonly #log: OperatorLog<ShimLogRecord>
   readonly #open = new Set<Socket>()
 
@@ -80,6 +82,7 @@ export class ShimServer {
     this.#onCredential = options.onCredential ?? (() => {})
     this.#taskFor = options.taskFor
     this.#holder = options.holder
+    this.#lease = options.lease ?? (() => null)
     this.#log = options.log ?? writeToStderr
   }
 
@@ -112,6 +115,7 @@ export class ShimServer {
   }
 
   #serve(socket: Socket): void {
+    const accepted = { holder: this.#holder?.() ?? null, lease: this.#lease() }
     this.#open.add(socket)
     socket.on('close', () => this.#open.delete(socket))
     socket.setEncoding('utf8')
@@ -123,14 +127,17 @@ export class ShimServer {
       const line = buffer.slice(0, end)
       buffer = ''
       socket.removeAllListeners('data')
-      void this.#answer(line).then((response) => {
+      void this.#answer(line, accepted).then((response) => {
         socket.end(`${JSON.stringify(response)}\n`)
       })
     })
     socket.on('error', () => socket.destroy())
   }
 
-  async #answer(line: string): Promise<ShimResponse> {
+  async #answer(
+    line: string,
+    accepted: { readonly holder: string | null; readonly lease: object | null },
+  ): Promise<ShimResponse> {
     let request: ShimRequest
     try {
       request = readRequest(line)
@@ -142,13 +149,16 @@ export class ShimServer {
     const sessionId = request.session
     const path = request.path ?? null
     const credential = request.credential ?? 'code'
-    if (this.#holder !== undefined) {
-      const holder = this.#holder()
-      if (holder !== sessionId) {
-        this.#log({ event: 'credential-refused', claimed: sessionId, holder, path, credential })
-        return { token: null, reason: 'this socket does not belong to that Session.' }
-      }
+    const refuse = (holder: string | null): ShimResponse => {
+      this.#log({ event: 'credential-refused', claimed: sessionId, holder, path, credential })
+      return { token: null, reason: 'this socket does not belong to that Session.' }
     }
+    const heldNow = (): boolean =>
+      this.#holder === undefined ||
+      (this.#holder() === sessionId &&
+        accepted.holder === sessionId &&
+        this.#lease() === accepted.lease)
+    if (!heldNow()) return refuse(this.#holder?.() ?? null)
     const where = () => ({ sessionId, taskId: this.#taskFor(sessionId), path, credential }) as const
     const reach = this.#reaches[credential]
 
@@ -167,11 +177,13 @@ export class ShimServer {
 
     try {
       const { token, expiresAt } = await reach.tokens.fresh()
+      if (!heldNow()) return refuse(this.#holder?.() ?? null)
       const served = where()
       this.#onCredential(served.taskId, credential, path)
       this.#log({ event: 'credential', ...served })
       return { token, expiresAt, account: reach.account }
     } catch (error) {
+      if (!heldNow()) return refuse(this.#holder?.() ?? null)
       const reason = reasonOf(error)
       this.#log({ event: 'credential-failed', ...where(), reason })
       return { token: null, reason }

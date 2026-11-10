@@ -28,8 +28,27 @@ function problems(env: Record<string, string>): string {
 }
 
 describe('readEgressEnv', () => {
-  it('is absent when nothing names egress, so a deployment without a gateway starts as before', () => {
-    expect(readEgressEnv({})).toBeNull()
+  it('refuses a deployment that names no gateway at all, saying how to run without one [fence:egress-refuses-a-silent-open-network]', () => {
+    const why =
+      'GHSA-7hpq-f638-956r: the README docker run left the agent with the whole internet, and ' +
+      'roma said so only as "gateway":null in a log. Running without the allowlist has to be ' +
+      'a choice the operator writes down, not the default.'
+
+    expect(problems({}), why).toMatch(/ROMA_EGRESS_GATEWAY is not set/)
+    expect(problems({}), why).toMatch(/ROMA_EGRESS_GATEWAY=none/)
+  })
+
+  it('is absent when the operator writes down that there is no gateway', () => {
+    expect(readEgressEnv({ ROMA_EGRESS_GATEWAY: 'none' })).toBeNull()
+  })
+
+  it('refuses "none" alongside a token or an allowlist, which nothing would enforce', () => {
+    expect(problems({ ROMA_EGRESS_GATEWAY: 'none', ROMA_EGRESS_ALLOW: 'pypi.org' })).toMatch(
+      /is "none", but ROMA_EGRESS_ALLOW is set/,
+    )
+    expect(problems({ ROMA_EGRESS_GATEWAY: 'none', ROMA_EGRESS_TOKEN_FILE: tokenFile })).toMatch(
+      /is "none", but ROMA_EGRESS_TOKEN_FILE is set/,
+    )
   })
 
   it('reads the gateway, its token, and what the operator adds to the agent’s allowlist', () => {

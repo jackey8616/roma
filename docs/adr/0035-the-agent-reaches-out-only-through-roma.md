@@ -18,8 +18,8 @@ to GET `example.com` and POST a canary to `httpbin.org`, and both answered 200.
 
 Two facts shape the answer.
 
-**roma and the agent share a network.** They run in one container, so one network namespace,
-and since ADR-0032 under one uid. Nothing on the network can tell roma's connection from the
+**roma and the agent share a network.** They run in one container, so one network namespace
+— and, since ADR-0036, under different uids, which the network cannot see either. Nothing on the network can tell roma's connection from the
 agent's. A single allowlist on the container would have to admit everything roma needs —
 Google's APIs, Pub/Sub, Discord, GitHub's API, Anthropic — and so admit it for the agent too.
 
@@ -68,14 +68,29 @@ longer needs the Messages API.
    connection straight to `api.anthropic.com:443` before it routes anything. If that
    succeeds, the allowlist would hold nothing, and roma refuses to start. Enforced by
    `fence:startup-refuses-an-open-network`.
+   **Amended:** one host name is not a network. With `api.anthropic.com` pointed at
+   loopback by `--add-host`, the probe failed and roma started on a network that reached
+   other hosts directly. roma now probes several hosts at once, two of them by address so
+   that no resolver can redirect them, and refuses if any one answers. Enforced by
+   `fence:egress-probe-any-target-is-a-way-out` and `fence:egress-probe-includes-an-address`.
+   It is still a check for a misconfigured network, not a proof that none is: a failed probe
+   cannot show that every other destination is closed. The isolation is the network's
+   topology — `internal: true` — and the check only catches the common ways of losing it.
 8. **Without a gateway, nothing changes.** `ROMA_EGRESS_GATEWAY` unset starts roma as before,
    with `{"event":"egress","gateway":null}` in the log to say so.
+   **Amended:** a log line is not a choice anyone made. `ROMA_EGRESS_GATEWAY` unset now
+   refuses to start; running with no allowlist takes `ROMA_EGRESS_GATEWAY=none`, written
+   into the deployment, and logs the same line. Enforced by
+   `fence:egress-refuses-a-silent-open-network`.
 
-`scripts/verify-image.sh` §7 proves the whole of it against the built image. It runs the
-real pinned `claude` and a fake Messages API on an `--internal` network beside a real
-gateway, and a Bash call that tries what the advisory did. Direct HTTPS, an unlisted host
-through the proxy, a POST of a canary, and the gateway without its token must all fail, and
-the gateway must answer 407. `git ls-remote` against this repository, and roma's own
+`scripts/verify-image.sh` §7 checks it against the built image. It runs the real pinned
+`claude` and a fake Messages API on an `--internal` network beside a real gateway, and a
+Bash call that tries what the advisory did. roma starts as root with the gateway token
+0400 and root's, reads it, drops, and runs the agent on a Seat through the real Launcher,
+as production does. Direct HTTPS, an unlisted host through the proxy, a POST of a canary,
+the gateway without its token, and the gateway with the token read from disk must all fail,
+the agent must find the token unreadable, and the gateway must answer 407. A probe that
+does not finish, or a check it never printed, fails rather than passing as blocked. `git ls-remote` against this repository, and roma's own
 `fetch`, must succeed. A control run on Docker's default network with no gateway must get
 out, so the probe is known to work. §8 renders `compose.yaml` and checks that it names a
 release rather than `latest`, passes every Channel's and Reach's variables, and mounts each
@@ -100,8 +115,9 @@ key file at the path roma is told.
   roma behind a gateway needs `GOOGLE_APPLICATION_CREDENTIALS` as a key file.
 - Two runtime dependencies are added: `undici` (6.x, the line Node 22 bundles, for the
   dispatcher) and `https-proxy-agent`, already in the tree through gaxios.
-- **Not covered:** a deployment that runs the image with `docker run` and no gateway. roma
-  says so in its log, and the README says what that means.
+- **Not covered:** a deployment that runs the image with `docker run` and
+  `ROMA_EGRESS_GATEWAY=none`. It has to say so to start, roma says so in its log, and the
+  README says what that means.
 
 ## Considered and rejected
 

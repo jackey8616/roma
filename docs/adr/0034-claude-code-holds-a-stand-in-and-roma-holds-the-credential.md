@@ -69,28 +69,35 @@ The same measurement is what the decision rests on: under the stand-in and
 the base URL, `system/init` still reports `apiKeySource: "none"`, and the Startup Self-Check
 passes unchanged.
 
-`scripts/verify-image.sh` §6 proves the whole of it against the built image. It uses the
-real pinned `claude`, roma's compiled `CredentialProxy`, `buildEnv` and `dropRoot`, and a
-fake Messages API whose first answer is one Bash call. That probe hunts for the token in the
+`scripts/verify-image.sh` §6 checks it against the built image. It uses the real pinned
+`claude`, roma's compiled `CredentialProxy`, `buildEnv`, `dropRoot`, `ClaudeSession` and
+Launcher, so the agent runs on Seat 0 as production runs it, and a fake Messages API whose
+first answer is one Bash call. It runs once for the Shared Window and once for Overflow,
+each with the fake credential in roma's own environment. That probe hunts for the token in the
 tool's own environment, in `claude`'s environment, memory and open files, and in roma's
 environment and memory. The token must be found in none of them, nor in the Transcript or
 anywhere under the Claude config dir, while the fake API is sent the real one. A control
 run with the token in `claude`'s environment, as before this decision, must find it, so the
-probe is known to work.
+probe is known to work. The probe ends with a completion line, and a route it never printed
+is reported missing rather than blocked, so a probe that did not run fails the check
+instead of passing it. The probe reads `claude`'s open regular files, not its pipes and
+sockets, and skips memory mappings over 64 MiB: it is a bounded search, not a proof that no
+route exists.
 
 ## Consequences
 
 - What the agent can take away is the stand-in. It works through the proxy while roma runs
   and is worth nothing once roma stops, and a new one is made on every boot. A Transcript
-  that records one records nothing anybody can use later.
+  that records one records nothing anybody can use once that boot of roma has ended; until
+  then it works through the proxy, as the next point says.
 - **This is not a boundary against spending.** The agent can call the proxy with the
   stand-in exactly as `claude` does, so it can still run Turns on the Shared Window, or on
   Overflow if its Session was given that, for as long as roma is up. What it can no longer
   do is take a year-long credential somewhere else.
 - The proxy's protection rests on ADR-0032. The real credential lives in roma's memory and
   roma's environment, and the agent is kept out of both only because roma started as root
-  and dropped. roma run from source, or under `--user`, leaves both reachable, as it already
-  logs.
+  and dropped. **Amended by ADR-0036:** roma run from source or under `--user` no
+  longer starts at all, so there is no unprotected mode to log.
 - Every Messages API call now makes one extra loopback hop. Responses are streamed through
   as they arrive.
 - Nonessential traffic is off for every Session: whatever Claude Code sends for telemetry,

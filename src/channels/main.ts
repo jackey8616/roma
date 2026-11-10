@@ -36,7 +36,7 @@ import type { SelfCheckLogRecord, StartupSelfCheckReport } from '../startup-self
 import { discordBinding, type DiscordLogRecord } from './discord/binding.js'
 import { readDiscordEnv } from './discord/env-config.js'
 import { googleChatBinding, type ChatLogRecord } from './google-chat/binding.js'
-import { readChatEnv } from './google-chat/env-config.js'
+import { chatIdentityKeyFileIn, readChatEnv } from './google-chat/env-config.js'
 
 const EXIT_SIGNALLED = 0
 const EXIT_FAILED = 1
@@ -94,7 +94,7 @@ export async function startConfiguredRoma(
       launcher.writeRoots(launcherRootsOf(roma)),
     )
   }
-  log({ event: 'privileges', ...dropRoot(keyFilesIn(env), rootSystem) })
+  log({ event: 'privileges', ...dropRoot(keyFilesIn(env), rootSystem, chatIdentityKeyFileIn(env)) })
   log({ event: 'audit', ...sealAudit(roma.auditRoot, auditSeal) })
 
   let egress: StartRomaEgress | undefined

@@ -227,6 +227,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
 
   readonly #residents = new Map<string, Resident>()
   readonly #leases = new Map<number, string>()
+  readonly #leaseIds = new Map<number, object>()
   #spawning: Promise<unknown> = Promise.resolve()
   readonly #reclaimTimer: NodeJS.Timeout
 
@@ -275,6 +276,10 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
 
   sessionOn(seat: number): string | null {
     return this.#leases.get(seat) ?? null
+  }
+
+  leaseOn(seat: number): object | null {
+    return this.#leaseIds.get(seat) ?? null
   }
 
   cavemanOn(sessionId: string): string | null {
@@ -429,6 +434,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     await this.#makeRoom()
     const seat = await this.#seats.lease()
     this.#leases.set(seat, sessionId)
+    this.#leaseIds.set(seat, {})
 
     const cwd = this.#workRoot.sessionDir(sessionId)
     const resuming = resume ?? this.#workRoot.hasSpawned(sessionId)
@@ -514,7 +520,10 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     const settle = (outcome: SeatOutcome | undefined): void => {
       if (settled) return
       settled = true
-      if (this.#leases.get(seat) === sessionId) this.#leases.delete(seat)
+      if (this.#leases.get(seat) === sessionId) {
+        this.#leases.delete(seat)
+        this.#leaseIds.delete(seat)
+      }
       if (outcome === undefined || outcome.returned) {
         this.#seats.give(seat)
         return

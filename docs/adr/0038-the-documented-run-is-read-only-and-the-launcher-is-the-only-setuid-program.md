@@ -51,14 +51,26 @@ after.** None of those programs is used by roma, the Launcher or any harness. Th
 stands in for `no-new-privileges` on roma's own uid. Enforced by
 `fence:image-strips-setuid-but-the-launcher`.
 
-**The egress gateway also gets `no-new-privileges`.** It runs as root only to read its token
-file, needs no capability and has no setuid program to run, so in compose.yaml it runs with
+**The egress gateway also gets `no-new-privileges`.** It runs as root because its token file
+is root's, and stays root — with no capability, so root there is a uid and nothing more. It
+needs no capability and has no setuid program to run, so in compose.yaml it runs with
 `cap_drop: [ALL]`, a read-only root and `no-new-privileges`.
 
 `verify-image.sh` §12 asks the built image, on the README's flags: the root mount is `ro`;
 the bounding set is exactly the six capabilities; the Launcher is the only setuid or setgid
 file; `node` writing the image's home fails with `EROFS`; and every path roma writes still
 takes a write.
+
+**Amended:** that left a run with seccomp turned off, with `/tmp` unable to execute a build,
+or with no limit on processes indistinguishable from the documented one. The README and
+compose.yaml now cap each container at 512 processes and spell out `nosuid,nodev` on every
+tmpfs, and §12 also asks: Docker's default seccomp filter is on; `pids.max` is 512; every
+tmpfs is `nosuid` and `nodev`; `/var/tmp` takes a write as `node` and `/run/roma-launch` as
+root; and a script in `/tmp` and in the work root runs. §7 asks the running gateway for
+`NoNewPrivs: 1`, a filter, and no effective capability. Enforced by
+`fence:documented-run-caps-processes` and `fence:documented-run-is-read-only`. 512 is a
+starting point that fifteen resident Sessions and their builds fit in, not a measured
+ceiling; memory is left to the Operator, who knows the host.
 
 ## Consequences
 
