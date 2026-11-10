@@ -177,6 +177,7 @@ export class Core {
   #interrupting = false
   readonly #notices = new Set<Promise<void>>()
   readonly #openings = new Map<string, Promise<void>>()
+  readonly #warning = new Set<string>()
 
   constructor({
     channel,
@@ -657,6 +658,7 @@ export class Core {
 
     let instruction: OutboundInstruction
     let running: RunningTask | null = null
+    let warned: string | null = null
     const attempts = new Attempts(this.#credential)
     try {
       const sessionId = this.#sessions.sessionFor(conversationKey)
@@ -696,6 +698,7 @@ export class Core {
       const contextPercent = this.#contextWarning(task, instruction)
       if (contextPercent !== null && instruction.kind === 'result') {
         instruction = { ...instruction, contextPercent }
+        warned = task.sessionId
       }
     } catch (error) {
       instruction = { kind: 'failure', ...address, reason: reasonFor(error) }
@@ -703,44 +706,49 @@ export class Core {
       if (running !== null) this.#running.delete(running)
     }
 
-    const answeredOn = attempts.answeredOn() ?? this.#credential
-    const durationMs = Date.now() - startedAt
-    const outcome = outcomeOf(instruction)
-    const cloudReach = this.#usedCloudReach(taskId)
-    const documentReach = this.#usedDocumentReach(taskId)
-    for (const credential of [
-      answeredOn,
-      ...attempts.credentials().filter((c) => c !== answeredOn),
-    ]) {
-      const paid = attempts.spentOn(credential)
-      if (credential !== answeredOn && !paid.costUsd && paid.compaction === null) continue
-      this.#audit.record({
-        ...(relay === null ? {} : { kind: 'relay' as const }),
-        taskId,
-        caller: message.caller,
-        callerName: message.callerName,
-        sessionId: running?.sessionId ?? null,
-        outcome,
-        costUsd: paid.costUsd,
-        durationMs,
-        turnMs: paid.turnMs,
-        credential,
-        runtime: EVERY_SESSION_RUNS_ON,
-        model: running?.model ?? this.#models.pinned,
-        effort: effortOn(
-          running?.model ?? this.#models.pinned,
-          running?.effort ?? this.#efforts.pinned,
-        ),
-        caveman: this.#cavemanOnRecord(running?.caveman ?? null),
-        outputTokens: paid.outputTokens,
-        cloudReach,
-        documentReach,
-        ...(paid.compaction === null ? {} : { compaction: paid.compaction }),
-        apiKeySource: attempts.apiKeySource(),
-      })
-    }
+    try {
+      const answeredOn = attempts.answeredOn() ?? this.#credential
+      const durationMs = Date.now() - startedAt
+      const outcome = outcomeOf(instruction)
+      const cloudReach = this.#usedCloudReach(taskId)
+      const documentReach = this.#usedDocumentReach(taskId)
+      for (const credential of [
+        answeredOn,
+        ...attempts.credentials().filter((c) => c !== answeredOn),
+      ]) {
+        const paid = attempts.spentOn(credential)
+        if (credential !== answeredOn && !paid.costUsd && paid.compaction === null) continue
+        this.#audit.record({
+          ...(relay === null ? {} : { kind: 'relay' as const }),
+          taskId,
+          caller: message.caller,
+          callerName: message.callerName,
+          sessionId: running?.sessionId ?? null,
+          outcome,
+          costUsd: paid.costUsd,
+          durationMs,
+          turnMs: paid.turnMs,
+          credential,
+          runtime: EVERY_SESSION_RUNS_ON,
+          model: running?.model ?? this.#models.pinned,
+          effort: effortOn(
+            running?.model ?? this.#models.pinned,
+            running?.effort ?? this.#efforts.pinned,
+          ),
+          caveman: this.#cavemanOnRecord(running?.caveman ?? null),
+          outputTokens: paid.outputTokens,
+          cloudReach,
+          documentReach,
+          ...(paid.compaction === null ? {} : { compaction: paid.compaction }),
+          apiKeySource: attempts.apiKeySource(),
+        })
+      }
 
-    await this.#answer(unanswered, instruction)
+      await this.#answer(unanswered, instruction)
+      if (warned !== null) this.#rememberWarned(warned)
+    } finally {
+      if (warned !== null) this.#warning.delete(warned)
+    }
   }
 
   #cavemanOnRecord(ranAt: string | null): string {
@@ -890,17 +898,30 @@ export class Core {
   }
 
   #contextWarning(task: RunningTask, instruction: OutboundInstruction): number | null {
-    const record = this.#workRoot.contextWarnedRecord(task.sessionId)
+    if (task.relay !== null || instruction.kind !== 'result') return null
+    const percent = nearlyFull(task.contextHeld, task.contextWindow)
+    if (percent === null || this.#warning.has(task.sessionId)) return null
     try {
-      if (task.attempts.compaction() !== null) this.#workRoot.forgetRecord(record)
-      if (task.relay !== null || instruction.kind !== 'result') return null
-      const percent = nearlyFull(task.contextHeld, task.contextWindow)
-      if (percent === null || this.#workRoot.readRecord(record) !== null) return null
-      this.#workRoot.writeRecord(record, String(percent))
-      return percent
+      if (this.#workRoot.readRecord(this.#workRoot.contextWarnedRecord(task.sessionId)) !== null) {
+        return null
+      }
     } catch {
       return null
     }
+    this.#warning.add(task.sessionId)
+    return percent
+  }
+
+  #rememberWarned(sessionId: string): void {
+    try {
+      this.#workRoot.writeRecord(this.#workRoot.contextWarnedRecord(sessionId), '')
+    } catch {}
+  }
+
+  #forgetWarned(sessionId: string): void {
+    try {
+      this.#workRoot.forgetRecord(this.#workRoot.contextWarnedRecord(sessionId))
+    } catch {}
   }
 
   #compactionFailed(task: RunningTask, code: string | null): void {
@@ -963,7 +984,10 @@ export class Core {
       const window = readSharedWindow(event)
       if (window !== null) attempts.saw(window)
       const compaction = readCompaction(event)
-      if (compaction !== null) attempts.compacted(compaction)
+      if (compaction !== null) {
+        attempts.compacted(compaction)
+        this.#forgetWarned(sessionId)
+      }
       const failed = readCompactionFailure(event)
       if (failed !== null) this.#compactionFailed(task, failed.code)
       const held = readContextHeld(event)

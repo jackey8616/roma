@@ -4372,6 +4372,58 @@ describe('a context that is nearly full', () => {
     expect(second.adapter.instructions.at(-1), why).not.toHaveProperty('contextPercent')
   })
 
+  it('remembers it said so only once the reply is delivered [fence:core-nearly-full-remembered-after-delivery]', async () => {
+    const why =
+      'The .context-warned record is written after the reply carrying the warning is ' +
+      'delivered (ADR-0040): written before, a reply the Channel failed to post marks a ' +
+      'warning nobody saw as given, and the next Task stays silent.'
+    const shared = newCore()
+    let refused = false
+    const delivered: OutboundInstruction[] = []
+    const core = coreOver(
+      shared,
+      channelThat((instruction) => {
+        if (!refused && instruction.kind === 'result' && instruction.contextPercent !== undefined) {
+          refused = true
+          return Promise.reject(new Error('the Channel is down'))
+        }
+        delivered.push(instruction)
+      }),
+    )
+    const say = async (text: string, events: readonly ClaudeEvent[]) => {
+      const task = core.handle(ingress(text))
+      task.catch(() => {})
+      await flush()
+      feed(shared.procFor(KEY), events)
+      await task.catch(() => {})
+    }
+
+    await say('hello', withContextHeld(OK, FULL))
+    await say('again', withContextHeld(OK, FULL + 10_000))
+
+    expect(refused).toBe(true)
+    expect(delivered.at(-1), why).toMatchObject({ kind: 'result', contextPercent: 86 })
+  })
+
+  it('forgets it said so the moment a Compaction is read, not when the Task ends [fence:core-nearly-full-reset-on-the-boundary]', async () => {
+    const why =
+      'The .context-warned record is removed as soon as a compact_boundary is read ' +
+      '(ADR-0040): a Task that compacts and then waits on the Shared Window may be cut ' +
+      'off by a restart, and a reset that waited for its ending would be lost.'
+    const { say, start, work } = newCore()
+    await say('hello', { events: withContextHeld(OK, FULL) })
+    const record = work.contextWarnedRecord(sessionIdFor(KEY))
+    expect(work.readRecord(record)).not.toBeNull()
+
+    const { task, proc } = await start('OK')
+    feed(proc, upToFirst(COMPACTED, 'system/compact_boundary'))
+    await flush()
+
+    expect(work.readRecord(record), why).toBeNull()
+    feed(proc, COMPACTED.slice(upToFirst(COMPACTED, 'system/compact_boundary').length))
+    await task
+  })
+
   it('says it again once a Compaction has emptied the context and it fills up again', async () => {
     const { adapter, say } = newCore()
 

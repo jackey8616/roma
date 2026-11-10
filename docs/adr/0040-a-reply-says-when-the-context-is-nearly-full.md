@@ -119,8 +119,20 @@ Re-read when the ADR-0007 pin moves, like the Relay list.
 
 Whether the warning was given is a record in the Work Root,
 `<sessionId>.context-warned`, beside `.opened`. A restart, an Eviction or a
-Reaping does not forget it; a Compaction removes it. Enforced by
+Reaping does not forget it. Enforced by
 `fence:core-nearly-full-survives-eviction`.
+
+Two rules about when that record changes, both found in review:
+
+- **It is written only after the reply carrying the warning is delivered.** If it
+  were written first, a reply the Channel failed to post would count as a warning
+  given, and the next Task would stay silent. While a warning is on its way, an
+  in-process set stops a second Task in the same Session from giving it again.
+  Enforced by `fence:core-nearly-full-remembered-after-delivery`.
+- **It is removed the moment a `compact_boundary` is read**, not when the Task
+  ends. A Task that compacts and then waits on the Shared Window can be cut off by
+  a restart, and a reset that waited for the Task to end would be lost. Enforced
+  by `fence:core-nearly-full-reset-on-the-boundary`.
 
 A Relay never carries the warning: `/compact` is the remedy, and a free Relay's
 reply is Claude Code's own.
