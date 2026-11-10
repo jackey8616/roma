@@ -101,6 +101,7 @@ interface Pending {
 }
 
 export class GatewayTransport implements Transport<DiscordEvent> {
+  readonly redelivers = false
   readonly #token: string
   readonly #url: string
   readonly #connect: ConnectGateway

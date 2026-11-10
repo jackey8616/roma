@@ -95,6 +95,11 @@ export type CoreLogRecord =
       readonly code: string | null
       readonly severity: Exclude<CompactionSeverity, 'benign'>
     }
+  | {
+      readonly event: 'task-interrupted'
+      readonly taskId: string
+      readonly conversationKey: string
+    }
 
 export type CoreLog = OperatorLog<CoreLogRecord>
 
@@ -118,6 +123,13 @@ export interface CoreOptions {
 
 type Resumption = 'reset' | 'overflow' | 'stopped'
 
+interface Unanswered {
+  readonly address: TaskAddress
+  readonly opened: Promise<void>
+  readonly reporter: ProgressReporter
+  interrupted: boolean
+}
+
 interface RunningTask extends TaskAddress {
   readonly sessionId: string
   readonly relay: RelayRequest | null
@@ -127,6 +139,7 @@ interface RunningTask extends TaskAddress {
   stopped: boolean
   toldContextFull: boolean
   readonly attempts: Attempts
+  readonly unanswered: Unanswered
   parked: Parked | null
 }
 
@@ -153,6 +166,7 @@ export class Core {
   readonly #usedDocumentReach: (taskId: string) => boolean
   readonly #log: CoreLog
   readonly #running = new Set<RunningTask>()
+  readonly #unanswered = new Set<Unanswered>()
   readonly #openings = new Map<string, Promise<void>>()
 
   constructor({
@@ -201,6 +215,34 @@ export class Core {
       return await this.#runFreeRelay(relay, message, opened)
     }
     return await this.#runTask(message, relay, opened)
+  }
+
+  async interrupt(): Promise<void> {
+    const cut = [...this.#unanswered].filter((unanswered) => !unanswered.interrupted)
+    for (const unanswered of cut) {
+      unanswered.interrupted = true
+      unanswered.reporter.stop()
+      const { taskId, conversationKey } = unanswered.address
+      this.#log({ event: 'task-interrupted', taskId, conversationKey })
+    }
+    await Promise.allSettled(
+      cut.map(({ address, opened }) =>
+        this.#deliverAfter(opened, { kind: 'interrupted', ...address }),
+      ),
+    )
+  }
+
+  #answering(address: TaskAddress, opened: Promise<void>, reporter: ProgressReporter): Unanswered {
+    const unanswered: Unanswered = { address, opened, reporter, interrupted: false }
+    this.#unanswered.add(unanswered)
+    return unanswered
+  }
+
+  async #answer(unanswered: Unanswered, instruction: OutboundInstruction): Promise<void> {
+    unanswered.reporter.stop()
+    this.#unanswered.delete(unanswered)
+    if (unanswered.interrupted && instruction.kind !== 'result') return
+    await this.#deliverAfter(unanswered.opened, instruction)
   }
 
   async #deliverAfter(
@@ -263,6 +305,7 @@ export class Core {
       updates: this.#channel.capabilities.messageMutation,
       deliver: (progress) => this.#deliverAfter(opened, { kind: 'progress', ...address, progress }),
     })
+    const unanswered = this.#answering(address, opened, reporter)
 
     let instruction: OutboundInstruction
     let session: string | null = null
@@ -322,8 +365,7 @@ export class Core {
       apiKeySource: null,
     })
 
-    reporter.stop()
-    await this.#deliverAfter(opened, instruction)
+    await this.#answer(unanswered, instruction)
   }
 
   async #runCommand(request: CommandRequest, message: IngressMessage): Promise<void> {
@@ -585,6 +627,7 @@ export class Core {
       updates: this.#channel.capabilities.messageMutation,
       deliver: (progress) => this.#deliverAfter(opened, { kind: 'progress', ...address, progress }),
     })
+    const unanswered = this.#answering(address, opened, reporter)
 
     let instruction: OutboundInstruction
     let running: RunningTask | null = null
@@ -600,6 +643,7 @@ export class Core {
         stopped: false,
         toldContextFull: false,
         attempts,
+        unanswered,
         parked: null,
         relay,
       }
@@ -664,8 +708,7 @@ export class Core {
       })
     }
 
-    reporter.stop()
-    await this.#deliverAfter(opened, instruction)
+    await this.#answer(unanswered, instruction)
   }
 
   #cavemanOnRecord(ranAt: string | null): string {
@@ -832,6 +875,7 @@ export class Core {
   }
 
   async #tell(task: RunningTask, instruction: OutboundInstruction): Promise<void> {
+    if (task.unanswered.interrupted) return
     try {
       await this.#deliverAfter(this.#openings.get(task.sessionId), instruction)
     } catch {}

@@ -14,6 +14,8 @@ import {
   REMEMBERED,
   RETRY_CEILING_MS,
   RETRY_FLOOR_MS,
+  THREAD_ARCHIVED,
+  THREAD_LOCKED,
 } from './discord-adapter.js'
 import { DiscordRefusal, MAX_BUTTONS, type DiscordButton } from './discord-api.js'
 import {
@@ -30,7 +32,7 @@ import {
   RECONNECT_CEILING_MS,
   RECONNECT_FLOOR_MS,
 } from './gateway-transport.js'
-import { MAX_TEXT, OVERFLOW_BUTTON } from './render.js'
+import { INTERRUPTED, MAX_TEXT, OVERFLOW_BUTTON } from './render.js'
 import { OVERFLOW_BUTTON as CHAT_OVERFLOW_BUTTON } from '../google-chat/render.js'
 import { FakeGatewayNetwork } from '../../../test/support/fake-gateway.js'
 import { recordedStream } from '../../../test/support/recorded-stream.js'
@@ -238,8 +240,16 @@ function to(
   return { ...outcome, taskId, conversationKey, caller, callerName }
 }
 
-function refusal(status: number, retryAfterMs: number | null = null): DiscordRefusal {
-  return new DiscordRefusal(`Discord answered ${status}`, status, retryAfterMs)
+function refusal(
+  status: number,
+  retryAfterMs: number | null = null,
+  code: number | null = null,
+): DiscordRefusal {
+  return new DiscordRefusal(`Discord answered ${status}`, status, retryAfterMs, code)
+}
+
+function locked(log: readonly DiscordLogRecord[]): readonly DiscordLogRecord[] {
+  return log.filter(({ event }) => event === 'conversation-locked')
 }
 
 function unopened(log: readonly DiscordLogRecord[]): readonly DiscordLogRecord[] {
@@ -2121,4 +2131,87 @@ function flushed(): Promise<void> {
 
 afterEach(() => {
   vi.useRealTimers()
+})
+
+describe('a thread a moderator locked', () => {
+  it('says so to the operator, naming the Conversation it can no longer reach [fence:discord-locked-thread-surfaces]', async () => {
+    const why =
+      'An outcome Discord refuses because the thread is locked must be logged as ' +
+      'conversation-locked, with the Conversation Key and the Task (ADR-0039). The Conversation ' +
+      'cannot be told, so the Operator Log is the only place the fact can exist; without it, ' +
+      '"roma has stopped answering in this one thread" has no cause anybody can find (#172).'
+    const channel = await messaged(addressed({ channel_id: THREAD }))
+    channel.api.failEvery('post', refusal(403, null, THREAD_LOCKED))
+
+    await expect(
+      channel.adapter.deliver(to(THREAD, { kind: 'result', text: 'the answer' })),
+      why,
+    ).rejects.toThrow(/403/)
+
+    expect(locked(channel.log), why).toEqual([
+      {
+        event: 'conversation-locked',
+        conversationKey: THREAD,
+        channel: THREAD,
+        taskId: 'task-1',
+        kind: 'result',
+        code: THREAD_LOCKED,
+      },
+    ])
+  })
+
+  it('says so for a thread that is archived and cannot be opened again by posting', async () => {
+    const channel = await messaged(addressed({ channel_id: THREAD }))
+    channel.api.failEvery('post', refusal(400, null, THREAD_ARCHIVED))
+
+    await expect(
+      channel.adapter.deliver(to(THREAD, { kind: 'failure', reason: 'it broke' })),
+    ).rejects.toThrow()
+
+    expect(locked(channel.log)).toMatchObject([{ kind: 'failure', code: THREAD_ARCHIVED }])
+  })
+
+  it('does not try again a post into a thread that is locked', async () => {
+    const channel = await messaged(addressed({ channel_id: THREAD }))
+    channel.api.failEvery('post', refusal(403, null, THREAD_LOCKED))
+
+    await expect(
+      channel.adapter.deliver(to(THREAD, { kind: 'result', text: 'the answer' })),
+    ).rejects.toThrow()
+
+    expect(channel.api.calls.filter((call) => call === 'post')).toHaveLength(1)
+  })
+
+  it('says nothing of a refusal that is not about the thread', async () => {
+    const channel = await messaged(addressed({ channel_id: THREAD }))
+    channel.api.failEvery('post', refusal(403))
+
+    await expect(
+      channel.adapter.deliver(to(THREAD, { kind: 'result', text: 'the answer' })),
+    ).rejects.toThrow()
+
+    expect(locked(channel.log)).toEqual([])
+  })
+
+  it('says nothing for an acknowledgement, which the outcome after it will say for', async () => {
+    const channel = await messaged(addressed({ channel_id: THREAD }))
+    channel.api.failEvery('post', refusal(403, null, THREAD_LOCKED))
+
+    await expect(
+      channel.adapter.deliver(to(THREAD, { kind: 'progress', progress: { phase: 'working' } })),
+    ).rejects.toThrow()
+
+    expect(locked(channel.log)).toEqual([])
+  })
+})
+
+describe('a Task roma was restarted out of', () => {
+  it('is told to send it again, as the reply to what it asked', async () => {
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, { kind: 'interrupted' }))
+
+    expect(channel.api.texts).toEqual([INTERRUPTED])
+    expect(channel.api.messages[0]?.posted.replyTo).toBe(MESSAGE)
+  })
 })

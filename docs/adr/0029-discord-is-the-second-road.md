@@ -408,7 +408,8 @@ it is the one unverified reading a decision here actually rests on.
 - **A thread a moderator locks is a Conversation roma can never reach again.**
   Sending unarchives *"unless the thread has been locked by a moderator"*, and the
   key names a place roma may no longer speak in. There is no second entrance, and
-  today the fact has nowhere to surface — #172.
+  today the fact has nowhere to surface — #172. **Amended by ADR-0039**: it surfaces
+  in the Operator Log as `conversation-locked`.
 - **A forwarded message has no author here.** `message_snapshots` excludes it, so
   `Quotation.author` and `PendingEnclosure.from` are `null` on every Discord
   forward — and ADR-0021's distinction between *"the screenshot Ada sent"* and
@@ -440,7 +441,7 @@ it is the one unverified reading a decision here actually rests on.
   429s count toward the *"10,000 per 10 minutes"* invalid-request limit, whose
   penalty is not scoped to the channel that caused it. ADR-0028 moved the retry
   into `deliver()`; this is the constraint that retry inherits, and it has no
-  counterpart on Chat, whose Adapter retries nothing. Three attempts, because
+  counterpart on Chat, whose Adapter retried nothing until ADR-0039. Three attempts, because
   what the retry repairs is a blip — a 503 while Discord moves something, or a
   bucket roma shares with itself during a split answer — and a fault that
   survives three, spread over a wait Discord named, is not transient. Enforced by

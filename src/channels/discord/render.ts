@@ -26,6 +26,8 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
       return split(instruction.text, MAX_TEXT)
     case 'stopped':
       return ['Stopped.']
+    case 'interrupted':
+      return [INTERRUPTED]
     case 'command-outcome':
       return [commandText(instruction.command, instruction.carriedOut)]
     case 'blocked':
@@ -45,6 +47,9 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
       ]
   }
 }
+
+export const INTERRUPTED =
+  'roma was restarted before it could finish this task. Send it again once roma is back.'
 
 export function threadName(text: string): string {
   const [first = ''] = text.trim().split('\n')

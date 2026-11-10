@@ -17,12 +17,19 @@ export const MAX_BUTTONS = 25
 export class DiscordRefusal extends Error {
   readonly status: number
   readonly retryAfterMs: number | null
+  readonly code: number | null
 
-  constructor(message: string, status: number, retryAfterMs: number | null = null) {
+  constructor(
+    message: string,
+    status: number,
+    retryAfterMs: number | null = null,
+    code: number | null = null,
+  ) {
     super(message)
     this.name = 'DiscordRefusal'
     this.status = status
     this.retryAfterMs = retryAfterMs
+    this.code = code
   }
 }
 

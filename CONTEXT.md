@@ -19,7 +19,8 @@ each one. Distinct from a Channel: Pub/Sub is a Transport and Google Chat is a
 Channel that publishes to it, and more than one Channel can share one.
 **Not necessarily a queue** — Discord's Gateway is a socket roma holds open, and
 what a Transport owes is the events and a way to stop, never durability
-(ADR-0028).
+(ADR-0028). It does say whether it redelivers, because shutdown tells a Task it is
+interrupted only where nothing will deliver it again (ADR-0039).
 _Avoid_: using this word for a Channel, and calling this a queue
 
 **Delivery**:

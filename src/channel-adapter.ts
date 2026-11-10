@@ -83,6 +83,9 @@ export type OutboundInstruction = TaskAddress &
         readonly kind: 'stopped'
       }
     | {
+        readonly kind: 'interrupted'
+      }
+    | {
         readonly kind: 'command-outcome'
         readonly command: Exclude<Command, 'model'>
         readonly carriedOut: boolean

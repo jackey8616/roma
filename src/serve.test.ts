@@ -56,14 +56,16 @@ class RefusingTransport extends FakeTransport {
 interface BootOptions {
   overflow?: boolean
   channels?: number
+  redelivers?: boolean
+  interruptWindowMs?: number
 }
 
-function boot({ overflow = true, channels = 1 }: BootOptions = {}) {
+function boot({ overflow = true, channels = 1, redelivers, interruptWindowMs }: BootOptions = {}) {
   const fixture = romaFixture('serve')
   fixtures.push(fixture)
   const bound = Array.from({ length: channels }, () => ({
     channel: new RecordingAdapter(),
-    transport: new RefusingTransport(),
+    transport: new RefusingTransport(redelivers === undefined ? {} : { redelivers }),
   }))
   const log: IngressLogRecord[] = []
 
@@ -80,6 +82,7 @@ function boot({ overflow = true, channels = 1 }: BootOptions = {}) {
     launcher: fixture.launcher,
     log: ingressOnly(log),
     selfCheckTimeoutMs: 1_000,
+    ...(interruptWindowMs === undefined ? {} : { interruptWindowMs }),
   }).then((roma) => {
     resolved = true
     running.push(roma)
@@ -541,5 +544,125 @@ describe('shutting down', () => {
 
     await expect((await roma.serving).shutdown()).rejects.toThrow('the queue is unreachable')
     expect(proc.signals).toContain('SIGTERM')
+  })
+})
+
+describe('shutting down where nothing can be handed back', () => {
+  function outcomesOf(channel: RecordingAdapter): string[] {
+    return channel.instructions.filter(({ kind }) => kind !== 'progress').map(({ kind }) => kind)
+  }
+
+  it('tells every Task it is about to kill, before it kills it [fence:serve-shutdown-tells-what-it-cannot-hand-back]', async () => {
+    const why =
+      'On a Transport that cannot redeliver, shutdown must tell each Conversation whose Task ' +
+      'it is killing that it was interrupted, before the Sessions end (ADR-0039). The ' +
+      'hand-back that protects a Pub/Sub Task is a no-op here, so without this the person ' +
+      'is left watching an Acknowledgement that will never be edited again (#171).'
+    const roma = await booted({ redelivers: false })
+    const order: string[] = []
+
+    const delivered = roma.transport.deliver(said('hello'), 'm-1')
+    await flush()
+    const proc = roma.procFor()
+    proc.onExit(() => order.push('session ended'))
+    const deliver = roma.channel.deliver.bind(roma.channel)
+    roma.channel.deliver = (instruction) => {
+      if (instruction.kind === 'interrupted') order.push('told')
+      return deliver(instruction)
+    }
+
+    await (await roma.serving).shutdown()
+    await delivered
+
+    expect(roma.channel.instructions.at(-1), why).toMatchObject({
+      kind: 'interrupted',
+      conversationKey: KEY,
+      caller: 'ada',
+    })
+    expect(order, why).toEqual(['told', 'session ended'])
+  })
+
+  it('tells it once, and not that it failed as well [fence:serve-interrupted-is-the-last-word]', async () => {
+    const why =
+      'A Task told it was interrupted must not then be told it failed (ADR-0039). The Turn ' +
+      'fails only because shutdown killed it, so "roma could not run this Task" after ' +
+      '"send it again" contradicts the one instruction the person can act on (#171).'
+    const roma = await booted({ redelivers: false })
+
+    const delivered = roma.transport.deliver(said('hello'), 'm-1')
+    await flush()
+
+    await (await roma.serving).shutdown()
+    await delivered
+    await flush()
+
+    expect(outcomesOf(roma.channel), why).toEqual(['result', 'interrupted'])
+  })
+
+  it('tells a Task still waiting in the queue too', async () => {
+    const roma = await booted({ redelivers: false })
+
+    const delivered = ['one', 'two', 'three', 'four'].map((key, at) =>
+      roma.transport.deliver(said('hello', key), `m-${at}`),
+    )
+    await flush()
+
+    await (await roma.serving).shutdown()
+    void Promise.allSettled(delivered)
+
+    const interrupted = roma.channel.instructions
+      .filter(({ kind }) => kind === 'interrupted')
+      .map(({ conversationKey }) => conversationKey)
+    expect(interrupted.sort()).toEqual(['four', 'one', 'three', 'two'])
+  })
+
+  it('tells nothing to a Task that had already been answered', async () => {
+    const roma = await booted({ redelivers: false })
+
+    const delivered = roma.transport.deliver(said('hello'), 'm-1')
+    await flush()
+    feed(roma.procFor(), OK)
+    await delivered
+
+    await (await roma.serving).shutdown()
+
+    expect(outcomesOf(roma.channel)).toEqual(['result', 'result'])
+  })
+
+  it('says nothing where the queue will deliver the Task again [fence:serve-shutdown-silent-where-redelivered]', async () => {
+    const why =
+      'On a Transport that redelivers, shutdown must not tell a Task it was interrupted ' +
+      '(ADR-0028, ADR-0039). The hand-back means whatever starts next runs it again and ' +
+      'answers it; "send it again" there asks the person to make a second copy of a request ' +
+      'the queue is already holding.'
+    const roma = await booted({ redelivers: true })
+
+    const delivered = roma.transport.deliver(said('hello'), 'm-1')
+    await flush()
+
+    await (await roma.serving).shutdown()
+    await delivered
+
+    expect(outcomesOf(roma.channel), why).not.toContain('interrupted')
+    expect(roma.transport.nacked, why).toEqual(['m-1'])
+  })
+
+  it('waits only so long for the telling before it goes on stopping [fence:serve-interrupt-bounded]', async () => {
+    const why =
+      'Telling interrupted Tasks must be bounded by interruptWindowMs (ADR-0039). A Channel ' +
+      'that cannot be reached would otherwise hold shutdown open until the platform kills ' +
+      'roma outright, Sessions and all, and the deploy waits on a post nobody can make (#171).'
+    const roma = await booted({ redelivers: false, interruptWindowMs: 50 })
+    roma.channel.hold('interrupted')
+
+    const delivered = roma.transport.deliver(said('hello'), 'm-1')
+    await flush()
+    const serving = await roma.serving
+
+    await serving.shutdown()
+    await delivered
+
+    expect(roma.transport.closed, why).toBe(true)
+    expect(roma.log, why).toContainEqual({ event: 'ingress-interrupt-unfinished', windowMs: 50 })
   })
 })

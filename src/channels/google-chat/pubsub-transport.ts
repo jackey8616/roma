@@ -37,6 +37,7 @@ export interface PubSubTransportOptions {
 }
 
 export class PubSubTransport implements Transport<ChatEvent> {
+  readonly redelivers = true
   readonly #subscription: PubSubSubscription
   readonly #log: OperatorLog<PubSubLogRecord>
 

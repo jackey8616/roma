@@ -1,4 +1,4 @@
-import type { ChatAction, ChatApi, ChatMessage } from './chat-api.js'
+import { ChatRefusal, type ChatAction, type ChatApi, type ChatMessage } from './chat-api.js'
 
 export const CHAT_API = 'https://chat.googleapis.com/v1'
 
@@ -29,8 +29,11 @@ export class HttpChatApi implements ChatApi {
   }
 
   async post(message: ChatMessage): Promise<string> {
-    const query =
-      message.replyOption === undefined ? '' : `?messageReplyOption=${message.replyOption}`
+    const parameters = new URLSearchParams({
+      ...(message.replyOption === undefined ? {} : { messageReplyOption: message.replyOption }),
+      ...(message.requestId === undefined ? {} : { requestId: message.requestId }),
+    }).toString()
+    const query = parameters === '' ? '' : `?${parameters}`
     const answer = await this.#send({
       method: 'POST',
       url: `${CHAT_API}/${message.space}/messages${query}`,
@@ -93,4 +96,50 @@ function nameOf(answer: unknown): string | null {
   if (typeof answer !== 'object' || answer === null) return null
   const name = (answer as { name?: unknown }).name
   return typeof name === 'string' && name !== '' ? name : null
+}
+
+export function refusalOf(error: unknown): unknown {
+  if (typeof error !== 'object' || error === null) return error
+  const { response, message } = error as { response?: unknown; message?: unknown }
+  const said = typeof message === 'string' ? message : 'Chat could not be reached'
+  if (typeof response !== 'object' || response === null) {
+    return isUnanswered(error) ? new ChatRefusal(said, null) : error
+  }
+  const { status, headers } = response as { status?: unknown; headers?: unknown }
+  if (typeof status !== 'number') return error
+  const seconds = asSeconds(headerOf(headers, 'retry-after'))
+  return new ChatRefusal(
+    `Chat answered ${status}: ${said}`,
+    status,
+    seconds === null ? null : Math.round(seconds * 1000),
+  )
+}
+
+const UNANSWERED = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EPIPE',
+  'EAI_AGAIN',
+  'ENOTFOUND',
+  'UND_ERR_SOCKET',
+  'UND_ERR_CONNECT_TIMEOUT',
+])
+
+function isUnanswered(error: object): boolean {
+  const { code } = error as { code?: unknown }
+  return typeof code === 'string' && UNANSWERED.has(code)
+}
+
+function headerOf(headers: unknown, name: string): string | null {
+  if (headers instanceof Headers) return headers.get(name)
+  if (typeof headers !== 'object' || headers === null) return null
+  const value = (headers as Record<string, unknown>)[name]
+  return typeof value === 'string' ? value : null
+}
+
+function asSeconds(header: string | null): number | null {
+  if (header === null || header.trim() === '') return null
+  const seconds = Number(header)
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : null
 }

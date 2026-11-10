@@ -25,7 +25,19 @@ export const RETRY_CEILING_MS = 30_000
 
 export const REMEMBERED = 1_000
 
-const ENDS_THE_TASK = new Set(['result', 'failure', 'stopped', 'command-outcome', 'choice'])
+export const THREAD_LOCKED = 160005
+export const THREAD_ARCHIVED = 50083
+
+const CLOSED_TO_ROMA = new Set([THREAD_LOCKED, THREAD_ARCHIVED])
+
+const ENDS_THE_TASK = new Set([
+  'result',
+  'failure',
+  'stopped',
+  'interrupted',
+  'command-outcome',
+  'choice',
+])
 
 interface Answering {
   readonly channel: string
@@ -39,11 +51,20 @@ interface Answered {
   place: Promise<string> | null
 }
 
-export type DiscordAdapterLogRecord = {
-  readonly event: 'thread-unopened'
-  readonly channel: string
-  readonly status: number
-}
+export type DiscordAdapterLogRecord =
+  | {
+      readonly event: 'thread-unopened'
+      readonly channel: string
+      readonly status: number
+    }
+  | {
+      readonly event: 'conversation-locked'
+      readonly conversationKey: string
+      readonly channel: string
+      readonly taskId: string
+      readonly kind: OutboundInstruction['kind']
+      readonly code: number
+    }
 
 export interface DiscordAdapterOptions {
   readonly api: DiscordApi
@@ -107,14 +128,28 @@ export class DiscordAdapter implements ChannelAdapter<DiscordEvent> {
     for (const [at, text] of messages.entries()) {
       const replyTo = at === 0 ? answering.replyTo : null
       const last = at === messages.length - 1
-      await this.#retrying(() =>
-        this.#api.post({
-          channel: answering.channel,
-          text,
-          replyTo,
-          buttons: last ? buttons : [],
-        }),
-      )
+      try {
+        await this.#retrying(() =>
+          this.#api.post({
+            channel: answering.channel,
+            text,
+            replyTo,
+            buttons: last ? buttons : [],
+          }),
+        )
+      } catch (error) {
+        if (closedToRoma(error)) {
+          this.#log({
+            event: 'conversation-locked',
+            conversationKey,
+            channel: answering.channel,
+            taskId,
+            kind: instruction.kind,
+            code: error.code,
+          })
+        }
+        throw error
+      }
     }
   }
 
@@ -219,6 +254,10 @@ function choiceButtons(
 
 function refused(error: unknown): error is DiscordRefusal {
   return error instanceof DiscordRefusal && error.status !== 429 && error.status < 500
+}
+
+function closedToRoma(error: unknown): error is DiscordRefusal & { readonly code: number } {
+  return error instanceof DiscordRefusal && error.code !== null && CLOSED_TO_ROMA.has(error.code)
 }
 
 function waitBefore(error: unknown, attempt: number): number | null {

@@ -8,6 +8,7 @@ import { GoogleChatAdapter } from './google-chat-adapter.js'
 import {
   CHAT_SCOPE,
   HttpChatApi,
+  refusalOf,
   type DownloadChatMedia,
   type SendChatRequest,
 } from './http-chat-api.js'
@@ -21,8 +22,12 @@ export async function googleChatBinding(chat: ChatEnv, log: ChatLog): Promise<Ch
   const auth = new GoogleAuth({ scopes: [CHAT_SCOPE] })
   const client = await auth.getClient()
   const send: SendChatRequest = async ({ method, url, body }) => {
-    const response = await client.request({ url, method, data: body })
-    return response.data
+    try {
+      const response = await client.request({ url, method, data: body })
+      return response.data
+    } catch (error) {
+      throw refusalOf(error)
+    }
   }
   const download: DownloadChatMedia = async (url) => {
     const response = await client.request({ url, method: 'GET', responseType: 'arraybuffer' })

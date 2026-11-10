@@ -10,6 +10,7 @@ export interface Delivery<Event = unknown> {
 export type Receiver<Event = unknown> = (delivery: Delivery<Event>) => Promise<void>
 
 export interface Transport<Event = unknown> {
+  readonly redelivers: boolean
   receive(receiver: Receiver<Event>): Promise<void>
   close(): Promise<void>
 }

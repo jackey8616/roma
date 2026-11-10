@@ -33,6 +33,10 @@ export type IngressLogRecord =
       readonly reason: string
     }
   | {
+      readonly event: 'ingress-interrupt-unfinished'
+      readonly windowMs: number
+    }
+  | {
       readonly event: 'ingress-unsettled'
       readonly deliveryId: string
       readonly settle: Settle
@@ -60,8 +64,11 @@ export interface BoundChannel {
 
 export interface Receiving {
   stop(): void
+  interrupt(): Promise<void>
   close(): Promise<void>
 }
+
+export const INTERRUPT_WINDOW_MS = 10_000
 
 export function bind<Event>(
   channel: ChannelAdapter<Event>,
@@ -75,7 +82,11 @@ export function bind<Event>(
         receive: async (log) => {
           const ingress = new Ingress<Event>({ core, channel, log })
           await transport.receive((delivery) => ingress.take(delivery))
-          return { stop: () => ingress.stop(), close: () => transport.close() }
+          return {
+            stop: () => ingress.stop(),
+            interrupt: () => (transport.redelivers ? Promise.resolve() : core.interrupt()),
+            close: () => transport.close(),
+          }
         },
       }
     },
@@ -84,6 +95,7 @@ export function bind<Event>(
 
 export interface ServeOptions extends Omit<StartRomaOptions, 'log'> {
   readonly log?: ServeLog
+  readonly interruptWindowMs?: number
 }
 
 export interface Serving extends Roma {
@@ -91,7 +103,7 @@ export interface Serving extends Roma {
 }
 
 export async function serve(options: ServeOptions): Promise<Serving> {
-  const { log = writeToStderr, ...startOptions } = options
+  const { log = writeToStderr, interruptWindowMs = INTERRUPT_WINDOW_MS, ...startOptions } = options
   const roma = await startRoma({ ...startOptions, log })
 
   const receiving: Receiving[] = []
@@ -107,6 +119,11 @@ export async function serve(options: ServeOptions): Promise<Serving> {
     ...roma,
     shutdown: async () => {
       for (const channel of receiving) channel.stop()
+      const told = await within(
+        interruptWindowMs,
+        Promise.allSettled(receiving.map((channel) => channel.interrupt())),
+      )
+      if (!told) log({ event: 'ingress-interrupt-unfinished', windowMs: interruptWindowMs })
       const closed = await Promise.allSettled(receiving.map((channel) => channel.close()))
       await roma.shutdown()
       for (const closing of closed) {
@@ -114,6 +131,15 @@ export async function serve(options: ServeOptions): Promise<Serving> {
       }
     },
   }
+}
+
+function within(ms: number, work: Promise<unknown>): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined
+  const expired = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms)
+    timer.unref?.()
+  })
+  return Promise.race([work.then(() => true), expired]).finally(() => clearTimeout(timer))
 }
 
 interface IngressOptions<Event> {
