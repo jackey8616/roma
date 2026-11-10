@@ -38,6 +38,6 @@
     "@google-cloud/pubsub": "6.4.1",
     "google-auth-library": "^10.9.1",
     "https-proxy-agent": "7.0.6",
-    "undici": "6.25.0"
+    "undici": "6.29.1"
   }
 }
