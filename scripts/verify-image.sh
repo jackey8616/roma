@@ -19,6 +19,16 @@ image="${1:?usage: scripts/verify-image.sh <image ref>}"
 # §5, §6, §9, §10 and §11 run on exactly these, so a list one short fails here first.
 minimum_caps=(--cap-drop=ALL --cap-add=SETUID --cap-add=SETGID --cap-add=CHOWN --cap-add=FOWNER --cap-add=KILL --cap-add=DAC_OVERRIDE)
 
+# The read-only root README.md runs roma on, with tmpfs at exactly the paths roma
+# and the Launcher write (ADR-0038). The two anonymous volumes stand in for the
+# Operator's durable audit and Claude config volumes. §5, §6, §9, §10, §11 and
+# §12 run on it, so a path roma starts writing that is missing here fails first.
+read_only_root=(--read-only
+  --tmpfs /tmp:exec,mode=1777 --tmpfs /var/tmp:mode=1777
+  --tmpfs /run/roma:uid=1000,gid=1000,mode=0711 --tmpfs /run/roma-launch:mode=0755
+  --tmpfs /var/lib/roma/work:exec,uid=1000,gid=1000,mode=0711
+  -v /var/lib/roma/audit -v /var/lib/roma/claude)
+
 # ---------------------------------------------------------------------------
 # 1. The Claude Code in the image is the one the image says it carries.
 #
@@ -184,7 +194,7 @@ contained_flags=(--disable-sigusr1)
 containment() {
   # $1: the `docker run` user, or empty for the image's own. $2...: node flags.
   local user="$1"; shift
-  docker run --rm -i ${user:+--user "${user}"} "${minimum_caps[@]}" \
+  docker run --rm -i ${user:+--user "${user}"} "${minimum_caps[@]}" "${read_only_root[@]}" \
     -e ROMA_OVERFLOW_API_KEY=FAKE-CANARY-ROMA-ENV \
     --entrypoint node "${image}" "$@" --input-type=module - < "${harness}"
 }
@@ -236,7 +246,7 @@ i2() {
   # $1: mode. The contained run starts as the image's own user, root, as roma does.
   local user=''
   [ "$1" = control ] && user=node
-  docker run --rm -i ${user:+--user "${user}"} "${minimum_caps[@]}" --entrypoint node "${image}" \
+  docker run --rm -i ${user:+--user "${user}"} "${minimum_caps[@]}" "${read_only_root[@]}" --entrypoint node "${image}" \
     --disable-sigusr1 --input-type=module - "$1" < "${proxy_harness}"
 }
 
@@ -292,7 +302,10 @@ chmod 0644 "${egress_dir}/egress.token"
 
 docker network create --internal "${egress_tag}-inside" >/dev/null
 docker network create "${egress_tag}-outside" >/dev/null
-docker run -d --name "${egress_tag}-gateway" --network "${egress_tag}-outside" --user node \
+# As compose.yaml runs it: root, with no capability, no-new-privileges and a
+# read-only root (ADR-0038).
+gateway_hardening=(--read-only --cap-drop=ALL --security-opt no-new-privileges)
+docker run -d --name "${egress_tag}-gateway" --network "${egress_tag}-outside" "${gateway_hardening[@]}" \
   -v "${egress_dir}/egress.token:/run/secrets/egress.token:ro" \
   -e ROMA_EGRESS_TOKEN_FILE=/run/secrets/egress.token \
   --entrypoint node "${image}" /app/dist/egress/gateway.js >/dev/null
@@ -422,7 +435,7 @@ isolation_checks=(
   work-dir-read enclosure-read transcript-read tmp-read
   work-dir-write transcript-write environ-read signal shim-claim
 )
-isolation="$(docker run --rm -i --network none "${minimum_caps[@]}" \
+isolation="$(docker run --rm -i --network none "${minimum_caps[@]}" "${read_only_root[@]}" \
   --entrypoint node "${image}" --disable-sigusr1 --input-type=module - \
   < "$(dirname "$0")/isolation-harness.mjs")"
 
@@ -442,7 +455,7 @@ echo "one Session's agent reaches nothing of another's, which its own agent does
 # root's, and that Enclosures and the reclaim stay inside the Session. Every
 # line must be PASS.
 # ---------------------------------------------------------------------------
-launcher="$(docker run --rm -i --network none "${minimum_caps[@]}" --entrypoint sh "${image}" -s \
+launcher="$(docker run --rm -i --network none "${minimum_caps[@]}" "${read_only_root[@]}" --entrypoint sh "${image}" -s \
   < "$(dirname "$0")/launcher-harness.sh" 2>&1)" || {
   echo "the Launcher harness failed:" >&2
   echo "${launcher}" >&2
@@ -470,7 +483,8 @@ echo "the Launcher refuses everyone but roma and empties a Seat before it is reu
 # ---------------------------------------------------------------------------
 audit_checks=(audit-read audit-append audit-rewrite audit-new-month audit-delete audit-swap)
 audit_run() {
-  docker run --rm -i --network none "${minimum_caps[@]}" \
+  # /srv is a tmpfs so that `exposed` can make /srv/shared a plain directory, not a mount.
+  docker run --rm -i --network none "${minimum_caps[@]}" "${read_only_root[@]}" --tmpfs /srv \
     --entrypoint node "${image}" --disable-sigusr1 --input-type=module - "$@" \
     < "$(dirname "$0")/audit-harness.mjs"
 }
@@ -486,3 +500,40 @@ done
 expect_line sealed "${audit_sealed}" 'ledger intact'
 expect_line exposed "${audit_exposed}" 'audit refused'
 echo "no Seat reaches the Audit Records, which roma itself does"
+
+# ---------------------------------------------------------------------------
+# 12. The documented run is hardened, and the image has nothing left to climb.
+#
+# GHSA-g6cx-6wcm-4hqw, ADR-0038. On the README's flags the root filesystem is
+# read-only, the bounding set is exactly the six capabilities the Launcher needs,
+# and the Launcher is the only setuid or setgid file in the image. As node, the
+# image's home is refused with EROFS rather than by a permission, which is what
+# says the read-only root is doing it, and every path roma writes still takes a
+# write. Container-wide no-new-privileges is deliberately absent: the Launcher is
+# setuid and would be voided; it sets no_new_privs on every Runtime instead,
+# which §10's runs-with-no-new-privs proves.
+# ---------------------------------------------------------------------------
+hardened="$(docker run --rm "${minimum_caps[@]}" "${read_only_root[@]}" --entrypoint sh "${image}" -c '
+  awk '\''$5 == "/" { split($6, o, ","); print "root-mount " o[1] }'\'' /proc/self/mountinfo
+  grep -E "^CapBnd:" /proc/self/status | tr -s "\t " " "
+  find / -xdev -type f -perm /6000 -printf "privileged %m %u:%g %p\n"
+  setpriv --reuid=node --regid=node --clear-groups sh -c "
+    touch /home/node/.probe 2>&1 | grep -q \"Read-only file system\" && echo \"home EROFS\"
+    for d in /tmp /var/lib/roma/work /run/roma /var/lib/roma/audit /var/lib/roma/claude; do
+      touch \"\$d/.probe\" && rm \"\$d/.probe\" && echo \"writable \$d\"
+    done"
+' 2>&1)"
+
+expect_line hardened "${hardened}" 'root-mount ro'
+expect_line hardened "${hardened}" 'CapBnd: 00000000000000eb'
+expect_line hardened "${hardened}" 'privileged 4750 root:node /usr/local/libexec/roma-launch'
+if [ "$(printf '%s\n' "${hardened}" | grep -c '^privileged ')" -ne 1 ]; then
+  echo "the image carries setuid or setgid files besides the Launcher:" >&2
+  echo "${hardened}" >&2
+  exit 1
+fi
+expect_line hardened "${hardened}" 'home EROFS'
+for d in /tmp /var/lib/roma/work /run/roma /var/lib/roma/audit /var/lib/roma/claude; do
+  expect_line hardened "${hardened}" "writable ${d}"
+done
+echo "the documented run has a read-only root, six capabilities, and no setuid file but the Launcher"

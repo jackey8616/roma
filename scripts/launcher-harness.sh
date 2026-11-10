@@ -11,7 +11,7 @@ L=/usr/local/libexec/roma-launch
 WORK=/var/lib/roma/work
 CONFIG=/var/lib/roma/claude
 SHIM=/run/roma
-REPORT=/root/report
+REPORT=/run/roma-launch/report
 AS_NODE='setpriv --reuid=node --regid=node --clear-groups'
 LEGACY=11111111-1111-4111-8111-111111111111
 FIRST=22222222-2222-4222-8222-222222222222

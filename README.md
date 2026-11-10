@@ -90,6 +90,12 @@ in it — and the image runs `node dist/channels/main.js` under `npm ci --omit=d
 
 ```bash
 docker run --rm \
+  --cap-drop=ALL --cap-add=SETUID --cap-add=SETGID --cap-add=CHOWN \
+  --cap-add=FOWNER --cap-add=KILL --cap-add=DAC_OVERRIDE \
+  --read-only \
+  --tmpfs /tmp:exec,mode=1777 --tmpfs /var/tmp:mode=1777 \
+  --tmpfs /run/roma:uid=1000,gid=1000,mode=0711 --tmpfs /run/roma-launch:mode=0755 \
+  --tmpfs /var/lib/roma/work:exec,uid=1000,gid=1000,mode=0711 \
   -e CLAUDE_CODE_OAUTH_TOKEN -e ROMA_PUBSUB_PROJECT_ID -e ROMA_PUBSUB_SUBSCRIPTION \
   -e ROMA_AUDIT_ROOT=/var/lib/roma/audit \
   -e ROMA_CLAUDE_CONFIG_DIR=/var/lib/roma/claude \
@@ -108,10 +114,17 @@ that the agent can open neither the key files nor roma's `/proc`, and roma check
 refuses to start if either does not hold (ADR-0032). Each agent then runs as a Seat — a uid
 of its own, leased while its Session is resident — through the image's setuid Launcher, so
 no agent reaches another's Working Directory, Enclosures or Transcript (ADR-0036). So do not
-add `--user`: roma refuses to start without root. If you run with `--cap-drop=ALL`, add back
-`--cap-add=SETUID --cap-add=SETGID --cap-add=CHOWN --cap-add=FOWNER --cap-add=KILL
---cap-add=DAC_OVERRIDE`, which the drop and the Launcher need; roma itself holds none of them
-once it is `node`.
+add `--user`: roma refuses to start without root.
+
+The flags above the environment are hardening, and the image is proved on exactly them
+(ADR-0038). `--cap-drop=ALL` keeps only the six capabilities the drop and the Launcher need;
+roma itself holds none of them once it is `node`. `--read-only` leaves writable only what is
+mounted: the two volumes, and tmpfs at the five paths roma and the Launcher write. The work
+root is tmpfs here because losing it is by design; mount a volume there instead if
+repositories are too large for memory or should outlive the container. **Do not add
+`--security-opt no-new-privileges`**: it voids the setuid Launcher and every agent would
+fail to start. The Launcher sets `no_new_privs` on each agent itself, and it is the only
+setuid program left in the image.
 
 Add two more to give the agent a Cloud Reach — the identity it acts as in Google Cloud. Most
 deployments have none and are unaffected; see `ROMA_CLOUD_KEY_FILE` below and

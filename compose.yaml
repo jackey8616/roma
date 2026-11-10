@@ -32,7 +32,10 @@
 #     owned by root, like the App's key.
 #
 # The gateway reads the same token file. It runs as root only to read it; it
-# has no agent beside it.
+# has no agent beside it, and needs no capability and no setuid program, so it
+# also runs with no-new-privileges. roma cannot: its Launcher is setuid, and
+# sets no_new_privs on every agent itself (ADR-0036, ADR-0038). Both run on a
+# read-only root with tmpfs where they write, as the README's `docker run` does.
 
 name: roma
 
@@ -44,6 +47,15 @@ services:
     restart: unless-stopped
     networks: [inside]
     depends_on: [egress]
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, CHOWN, FOWNER, KILL, DAC_OVERRIDE]
+    tmpfs:
+      - /tmp:exec,mode=1777
+      - /var/tmp:mode=1777
+      - /run/roma:uid=1000,gid=1000,mode=0711
+      - /run/roma-launch:mode=0755
+      - /var/lib/roma/work:exec,uid=1000,gid=1000,mode=0711
     environment:
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       ROMA_PUBSUB_PROJECT_ID: ${ROMA_PUBSUB_PROJECT_ID:-}
@@ -80,6 +92,9 @@ services:
       outside: {}
     entrypoint: ['/usr/bin/tini', '--']
     command: ['node', '/app/dist/egress/gateway.js']
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     environment:
       ROMA_EGRESS_TOKEN_FILE: /run/secrets/egress.token
     volumes:

@@ -271,6 +271,13 @@ RUN groupadd --gid 19999 roma-parked \
             --shell /usr/sbin/nologin "roma-seat-${n}" || exit 1; \
      done \
   && mkdir -p /run/roma-launch && chmod 0755 /run/roma-launch
+# The base image's own setuid and setgid programs — su, passwd, mount and the
+# rest — lose the bit, so the Launcher below is the only one left (ADR-0038,
+# GHSA-g6cx-6wcm-4hqw). No agent could climb through them anyway: the Launcher
+# execs every Runtime with no_new_privs (ADR-0036). But roma itself cannot run
+# under a container-wide no-new-privileges, which would void the Launcher, so
+# nothing else in the image is left for roma's uid to exec into root.
+RUN find / -xdev -type f -perm /6000 -exec chmod ug-s {} +
 COPY --from=launcher --chown=root:node --chmod=4750 /out/roma-launch /usr/local/libexec/roma-launch
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
