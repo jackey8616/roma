@@ -25,6 +25,13 @@ source**: it now resumes threads. The seeding step gains a form that makes no
 copy, item 3's scope is narrowed to what #149 measured, and the agenda gains
 the item ADR-0030 added to it.
 
+**Amended 2026-11-10** by #218. `ROMA_CODEX_HOME` is checked at boot, before any
+Runtime exists to use it: set but relative, missing, not a directory, unwritable or
+holding no `auth.json`, roma refuses to start, naming it in the same single refusal
+as every other configuration problem (ADR-0015 §8, #103). The writability half runs
+after the drop to `node` (ADR-0032), since root can write anywhere. Enforced by
+`fence:main-checks-codex-home-after-drop`.
+
 The spike that the design this pull request previously proposed gated
 construction on survives here as that agenda, extended by one item the review
 of that draft asked for: the pinned build's own reasoning-effort levels, which

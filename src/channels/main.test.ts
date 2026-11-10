@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -9,6 +9,7 @@ import { EgressRefused } from '../egress/route.js'
 import type { AuditSealSystem } from '../audit-seal.js'
 import { startConfiguredRoma } from './main.js'
 import { FakeLauncher } from '../../test/support/fake-launcher.js'
+import { FakeCloudMinter, FakeMinter, fakeReaches } from '../../test/support/fake-minter.js'
 import { FakeRuntime } from '../../test/support/fake-runtime.js'
 
 const launcher = () => new FakeLauncher('/nonexistent', new FakeRuntime().spawn)
@@ -141,10 +142,12 @@ describe('the keys roma reads at boot', () => {
       },
     }
 
-    await expect(startConfiguredRoma(missing, () => {}, root, launcher())).rejects.toThrow(
-      ConfigurationMissing,
-    )
-    expect(becameUser).toBe(false)
+    const started = startConfiguredRoma(missing, () => {}, root, launcher())
+
+    await expect(started).rejects.toThrow(ConfigurationMissing)
+    await expect(started).rejects.toThrow(/github-app\.pem/)
+    await expect(started).rejects.toThrow(/still root/)
+    expect(becameUser).toBe(true)
   })
 
   it('tell the Launcher where Sessions live while roma is still root [fence:main-writes-the-launcher-roots-before-the-drop]', async () => {
@@ -278,5 +281,144 @@ describe('the Audit Records', () => {
     ).toBe(true)
     expect(calls.length, why).toBeGreaterThan(1)
     expect(logged, why).toContainEqual({ event: 'audit', sealed: true, tightened: false })
+  })
+})
+
+describe('one refusal, whatever found the problem [fence:main-one-refusal-across-live-checks]', () => {
+  const why =
+    'Every configuration problem roma can find at boot must arrive in one refusal, including ' +
+    'what only a network round trip or a check made as node can find (ADR-0015 §8, #103, ' +
+    '#218). Refusing in two steps turns standing roma up into a sequence of boots.'
+  const dirs: string[] = []
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+  })
+
+  const rootThatDrops = (onDrop: () => void = () => {}): RootSystem => {
+    let uid = 0
+    return {
+      uid: () => uid,
+      becomeUser: () => {
+        onDrop()
+        uid = 1000
+      },
+      procOwner: () => 0,
+      canRead: () => false,
+      keyFileMode: () => ({ uid: 0, mode: 0o100400 }),
+      nodeFlags: () => ['--disable-sigusr1'],
+    }
+  }
+
+  function deployment() {
+    const dir = mkdtempSync(join(tmpdir(), 'roma-main-refusal-'))
+    dirs.push(dir)
+    const key = join(dir, 'github-app.pem')
+    writeFileSync(key, 'not-a-real-pem')
+    return {
+      dir,
+      env: { ...MINIMAL, ROMA_GITHUB_PRIVATE_KEY_FILE: key, ROMA_DISCORD_BOT_TOKEN: 'a-bot-token' },
+    }
+  }
+
+  function start(
+    env: Record<string, string | undefined>,
+    reaches: Parameters<typeof fakeReaches>[0],
+    root: RootSystem = rootThatDrops(),
+  ) {
+    const started = startConfiguredRoma(
+      env,
+      () => {},
+      root,
+      launcher(),
+      { probe: () => Promise.resolve(false), route: () => {} },
+      sealable(),
+      () => fakeReaches(reaches),
+    )
+    started.catch(() => {})
+    return started
+  }
+
+  async function refusal(started: Promise<unknown>): Promise<readonly string[]> {
+    const error: unknown = await started.then(
+      () => expect.unreachable('should have refused'),
+      (refused: unknown) => refused,
+    )
+    expect(error, why).toBeInstanceOf(ConfigurationMissing)
+    return (error as ConfigurationMissing).problems
+  }
+
+  it('names a missing variable and a revoked cloud key together', async () => {
+    const { env } = deployment()
+    const problems = await refusal(
+      start(
+        { ...env, ROMA_AUDIT_ROOT: undefined },
+        { cloudMinter: new FakeCloudMinter({ failsWith: new Error('the key was revoked') }) },
+      ),
+    )
+
+    expect(problems[0], why).toBe('ROMA_AUDIT_ROOT is not set.')
+    expect(problems[1], why).toMatch(/Cloud Reach .* the key was revoked/)
+  })
+
+  it('names a missing variable and a forge that refused together, and touches no other provider', async () => {
+    const { env } = deployment()
+    const cloudMinter = new FakeCloudMinter()
+    const problems = await refusal(
+      start(
+        { ...env, ROMA_AUDIT_ROOT: undefined },
+        { minter: new FakeMinter({ failsWith: new Error('a bad private key') }), cloudMinter },
+      ),
+    )
+
+    expect(problems, why).toEqual(['ROMA_AUDIT_ROOT is not set.', 'a bad private key'])
+    expect(cloudMinter.minted, why).toEqual([])
+  })
+
+  it('lets a forge refusal through as it is when it is the only thing wrong', async () => {
+    const { env } = deployment()
+    const refused = new Error('a bad private key')
+
+    await expect(start(env, { minter: new FakeMinter({ failsWith: refused }) })).rejects.toBe(
+      refused,
+    )
+  })
+
+  it('names a missing ROMA_CODEX_HOME beside a missing variable', async () => {
+    const { env, dir } = deployment()
+    const codexHome = join(dir, 'no-codex-here')
+    const problems = await refusal(
+      start({ ...env, ROMA_AUDIT_ROOT: undefined, ROMA_CODEX_HOME: codexHome }, {}),
+    )
+
+    expect(problems, why).toEqual([
+      'ROMA_AUDIT_ROOT is not set.',
+      `ROMA_CODEX_HOME is ${codexHome}, which does not exist.`,
+    ])
+  })
+
+  it('refuses a ROMA_CODEX_HOME nobody seeded, even with everything else in order', async () => {
+    const { env, dir } = deployment()
+    const codexHome = join(dir, 'codex')
+    mkdirSync(codexHome)
+
+    const problems = await refusal(start({ ...env, ROMA_CODEX_HOME: codexHome }, {}))
+
+    expect(problems, why).toEqual([expect.stringContaining(join(codexHome, 'auth.json'))])
+  })
+
+  it('checks ROMA_CODEX_HOME once roma is node, which is who has to write to it [fence:main-checks-codex-home-after-drop]', async () => {
+    const after =
+      'A writability check made as root passes on any directory, so ROMA_CODEX_HOME must be ' +
+      'checked after the drop, as the user that will write to it (#218).'
+    const { env, dir } = deployment()
+    const codexHome = join(dir, 'codex')
+    mkdirSync(codexHome)
+    const seedOnDrop = rootThatDrops(() => writeFileSync(join(codexHome, 'auth.json'), '{}'))
+
+    const problems = await refusal(
+      start({ ...env, ROMA_AUDIT_ROOT: undefined, ROMA_CODEX_HOME: codexHome }, {}, seedOnDrop),
+    )
+
+    expect(problems, after).toEqual(['ROMA_AUDIT_ROOT is not set.'])
   })
 })

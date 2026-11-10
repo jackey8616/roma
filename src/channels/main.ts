@@ -1,13 +1,23 @@
 import { fileURLToPath } from 'node:url'
-import { CLOUD_KEY_FILE_VAR, readCloudEnv } from '../cloud/env-config.js'
+import { CLOUD_KEY_FILE_VAR, readCloudEnv, type CloudEnv } from '../cloud/env-config.js'
 import { CLOUD_AGENT_HOSTS } from '../cloud/egress.js'
 import { cloudReachFrom } from '../cloud/reach.js'
 import type { CoreLogRecord } from '../core.js'
-import { DOCUMENT_KEY_FILE_VAR, readDocumentEnv } from '../documents/env-config.js'
+import {
+  DOCUMENT_KEY_FILE_VAR,
+  readDocumentEnv,
+  type DocumentEnv,
+} from '../documents/env-config.js'
 import { DOCUMENT_AGENT_HOSTS } from '../documents/egress.js'
 import { documentReachFrom } from '../documents/reach.js'
 import { realAuditSealSystem, sealAudit, type AuditSealSystem, type Sealed } from '../audit-seal.js'
-import { dropRoot, realRootSystem, type Dropped, type RootSystem } from '../drop-root.js'
+import {
+  ContainmentRefused,
+  dropRoot,
+  realRootSystem,
+  type Dropped,
+  type RootSystem,
+} from '../drop-root.js'
 import { agentAllowlist } from '../egress/allowlist.js'
 import type { Gateway } from '../egress/egress-proxy.js'
 import { EGRESS_TOKEN_FILE_VAR, readEgressEnv } from '../egress/env-config.js'
@@ -17,20 +27,33 @@ import {
   routeThroughGateway,
   type DirectProbe,
 } from '../egress/route.js'
-import { envValue, launcherRootsOf, readConfiguration, type Environment } from '../env-config.js'
+import { codexHomeProblems } from '../codex-home.js'
+import {
+  attempted,
+  certain,
+  complete,
+  ConfigurationMissing,
+  envValue,
+  launcherRootsOf,
+  readConfiguration,
+  refuseIfAny,
+  type Environment,
+} from '../env-config.js'
 import { GITHUB_AGENT_HOSTS } from '../github/egress.js'
-import { isolating, realLauncher, type Launcher } from '../launcher.js'
-import { PRIVATE_KEY_FILE_VAR, readMinterEnv } from '../github/env-config.js'
+import { IsolationRefused, isolating, realLauncher, type Launcher } from '../launcher.js'
+import { PRIVATE_KEY_FILE_VAR, readMinterEnv, type MinterEnv } from '../github/env-config.js'
 import { githubReachFrom } from '../github/reach.js'
 import { gitConfig } from '../github/shims.js'
-import { writeToStderr, type OperatorLog } from '../operator-log.js'
+import { reasonOf, writeToStderr, type OperatorLog } from '../operator-log.js'
+import type { Reaches } from '../reach.js'
 import { serve, type ChannelBinding, type IngressLogRecord, type Serving } from '../serve.js'
 import type { PoolLogRecord } from '../session-pool.js'
 import type { ShimLogRecord } from '../shim-server.js'
-import type {
-  EgressOptions as StartRomaEgress,
-  IsolationLogRecord,
-  ReachLogRecord,
+import {
+  proveReaches,
+  type EgressOptions as StartRomaEgress,
+  type IsolationLogRecord,
+  type ReachLogRecord,
 } from '../startup.js'
 import type { SelfCheckLogRecord, StartupSelfCheckReport } from '../startup-self-check.js'
 import { discordBinding, type DiscordLogRecord } from './discord/binding.js'
@@ -72,6 +95,20 @@ type RomaLog = OperatorLog<
   | ProcessLogRecord
 >
 
+export interface ReachEnvs {
+  readonly minterEnv: MinterEnv
+  readonly cloudEnv: CloudEnv | null
+  readonly documentEnv: DocumentEnv | null
+}
+
+export type ReachesOf = (envs: ReachEnvs) => Reaches
+
+const REAL_REACHES: ReachesOf = ({ minterEnv, cloudEnv, documentEnv }) => ({
+  code: githubReachFrom(minterEnv),
+  cloud: cloudReachFrom(cloudEnv),
+  documents: documentReachFrom(documentEnv),
+})
+
 export async function startConfiguredRoma(
   env: Environment = process.env,
   log: RomaLog = writeToStderr,
@@ -79,58 +116,121 @@ export async function startConfiguredRoma(
   launcher: Launcher = realLauncher(),
   egressSystem: EgressSystem = REAL_EGRESS,
   auditSeal: AuditSealSystem = realAuditSealSystem(),
+  reachesOf: ReachesOf = REAL_REACHES,
 ): Promise<Serving> {
-  const { roma, channels, minterEnv, cloudEnv, documentEnv } = readConfiguration(
+  const problems: string[] = []
+  const read = readConfiguration(
     env,
     { chat: readChatEnv, discord: readDiscordEnv },
     readMinterEnv,
     readCloudEnv,
     readDocumentEnv,
+    problems,
   )
-  const egressEnv = readEgressEnv(env)
-  const { shimDir, ...core } = roma
-  if (rootSystem.uid() === 0) {
-    await isolating('be told where Sessions live', async () =>
-      launcher.writeRoots(launcherRootsOf(roma)),
+  const beforeEgress = problems.length
+  const egressEnv = attempted(() => readEgressEnv(env), problems)
+  const egressRead = problems.length === beforeEgress
+
+  const refusing = async <T>(step: () => T | Promise<T>): Promise<T> => {
+    try {
+      return await step()
+    } catch (error) {
+      if (problems.length === 0 || !isBootRefusal(error)) throw error
+      throw new ConfigurationMissing([...problems, ...problemsOf(error)])
+    }
+  }
+
+  const roma = read.roma
+  if (rootSystem.uid() === 0 && roma !== null) {
+    await refusing(() =>
+      isolating('be told where Sessions live', async () =>
+        launcher.writeRoots(launcherRootsOf(roma)),
+      ),
     )
   }
-  log({ event: 'privileges', ...dropRoot(keyFilesIn(env), rootSystem, chatIdentityKeyFileIn(env)) })
-  log({ event: 'audit', ...sealAudit(roma.auditRoot, auditSeal) })
+  const dropped = await refusing(() =>
+    dropRoot(keyFilesIn(env), rootSystem, chatIdentityKeyFileIn(env)),
+  )
+  log({ event: 'privileges', ...dropped })
+  if (roma !== null) {
+    log({ event: 'audit', ...(await refusing(() => sealAudit(roma.auditRoot, auditSeal))) })
+  }
+
+  if (read.codexHome !== null) problems.push(...codexHomeProblems(read.codexHome))
 
   let egress: StartRomaEgress | undefined
-  if (egressEnv === null) {
-    log({ event: 'egress', gateway: null, allow: null })
-  } else {
-    const { gateway, extra } = egressEnv
-    if (await egressSystem.probe()) throw new EgressRefused(gateway.url)
-    egressSystem.route(gateway)
-    const allow = agentAllowlist(
-      GITHUB_AGENT_HOSTS,
-      cloudEnv === null ? [] : CLOUD_AGENT_HOSTS,
-      documentEnv === null ? [] : DOCUMENT_AGENT_HOSTS,
-      extra,
-    )
-    log({ event: 'egress', gateway: gateway.url, allow })
-    egress = { gateway, allow }
+  if (egressRead) {
+    if (egressEnv === null) {
+      log({ event: 'egress', gateway: null, allow: null })
+    } else {
+      const { gateway, extra } = egressEnv
+      await refusing(async () => {
+        if (await egressSystem.probe()) throw new EgressRefused(gateway.url)
+      })
+      egressSystem.route(gateway)
+      const allow = agentAllowlist(
+        GITHUB_AGENT_HOSTS,
+        read.cloudEnv === null ? [] : CLOUD_AGENT_HOSTS,
+        read.documentEnv === null ? [] : DOCUMENT_AGENT_HOSTS,
+        extra,
+      )
+      log({ event: 'egress', gateway: gateway.url, allow })
+      egress = { gateway, allow }
+    }
   }
 
+  const reaches =
+    read.minterEnv === null
+      ? null
+      : reachesOf({
+          minterEnv: read.minterEnv,
+          cloudEnv: read.cloudEnv,
+          documentEnv: read.documentEnv,
+        })
+  const proving = reaches === null || !egressRead ? null : await proveReaches(reaches, log)
+  if (proving !== null && proving.refused !== null) {
+    if (problems.length === 0) throw proving.refused
+    problems.push(...problemsOf(proving.refused))
+  }
+  refuseIfAny(problems)
+  const configuration = complete(read)
+
+  const { shimDir, ...core } = configuration.roma
+  const { channels } = configuration
   const bound: ChannelBinding[] = []
   if (channels.chat !== null) bound.push(await googleChatBinding(channels.chat, log))
   if (channels.discord !== null) bound.push(discordBinding(channels.discord, log))
 
   return await serve({
     ...core,
-    reaches: {
-      code: githubReachFrom(minterEnv),
-      cloud: cloudReachFrom(cloudEnv),
-      documents: documentReachFrom(documentEnv),
-    },
+    reaches: certain(reaches),
+    proved: certain(proving).proved,
     shims: { dir: shimDir, gitConfig: gitConfig() },
     launcher,
     channels: bound,
     ...(egress === undefined ? {} : { egress }),
     log,
   })
+}
+
+function isBootRefusal(error: unknown): boolean {
+  return (
+    error instanceof ConfigurationMissing ||
+    error instanceof ContainmentRefused ||
+    error instanceof IsolationRefused ||
+    error instanceof EgressRefused
+  )
+}
+
+function problemsOf(refused: unknown): readonly string[] {
+  if (
+    refused instanceof ConfigurationMissing ||
+    refused instanceof ContainmentRefused ||
+    refused instanceof IsolationRefused
+  ) {
+    return refused.problems
+  }
+  return [reasonOf(refused)]
 }
 
 function keyFilesIn(env: Environment): { variable: string; path: string }[] {
