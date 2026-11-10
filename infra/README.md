@@ -33,9 +33,9 @@ an override.
   one is below too.
 - **The agent's Cloud Reach.** The identity the *agent* acts as in Google Cloud is not made
   here and should not live in this project at all. The manual steps are below.
-- **Anything that runs roma** — no container, no VM, no firewall, and **no egress
-  allowlist**. ADR-0003 describes that allowlist as the only protection still doing real
-  work under `bypassPermissions`; roma does not have it and neither does this. A template
+- **Anything that runs roma** — no container, no VM and no firewall. The egress allowlist
+  ADR-0003 describes is in `compose.yaml` at the repository root, not here (ADR-0035): a
+  VM that runs it gets the allowlist, and one that runs the bare image does not. A template
   that provisioned the queue and stopped could easily read as "the infrastructure is done".
   It is not.
 
@@ -219,7 +219,9 @@ first Task. Rotating it needs a restart.
 same container under the same uid, so a shell can read it too — the same gap
 `docs/github-app-verification.md` records for the App's PEM. And on a Google host nothing here
 stops the agent reaching the metadata server and standing in roma's *own* identity with one
-`fetch`; roma has no egress control. That is an argument for keeping the account above at the
+`fetch`, unless roma runs behind its Egress Gateway, whose internal network cannot reach the
+metadata server (ADR-0035) — which is also why roma there needs `GOOGLE_APPLICATION_CREDENTIALS`
+as a key file. Either way, that is an argument for keeping the account above at the
 `pubsub.subscriber` it has today and nothing more.
 
 ## The agent's Document Reach and its Depot

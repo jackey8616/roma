@@ -116,7 +116,7 @@ availability:
   enforced in `src/session-pool.ts`, which takes the session id off what the
   CLI said and "never off the transcript's own path — that path is undocumented
   and Claude Code's to change". Codex's rollout files are the same kind of
-  thing and inherit the same refusal.
+  thing and inherit the same refusal. *Not enforced (ADR-0031).*
 
 ## The offer
 
@@ -249,7 +249,8 @@ That fixes the order in which the two records are written, and the order is
 load-bearing: **the offer is decided before the Opening, never after.** The
 other way round, `Core.#open` writes the Opened record on the very message the
 offer was about to park, every new Session then looks like a grandfathered
-one, and the rule below quietly stops firing at all.
+one, and the rule below quietly stops firing at all. *Not enforced
+(ADR-0031): not built.*
 
 ## Grandfathering
 

@@ -60,7 +60,7 @@ supply prose. The prose is no longer shown; the events still are the only thing
 arriving during generation, and the count is derived from them. Without the flag
 the Acknowledgement freezes for the whole of a generating Turn. A future reader
 who sees that roma no longer displays the deltas should not conclude the flag
-can go.
+can go. Enforced by `fence:session-invocation-pinned`.
 
 ## Alternatives, and why not
 
@@ -71,8 +71,8 @@ gravestone. Verified by hand against a real Workspace — a reply inside a threa
 deleted, leaves the marker — and app authentication is not going to render more
 cleanly than a person does. It also cannot fix the half of the complaint that
 was reported from a phone: a delete does not retract a push notification that
-already fired, so the two buzzes remain either way. And it would widen `ChatApi`
-from the two calls it deliberately has to three.
+already fired, so the two buzzes remain either way. And it would add a delete to
+`ChatApi`, a call nothing else needs.
 
 **Edit the Acknowledgement into the final answer** — one message, one
 notification, streaming preserved. This is the only option that reduces the
@@ -80,14 +80,14 @@ notifications, and it is still refused: it reverses ADR-0003's unconditional
 rule outright, turns an answer longer than Chat's limit into a hybrid of one
 edit and N posts, and breaks the guarantee that a Task's last instruction is its
 last, which is what lets an Adapter drop an Acknowledgement the moment a Task
-ends.
+ends. *Not enforced (ADR-0031).*
 
 **Collapse the Acknowledgement into a short sentence when the Result is
 posted** — the same end state as the decision above, with the streaming prose
 kept while the Task runs. Genuinely close, and refused only for its cost: an
 extra Channel call per Task and an Adapter that must edit a message it is
 otherwise finished with. Worth reopening if anyone misses watching the answer
-arrive; nothing else here would have to change for it.
+arrive; nothing else here would have to change for it. *Not enforced (ADR-0031).*
 
 **Show a fixed prefix of the answer instead of the tail.** Rejected before it
 was proposed, by the code it would have reverted: the renderer showed the *end*
@@ -105,7 +105,7 @@ outgrows it, which reads as a hang.
   alternative above, and that is an ADR-0003 conversation.
 - The Core no longer accumulates a Turn's prose to hand to a renderer that will
   not show it — 17706 characters in the capture this was designed against, held
-  for nobody.
+  for nobody. What it keeps is the length, summed across the Turn's deltas.
 - ~~Nothing is trimmed to Chat's limit in the Acknowledgement any more, because
   every phase is now a fixed sentence around a small number.~~ The one phase that
   can still exceed the limit is a tool named by Claude Code's own description of
@@ -117,6 +117,10 @@ outgrows it, which reads as a hang.
   bounds sit, how many of them there are, and which end of a command goes are
   `render.ts`'s business rather than this decision's; what belongs here is only
   that the Consequence stopped being true.
+  The tool's own bound, `MAX_TOOL_CHARS` in `progress-phrase.ts`, is a judgement
+  rather than a measurement: two recorded `task_started` descriptions are 8 and
+  56 characters, which says the ordinary case is never cut and nothing about the
+  tail.
 - A second Channel that *can* show prose cheaply no longer gets it from
   `TaskProgress`. That is the intended trade: `channel-adapter.ts` says to expect
   the second Channel to change the interface and to prefer changing it then to

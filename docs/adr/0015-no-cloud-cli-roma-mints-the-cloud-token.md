@@ -144,7 +144,8 @@ The reasoning that got it there is arithmetic, and it transfers whole:
 
 A Google Cloud access token is also about an hour. A Resident Session outliving
 an hour is ordinary. `google-auth-library` is already a runtime dependency,
-surviving `npm ci --omit=dev`, so the means are present.
+surviving `npm ci --omit=dev`, so the means are present. Enforced by
+`fence:startup-cloud-token-is-asked-for-never-kept`.
 
 Two further facts shape the rest.
 
@@ -198,9 +199,17 @@ key, and produces a Cloud Token from it on request. One component and one term
 for both, because it is one rule: a long-lived key never enters the space the
 agent can reach.
 
+**Amended 2026-11-09 by ADR-0032.** When this was written the rule did not hold
+— the agent shared roma's uid and could read the key file, roma's environment and
+roma's memory (GHSA-v52v-hcv8-cr23). It holds now because roma reads the key as
+root and drops to `node` before an agent exists, which only works if
+`ROMA_CLOUD_KEY_FILE` is mounted 0400 and owned by root; roma refuses to start
+when it is not.
+
 A Cloud Token is what the agent gets — an hour long, obtained when something
 needs one, never written into a process environment fixed at spawn, and never
-persisted anywhere that outlives the command it was made for.
+persisted anywhere that outlives the command it was made for. Enforced by
+`fence:startup-cloud-token-is-asked-for-never-kept`.
 
 The key is named to roma by a path rather than inline, following
 `ROMA_GITHUB_PRIVATE_KEY_FILE` and `GOOGLE_APPLICATION_CREDENTIALS`: multi-line
@@ -220,7 +229,8 @@ The key file is loaded explicitly, by the path the environment gave. roma never
 asks a Google library to *find* a credential, because finding one is a precedence
 chain ending at the metadata server: on a Google host, a missing or unreadable
 key would otherwise resolve silently to roma's own identity, and roma would mint
-Cloud Tokens for the one identity §2 exists to exclude.
+Cloud Tokens for the one identity §2 exists to exclude. Enforced by
+`fence:cloud-never-resolves-a-credential`.
 
 This repository has paid for the general version of that mistake already, in
 `build-env.ts`:
@@ -230,7 +240,7 @@ This repository has paid for the general version of that mistake already, in
 > order, so a process handed both runs on one and silently changes model.
 
 Same shape, second vendor. A missing key must produce a *failure*, never a
-*substitution*.
+*substitution*. Enforced by `fence:cloud-refuses-only-a-named-path`.
 
 **Amended 2026-08-02 by ADR-0020 §7 — in how this is enforced, not in what it
 says.** This section was carried by two guards. `RESOLVES_A_CREDENTIAL`, which bans
@@ -240,7 +250,9 @@ because `new GoogleCloudMinter` moved inside `src/cloud/`, behind
 `cloudReachFrom(env: CloudEnv | null)`, so the substitution the match watched for
 can no longer be written there and the directory rule now binds the construction
 site for the first time. If you are reading this because the guard looks thin: read
-ADR-0020 §7 before adding a source match back.
+ADR-0020 §7 before adding a source match back. The composition
+root's half — a `new GoogleAuth()` written in `src/startup.ts` — is held too,
+since ADR-0020 §7's amendment. Enforced by `fence:chain-only-for-romas-own-identity`.
 
 ### 5. A Cloud Token is scoped to `cloud-platform`, and that is not configurable
 
@@ -269,7 +281,8 @@ with somebody waiting at the other end.
 token, its expiry and the identity's account. The bare form is the common one and
 is a one-liner — `curl -H "Authorization: Bearer $(roma-cloud-token)"` — with
 nothing to parse, because a tool invented to save the model's output tokens
-should not require the model to write a parser to use it. Expiry is in `--json`
+should not require the model to write a parser to use it. It ends in a newline, as
+every command's output does, and `$(…)` strips it. Expiry is in `--json`
 rather than the default because re-running is free and stateless: an agent does
 not need to reason about how long it has left, it needs to ask again.
 
@@ -383,6 +396,10 @@ record an unverifiable self-report.
 It records the ordinary path only. An agent that reaches the metadata server
 itself is invisible here, the same honesty the `Requested-by:` trailer carries.
 
+What it is for is the Google Cloud bill. Everything the agent does there is done
+as one service account, so unexplained activity on it can be narrowed to the
+people whose Tasks touched it, and nowhere else answers that.
+
 ### 11. `infra/` provisions none of it, and roma's own identity is renamed
 
 `infra/main.tf` is one project, and it is the project holding roma's control
@@ -390,7 +407,7 @@ plane — the topic, the subscription, the identity roma runs on. Creating the
 Cloud Reach there would put it one IAM binding from the ingress it must never
 touch, and would imply the agent's Google Cloud is roma's. Often it will not be:
 roma may not run on Google Cloud at all, and the project the agent works in may
-belong to somebody else.
+belong to somebody else. *Not enforced (ADR-0031).*
 
 `infra/README.md` gains a section instead, written like the one already refusing
 to create service account keys: the manual steps, the recommendation that the

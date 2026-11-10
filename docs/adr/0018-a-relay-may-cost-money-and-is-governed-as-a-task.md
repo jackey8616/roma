@@ -53,7 +53,7 @@ This ADR specifies one sentence — "Compacted: 31,953 → 1,764 tokens" — and
 implementation carries two fallbacks behind it, because the figures it quotes are
 nullable everywhere else in roma and a Relay that neither compacted nor spoke
 would otherwise end in silence. Neither has been seen on any capture; both exist
-so that no ending of a paid Relay is unanswered.
+so that no ending of a paid Relay is unanswered. Enforced by `fence:core-relay-reply-never-silent`.
 
 **The drift check's new key needed a floor, and a capture is why.** This ADR
 specifies "the `modelUsage` output-token delta, summed across models". The
@@ -69,7 +69,8 @@ zero. The cost is that real work immediately after such a reading is
 under-counted, which is the right way round for a one-directional alarm — it can
 fail to fire, and it cannot fire wrongly. `total_cost_usd` is deliberately *not*
 treated this way: it is a figure things are billed from, and it does not exhibit
-this.
+this. Both baselines move on the same terminal event, so the two figures cannot
+come to disagree about which Turn they belong to.
 
 **Amended 2026-08-01, and this one is to the decisions rather than only to the
 evidence.** It was written the same day, on facts read off the pinned build and
@@ -143,6 +144,10 @@ recorded in `docs/compaction-verification.md`:
 - `compact_error` on this path is a **sentence** — `"Not enough messages to
   compact."` — and the same sentence arrives in the terminal event's `result`,
   free, in 29ms, with `is_error: false`.
+  **Amended 2026-11-09:** on 2.1.319 one exchange is no longer too few, so the
+  same `/compact` compacts and is paid for ($0.0242 in #160's run). The failure
+  path is unchanged in the bundle, and roma's handling of it is still tested off
+  the 2.1.220 capture.
 - A **successful** `/compact` returns `result: ""`.
 - The Caller Marker does reach the Transcript, in `<command-args>`, and it
   survives the Compaction: the command entry is parented onto the compaction
@@ -356,6 +361,13 @@ person, and is still re-applied when the ADR-0007 pin moves.
 > stoppable, Parkable, Overflowable and audited — exactly as a Task is. A Relay
 > that drives none keeps ADR-0012's arrangements unchanged.
 
+The free half stays off the Task path rather than riding it with the machinery
+switched off. With no Turn there is no credential decision to make and nothing to
+park, no Shared Window reading, and nothing to spend, so carrying Attempts,
+Parking and Overflow through it would be a path on which every one of those
+branches is dead — and a dead branch is where a later reader looks for meaning that
+is not there.
+
 ADR-0012 exempted a Readout from the cap of three by arguing "no Turn, no money,
 no retry", and named the cost it was buying: three people asking what is going
 on should not be able to stop the work they are asking about. Not one clause of
@@ -512,7 +524,8 @@ either direction". Both halves were wrong, and the measurement is what shows it.
 `duration_api_ms` was `0` and the top-level `usage` was all zeros. So ADR-0012's
 check would not fire on a legitimate `/compact` — it would **never** fire — and a
 per-entry expectation keyed on the same field has nothing to compare, because
-reality says zero for a free Relay and a paid one alike.
+reality says zero for a free Relay and a paid one alike. Enforced by
+`fence:core-free-relay-drift-is-one-way`.
 
 The two paths differ because an auto Compaction rides *inside* somebody's Turn
 and bumps its count to 2 (#100), while a manual one is a `type:"local"` command
@@ -535,6 +548,8 @@ insurance ADR-0012 actually bought; what was never bought is the alert.
 Keyed on **model work** rather than on money, because model work is what the
 membership rule is about — "read-only", "drives no Turn". Cost is a downstream
 function of it that moves with pricing, plans and models; output tokens do not.
+Output rather than input, because input moves for reasons that are not the
+entry's doing: a cache read is counted there.
 And it is visible: on the same result where the top-level `usage` reported zeros,
 `modelUsage` moved by `+2,019` input and `+1,978` output tokens. roma already
 reads this object — ADR-0012's rejected alternative measured
@@ -543,7 +558,8 @@ reads this object — ADR-0012's rejected alternative measured
 **One direction only.** A paid entry's expectation is that it *may* do model
 work, not that it must: a `/compact` that fails with too little conversation to
 summarise does none, at a delta of zero, and a two-directional check would report
-that as drift every time somebody typed `/compact` into a short thread.
+that as drift every time somebody typed `/compact` into a short thread. Enforced by
+`fence:core-manual-compaction-is-the-callers`.
 
 **And a check that fires before the money moves, not after.** One seam 2 case per
 Relay entry, asserting its cost class against the pinned build — the shape
@@ -570,7 +586,8 @@ compounds the backlog".
 **`status: "compacting"` is reported as progress.** The Acknowledgement's
 vocabulary is "which tool is running … how much of the answer has been written",
 and a Compaction has neither, so without this the Acknowledgement idles for the
-whole 19,487ms. It is the same shape of dead stream `readToolStarted` already
+whole 19,487ms — up to 28,517ms on the manual path
+(`docs/manual-compaction-verification.md`). It is the same shape of dead stream `readToolStarted` already
 exists for.
 
 ### What the Caller is told

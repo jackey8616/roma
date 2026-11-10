@@ -20,6 +20,11 @@ are three. Marked inline below.
 gained a row. `fable` went onto the Model Menu, so `claude-fable-5` is now a model
 a Session can run on and the Matrix owes it an answer. Marked inline below.
 
+**Amended 2026-10-29**, the same way again: the decision stands and two rows
+moved. `fable` resolves to `claude-fable-5-1` and `opus` to `claude-opus-5-5`,
+and the extractor cannot say anything about either because the pinned bundle
+has never heard of them. Marked inline below.
+
 Repeats ADR-0014's shape for a second per-Session setting, and the repetition is
 the point: `/effort` fails as a relay for the same reason `/model` does, and the
 machinery that solved it is already here. What is **not** repeated is how roma
@@ -99,13 +104,14 @@ consequences, both load-bearing:
 
 - **Passing `--effort` on every spawn closes the settings file.** The config dir
   is one per deployment (`ROMA_CLAUDE_CONFIG_DIR`), so an `effortLevel` left in it
-  would otherwise set the effort for every Session in roma, invisibly.
+  would otherwise set the effort for every Session in roma, invisibly. Enforced by
+  `fence:session-effort-always-passed`.
 - **`buildEnv`'s allowlist closes the environment variable.** `PASSTHROUGH` is
   `PATH, HOME, USER, SHELL, LANG, TMPDIR` and nothing else, so a host
   `CLAUDE_CODE_EFFORT_LEVEL` cannot reach a Session. That allowlist was written
   for credentials. It turns out to be the only thing standing between the host
   environment and roma's effort, and it should not be narrowed without reading
-  this line.
+  this line. Enforced by `fence:buildenv-no-host-effort`.
 
 **Measured — none of it needs a credential.** With the environment stripped to
 exactly `buildEnv`'s `PASSTHROUGH` plus a fresh config dir — no `ANTHROPIC_*`, no
@@ -224,7 +230,10 @@ the working directory because ADR-0008 has the agent committing its contents.
 `session-pool.ts` maintains the invariant on the swap it already has. A Resident
 records the effort it was spawned on as well as the model; acquiring a Session for
 a Turn whose effort differs ends the process and spawns a new one, resumed. No new
-failure mode is taken on, and `swap`'s `reason` gains a third value.
+failure mode is taken on, and `swap`'s `reason` gains a third value. The Resident
+is the only place that answer exists at all: nothing in the stream echoes the
+effort back, so a process that did not write it down could not be asked afterwards
+what it was started at.
 
 ### The Effort Menu holds every level, and `ultracode` is not one
 
@@ -237,7 +246,9 @@ models because a costlier model is a bigger share of a window everybody stands i
 and roma cannot check what it hands over. Neither reason survives here: the levels
 are enumerable, they are all Claude Code's own, and a Caller asking for more
 thinking on a task they are about to wait for is the feature rather than the
-risk.
+risk. The build's one alias, `med`, is not on it: the Menu is roma's outright,
+nothing is relayed and nothing is compared against Claude Code, so an alias would
+be a spelling roma had chosen to claim rather than one it inherited.
 
 **`ultracode` is off the Menu and reachable only through `ROMA_EFFORT`.** It is
 not a level — `hBc = {ultracode:"xhigh"}` — it is `xhigh` plus dynamic workflow
@@ -249,7 +260,7 @@ already name a model off the Model Menu, and `menuNameFor()` returning `null` is
 that case already handled. Whether a Caller may reach it is deferred to its own
 ticket, and deliberately deferred to **after** the Audit Record has effort on it —
 which is ADR-0014's own reason for deferring the per-model gate: *record the model
-first, then look.*
+first, then look.* Enforced by `fence:menu-effort-holds-back-ultracode`.
 
 **`auto` is not on the Menu because it cannot be.** `--effort auto` is rejected by
 the CLI parser (`uJn` → `uHt` → `AWr`, and `auto` is in neither table), so it
@@ -266,12 +277,13 @@ committed as a constant.
 It anchors on the **server-side feature-flag names** — `Ede(e,"effort")`,
 `"xhigh_effort"`, `"max_effort"` — rather than on minified identifiers, because
 the flag names are a contract with something and the identifiers are renamed every
-build. Against 2.1.220 it yields, for roma's Menu:
+build. Against 2.1.220 it yields `—` for every row but haiku's, and a person
+reads that output into `EFFORT_MATRIX`, which for roma's Menu holds:
 
 | model | takes effort | xhigh | max |
 | --- | --- | --- | --- |
-| `claude-fable-5` | yes | yes | yes |
-| `claude-opus-5` | yes | yes | yes |
+| `claude-fable-5-1` | yes | yes | yes |
+| `claude-opus-5-5` | yes | yes | yes |
 | `claude-sonnet-5` | yes | yes | yes |
 | `claude-haiku-4-5` | **no** | no | no |
 
@@ -282,6 +294,25 @@ than a weaker one: the extractor reports it *unnamed* on all three gates, and th
 describes itself as `Deeper reasoning than high, just below maximum (Fable 5,
 Opus 4.7+, Sonnet 5)`, which names Fable 5 first. Reading that silence as a
 refusal is the mistake the paragraph below was written about.
+
+**Amended 2026-10-29 — the `claude-fable-5-1` and `claude-opus-5-5` rows
+replaced `claude-fable-5` and `claude-opus-5`.** Both read `—` on every gate, as
+their predecessors did, and that `—` must not be read as a `no`. The `yes` for
+`claude-opus-5-5` is covered by the `xhigh` self-description's `Opus 4.7+`. The
+`yes` for `claude-fable-5-1` is the first row nothing in the build supports:
+2.1.220 predates Fable 5.1 and names it nowhere, so it rests on the model's own
+documentation — `effort` from `low` to `max`, default `high`. Opus 5.5 defaults
+to `medium` on the API; neither default runs under roma, which passes `--effort`
+on every spawn.
+
+**Amended 2026-11-09 — `claude-sonnet-5-5` and `claude-haiku-5-5` join, and
+the Menu loses its only `no` (#160).** On 2.1.319 the gates' by-name lists are
+unchanged, so both new ids read `—`. The `yes` for each is read off the build's
+own model registry, which lists `effort`, `xhigh_effort` and `max_effort` among
+both models' capabilities — firmer than the inference the other rows rest on.
+`claude-haiku-4-5` stays in `EFFORT_MATRIX` as `no` for a deployment that pins
+it, which is now the only way a Session reaches the takes-none path; the tests
+for that path pin it rather than choose it.
 
 **It reports; it does not gate.** Nothing fails a build on it, nothing in CI
 watches it, and roma refuses nothing because of it. This is `claude-code-drift.ts`'s
@@ -322,6 +353,11 @@ current` to it and compares loosely — the level word anywhere in the message,
 case-insensitively, rather than the sentence's shape. A disagreement is written to
 the Operator Log. **Boot continues.**
 
+**This is never a Relay.** A Relay goes to a Caller's Session on their behalf, and
+`/effort` is roma's own Command precisely so that it never reaches one. The probe
+has no Caller, no Session and no Task, which is why `relayCommand` describes
+itself by subtraction.
+
 Not blocking, and this is the sharpest trade in the ADR. Every other self-check
 condition reads a structured field: `apiKeySource`, `model`, `num_turns`. This one
 reads English prose in at least three shapes, one of which embeds a description
@@ -331,6 +367,15 @@ wrong depth. The Operator Log is where an anomaly goes — ADR-0012's drift chec
 already writes a misbehaving Readout there for the same reason, and the loose
 match exists so the line fires on a changed *level* rather than on changed
 *prose*, because a check people learn to ignore has stopped watching.
+
+**`auto` anywhere in the answer is a disagreement**, whatever else it names —
+stricter than the loose match alone. The cost is a false disagreement if a
+release ever writes something like `Current effort level: high (auto-selected)`,
+which is the prose-brittleness the loose match was chosen to avoid. It is taken
+deliberately, because the two mistakes are not the same size: a false
+disagreement is one line in the Operator Log on a boot that continues, and a
+false agreement is roma believing it verified its own wiring when it verified
+nothing. Enforced by `fence:startup-self-check-auto-vetoes`.
 
 **Once, at boot, and not on every spawn.** Per-spawn verification was decided and
 then withdrawn when the precedence measurements came in: with `--effort` beating
@@ -357,7 +402,7 @@ record says **that** rather than naming a level. Optional, and absent read as
 this field existed ran on whatever that shared settings file happened to say, and
 roma genuinely does not know what that was. Labelling those retroactively would
 be inventing a fact, which is the discipline `costUsd` already keeps by
-distinguishing free from unpriced.
+distinguishing free from unpriced. Enforced by `fence:audit-old-records-stay-readable`.
 
 Optional rather than required for the reason `callerName` and `kind` are:
 `readRecord` drops a line it cannot parse, a dropped line leaves the month's
@@ -394,7 +439,8 @@ stopped being the mechanism.
   on the re-audit list, and unlike those two it produces its own output for
   review rather than requiring somebody to go and read a binary.
 - `buildEnv`'s `PASSTHROUGH` allowlist quietly became load-bearing for something
-  other than credentials. Narrowing it is now a decision about effort as well.
+  other than credentials. Narrowing it is now a decision about effort as well. Enforced by
+  `fence:buildenv-no-host-effort`.
 - Nothing here gives a Caller a way to know an effort was applied. The reply says
   what roma set and, where the Matrix knows better, that it will not apply. It
   never says the model thought harder, because roma cannot see that.

@@ -2,13 +2,6 @@ import { accessSync, constants, statSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { envValue, type Environment } from './env-config.js'
 
-/**
- * The `CODEX_HOME` a deployment named, or null where it configured no Codex —
- * optional and never defaulted (ADR-0025, ADR-0026 *The home*).
- *
- * Absolute, because the process that reads it starts in a different directory
- * from the one roma was started in, and a relative home would name two places.
- */
 export function readCodexHome(env: Environment, problems: string[]): string | null {
   const found = envValue(env, 'ROMA_CODEX_HOME')
   if (found === null) return null
@@ -19,14 +12,6 @@ export function readCodexHome(env: Environment, problems: string[]): string | nu
   return found
 }
 
-/**
- * What is wrong with a `CODEX_HOME`, as sentences an operator can act on — empty
- * where nothing is.
- *
- * It must be a writable directory holding a seeded `auth.json` (ADR-0026 *The
- * home*). The file's contents are not read: the credential is the Runtime's to
- * interpret.
- */
 export function codexHomeProblems(codexHome: string): string[] {
   let isDirectory: boolean
   try {
@@ -50,9 +35,7 @@ export function codexHomeProblems(codexHome: string): string[] {
   let seeded = false
   try {
     seeded = statSync(auth).isFile()
-  } catch {
-    // Absent, which is the sentence below.
-  }
+  } catch {}
   if (!seeded) {
     problems.push(
       `${auth} does not exist. Seed it by logging in straight into this directory — ` +

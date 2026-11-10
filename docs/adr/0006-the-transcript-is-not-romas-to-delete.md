@@ -106,7 +106,8 @@ are right, and a rule that flagged them would be switched off within a week.
   every container replacement instead of accumulating it. This ADR decided roma
   deletes nothing and the packaging deleted everything, which was #54. The image
   now sets no default and the documented run mounts a durable volume, so the
-  commitment above is one a deployment actually carries.
+  commitment above is one a deployment actually carries. Enforced by
+  `fence:image-no-default-for-data`.
 - **Ownership stayed where ADR-0003 put it, and the reason improved.** ADR-0003
   said "not ours" and rested on it being Claude Code's file. That is still true,
   but the sharper reason is now available: the Transcript is the only account

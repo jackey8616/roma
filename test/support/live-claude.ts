@@ -3,43 +3,18 @@ import { mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Credential } from '../../src/build-env.js'
+import { spawnRuntimeProcess, type SpawnRuntimeProcess } from '../../src/runtime-process.js'
+import type { Fronted } from '../../src/credential-proxy.js'
+import { fronted } from './fronted.js'
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url))
 
-/**
- * Where every throwaway directory seam 2 hands out lives — outside the checkout,
- * on purpose. The Codex live tests' working directories live here too, for the
- * per-checkout reason below.
- *
- * These used to sit at `${REPO_ROOT}.tmp/seam2/`, which is gitignored but still
- * *inside* the repository, so Claude Code walked up from the working directory
- * and found roma's own `CLAUDE.md` and `.claude/skills/` (#101). That put this
- * project's operating instructions in front of the agent under test and made the
- * baseline depend on whatever skills a contributor happened to have installed.
- *
- * Stable rather than randomised, and per checkout rather than shared. Stable
- * because `liveConfigDir` deliberately survives between runs, so whatever Claude
- * Code writes into it — onboarding state and the like — is not paid for again on
- * every invocation. Per checkout because `.tmp/seam2/` was, and losing that would
- * trade one bug for another: `liveSessionDirs` deletes the directory it is asked
- * for, so two checkouts running seam 2 at once would wipe each other's Session
- * mid-Turn, and on a shared machine a fixed `/tmp` name is somebody else's
- * directory and an `EACCES` that reads like an isolation failure.
- */
 export const SEAM2_ROOT = join(
   tmpdir(),
   `roma-seam2-${createHash('sha256').update(REPO_ROOT).digest('hex').slice(0, 12)}`,
 )
 
-/**
- * The Shared Window credential seam 2 runs on.
- *
- * Fails loudly rather than skipping. A silently skipped seam 2 is worse than no
- * seam 2: it reports green while the one contract the architecture rests on goes
- * unchecked.
- */
-export function sharedWindowCredential(): Credential {
+export function sharedWindowCredential(): Fronted {
   const token = process.env['CLAUDE_CODE_OAUTH_TOKEN'] ?? readDotEnv()['CLAUDE_CODE_OAUTH_TOKEN']
   if (token === undefined || token === '') {
     throw new Error(
@@ -47,19 +22,14 @@ export function sharedWindowCredential(): Credential {
         'repo root (get one with `claude setup-token`), or export it.',
     )
   }
-  return { kind: 'shared-window', oauthToken: token }
+  return fronted({ kind: 'shared-window', oauthToken: token })
 }
 
-/**
- * A throwaway directory pair for one live Session.
- *
- * The config dir stands in for the container, where no keychain login exists —
- * without it the spawned process resolves credentials against the developer's
- * own machine and the test proves nothing about how roma will run. The working
- * directory closes the other half of the same door: it is outside the repository,
- * so the Session inherits neither roma's `CLAUDE.md` nor its project skills, the
- * way a container running roma would not. `live-claude.test.ts` asserts it.
- */
+export const liveSpawn: SpawnRuntimeProcess = ({ seat: _seat, ...request }) => {
+  mkdirSync(request.cwd, { recursive: true })
+  return spawnRuntimeProcess(request)
+}
+
 export function liveSessionDirs(name: string): { configDir: string; cwd: string } {
   const cwd = join(SEAM2_ROOT, 'work', name)
   const configDir = liveConfigDir()
@@ -68,15 +38,6 @@ export function liveSessionDirs(name: string): { configDir: string; cwd: string 
   return { configDir, cwd }
 }
 
-/**
- * A throwaway work root for one live pool.
- *
- * Empty rather than pre-populated: creating the per-Session directory under it
- * is the pool's job, and whether that directory exists is how the pool decides
- * between `--session-id` and `--resume`.
- *
- * Outside the repository for the same reason `liveSessionDirs` is.
- */
 export function liveWorkRoot(name: string): { configDir: string; workRoot: string } {
   const workRoot = join(SEAM2_ROOT, 'pool', name)
   const configDir = liveConfigDir()
@@ -85,19 +46,6 @@ export function liveWorkRoot(name: string): { configDir: string; workRoot: strin
   return { configDir, workRoot }
 }
 
-/**
- * Where a live Session's raw stdout is teed, for a run whose job is to produce a
- * capture rather than only to assert on one.
- *
- * Outside the checkout like everything else here, and deliberately **not** in
- * `test/fixtures/claude-stream/`. A fixture is evidence of one run on one build,
- * and a test that rewrote one every time somebody ran it would quietly replace
- * the bytes a verification document quotes. Copying a capture into the fixtures
- * directory stays a person's decision.
- *
- * Truncated rather than appended to: two runs spliced into one file is a stream
- * that never happened.
- */
 export function liveCaptureFile(name: string): string {
   const dir = join(SEAM2_ROOT, 'capture')
   mkdirSync(dir, { recursive: true })
@@ -112,7 +60,6 @@ function liveConfigDir(): string {
   return configDir
 }
 
-/** `.env` at the repo root, where a developer keeps the live tests' credentials. */
 export function readDotEnv(): Record<string, string> {
   let contents: string
   try {

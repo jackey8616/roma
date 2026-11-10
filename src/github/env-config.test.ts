@@ -5,16 +5,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { ConfigurationMissing } from '../env-config.js'
 import { readMinterEnv, realGhPath } from './env-config.js'
 
-/**
- * The App's settings, read the way a Channel's are: in its own directory, into
- * the Core's own refusal.
- *
- * The refusals matter more than the reading. roma without GitHub is not a roma
- * anybody wants running, so a deployment that has half-configured it must be
- * told at boot rather than inside somebody's first Turn — and told about every
- * missing part at once, because standing roma up is one pass.
- */
-
 let dirs: string[] = []
 
 afterEach(() => {
@@ -42,9 +32,6 @@ describe('reading the GitHub App out of the environment', () => {
     })
   })
 
-  // Not the Overflow shape — optional but refused if half-configured. Required
-  // means required: the image installs `git` on the grounds that it is what the
-  // agent is for.
   it('refuses when either half is missing, naming both at once', () => {
     try {
       readMinterEnv({})
@@ -57,9 +44,6 @@ describe('reading the GitHub App out of the environment', () => {
     }
   })
 
-  // Read at boot rather than at first use, so that a path pointing at nothing is
-  // one of the problems a single boot reports — not a `git clone` failing an
-  // hour later for a reason nobody can see.
   it('refuses a key file it cannot read, and says why', () => {
     expect(() =>
       readMinterEnv({
@@ -69,8 +53,6 @@ describe('reading the GitHub App out of the environment', () => {
     ).toThrow(/ROMA_GITHUB_PRIVATE_KEY_FILE.*could not read/s)
   })
 
-  // An empty mount is what a secret that failed to materialise looks like, and
-  // it would otherwise boot roma on a key that signs nothing.
   it('refuses a key file that is empty', () => {
     expect(() =>
       readMinterEnv({

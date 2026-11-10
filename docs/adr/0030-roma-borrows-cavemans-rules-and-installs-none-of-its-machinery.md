@@ -115,6 +115,7 @@ directory on the chain and no repository root to stop at, and runs to `/`. On
 the way it stats `.claude/skills` under `/var/lib/roma/work`, `/var/lib/roma`,
 `/var/lib`, `/var` and `/`. The first of those may be a mounted volume. **The
 other four are the image's own filesystem, and a `COPY` can write any of them.**
+Enforced by `fence:image-adds-no-skills-or-volumes`.
 
 **So the sentence this section used to end on is wrong, and the decision it
 supported is not.** It read: *there is no path an image can bake a skill into
@@ -220,6 +221,15 @@ argument a Reach announcement rides (`startup.ts`'s `eachReach`) — so what
 survived the Eviction here is the channel itself, and ADR-0020's capabilities
 survive it with the ruleset. `docs/append-on-resume-verification.md` is the
 method and the reading in full.
+
+**Amended 2026-11-09 — on 2.1.319 the append did not survive, until roma turned
+the snapshot off (#160).** 2.1.319 records the rendered system prompt in the
+Transcript (`prompt_snapshot`) on a Session's first request and reuses it on
+every resume, so a resumed process answered with the **first** codeword
+(`original-persists`, twice). The build's own flag, `--system-prompt-snapshot
+off`, renders the prompt fresh on every request, which is what 2.1.220 did; with
+it on every spawn the verdict is `append-applies` again. Enforced by
+`fence:session-prompt-never-snapshotted`.
 
 **Not measured — that any of this saves a token.** The 65% is caveman's own
 number, measured by a third party on prompts nobody here has seen, and it is
@@ -335,7 +345,9 @@ spawning the way `#modelFor` and `#effortFor` already are — so a Chosen Cavema
 written while roma was somewhere else is in force without anybody telling the
 pool about it. A Session whose Caveman changes gets the pool's existing **`swap`**
 with a fourth `reason`, and the comment on that event already says what that
-costs: *an eviction is roma making room and this is money moving.*
+costs: *an eviction is roma making room and this is money moving.* The Resident
+records the level as a word, because nothing in the stream echoes it and the argv
+carries only the ruleset it renders to; that word is the swap's `from`.
 
 ### roma owns the text, because three of its lines describe a machine that is
 not there
@@ -352,7 +364,7 @@ of `jackey8616/caveman`, with three lines rewritten:
 
 **All four describe the tracker hook**, which is the piece the section above
 declines to install. Removing them is not editorial taste; it is deleting the
-manual for a part that is not in the box.
+manual for a part that is not in the box. Enforced by `fence:caveman-tracker-lines-removed`.
 
 The fourth row is here because the first three were written from a reading of
 caveman's `## Persistence` section and the fourth line is in `## Boundaries`,
@@ -378,10 +390,16 @@ upstream turns the run red, and somebody decides.
 
 `src/` holds no file that is not `.ts`, `build` is `rm -rf dist && tsc`, and the
 runtime stage copies `dist/` — so a `.md` under `src/` would silently not ship,
-and a `.md` anywhere else needs a `COPY` this image does not otherwise want. The
+and a `.md` anywhere else needs a `COPY` this image does not otherwise want.
+Enforced by `fence:src-ships-only-typescript`. The
 derived ruleset is therefore a constant in `src/`, one template plus roma's own
-copy of caveman's fifteen-line level filter. One template rather than six
-finished strings for the reason `ChosenRecord` is one class: the same idea
+copy of caveman's fifteen-line level filter, line for line from
+`caveman-activate.js`. Neither of its patterns may widen to the whole row or the
+whole bullet. Enforced by `fence:caveman-filter-keeps-the-table` for the row; the
+example pattern's `(\S+?):` keeps the Auto-Clarity bullets only because it wants
+a colon after a single token, and a loosening to `(.+?):` changes nothing on the
+pinned text, so that half is *Not enforced (ADR-0031).* One template rather than
+six finished strings for the reason `ChosenRecord` is one class: the same idea
 written once. Also because the rewritten `Default:` line has to name the Pinned
 Caveman, which is a runtime value and cannot be a static string.
 
@@ -395,7 +413,9 @@ exits before filtering for exactly this reason, and roma does the same.
 The **Caveman Menu** offers `off`, `lite`, `full`, `ultra`, `wenyan-full`, and
 `default` — six, the same width as the Effort Menu, and under the ten buttons on
 one message ADR-0023 declines to open. `wenyan` is not on it because it is an
-alias. `commit`, `review` and `compress` are not on it because they defer to
+alias — caveman's hook folds it into `wenyan-full`, and roma relays nothing to that
+hook, so a second accepted spelling would be one roma chose to claim rather than
+inherited, and the Audit Record would carry two spellings for one level. `commit`, `review` and `compress` are not on it because they defer to
 skills roma does not install and would point at nothing.
 
 `wenyan-lite` and `wenyan-ultra` are accepted by `ROMA_CAVEMAN` and never drawn,
@@ -412,7 +432,7 @@ neither. It appears in both, **and only where the Session's Caveman is not
 `off`**: ADR-0024 gives the Opening its job as telling somebody what they are on
 when the answer is not obvious, and a deployment that never turns this on has
 nothing to tell. The conditional tail is not a new shape on that sentence —
-`#modelTakesNone` is already one.
+`#modelTakesNone` is already one. Enforced by `fence:core-opening-says-what-config-says`.
 
 The sentence's `Change either with` becomes `Change any with` when the third fact
 is present, because *either* was only ever true of two.
@@ -441,11 +461,17 @@ not change what happens, it makes roma able to say what happens.*
 - **`appendSystemPrompt` moves.** It leaves the `SessionPool` constructor for
   `SpawnTerms`. Nothing else reads it, and the Reach announcements it already
   carries are unaffected — a Caveman is appended after them, on the blank-line
-  rule `startup.ts` already applies.
+  rule `startup.ts` already applies. The Resident records it too: `#turn`'s retry
+  respawn hands a Resident back as its own `SpawnTerms`, so the retried Turn runs
+  on what it began under rather than on whatever the pool holds by then, and
+  `sameTerms` compares it, because a Chosen Caveman is what lets two spawns of one
+  deployment disagree about it.
 - **A fourth `swap` reason.** `'caveman'` beside `'credential'`, `'model'` and
   `'effort'`. Its `from`/`to` are strings, so it joins the arm that already
   carries two — and an operator reading an unexplained respawn gets a fourth
-  answer to *which*.
+  answer to *which*. Where several terms move at once the swap names the model
+  first, the effort second and the Caveman third: the model is the larger fact,
+  and every term is on the `spawn` record that follows anyway.
 - **A third Chosen Record adapter.** `chosenCavemen` beside `chosenModels` and
   `chosenEfforts`. The entry in `CONTEXT.md` that says "used twice" is amended
   rather than left to rot.
@@ -495,7 +521,7 @@ description on every spawn, where the append pays nothing; and a Session that
 does use it pays the description, the nudge, the body once invoked, *and* a Skill
 tool call whose round trip is spent on the output side. There is no lazy case to
 win: caveman has to shape the first sentence, so the body is loaded before the
-first response or it is useless. The append is cheaper in both states.
+first response or it is useless. The append is cheaper in both states. *Not enforced (ADR-0031).*
 
 **Append the ruleset unedited.** Rejected: see the table above. It would make
 `/caveman` report a state the model had abandoned and make roma refuse two names
@@ -547,7 +573,9 @@ Ordered by how much falls if the answer is no.
    `src/append-on-resume.live.test.ts` is the instrument and
    `docs/append-on-resume-verification.md` the reading. Moving the pin re-opens
    it — that is what ADR-0007 means by a re-verification event — and re-running
-   that one file is the whole of what re-opening costs.
+   that one file is the whole of what re-opening costs. Moving to 2.1.319
+   re-opened it and the answer was no, until every spawn passed
+   `--system-prompt-snapshot off` (amended above).
 6. **Does the app-server take a system-prompt append, and is any of this
    measurable on Codex?** ADR-0026's agenda gains this item; nothing here is
    blocked on it.

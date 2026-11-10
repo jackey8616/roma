@@ -8,22 +8,6 @@ import { MINTER_SOCKET_VAR, SESSION_ID_VAR, socketPathIn } from '../shim-protoco
 import { ShimServer } from '../shim-server.js'
 import { FakeCloudMinter, fakeServedReaches } from '../../test/support/fake-minter.js'
 
-/**
- * The Cloud Shortcut as a shell sees it: a real child process, a real socket.
- *
- * Spawned rather than called, mirroring `src/github/gh-shim.test.ts`, and
- * justified the same way: the Shortcut's entire contract is what a shell
- * observes. Exactly what lands on stdout, exactly what does not, the exit code,
- * and which stream the refusal goes to are the whole of the thing — and nothing
- * in-process can see any of it.
- *
- * The bare form's contract in particular is unusually literal, because the
- * command exists to be substituted:
- * `curl -H "Authorization: Bearer $(roma-cloud-token)"`. One stray character on
- * stdout is a malformed Authorization header and an unexplained 401 inside
- * somebody's Turn.
- */
-
 const SHORTCUT = fileURLToPath(new URL('./cloud-token.ts', import.meta.url))
 const SESSION = 'a-session'
 
@@ -62,9 +46,6 @@ async function shortcutAgainst({ cloudMinter }: { cloudMinter?: FakeCloudMinter 
 }
 
 describe('the Cloud Shortcut', () => {
-  // Nothing to parse, because a tool invented to save the model's output tokens
-  // should not require the model to write a parser to use it. The trailing
-  // newline is what every command writes and what `$(…)` strips.
   it('prints the token and nothing else', async () => {
     const shortcut = await shortcutAgainst({ cloudMinter: new FakeCloudMinter() })
 
@@ -75,10 +56,6 @@ describe('the Cloud Shortcut', () => {
     expect(ran.code).toBe(0)
   })
 
-  // The expiry is behind `--json` rather than in the default because re-running
-  // is free and stateless: an agent does not need to reason about how long it
-  // has left, it needs to ask again. What `--json` is for is the APIs that want
-  // the identity named.
   it('gives the token, its expiry and the account under --json', async () => {
     const cloudMinter = new FakeCloudMinter()
     const shortcut = await shortcutAgainst({ cloudMinter })
@@ -93,10 +70,6 @@ describe('the Cloud Shortcut', () => {
     expect(ran.code).toBe(0)
   })
 
-  // Installed on every image, including the deployments with no Cloud Reach —
-  // otherwise this is `command not found`, which a model reads as a broken PATH
-  // and spends a Turn investigating. One sentence, on stderr, repeatable to a
-  // person, and nothing on stdout for a caller to mistake for a credential.
   it('says this deployment has no Cloud Reach, and exits non-zero', async () => {
     const shortcut = await shortcutAgainst()
 
@@ -108,9 +81,6 @@ describe('the Cloud Shortcut', () => {
     expect(ran.code).not.toBe(0)
   })
 
-  // roma's own sentence rather than a paraphrase: "this deployment has none" and
-  // "the key stopped working" are different problems for different people, and
-  // the agent has to be able to relay either.
   it('passes on why there is no token, when there should have been one', async () => {
     const cloudMinter = new FakeCloudMinter()
     cloudMinter.failsWith = new Error('the service account key was revoked')
@@ -122,9 +92,6 @@ describe('the Cloud Shortcut', () => {
     expect(ran.code).not.toBe(0)
   })
 
-  // A silently ignored `--jsno` hands a bare token to something that was about
-  // to parse it, and the failure surfaces as unreadable JSON several steps from
-  // the typo that caused it.
   it('refuses an argument it does not take rather than ignoring it', async () => {
     const shortcut = await shortcutAgainst({ cloudMinter: new FakeCloudMinter() })
 
@@ -135,9 +102,6 @@ describe('the Cloud Shortcut', () => {
     expect(ran.code).not.toBe(0)
   })
 
-  // Running roma from source, or something invoking this by hand. The complaint
-  // names the variable rather than reporting an unexplained connection failure,
-  // which is what would send somebody to look at the socket instead.
   it('says which variable is missing when there is no roma to ask', async () => {
     const shortcut = await shortcutAgainst({ cloudMinter: new FakeCloudMinter() })
 

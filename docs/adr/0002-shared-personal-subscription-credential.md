@@ -62,7 +62,8 @@ and **always in non-interactive mode**."
 So the obvious approach — keeping an API key in the container environment for
 the overflow valve below — would silently route *every* run to metered billing
 and never touch the subscription. There is no warning; it would surface as an
-unexpected invoice.
+unexpected invoice. Enforced by `fence:buildenv-no-stray-key`. Enforced by
+`fence:startup-self-check-catches-a-stray-key`.
 
 **Amended — confirmed, and worse than described. The key takes the model with
 it.** With both credentials present, the prototype observed:
@@ -95,10 +96,23 @@ overflow:  { ANTHROPIC_API_KEY: <key> }           # OAuth token absent
 The key must be **absent**, not empty — an empty string still occupies its slot
 in the precedence order. Both secrets are read from GCP Secret Manager into the
 Node process and never enter the container's global environment, the image, or
-version control.
+version control. Enforced by `fence:buildenv-no-stray-key`.
 
 A consequence worth noting: the overflow valve stops being a special mode and
 becomes just a different environment map.
+
+**Amended 2026-11-09 by ADR-0034 — the maps above hold stand-ins now, not the
+secrets.** The agent's Bash tool shares `claude`'s uid and read the token out of
+`/proc/<claude>/environ` into a Transcript (GHSA-wqj9-8qq4-w466). Each map now
+carries a stand-in in the same variable, the other variable still **absent**, and
+`ANTHROPIC_BASE_URL` pointed at roma's credential proxy, which puts the real
+credential back on the way out. Everything above about precedence and absence
+holds unchanged.
+
+**Amended — one map per credential, chosen per Turn.** The Session Pool holds
+both maps and picks between them for each Turn. Both reach the same Credential
+Shim socket: a credential for reaching the code has nothing to do with which bill
+a Turn lands on.
 
 ### Quota exhaustion
 
@@ -110,6 +124,10 @@ On exhaustion the bot states plainly that quota is spent, gives the expected
 reset time, and queues the task. It also offers an **overflow valve**: a button
 that reruns the task on a metered API key.
 
+**Amended — a blocked task waits holding nothing.** It keeps no concurrency slot
+and no process while it waits, and runs again when the window comes back or when
+somebody takes the valve.
+
 **Amended — the expected reset time has a real source.** It is `resetsAt` on the
 `rate_limit_event` above, not an estimate. `overageStatus` and `isUsingOverage`
 on the same event tell us whether overage is even available before we offer the
@@ -118,19 +136,15 @@ valve.
 The valve is **off by default** and offered at the moment a task is blocked,
 rather than as a setting to be enabled in advance — people are poor at
 predicting which work will turn out to be interruptible, and are well placed to
-judge it once blocked.
+judge it once blocked. The button says that it costs money ("Run it on metered
+billing"), because that is the whole of the decision: a button labelled "Run
+anyway" would be the choice made by somebody who did not know they were making it.
 
-**Amended again — what a spent window looks like is still unmeasured, and the
-implementation says so.** Every capture in `test/fixtures/claude-stream/` reports
-`status: "allowed"`, including the one quoted above; measuring the other case
-means deliberately draining the window the whole team shares, which blocks
-everybody until it resets. So `spentUntil` in `src/quota.ts` reads *anything that
-is not `allowed`* as spent, and that one function is the whole of the guess —
-deliberately shaped to survive being wrong, since a status roma has never seen
-parks a Task and says so rather than running it into a wall. It also refuses to
-call the window spent when the event carries no `resetsAt`: a Task parked against
-a moment that never arrives waits for ever, and nothing would come and look at it
-again. Correct it there, and nowhere else, once somebody has seen one.
+**Amended again — only `rejected` is spent.** Enforced by
+`fence:only-rejected-is-spent`. An earlier amendment here read *anything that is
+not `allowed`* as spent; `allowed_warning` proved that wrong (#83), and the check
+is now the statement of the rule. A window that is spent but carries no
+`resetsAt` is not parked either, and the same check holds that.
 
 - Anyone may press it. Restricting it to an admin turns a person into an
   approval queue and leaves urgent work stuck whenever they are offline.
@@ -139,6 +153,9 @@ again. Correct it there, and nowhere else, once somebody has seen one.
 - Spend is shown in the reply, and a **monthly overflow cap** is enforced;
   beyond it, overflow is refused outright and the owner is notified. Without a
   cap, "off by default" would be ceremony rather than protection.
+  - **The spend is shown only where somebody chose to spend it, and as a
+    message of its own** rather than appended to the answer: the answer is what
+    gets quoted later, and a price tag inside it would be quoted along with it.
   - **The cap is a required part of configuring overflow at all**, not a setting
     with a default: a default would be roma deciding how much of somebody's money
     to spend on their behalf. A metered key and a cap are configured as one
@@ -189,7 +206,7 @@ carries it.
   fix. The total belongs to the process rather than to the session — measured
   when the session pool first evicted and resumed one, and recorded in ADR-0003's
   observability section — so the baseline restarts with every process and nothing
-  has to be carried across an eviction.
+  has to be carried across an eviction. Enforced by `fence:session-cost-is-a-delta`.
 
 **Amended — "off by default" is a variable roma names for itself.** The ingress
 subscriber (#13) is where a deployment first has to say whether overflow exists,
@@ -218,4 +235,4 @@ credential handling was placed at the spawn boundary.
 One amendment-era caveat: because the credential also determines the model, a
 migration must set `--model` deliberately rather than inherit whatever the new
 credential defaults to. Otherwise a change of billing silently becomes a change
-of capability and cost.
+of capability and cost. Enforced by `fence:session-model-always-passed`.

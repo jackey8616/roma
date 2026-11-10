@@ -1,13 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CodexAppServer, CodexAppServerLost, CodexRpcError } from './codex-app-server.js'
-import { FakeClaude, flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
+import { FakeRuntime, flush, type FakeRuntimeProcess } from '../test/support/fake-runtime.js'
 
-// Seam 1 for the Codex harness: the wire, against a fake process that frames
-// bytes rather than events. Every reply below is shaped the way the pinned
-// build's own schema says it is (`codex app-server generate-ts`, 0.165.0).
-
-function harness(): { server: CodexAppServer; fake: FakeClaude; proc: () => FakeClaudeProcess } {
-  const fake = new FakeClaude()
+function harness(): { server: CodexAppServer; fake: FakeRuntime; proc: () => FakeRuntimeProcess } {
+  const fake = new FakeRuntime()
   const server = new CodexAppServer({
     codexHome: '/var/lib/roma/codex',
     cwd: '/tmp/probe',
@@ -17,16 +13,16 @@ function harness(): { server: CodexAppServer; fake: FakeClaude; proc: () => Fake
   return { server, fake, proc: () => fake.process }
 }
 
-function reply(proc: FakeClaudeProcess, id: number, result: unknown): void {
+function reply(proc: FakeRuntimeProcess, id: number, result: unknown): void {
   proc.emitStdout(`${JSON.stringify({ id, result })}\n`)
 }
 
-function notify(proc: FakeClaudeProcess, method: string, params: unknown): void {
+function notify(proc: FakeRuntimeProcess, method: string, params: unknown): void {
   proc.emitStdout(`${JSON.stringify({ method, params })}\n`)
 }
 
 describe('spawning', () => {
-  it('runs `codex app-server` under the CODEX_HOME it was given, over any inherited one', () => {
+  it('runs `codex app-server` under the CODEX_HOME it was given, over any inherited one [fence:codex-home-beats-inherited]', () => {
     const { fake } = harness()
     expect(fake.lastSpawn.command).toBe('codex')
     expect(fake.lastSpawn.args).toEqual(['app-server'])
@@ -135,7 +131,7 @@ describe('a Turn', () => {
   async function started(effort?: string): Promise<{
     server: CodexAppServer
     turn: ReturnType<CodexAppServer['runTurn']>
-    proc: FakeClaudeProcess
+    proc: FakeRuntimeProcess
   }> {
     const { server, proc } = harness()
     const turn = server.runTurn({
@@ -184,7 +180,6 @@ describe('a Turn', () => {
       turnId: 'tu-1',
       item: { type: 'agentMessage', id: 'm1', text: 'PING' },
     })
-    // Another thread's traffic on the same process is not this Turn's.
     notify(proc, 'item/completed', {
       threadId: 'th-2',
       turnId: 'tu-9',
@@ -227,14 +222,13 @@ describe('a Turn', () => {
     await expect(turn).rejects.toThrow('turn/completed carried no finished Turn')
   })
 
-  it('refuses a usage reading it cannot read, once the Turn is over', async () => {
+  it('refuses a usage reading it cannot read, once the Turn is over [fence:codex-turn-ends-only-on-turn-completed]', async () => {
     const { server, turn, proc } = await started()
     notify(proc, 'thread/tokenUsage/updated', {
       threadId: 'th-1',
       turnId: 'tu-1',
       tokenUsage: { total: { totalTokens: 1 }, last: { totalTokens: 1 } },
     })
-    // The server's Turn is still running, so roma's must be too.
     await expect(server.runTurn({ threadId: 'th-1', text: 'again' })).rejects.toThrow(
       'a Turn is already running',
     )
@@ -279,10 +273,19 @@ describe('a Turn', () => {
     await expect(turn).rejects.toBeInstanceOf(CodexAppServerLost)
     await expect(turn).rejects.toThrow(/exited \(code 1.*\n.*401 Unauthorized/s)
   })
+
+  it('fails without an unhandled rejection when the process dies before turn/start is answered [fence:codex-lost-turn-is-handled]', async () => {
+    const { server, proc } = harness()
+    const turn = server.runTurn({ threadId: 'th-1', text: 'Reply PING' })
+    await flush()
+    proc().emitExit({ code: 1, signal: null })
+
+    await expect(turn).rejects.toBeInstanceOf(CodexAppServerLost)
+  })
 })
 
 describe('stdout that is not the protocol', () => {
-  it('keeps it in stderr, where a failure is explained from', async () => {
+  it('keeps it in stderr, where a failure is explained from [fence:codex-stdout-never-throws]', async () => {
     const { server, proc } = harness()
     proc().emitStdout('panic: something\n')
     proc().emitStdout('[1,2]\n')

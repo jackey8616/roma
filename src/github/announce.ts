@@ -1,40 +1,7 @@
 import type { Installation } from './installation.js'
 
-/**
- * What every Session is told it can reach.
- *
- * Its own file rather than beside the gitconfig in `shims.ts`. The two are
- * edited for different reasons — one changes when the Shim's wiring does, this
- * one changes when what an agent needs to be told does — and a file that holds
- * both is a file with two reasons to change.
- */
-
-/**
- * The most repositories the announcement will name one by one.
- *
- * A cap, never the whole list: this text is prepended to every Turn of every
- * Session, and an Installation on a thousand repositories would spend more of
- * the context window on a directory than on the work.
- *
- * What is capped is the advertisement, not the access, and the text has to keep
- * saying so — the failure this whole announcement prevents is an agent that
- * refuses work it can do.
- */
 const NAMED_AT_MOST = 100
 
-/**
- * A capability nobody knows about is a capability nobody has.
- *
- * Claude Code in an empty directory has no reason to believe it can clone
- * anything, and an agent that explains it has no access instead of trying is the
- * failure this text exists to prevent — so it says the credentials are present,
- * what they reach, and that the working directory is empty on purpose.
- *
- * That the list goes stale if the App is installed somewhere new is accepted,
- * and it goes stale softly: the token already covers the new repository, so
- * cloning it works. Only the advertisement is behind, and only until the next
- * restart.
- */
 export function announce(installation: Installation): string {
   const { account, repositories } = installation
   const named = repositories.slice(0, NAMED_AT_MOST)

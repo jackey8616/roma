@@ -3,9 +3,9 @@
 #
 # Two stages, because they want opposite things. The builder needs the whole
 # toolchain — TypeScript, the test-only dependencies, the lot — and produces one
-# directory. The runtime needs that directory, the two runtime dependencies, and
-# the two Runtimes' CLIs — Claude Code and Codex — and nothing the builder used is
-# allowed to follow it in.
+# directory. The runtime needs that directory, the runtime dependencies, and
+# the two Runtimes' CLIs — Claude Code and Codex — and nothing the builder used
+# is allowed to follow it in.
 
 # The Claude Code this image carries, exact rather than floating.
 #
@@ -17,7 +17,7 @@
 # red, and `docs/adr/0007-a-container-image-pinned-to-one-claude-code.md` says
 # what the re-verification is. Named exactly rather than globbed: `0006-*` used
 # to match this file and matches a different decision now.
-ARG CLAUDE_CODE_VERSION=2.1.220
+ARG CLAUDE_CODE_VERSION=2.1.319
 
 # The Codex this image carries — the second Runtime's pin, exact for the first
 # one's reason (ADR-0026 *The pins*). Every Codex reading in `docs/` is evidence
@@ -75,7 +75,26 @@ COPY src ./src
 RUN npm run build
 
 # ---------------------------------------------------------------------------
-# Runtime: `dist/`, the two dependencies it imports, and an agent's userland.
+# Launcher: the one program that is root after boot (ADR-0036).
+#
+# Built on the runtime's own base so it links against the glibc it will run on,
+# and with every warning an error: a truncated path in a setuid program is a
+# wrong directory, not a cosmetic problem. The compiler stays in this stage.
+# ---------------------------------------------------------------------------
+FROM node:22-slim AS launcher
+
+RUN apt-get update \
+  && apt-get install --no-install-recommends --yes gcc libc6-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY launcher/roma-launch.c /src/roma-launch.c
+RUN mkdir -p /out \
+  && gcc -std=c11 -O2 -Wall -Wextra -Werror -Wconversion -Wshadow -Wformat=2 \
+       -D_FORTIFY_SOURCE=2 -fstack-protector-strong -fPIE -pie -Wl,-z,relro,-z,now \
+       -o /out/roma-launch /src/roma-launch.c
+
+# ---------------------------------------------------------------------------
+# Runtime: `dist/`, the dependencies it imports, and an agent's userland.
 # ---------------------------------------------------------------------------
 FROM node:22-slim AS runtime
 
@@ -120,8 +139,9 @@ RUN curl --fail --silent --show-error --location \
 
 WORKDIR /app
 
-# `--omit=dev` leaves @google-cloud/pubsub and google-auth-library, which is
-# every dependency `dist/` has. `tsx` is not among them: the image runs compiled
+# `--omit=dev` leaves @google-cloud/pubsub and google-auth-library, plus undici
+# and https-proxy-agent for the egress gateway (ADR-0035), which is every
+# dependency `dist/` has. `tsx` is not among them: the image runs compiled
 # JavaScript, so the reason the README used to give for keeping it at runtime has
 # expired along with "deployment is out of scope".
 COPY package.json package-lock.json ./
@@ -190,7 +210,7 @@ RUN printf '#!/bin/sh\nexec node /app/dist/documents/document-token.js "$@"\n' >
 # defaulting either here would re-open that hole from a new direction, with the
 # data in the container's writable layer, gone with the container. ADR-0002 is
 # explicit that per-user attribution does not exist at the provider, so the Audit
-# Records are the only place it ever exists — and ADR-0005 makes the Transcript
+# Records are the only account of spending roma can add up — and ADR-0005 makes the Transcript
 # the only account there is of what an agent did, which ADR-0006 then decided
 # roma deletes nothing from. A default is roma doing the deleting anyway, on a
 # schedule nobody chose.
@@ -231,17 +251,56 @@ ENV HOME=/home/node \
 # `/run/roma` is made here for a different reason again: roma creates it at boot
 # if it is missing, and it cannot, because `/run` belongs to root and roma is
 # `node`.
+#
+# The work root, the Claude config root and `/run/roma` are 0711 because every
+# Seat passes through them to its own Session and its own socket, and must not
+# list anyone else's (ADR-0036). The audit root is no Seat's business at all.
 RUN mkdir -p /var/lib/roma/work /var/lib/roma/claude /var/lib/roma/audit /var/lib/roma/codex /run/roma \
   && chown -R node:node /var/lib/roma /run/roma \
-  && chmod 0700 /run/roma
+  && chmod 0711 /run/roma /var/lib/roma/work /var/lib/roma/claude \
+  && chmod 0700 /var/lib/roma/audit /var/lib/roma/codex
 
-# Not root. The agent's blast radius is already "anything a member of a connected
-# channel asks for" (ADR-0003); it does not also need to be root inside the
-# container it is confined to.
-USER node
+# No `USER node`, and that is the containment rather than a lapse of it
+# (ADR-0032, GHSA-v52v-hcv8-cr23). roma starts as root for exactly as long as it
+# takes to read the key files, then becomes `node` before it builds a Channel or
+# spawns an agent — so roma serves as `node` and every agent runs as `node`, as
+# before. What starting as root buys is two things the agent, also `node`, then
+# cannot reach: key files that only root can read (mount them 0400, owned by
+# root), and a roma the kernel has marked not dumpable because it changed uid, so
+# `/proc/<roma>/environ`, `/proc/<roma>/mem` and ptrace are closed to it. roma
+# checks both after the drop and refuses to start if either does not hold.
+#
+# `--disable-sigusr1` is part of the same boundary. The agent may signal roma —
+# same uid — and SIGUSR1 would otherwise open a Node inspector on 127.0.0.1:9229
+# that reads roma's memory regardless of what the kernel says; roma refuses to
+# start as root without it. `scripts/verify-image.sh` proves all of it against
+# the built image.
+# The Seats, the uid a parked Session belongs to, and the Launcher that moves a
+# Session between them (ADR-0036). Each Seat has a group of its own and no
+# other, so the Launcher — executable by group `node` only — is refused to every
+# agent by the kernel. `/run/roma-launch` is where roma, while still root,
+# writes the roots the Launcher derives every path from.
+RUN groupadd --gid 19999 roma-parked \
+  && useradd --uid 19999 --gid 19999 --no-create-home --home-dir /nonexistent \
+       --shell /usr/sbin/nologin roma-parked \
+  && for i in $(seq 0 15); do \
+       n="$(printf '%02d' "${i}")"; id=$((20000 + i)); \
+       groupadd --gid "${id}" "roma-seat-${n}" \
+       && useradd --uid "${id}" --gid "${id}" --no-create-home --home-dir /nonexistent \
+            --shell /usr/sbin/nologin "roma-seat-${n}" || exit 1; \
+     done \
+  && mkdir -p /run/roma-launch && chmod 0755 /run/roma-launch
+# The base image's own setuid and setgid programs — su, passwd, mount and the
+# rest — lose the bit, so the Launcher below is the only one left (ADR-0038,
+# GHSA-g6cx-6wcm-4hqw). No agent could climb through them anyway: the Launcher
+# execs every Runtime with no_new_privs (ADR-0036). But roma itself cannot run
+# under a container-wide no-new-privileges, which would void the Launcher, so
+# nothing else in the image is left for roma's uid to exec into root.
+RUN find / -xdev -type f -perm /6000 -exec chmod ug-s {} +
+COPY --from=launcher --chown=root:node --chmod=4750 /out/roma-launch /usr/local/libexec/roma-launch
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "/app/dist/channels/main.js"]
+CMD ["node", "--disable-sigusr1", "/app/dist/channels/main.js"]
 
 # Last, so that a new version or revision reprints one layer rather than
 # rebuilding the install layers above it. Readable with `docker inspect`, without

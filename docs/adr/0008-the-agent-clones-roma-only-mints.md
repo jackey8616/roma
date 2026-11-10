@@ -104,7 +104,7 @@ in front of `gh` must hand out a token for the whole Installation, and an agent
 that can invoke that Shim can obtain one whenever it likes. Scoping `git`'s side
 alone would bound accidental leakage on one path while the other stayed wide
 open, and would be read a year from now as a boundary it never was — the precise
-mistake the *not a boundary against the agent* paragraph below exists to prevent.
+mistake the *not a boundary against the agent* paragraph below exists to prevent. *Not enforced (ADR-0031).*
 
 So the blast radius above stands, and the reason for it is no longer ignorance.
 
@@ -125,6 +125,10 @@ it is the version that dies mid-Turn.
 `credential.helper` and `credential.useHttpPath`. The helper is a thin client. It
 holds no secret and mints nothing; it asks roma, over a local channel, and roma —
 which holds the App private key — mints and answers.
+The helper is named as a `!`-prefixed shell command, `git`'s own spelling for
+"run this": the Shim is a Node module in roma's build, not an executable named
+`git-credential-something`, and a shebang wrapper installed by the image would be
+a second file to keep in step.
 
 **The private key never enters the container's reachable space.** A key in the
 agent's reach would turn a one-hour exposure into a permanent, indefinitely
@@ -140,6 +144,17 @@ short of running the agent somewhere else can. What is left doing the work is th
 one-hour expiry, which bounds a token that escapes and is unaffected by the key.
 `docs/github-app-verification.md` records the gap; it is not treated as met.
 
+**Amended 2026-11-09 by ADR-0032 — the sentence is true again, by a different
+route than it assumed.** GHSA-v52v-hcv8-cr23 showed the gap was wider than the
+file: roma's environment and roma's memory held the key too, so not mounting it
+would not have closed it. And the one-hour expiry was never the bound for this
+line — it bounds a leaked *token*; a leaked *signing key* mints until it is
+revoked. roma now starts as root, reads the key, and becomes `node` before any
+agent exists: the key file is root's, and the kernel marks roma not dumpable, so
+the agent — still `node`, still roma's child — can open neither the file nor
+roma's `/proc`. roma proves both and refuses to start otherwise. Different
+containers are no longer needed for this, only for what ADR-0008 defers.
+
 It must also be said plainly, because a credential helper is easily sold as
 security it is not: **this is not a boundary against the agent.** The agent has a
 shell under `bypassPermissions`; `git credential fill` prints the token. What the
@@ -148,6 +163,14 @@ the process environment — where `env`, a stack trace, or a diagnostic command
 would write it into a **Transcript roma has promised never to delete**
 (ADR-0006). The hour is what bounds that; nothing longer-lived than an hour could
 be allowed anywhere near an append-only record.
+
+**Amended 2026-11-09 by ADR-0034 — that sentence was not true of the deployment
+until now.** ADR-0002 had put the year-long Shared Window token in the very
+environment it describes, and the agent printed it into a Transcript
+(GHSA-wqj9-8qq4-w466). Claude Code now holds a stand-in, and the token stays in
+roma behind a credential proxy — the option rejected below, taken up for the
+Messages API credential only. Enforced by
+`fence:startup-no-forge-token-in-env`.
 
 **Amended — one helper is not the whole mechanism, because `gh` is not `git`.**
 Issues and pull requests are a good part of what this exists for: `issues: write`
@@ -158,7 +181,7 @@ credential helper.** It takes a token from `GH_TOKEN`, or from a config file it
 was logged into — the process environment this section rejects on arithmetic, and
 a file the Alternatives below reject on the same expiry. Implemented exactly as
 written, an agent could clone and push and could not open a pull request, which
-is not a shortfall anybody would accept as the design.
+is not a shortfall anybody would accept as the design. *Not enforced (ADR-0031).*
 
 The mechanism is therefore one **Minter** and **two Credential Shims**, both
 named in CONTEXT.md: `git`'s credential helper, and something ahead of `gh` on
@@ -167,6 +190,14 @@ and no other. Per invocation rather than per Session, for this section's own
 arithmetic — an environment fixed at spawn is stale within the hour, and a
 Resident Session outliving an hour is ordinary.
 
+Per invocation costs less than it sounds, and the cache in front of the Minter
+saves less than it was built expecting: `git` asks once per operation — one
+request for a clone, a fetch or a push, not one per object
+(`docs/github-app-verification.md`) — so it saves a round trip per operation
+rather than rescuing roma from a rate limit. It stays because `gh` asks once per
+invocation and an agent runs many, three Tasks run at once, and a token expiring
+mid-operation would be a failure nobody could reproduce.
+
 The GitHub MCP server was considered in `gh`'s place and is worse here rather
 than better: its token is an environment variable read at launch, and an MCP
 server is started once per Session and then stays. It is `GH_TOKEN` at spawn with
@@ -174,6 +205,20 @@ an extra process in front of it.
 
 What none of this changes: a Shim is still not a boundary against the agent, for
 the reason two paragraphs up. It has only stopped being singular.
+
+**Amended — `git`'s Shim speaks git's protocol as it is actually spoken, and
+treats its three operations as three different things.** The helper is run as
+`helper <operation>`, is given `key=value` lines on stdin ending at a blank line
+or EOF, and answers `get` with `key=value` lines of its own:
+
+- **`get`** is answered with `username=x-access-token` and an Installation Token,
+  which is GitHub's spelling for "this credential is an App's".
+- **`erase`** is git saying the credential it was given was rejected. It hands the
+  credential back, which is roma's only signal that a token it believes in has
+  stopped working. Measured: `git` 2.43.0 calls a helper twice on an
+  authentication failure, the second time with `erase` and the dead password.
+- **`store`** is answered by doing nothing at all. roma has nowhere to store a
+  credential and wants none: nothing may outlive the operation that needed it.
 
 ### What the Installation may do
 
@@ -206,7 +251,7 @@ two places, neither of them the author field.
 applies only to interactive commits with no `-m`, and the agent always passes
 `-m`. Like the helper, this is for honesty and not for enforcement — an agent
 with a shell can defeat it, and the point is that the ordinary path records the
-truth.
+truth. *Not enforced (ADR-0031): not built.*
 
 **Amended 2026-07-30 by ADR-0009**, which corrects the address rather than the
 decision. The trailer originally read `Requested-by: alice@example.com
@@ -259,7 +304,8 @@ an Ingress Message exists, and a failure blocks the boot — the Startup
 Self-Check's shape, for the Startup Self-Check's reason. A bad private key that
 surfaced instead as an inexplicable `git clone` failure inside somebody's Turn
 would read as "roma is broken" with no diagnosis attached. Unlike the Claude
-self-check, this one is free.
+self-check, this one is free. Enforced by
+`fence:startup-installation-proved-at-boot`.
 
 ### The agent is told what it has
 
@@ -315,7 +361,10 @@ spared.
   real escalation path.** The agent can rewrite what counts as passing, and CI is
   usually where a repository's secrets are. It bypasses code review and reaches
   credentials in the same move. This is not an argument against the decision —
-  it is why the decision is written down instead of assumed.
+  it is why the decision is written down instead of assumed. **Amended by
+  ADR-0035:** behind the Egress Gateway the agent reaches only its allowlist, but
+  that list includes `github.com` and `api.github.com`, so this path is narrowed
+  for exfiltration elsewhere and unchanged for GitHub itself.
 - **Every Conversation reaches every repository in the Installation.** Anyone who
   can message roma has that reach. Which repositories the App is installed on is
   now the only control, and choosing that list is an operational decision with no
@@ -336,7 +385,7 @@ spared.
   hook firing under the agent's actual commit commands, the system prompt
   landing — is a documented behaviour that this repository has not observed. The
   house standard is measurement (ADR-0002, ADR-0003, the transcript collision
-  work), and this ADR does not meet it yet.
+  work), and this ADR does not meet it yet. *Not enforced (ADR-0031).*
 
   **Updated by #60**, and only partly. The helper protocol *is* measured now, and
   continuously: `src/github/git-credential-shim.test.ts` drives a real `git`

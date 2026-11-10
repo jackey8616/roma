@@ -1,23 +1,8 @@
-import type { ClaudeProcess, SpawnClaudeProcess } from './claude-process.js'
-import { spawnClaudeProcess } from './claude-process.js'
+import type { RuntimeProcess, SpawnRuntimeProcess } from './runtime-process.js'
+import { spawnRuntimeProcess } from './runtime-process.js'
 
-/**
- * A `codex app-server` process, spoken to over JSON-RPC on stdio — the harness
- * #149 asks for, and the floor ADR-0026's verification agenda stands on.
- *
- * Deliberately not a Session. It is not owned by the Session Pool, it does not
- * resume, it has no wedge watchdog and it answers no approval — each of those is
- * an agenda item this module exists to make askable (#151, #156, #153). What it
- * does hold is the wire: a request is matched to its reply by id, notifications
- * are routed to the one Turn running, and a process that dies fails everything
- * still waiting rather than leaving it to a timeout.
- *
- * Every method and field name here is the pinned build's own
- * (`codex app-server generate-ts`); `docs/codex-app-server-verification.md`
- * records where that disagrees with ADR-0026.
- */
 export class CodexAppServer {
-  readonly #process: ClaudeProcess
+  readonly #process: RuntimeProcess
   readonly #pending = new Map<number, Pending>()
   readonly #stderr: string[] = []
   readonly #exit: Promise<void>
@@ -26,13 +11,16 @@ export class CodexAppServer {
   #turn: RunningTurn | null = null
   #lostBecause: string | null = null
 
-  constructor({ codexHome, cwd, inherit = {}, spawn = spawnClaudeProcess }: CodexAppServerOptions) {
+  constructor({
+    codexHome,
+    cwd,
+    inherit = {},
+    spawn = spawnRuntimeProcess,
+  }: CodexAppServerOptions) {
     this.#process = spawn({
       command: 'codex',
       args: ['app-server'],
       cwd,
-      // Last, so an inherited `CODEX_HOME` can never point the process at a
-      // credential other than the one the deployment named.
       env: { ...inherit, CODEX_HOME: codexHome },
     })
     this.#process.onStdout((chunk) => this.#read(chunk))
@@ -49,20 +37,13 @@ export class CodexAppServer {
     })
   }
 
-  /** The last lines the process wrote to stderr, for a failure that needs explaining. */
   get stderr(): readonly string[] {
     return this.#stderr
   }
 
-  /**
-   * The handshake: `initialize`, then the `initialized` notification the
-   * protocol requires before it serves anything else.
-   */
   async initialize(clientVersion: string): Promise<CodexInitialized> {
     const result = await this.#request('initialize', {
       clientInfo: { name: 'roma', title: null, version: clientVersion },
-      // Only the stable surface: anything roma relies on must be in the build it
-      // pins without an opt-in that build may drop.
       capabilities: { experimentalApi: false, requestAttestation: false },
     })
     this.#send({ method: 'initialized' })
@@ -72,13 +53,6 @@ export class CodexAppServer {
     }
   }
 
-  /**
-   * Start a thread on a model, and report what the server says it started it on.
-   *
-   * There is no effort here: it travels on `runTurn`
-   * (`docs/codex-app-server-verification.md`). Approvals are off: a harness Turn has nobody to
-   * approve anything, and the posture a served Session runs under is #153's.
-   */
   async startThread({ model, cwd }: CodexThreadRequest): Promise<CodexThread> {
     const result = await this.#request('thread/start', { model, cwd, approvalPolicy: 'never' })
     return {
@@ -88,13 +62,6 @@ export class CodexAppServer {
     }
   }
 
-  /**
-   * One Turn, from `turn/start` to `turn/completed`. One at a time per process.
-   *
-   * The reply is the text of the Turn's completed `agentMessage` items, in order.
-   * Usage is the last `thread/tokenUsage/updated` reading for the thread, because
-   * the pinned build puts none on `turn/completed`.
-   */
   async runTurn({ threadId, text, effort }: CodexTurnRequest): Promise<CodexTurn> {
     if (this.#turn !== null) throw new Error('a Turn is already running on this app-server')
 
@@ -118,7 +85,6 @@ export class CodexAppServer {
     }
   }
 
-  /** Close stdin and wait for the process to go, killing it if it outstays `graceMs`. */
   async close(graceMs = 5_000): Promise<void> {
     if (this.#lostBecause !== null) return
     this.#process.closeStdin()
@@ -127,7 +93,6 @@ export class CodexAppServer {
     clearTimeout(timer)
   }
 
-  /** Send one request and wait for the reply carrying its id. */
   #request(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (this.#lostBecause !== null) {
       return Promise.reject(new CodexAppServerLost(this.#lostBecause, this.#stderr))
@@ -139,12 +104,10 @@ export class CodexAppServer {
     return reply.promise
   }
 
-  /** One message, one line — the wire's whole framing. */
   #send(message: Record<string, unknown>): void {
     this.#process.write(`${JSON.stringify(message)}\n`)
   }
 
-  /** Split stdout into lines, keeping a partial one for the next chunk. */
   #read(chunk: string): void {
     this.#buffered += chunk
     const lines = this.#buffered.split('\n')
@@ -152,14 +115,11 @@ export class CodexAppServer {
     for (const line of lines) if (line.trim() !== '') this.#dispatch(line)
   }
 
-  /** Route one line to the reply, server request or notification it is. */
   #dispatch(line: string): void {
     let message: unknown
     try {
       message = JSON.parse(line)
     } catch {
-      // Never throw here: this runs inside a stream listener, where nobody is
-      // waiting to catch it and the line would be lost with the process.
       this.#keepStderr(`<not JSON on stdout> ${line.slice(0, 200)}`)
       return
     }
@@ -175,7 +135,6 @@ export class CodexAppServer {
     }
   }
 
-  /** Settle the request a reply answers. */
   #reply(id: number, message: Record<string, unknown>): void {
     const pending = this.#pending.get(id)
     if (pending === undefined) return
@@ -196,7 +155,6 @@ export class CodexAppServer {
     }
   }
 
-  /** Refuse a server request, so the server is not left waiting for an answer. */
   #decline(id: unknown, method: string): void {
     this.#send({
       id,
@@ -204,7 +162,6 @@ export class CodexAppServer {
     })
   }
 
-  /** Fold one notification into the running Turn, where it is that Turn's thread's. */
   #notification(method: string, params: Record<string, unknown>): void {
     const turn = this.#turn
     if (turn === null || params['threadId'] !== turn.threadId) return
@@ -218,9 +175,6 @@ export class CodexAppServer {
         return
       }
       case 'thread/tokenUsage/updated': {
-        // Never reject `completed` here: that ends `runTurn` while the server's
-        // Turn is still running, frees the one-Turn guard, and the next
-        // `turn/start` steers the old Turn instead of starting a new one.
         const usage = readTokenUsage(params['tokenUsage'])
         if (usage === null) {
           turn.usageProblem ??= `thread/tokenUsage/updated carried no usage: ${JSON.stringify(params)}`
@@ -235,7 +189,6 @@ export class CodexAppServer {
     }
   }
 
-  /** Settle the running Turn from its `turn/completed`, refusing a shape this build never sends. */
   #complete(turn: RunningTurn, completed: Record<string, unknown>): void {
     const { id, status } = completed
     if (typeof id !== 'string' || !isTurnStatus(status)) {
@@ -258,7 +211,6 @@ export class CodexAppServer {
     })
   }
 
-  /** Fail everything still waiting, once, because nothing will answer it now. */
   #lose(reason: string): void {
     if (this.#lostBecause !== null) return
     this.#lostBecause = reason
@@ -268,7 +220,6 @@ export class CodexAppServer {
     this.#turn?.completed.reject(lost)
   }
 
-  /** Keep the last `STDERR_LINES` lines of stderr. */
   #keepStderr(chunk: string): void {
     this.#stderr.push(...chunk.split('\n').filter((line) => line !== ''))
     if (this.#stderr.length > STDERR_LINES) {
@@ -278,22 +229,14 @@ export class CodexAppServer {
 }
 
 export interface CodexAppServerOptions {
-  /**
-   * The `CODEX_HOME` the process runs under — the deployment's writable mount,
-   * holding the operator-seeded `auth.json` (ADR-0026 *The home*).
-   */
   readonly codexHome: string
-  /** Where the process itself starts. A thread names its own working directory. */
   readonly cwd: string
-  /** The environment beneath `CODEX_HOME`. Nothing by default. */
   readonly inherit?: Readonly<Record<string, string>>
-  readonly spawn?: SpawnClaudeProcess
+  readonly spawn?: SpawnRuntimeProcess
 }
 
-/** What the handshake said back. */
 export interface CodexInitialized {
   readonly userAgent: string
-  /** The `CODEX_HOME` the server resolved — which should be the one it was handed. */
   readonly codexHome: string
 }
 
@@ -302,44 +245,35 @@ export interface CodexThreadRequest {
   readonly cwd: string
 }
 
-/** A thread, as the server says it was started. */
 export interface CodexThread {
   readonly threadId: string
   readonly model: string
-  /** Null where the server named none — which it does when nobody sent one. */
   readonly reasoningEffort: string | null
 }
 
 export interface CodexTurnRequest {
   readonly threadId: string
   readonly text: string
-  /** Sent on `turn/start` where given, and then sticks to the thread. */
   readonly effort?: string
 }
 
-/** One finished Turn. */
 export interface CodexTurn {
   readonly turnId: string
   readonly status: CodexTurnStatus
   readonly text: string
-  /** The server's own sentence for a failed or interrupted Turn. */
   readonly error: string | null
-  /** The last usage reading for the Turn's thread, or null where none came. */
   readonly tokenUsage: CodexTokenUsage | null
 }
 
 export type CodexTurnStatus = (typeof TURN_STATUSES)[number]
 
-/** The statuses a finished Turn can have; `inProgress` is not one. */
 const TURN_STATUSES = ['completed', 'interrupted', 'failed'] as const
 
-/** One `thread/tokenUsage/updated` reading: the thread's running total, and the last call's. */
 export interface CodexTokenUsage {
   readonly total: CodexTokenBreakdown
   readonly last: CodexTokenBreakdown
 }
 
-/** The build's `TokenUsageBreakdown`, field for field. */
 export interface CodexTokenBreakdown {
   readonly totalTokens: number
   readonly inputTokens: number
@@ -349,7 +283,6 @@ export interface CodexTokenBreakdown {
   readonly reasoningOutputTokens: number
 }
 
-/** The server answered a request with an error. */
 export class CodexRpcError extends Error {
   readonly method: string
   readonly code: number | null
@@ -362,7 +295,6 @@ export class CodexRpcError extends Error {
   }
 }
 
-/** The process went away, so nothing still waiting on it will be answered. */
 export class CodexAppServerLost extends Error {
   readonly stderr: readonly string[]
 
@@ -373,35 +305,28 @@ export class CodexAppServerLost extends Error {
   }
 }
 
-/** Lines of stderr kept. */
 const STDERR_LINES = 200
-/** Lines of stderr a lost process quotes. */
 const STDERR_TAIL = 20
 
-/** A request waiting for its reply. */
 interface Pending {
   readonly method: string
   readonly reply: Deferred<Record<string, unknown>>
 }
 
-/** The Turn in flight, and what its notifications have said so far. */
 interface RunningTurn {
   readonly threadId: string
   readonly messages: string[]
   tokenUsage: CodexTokenUsage | null
-  /** The first usage reading that could not be read, refused once the Turn ends. */
   usageProblem: string | null
   readonly completed: Deferred<CodexTurn>
 }
 
-/** What `deferred` returns. */
 interface Deferred<T> {
   readonly promise: Promise<T>
   resolve(value: T): void
   reject(error: Error): void
 }
 
-/** A promise with its settle functions held outside it. */
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void
   let reject!: (error: Error) => void
@@ -409,14 +334,10 @@ function deferred<T>(): Deferred<T> {
     resolve = res
     reject = rej
   })
-  // Never remove this: a Turn lost before `turn/start` is answered rejects
-  // `completed` with nobody awaiting it yet, and Node ends the process on an
-  // unhandled rejection. Whoever awaits it later still sees the error.
   promise.catch(() => {})
   return { promise, resolve, reject }
 }
 
-/** A usage reading, or null where it is not the shape the build documents — which the caller refuses. */
 function readTokenUsage(value: unknown): CodexTokenUsage | null {
   if (!isRecord(value)) return null
   const total = readBreakdown(value['total'])
@@ -424,7 +345,6 @@ function readTokenUsage(value: unknown): CodexTokenUsage | null {
   return total === null || last === null ? null : { total, last }
 }
 
-/** One breakdown, or null where any field is missing. */
 function readBreakdown(value: unknown): CodexTokenBreakdown | null {
   if (!isRecord(value)) return null
   const {
@@ -455,12 +375,10 @@ function readBreakdown(value: unknown): CodexTokenBreakdown | null {
   }
 }
 
-/** Whether a value is one of `TURN_STATUSES`. */
 function isTurnStatus(value: unknown): value is CodexTurnStatus {
   return TURN_STATUSES.some((status) => status === value)
 }
 
-/** A string field the server must have sent. */
 function stringField(record: Record<string, unknown>, field: string): string {
   const value = record[field]
   if (typeof value !== 'string') {
@@ -471,12 +389,10 @@ function stringField(record: Record<string, unknown>, field: string): string {
   return value
 }
 
-/** A field the server sends as a string or as null, and as nothing else. */
 function nullableStringField(record: Record<string, unknown>, field: string): string | null {
   return record[field] === null ? null : stringField(record, field)
 }
 
-/** An object field the server must have sent. */
 function objectField(record: Record<string, unknown>, field: string): Record<string, unknown> {
   const value = record[field]
   if (!isRecord(value)) {
@@ -487,12 +403,10 @@ function objectField(record: Record<string, unknown>, field: string): Record<str
   return value
 }
 
-/** The value if it is a plain object, and an empty one otherwise. */
 function recordOrEmpty(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {}
 }
 
-/** A plain object, not an array and not null. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

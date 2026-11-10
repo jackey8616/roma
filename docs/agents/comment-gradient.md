@@ -1,100 +1,40 @@
 # Comment Gradient
 
-How much prose a symbol in `src/` gets, and why the amount is a signal rather than a style.
+There is no gradient any more: roma has no comments, only tool directives.
+ADR-0033 is the decision; this is how to apply it.
 
-An **interface** is everything a caller must know to use a module correctly — the type, the
-invariants, the ordering constraints, the failure modes. In roma almost all of that is written
-in JSDoc, so the size of a comment *is* the width of the interface. Thick prose on something a
-caller can reach is the interface doing its job. Thick prose on something a caller cannot reach
-has no reader.
+## What a comment may be
 
-## The gradient
+Enforced by `roma/comment-whitelist`, in every TS and JS file except vendored
+skills, worktrees, fixtures and build output:
 
-**Reachable — an export, an interface member, a public method.** Write what a caller must know.
-No limit; this is the interface.
+- `// eslint-disable-next-line rule -- <name>` (and `-disable`, `-disable-line`,
+  `-enable`);
+- `// @ts-expect-error -- <name>`;
+- `/// <reference …>`;
+- a `#!` line.
 
-**Unreachable — a non-exported symbol, a `#private` member.** One line, matching the 62 that
-already read this way:
+`<name>` is one of `fence:<id>`, `roma/<rule>` or `ADR-NNNN`, and it must resolve.
+Nothing else is allowed: no JSDoc, no `SAFETY:`, no `Enforced by` line.
 
-```ts
-/** A Task waiting for the Shared Window to come back. */
-/** Money as people read it, which is two decimal places and no more. */
-/** base64url, which is base64 with two characters swapped and the padding gone. */
-```
+An agent hears about a comment as soon as it writes one: the `PostToolUse` hook in
+`.claude/settings.json` lints the file and fails. `npx eslint --fix <file>`
+deletes prose comments. It never deletes a directive.
 
-The line is drawn at **reachability, not at `export`**. A `#private` method is as unreachable as
-a module-level function, and one that happens to live inside a class is not owed more prose for
-it.
+## Where what you wanted to say goes instead
 
-## The exception: the guardrail test
+- **A change and what it would break** is a test titled `[fence:<id>]`, on the
+  highest rung that can hold it: structure or type > lint > test >
+  `scripts/check-*.ts`. Show it red against the bug re-planted, then green. Its
+  failure message says what was violated, why, and which ADR (ADR-0031).
+- **Why a decision was taken** goes in `docs/adr/`. An ADR Decision a check
+  holds is marked *Enforced by* and the check's name, which
+  `scripts/check-adr-enforcers.ts` keeps true.
+- **What a term means** goes in `CONTEXT.md`.
+- **What a caller must know** is the name and the type. If the type cannot say
+  it, make it say it, or write the test that fails when a caller gets it wrong.
+- **What a measurement showed** goes in the seam 2 test that asserts it.
+- **What used to be true** is in the commit.
 
-An unreachable symbol earns more than a line only when its comment is a **guardrail**, which
-means both halves:
-
-1. a change a reader would plausibly make, and
-2. the concrete thing that would then break.
-
-Keep the breakage. Drop the argument around it.
-
-```ts
-// Guardrail — the change is obvious, the breakage is nameable.
-/**
- * Not `table[spelling]`: an object literal inherits `Object.prototype`, so
- * `COMMANDS['constructor']` answers with a function, and the single word
- * `constructor` was swallowed as a Command that does not exist.
- */
-
-// Not a guardrail — nothing breaks if it goes.
-/**
- * Named for the queue's own verb rather than for roma's, because it is the
- * queue's word — roma's is settling, and an Acknowledgement is something else.
- */
-```
-
-If the honest answer is *"it would be less clear"* or *"the name came from…"*, it is not a
-guardrail. Delete it.
-
-Phrase a surviving guardrail as the rule it enforces — **"Never `X`: …"**, **"Not `X`: …"**,
-**"Do not delete this: …"** — so a reader meets the prohibition before the reasoning.
-
-## What goes where instead
-
-- **What a term means** → `CONTEXT.md`. Cite it; never restate it.
-- **Why a decision was taken** → `docs/adr/`. Cite the ADR; never re-argue it.
-- **What a measurement showed** → the seam 2 test that asserts it. A number in prose goes stale
-  silently; a number in an assertion fails.
-- **What used to be true before an amendment** → the commit. That is what git is.
-
-A citation is one clause. `(ADR-0018)` is enough — if the reader needs the argument, the ADR is
-where the argument lives, and it is the version that gets amended.
-
-## The same guardrail at two widths
-
-One rule can be true at more than one symbol — the field an operator reads, and the class that
-computes it. The **widest** symbol carries the argument. The narrow ones keep only what is about
-their own shape, and cite.
-
-```ts
-// audit-log.ts — a field in the record roma writes to disk. Carries the argument.
-/**
- * A yes or a no, and deliberately **not a count** (ADR-0015 §10). One token does
- * unlimited API calls for an hour, so a number of mints is not a measure of what
- * was done and would be read as one.
- */
-
-// reach-use.ts — the class behind it, one importer. Keeps only its own shape.
-/**
- * **Never turn this into a tally.** A `Set` is the shape that cannot accidentally
- * become one; why a count would be wrong is `audit-log.ts`'s `cloudReach`.
- */
-```
-
-Width is the audience, not the file. Copying an argument down the call graph puts it where
-fewest people read it and most copies drift, and the copy that survives longest is rarely the
-one that gets amended.
-
-## Scope
-
-`src/` only. Tests are deliberately not covered yet: a comment above a test is often the thing
-that stops the test being deleted, which is a different risk from the one this rule addresses,
-and it has not been calibrated.
+Do not move the text into a string, a directive's reason or an identifier to get
+it past the rule.

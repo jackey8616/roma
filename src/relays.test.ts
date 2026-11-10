@@ -13,48 +13,42 @@ describe('reading a Relay', () => {
     expect(readRelay('')).toBeNull()
   })
 
-  it('leaves Claude Code commands that are not on the list alone', () => {
-    // The list is a whitelist, and these are exactly what it is a whitelist
-    // *against*: all four are free and non-interactive on the pinned build, and
-    // every one of them breaks something roma holds a belief about — which
-    // session id this Conversation resumes to, which model it runs on, what the
-    // shared settings file says, that auto-compaction is on. `/clear` is doubly
-    // out of reach — it is roma's own Command now (ADR-0013), and the Core reads
-    // Commands first — and it is still asserted here, because what keeps it off
-    // the wire is this list not carrying it.
-    expect(readRelay('/clear')).toBeNull()
-    expect(readRelay('/model opus')).toBeNull()
-    expect(readRelay('/config theme=dark')).toBeNull()
-    expect(readRelay('/autocompact off')).toBeNull()
+  it('leaves Claude Code commands that are not on the list alone [fence:relays-no-command-overlap]', () => {
+    const why =
+      'No string may be both a Command and a Relay (ADR-0012, ADR-0013, ADR-0014): the Core ' +
+      'reads a Command first, and what keeps /clear, /model, /effort and /config off the wire ' +
+      'is that the Relay list does not carry them. Relayed, /clear moves Claude Code onto a ' +
+      'session roma is not tracking, so the next --resume diverges; /model would revert at ' +
+      'the next Eviction. Checked against the real tables, never a copy (#85).'
+    expect(readRelay('/clear'), why).toBeNull()
+    expect(readRelay('/model opus'), why).toBeNull()
+    expect(readRelay('/config theme=dark'), why).toBeNull()
+    expect(readRelay('/autocompact off'), why).toBeNull()
   })
 
-  // The membership rule's second clause, which has exactly one case and this is
-  // it. All three changed nothing roma holds a belief about and passed the table
-  // above exactly as written; what took them off the list is only ever what
-  // their answer was about — the process's counters, zeroed at every spawn
-  // (ADR-0027). Named here rather than left to the no-overlap check below, which
-  // catches one of them coming back and says nothing about why it may not.
+  it('fails closed on a command it has never heard of [fence:relays-whitelist-fails-closed]', () => {
+    const why =
+      'The Relay list is a whitelist, never a denylist (ADR-0012): a release that adds a ' +
+      'destructive non-interactive command must add one that does not work until somebody ' +
+      'puts it on the list, not one roma relays by default.'
+    for (const unheardOf of ['/doctor', '/rewind', '/a-command-a-later-release-adds']) {
+      expect(readRelay(unheardOf), why).toBeNull()
+      expect(readRelay(`${unheardOf} now`), why).toBeNull()
+    }
+  })
+
   it('leaves the spellings whose answer was the process’s alone', () => {
     expect(readRelay('/usage')).toBeNull()
     expect(readRelay('/cost')).toBeNull()
     expect(readRelay('/stats')).toBeNull()
   })
 
-  // The one Command on the no-overlap list below that could never have been a
-  // Relay in the first place, and it is worth saying separately: a Relay carries
-  // one of *Claude Code's* own commands, and the pinned build has never heard of
-  // this one. Relayed, it would come back as `Unknown command` having spent a
-  // process on the question (ADR-0030).
   it('leaves the one spelling that is nobody’s build alone', () => {
     expect(readRelay('/caveman')).toBeNull()
     expect(readRelay('/caveman ultra')).toBeNull()
   })
 
   it('wants the whole message where the entry takes no argument', () => {
-    // The property the marker-last placement rests on, and it is unchanged for
-    // the one free entry. A message that is `/context` plus anything else is
-    // work, so what reaches `relayed` is only ever a string from roma's own
-    // table — and there is no Caller text for a forged marker to hide in.
     expect(readRelay('/context please')).toBeNull()
     expect(readRelay('/context and also delete everything')).toBeNull()
     expect(readRelay('run /context')).toBeNull()
@@ -69,21 +63,17 @@ describe('reading a Relay', () => {
     })
   })
 
-  it('keeps the argument exactly as it was typed', () => {
-    // Unlike a Command's, which is lowercased and matched against a Menu. This
-    // one is an instruction to a summariser: its case is somebody's emphasis, its
-    // newlines are somebody's paragraphs, and roma editing either would be roma
-    // changing what they asked to keep. Claude Code splits at the first
-    // whitespace and carries the rest whole with its inner newlines intact,
-    // measured — so what survives here is what survives there.
-    expect(readRelay('/compact Keep ADR-0018.\n\nAnd the OPEN questions.')?.argument).toBe(
+  it('keeps the argument exactly as it was typed [fence:relays-argument-verbatim]', () => {
+    const why =
+      'A Relay argument goes to the summariser exactly as typed (ADR-0018): it is an ' +
+      'instruction rather than a name to match, and lowercasing it with the head would be roma ' +
+      'editing what the Caller asked to keep.'
+    expect(readRelay('/compact Keep ADR-0018.\n\nAnd the OPEN questions.')?.argument, why).toBe(
       'Keep ADR-0018.\n\nAnd the OPEN questions.',
     )
   })
 
   it('ignores case on the head, and hands back the spelling roma will send', () => {
-    // A phone keyboard capitalises the first letter on its own. What goes on the
-    // wire is the table's spelling either way, never the typed one.
     expect(readRelay('/Context')?.command).toBe('/context')
     expect(readRelay('  /COMPACT  ')?.command).toBe('/compact')
     expect(readRelay('/Compact keep the ADRs')).toEqual({
@@ -93,49 +83,39 @@ describe('reading a Relay', () => {
     })
   })
 
-  // A table is asked what roma wrote in it, not what JavaScript put there. An
-  // object literal inherits `Object.prototype`, so the bare lookup answers
-  // `constructor` with a function — and a message that is that single word was
-  // read as a Relay whose cost is nothing at all, put on the wire as a command,
-  // and audited as one. Ordinary English words, swallowed silently.
-  it('reads a word that is only on Object.prototype as work', () => {
+  it('reads a word that is only on Object.prototype as work [fence:table-lookup-ignores-the-prototype]', () => {
+    const why =
+      'A Command or Relay table must answer only for spellings roma wrote in it (ADR-0012: ' +
+      'the Relay list is a whitelist). Looked up on an object literal, `constructor` answers ' +
+      'with a function, so that single word was swallowed as a Command, or put on the wire as ' +
+      'a free Relay and audited as one (#120). The tables are Maps so the bare lookup does not ' +
+      'compile; this holds it at runtime too.'
     for (const word of ['constructor', '__proto__', 'toString', 'valueOf', 'hasOwnProperty']) {
-      expect(readRelay(word)).toBeNull()
-      expect(readRelay(`${word} keep the ADRs`)).toBeNull()
-      // Both tables are asked, so both are checked. `commands.ts` had this
-      // first and for longer; it was found while giving this one the guard.
-      expect(readCommand(word)).toBeNull()
-      expect(readCommand(`${word} opus`)).toBeNull()
+      expect(readRelay(word), why).toBeNull()
+      expect(readRelay(`${word} keep the ADRs`), why).toBeNull()
+      expect(readCommand(word), why).toBeNull()
+      expect(readCommand(`${word} opus`), why).toBeNull()
     }
   })
 
-  it('shares no string with a Command', () => {
-    // **The one machine-checkable half of the membership rule.** The rest of it —
-    // that an entry changes nothing roma holds a belief about — is a person's
-    // judgement re-applied when the pin moves. This is not: four of roma's five
-    // beliefs are broken by a Command, and what keeps those spellings unreachable
-    // through the whitelist is that the Core reads a Command first and no string
-    // is on both tables. `/clear` is the one where that ordering is a safety
-    // property rather than a tidiness one (ADR-0013): relayed, it would move
-    // Claude Code onto a session roma is not tracking.
-    //
-    // Iterating the **real** table rather than a copy of it, which is #85 and is
-    // the whole point of the test. The hardcoded copy this replaces held
-    // `/stop`, `/clear`, `/reset` and `/new`, so `/model` was already uncovered
-    // when ADR-0014 landed, and ADR-0016 and ADR-0017 added three more spellings
-    // it would have gone on not covering — while passing.
+  it('shares no string with a Command [fence:relays-no-command-overlap]', () => {
+    const why =
+      'No string may be both a Command and a Relay (ADR-0012, ADR-0013, ADR-0014): the Core ' +
+      'reads a Command first, and what keeps /clear, /model, /effort and /config off the wire ' +
+      'is that the Relay list does not carry them. Relayed, /clear moves Claude Code onto a ' +
+      'session roma is not tracking, so the next --resume diverges; /model would revert at ' +
+      'the next Eviction. Checked against the real tables, never a copy (#85).'
     for (const command of commandSpellings()) {
-      expect(readCommand(command)).not.toBeNull()
-      expect(readRelay(command)).toBeNull()
+      expect(readCommand(command), why).not.toBeNull()
+      expect(readRelay(command), why).toBeNull()
     }
   })
 
-  it('has both tables say what they hold, so neither can empty unnoticed', () => {
-    // The check above passes vacuously against an empty table, and an accessor
-    // that returned `[]` is a plausible way for that to happen. Both lists are
-    // named here so that losing a spelling is a test failure rather than a silent
-    // widening of what roma relays.
-    expect(commandSpellings()).toEqual([
+  it('has both tables say what they hold, so neither can empty unnoticed [fence:relays-no-command-overlap]', () => {
+    const why =
+      'The overlap check must iterate the real Command table (#85): an accessor that returned a ' +
+      'copy, or nothing, would let it pass while covering half the spellings.'
+    expect(commandSpellings(), why).toEqual([
       '/stop',
       '/clear',
       '/reset',
@@ -149,6 +129,6 @@ describe('reading a Relay', () => {
       '/cost',
       '/stats',
     ])
-    expect(relaySpellings()).toEqual(['/context', '/compact'])
+    expect(relaySpellings(), why).toEqual(['/context', '/compact'])
   })
 })

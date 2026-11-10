@@ -161,7 +161,8 @@ fuller version roma can reach)
 What the Core hands back to an Adapter — the result of a Task, why there isn't
 one, or what the Task is doing meanwhile. It says what happened and whose it is,
 never how either should look: how a failure reads and how a person is addressed
-are the Channel's.
+are the Channel's. The one sentence the Core does write is a failure's reason,
+which every Channel passes through, since it reads the same on all of them.
 _Avoid_: response, reply, command (a command is `/clear`, `/model` or `/stop`)
 
 **Acknowledgement**:
@@ -282,7 +283,7 @@ deletes the first and steps over the second, so a Conversation can go quiet for 
 fortnight, lose the directory it was working in, and still come back on the model
 and the effort somebody chose for it. Six kinds of file rely on that and were
 each added by somebody who had to work it out again — a Session Generation, a
-Chosen Model, a Chosen Effort, the Runtime a Session runs on, the record that a
+Chosen Model, a Chosen Effort, a Chosen Caveman, the record that a
 Session has had its Opening, and the half-written record a machine that lost
 power leaves behind. The Opening record is the one that shows what the rule
 buys: the same Session's spawn file lives *inside* the Working Directory and is
@@ -354,6 +355,16 @@ A Session whose Claude Code process is currently alive, so the next message
 skips cold start.
 _Avoid_: warm session, active session, hot session
 
+**Seat**:
+One of a fixed number of uids an agent runs as, leased to a Resident Session for
+as long as it is resident and returned when its process ends. It is the boundary
+between Sessions: two Sessions are kept apart because they never hold the same
+Seat at once, and a Seat is emptied — its processes killed, its Session's files
+given to a uid nothing runs as — before anyone holds it again. Proposed in ADR-0036.
+_Avoid_: slot, sandbox (it confines nothing but other Sessions), user (that
+reads as a Caller), and saying a Session *has* a uid — it holds one only while
+resident
+
 **Session Pool**:
 What decides which Sessions are resident, and for how long. It owns spawning,
 Eviction, Reaping, and abandoning a Turn that has spent its retry budget, and it
@@ -378,7 +389,8 @@ _Avoid_: timing out, garbage collection, idling out
 **Command**:
 One of the seven messages roma answers itself instead of handing to the Runtime:
 `/stop` ends the work this Conversation has in flight — running, queued, or
-still starting — `/clear` gives the Conversation a fresh Session, `/model` sets
+still starting — and leaves the Session intact, so the next message can
+redirect it rather than start over; `/clear` gives the Conversation a fresh Session, `/model` sets
 its Chosen Model, `/effort` sets its Chosen Effort, `/caveman` sets its Chosen
 Caveman, `/config` says what this Session is set to and refuses to set anything
 else, and `/usage` says what the deployment has spent this calendar month.
@@ -888,6 +900,28 @@ on its own for the Conversation's next message. Claude Code's alone: a Codex
 Task that hits its window fails with the reason instead, and ADR-0026 is where
 that asymmetry is argued rather than an oversight.
 _Avoid_: fallback, API mode, paid mode, spillover
+
+**Credential Proxy**:
+roma's own loopback HTTP proxy, and the only thing that holds the Shared Window
+token or the Overflow key once roma is serving. A Claude Code process is handed a
+**stand-in** in their place and sends every API call through the proxy, which
+swaps the stand-in for the real credential on the way out. The stand-in is new on
+every boot and worth nothing once roma stops, so the agent, which can read
+everything `claude` holds, can spend the credential while roma runs but cannot
+take it away (ADR-0034).
+_Avoid_: gateway, API proxy (it proxies nothing but credentials), and calling
+the stand-in a token
+
+**Egress Gateway**:
+The only way out of the network roma runs on: a CONNECT proxy, beside roma rather
+than inside it, that tunnels for whoever carries its token and refuses everyone
+else. Only roma holds the token, so everything the agent reaches it reaches
+through roma, which forwards only what the **agent's allowlist** names — the npm
+registry, GitHub's hosts, Google's APIs with a Google Reach, and what the
+operator adds. roma's own traffic goes through the gateway unrestricted
+(ADR-0035).
+_Avoid_: firewall (it is not one), egress proxy for the gateway (that is the
+proxy inside roma), and calling it the Credential Proxy
 
 **Parked**:
 What a Task is while it waits on something that is neither roma nor the queue:

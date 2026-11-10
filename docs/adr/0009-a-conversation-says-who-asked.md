@@ -86,7 +86,7 @@ ADR-0003 keeps out of the Core.
 
 **Falling back rather than going without.** No display name means
 `<from>users/17</from>`. The marker is never absent, because an absent marker is
-the misattribution above.
+the misattribution above. Enforced by `fence:attribution-marker-without-a-name`.
 
 **Composed in the Core, after `readCommand`.** An Adapter may not prefix the
 text: `readCommand` requires the whole message to be `/stop` or `/new`, so a
@@ -130,7 +130,8 @@ message — so a mention is the only mechanism.
 The mention is counted inside the 4096-character limit rather than added after
 the split, so that addressing an answer can never be what makes Chat refuse it.
 It goes on the **first** message only: each is a separate post, and a long answer
-should not notify somebody once per 4096 characters of itself.
+should not notify somebody once per 4096 characters of itself. Enforced by
+`fence:gchat-split-under-the-limit`. Enforced by `fence:gchat-mention-once-per-answer`.
 
 A DM gets one too. The Adapter could tell from the Conversation Key and
 deliberately does not — a rule with an exception in it is a rule somebody has to

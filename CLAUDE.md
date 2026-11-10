@@ -51,8 +51,9 @@ Single-context — one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/
 
 ### Comments
 
-A comment's size is the width of the interface it documents, so an unreachable symbol — one that
-is not exported, or is `#private` — gets **one line**, unless its comment is a guardrail naming
-both a change somebody would make and what it would break. Definitions belong in `CONTEXT.md`,
-decisions in `docs/adr/`, measurements in the seam 2 test that asserts them; cite them, never
-restate them. See `docs/agents/comment-gradient.md`.
+**Write no comments.** The only comments allowed are tool directives (`eslint-disable…`,
+`@ts-expect-error`) whose reason after ` -- ` is one name that resolves (`fence:<id>`,
+`roma/<rule>` or `ADR-NNNN`). `roma/comment-whitelist` enforces it in every TS/JS file, and a
+`PostToolUse` hook fails the edit that adds one. A change plus what it would break is a test
+titled `[fence:<id>]`; a reason goes in `docs/adr/`; a term in `CONTEXT.md`. Never use
+`--no-verify`. See `docs/agents/comment-gradient.md` and ADR-0033.

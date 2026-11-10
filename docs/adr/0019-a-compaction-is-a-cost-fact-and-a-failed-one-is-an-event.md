@@ -43,6 +43,10 @@ Nothing here implements `/compact`; what it does is make the value `trigger:
   it stayed healthy, cost two cents and answered, and the Session served the next
   Turn normally. It happened twice, in both captures.
 
+The longest Compaction roma holds a capture of is a later one, the `/compact` in
+`test/fixtures/claude-stream/manual-compaction.jsonl`: **28,517ms**, with nothing
+else on the stream until it finished.
+
 **Read off the bundle, on the pinned build** — #98's second comment, quoting the
 switch that maps every code to what Claude Code does with it:
 
@@ -140,7 +144,7 @@ delta exists to avoid, one field over.
 **It is filed under the credential that paid for it,** on the Attempt rather than
 on the Task. A Task blocked on the Shared Window and rerun on Overflow produces
 two records; summed, the metered one would report a Compaction the subscription
-had already paid for.
+had already paid for. Enforced by `fence:attempts-compaction-on-its-attempt`.
 
 ### The Caller is not told about one that worked
 
@@ -165,6 +169,13 @@ a false alarm on the one channel ADR-0010 sets a high bar for.
 | `unreducible` | `exhausted`, `media_unstrippable` | **yes** | **yes** |
 | `unexplained` | `error`, and anything roma has not seen | **yes** | no |
 
+`aborted` is benign because somebody stopped it: nothing has gone wrong that they
+do not already know about, and the reply they are owed is the one `/stop`
+produces. `media_unstrippable` is unreducible for a different reason from
+`exhausted` — the attached media exceeds size limits — and with the same
+consequence. Both lists are a person's judgement about one build, like the Relay
+list, and are re-applied when the pin moves.
+
 **Three rather than two, because roma is told a code and not a consequence**, and
 its two possible responses have different bars. Telling an operator costs a line
 in a stream they read when something looks wrong. Telling a Caller their thread
@@ -181,7 +192,7 @@ is a new value being folded into the answer that means "nothing to see". So the
 codes roma has a positive reason to believe are harmless are written down, and a
 code a later release adds lands in `unexplained`: the operator sees it, nobody is
 told a wrong story about their thread, and somebody decides which list it belongs
-on.
+on. Enforced by `fence:stream-unknown-compaction-code-is-unexplained`.
 
 **Matching on the error *text* is refused, and costs nothing to refuse.** #98
 rejected it as the mistake `shared-window.ts` already made once — defining

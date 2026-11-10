@@ -4,15 +4,16 @@ Date: 2026-08-12
 
 ## Status
 
-Proposed. **Nothing here is implemented.** This ADR and ADR-0029 are the
-decisions; the code that keeps them is separate work.
+Accepted, and implemented by #178–#181. (It read "Proposed. Nothing here is
+implemented." until the build landed.) This ADR and ADR-0029 are the decisions.
 
 **Amended 2026-08-12 by that work** (#178–#181), in one place. The decisions are
 unchanged; what the amendment corrects is a name this file predicted and the
 build did not keep. Marked inline.
 
 With ADR-0029, this is the first exercise of the contract `src/channel-adapter.ts`
-calls provisional:
+called provisional. That paragraph has since been removed, because the second
+Channel left the contract unchanged. It read:
 
 > **Provisional.** It was designed against one Channel and cannot be validated
 > until a second exists, so it is deliberately the smallest thing that serves the
@@ -200,7 +201,7 @@ enforced twice, so twice the ceiling is spendable with no configuration looking
 wrong. ADR-0027's `/usage` would answer for one Channel about a subscription both
 share. Pointing the two processes at one root instead trades those for two
 writers on one JSONL and two resident pools on one `auth.json`, which is #155
-made worse rather than a fix.
+made worse rather than a fix. *Not enforced (ADR-0031).*
 
 **Discord's Gateway publishing onward into Pub/Sub.** ADR-0003 explicitly
 sanctions the shape — *"a channel without native delivery needs an HTTPS receiver

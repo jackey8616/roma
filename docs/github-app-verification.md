@@ -311,3 +311,12 @@ how roma spawns Claude Code and not a change to any of this. It is the same
 conversation as the credential-injecting proxy and the egress allowlist, both of
 which ADR-0008 defers for the same reason. Recorded here rather than left as a
 sentence in an ADR that the code quietly contradicts.
+
+**Met since 2026-11-09, by ADR-0032 rather than by separate containers.**
+GHSA-v52v-hcv8-cr23 found the gap was wider than this section said — roma's
+*memory* held the PEM, so removing the file after boot would not have closed it,
+and roma's environment held `ROMA_OVERFLOW_API_KEY`. roma now reads every key file
+as root and becomes `node` before any agent exists; the files are root's and roma
+is not dumpable, so the agent, still `node`, reaches neither. roma checks both
+and refuses to start otherwise, and `scripts/verify-image.sh` §5 proves it
+against the built image.

@@ -145,7 +145,9 @@ prevent.
 today, and those sentences already name the whole Menu. So the buttons are purely
 additive: a Channel that ignores `options` is not degraded, it is *correct*, and
 that is what keeps ADR-0003's channel-agnostic Core honest without a capability
-flag. A second Channel gains this feature by doing nothing.
+flag. A second Channel gains this feature by doing nothing. In Google Chat the
+renderer writes only the text, and the buttons are the Adapter's, because they
+are a card rather than words.
 
 ### Two of the four replies carry one
 
@@ -185,7 +187,8 @@ deployment that pinned something off the Model Menu has, and a `null` draws the
 buttons: roma has no ground to withhold an offer on the strength of a reading it
 never made. `Core.#effortStranded` already states this rule as a guardrail for
 the sentence; this is the same rule at a second site, and the two must agree or
-roma will say a level applies while declining to offer it.
+roma will say a level applies while declining to offer it. Enforced by
+`fence:core-unmeasured-model-keeps-effort`.
 
 The narrower risk is named and accepted: two of the Matrix's three rows are, by
 `src/effort-menu.ts`'s own admission, a person's inference rather than the
@@ -208,7 +211,8 @@ so the bot guard would swallow it — and relaxing that guard to let it through
 would re-open the fault it exists to close and attribute the choice to roma
 rather than to whoever pressed. The person who pressed is elsewhere on the event,
 and reading them from the message's sender is the specific mistake this
-arrangement forecloses.
+arrangement forecloses. Enforced by `fence:gchat-press-is-read-off-the-presser`.
+Enforced by `fence:gchat-never-answers-an-app`.
 
 Three readers, each answering about one kind of event, no existing logic
 modified. The Conversation Key derivation moves into one function the message
@@ -221,7 +225,12 @@ context.
 `ChatMessage` carries a list of actions rather than one, and the Overflow offer
 becomes a list of one. The Chat API port renders them as a single card holding a
 single `buttonList`, so a `/model` card is four buttons and an `/effort` card is
-six.
+six. One `buttonList` rather than a widget per button because that is Chat's own
+grouping: it wraps a row across lines, which is what a six-level Effort Menu needs
+on a phone. The round trip is `action.function` and `action.parameters`; going out
+the parameters must be `{key, value}` pairs, and a press may come back in that
+shape or as an object, so `chat-events.ts` reads both
+(<https://developers.google.com/workspace/chat/read-form-data>).
 
 **`ChannelAdapter` gains no method.** No `toAction`, no generalisation of
 `toOverflowTaken`. That interface documents itself as provisional, designed
@@ -274,7 +283,7 @@ registered command from `argumentText`, and `readIngressMessage` reads
 `argumentText` first, so `/model opus` would arrive as the bare text `opus`, fail
 `readCommand`, and fall through to a billable Task — turning five free Commands
 into paid Turns. The registration also lives in the Chat API console rather than
-in this repository, where nothing versions it and no test can see it.
+in this repository, where nothing versions it and no test can see it. *Not enforced (ADR-0031).*
 
 **A field on `result` and on `failure` instead of a new kind.** The smaller diff.
 Rejected because it leaves `/model opsu` modelled as a Task failure, which it is
@@ -286,7 +295,8 @@ Rejected. It is more honest in one narrow sense — it does not describe a press
 a message somebody sent — and it costs a Core entrance, a change to a provisional
 interface, and fresh answers to the three questions the synthesis makes
 disappear. `toOverflowTaken` needed its own method because a Task id is not a
-message; a Command *is* one.
+message; a Command *is* one. (A third Command for taking Overflow would have
+been one anybody could type at any moment, including when nothing is blocked.)
 
 **A dropdown rather than buttons.** Rejected on the feature's own purpose. A
 `selectionInput` is two taps before anything happens, against one, and reading

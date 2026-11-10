@@ -288,8 +288,11 @@ marker's rejected alternative could.
 - ADR-0011's "roma's part is tag-delimited and comes first" acquires its first
   exception, bounded to four exact strings.
 - roma now has a list that must be re-audited whenever the ADR-0007 pin moves.
-  Nothing enforces that; the drift check catches two of the three ways it can be
-  wrong, and the third is the risk named above.
+  Nothing enforces the re-audit itself; the drift check catches two of the three
+  ways it can be wrong, and the third is the risk named above. *Not enforced
+  (ADR-0031).* What is held is that the list names the pinned version, so the
+  drift report prints it when the pin moves. Enforced by
+  `fence:pin-lists-name-the-version`.
 - A Readout on a non-resident Session can evict somebody else's at
   `MAX_RESIDENT`. That third party pays a cold start for a question they did not
   ask and will not be told why. The Operator Log makes it traceable but not
@@ -314,6 +317,10 @@ marker's rejected alternative could.
   problem and is not solved here.
 - Nothing here gives roma a number of its own. What a Caller sees is Claude
   Code's own reading, relayed.
+- **No new instruction kind.** A Readout's answer reaches the Adapter as a
+  `result` — text to be posted as its own message — because an Adapter has nothing
+  to do differently with one, and a kind of its own would be a concept every
+  Channel had to learn for no change in behaviour.
 
 ## Alternatives considered
 

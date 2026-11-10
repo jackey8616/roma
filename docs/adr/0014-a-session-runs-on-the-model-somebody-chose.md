@@ -19,6 +19,13 @@ drawn first (#196). Nothing here is overturned: this ADR decides that a Session
 runs on the model somebody chose, and which names the Menu carries was always the
 Menu's own per-entry judgement rather than this document's.
 
+**Amended 2026-10-29**, to the Menu and to the Pinned Model, marked inline the
+same way. `fable` resolves to `claude-fable-5-1`, `opus` to `claude-opus-5-5`,
+and `PINNED_MODEL` is `claude-opus-5-5` — the first time the Pinned Model is not
+what `sonnet` resolves to, and the first time two Menu ids occur nowhere in the
+pinned build's bundle. Nothing here is overturned; what that second fact rests on
+is recorded under Verification status, with what it leaves unmeasured.
+
 Builds on ADR-0013, which decides which string puts a Conversation back on the
 Pinned Model by clearing it.
 
@@ -60,6 +67,22 @@ spawned on the alias and demanded the id back — one spawn asked to carry both 
 assertion about roma and a recording of a table roma does not control, and it went
 red without either being at fault. It now measures the two separately.
 
+**Amended 2026-10-29 — two Menu ids the table does not carry.** The Menu now
+resolves `fable` to `claude-fable-5-1` and `opus` to `claude-opus-5-5`, and
+neither string occurs anywhere in the 2.1.220 bundle, whose alias table still
+reads `fable:"claude-fable-5", opus:"claude-opus-5"`: both models shipped after
+the pin (2.1.287's table reads `fable:"claude-fable-5-1", opus:"claude-opus-5-5"`).
+What carries them is the argument hint measured below — `… default, or a full
+model ID` — and it was **observed at no cost** rather than read, by hand and
+with nothing recorded: 2.1.220 spawned with a credential that cannot be billed
+echoes `--model claude-opus-5-5` and `--model claude-fable-5-1` back unchanged
+in `system/init`, which arrives before the first API call. **Not measured: the
+API serving either under the Shared Window on the pinned build.** The seam 2
+Menu check has not been run on them, and on a developer machine it runs whatever
+`claude` is on `PATH` rather than the pin, so a green run there is evidence
+about a different build. Its alias leg now asks only that a name reach the same
+line, since on this pin `opus` still expands to `claude-opus-5`.
+
 The consequence worth naming: every id on the Menu is an **undated alias**, so the
 model behind it can be re-pointed upstream and the Audit Record will go on
 spelling it the same way across that move. Accepted, because the alternative —
@@ -69,7 +92,9 @@ carries, and the check below is what surfaces it.
 
 `PINNED_MODEL` is `claude-sonnet-5`, which is what `sonnet` resolves to. roma
 pins the resolved id and a Caller would type the alias, so the two spellings have
-to be understood as the same model.
+to be understood as the same model. **Amended 2026-10-29** — `claude-opus-5-5`,
+which is what `opus` resolves to; the sentence holds with the names swapped, and
+so does the reason the two are not one constant.
 
 **Measured — `/model` has two descriptors, and the non-interactive one is live.**
 The bundle declares `{type:"local", name:"model", supportsNonInteractive:!0,
@@ -220,7 +245,7 @@ What it rejected is a *general* rule, and the reason is growth: a rule keyed on
 "begins with a slash and looks like ours" inherits every command a later release
 adds. A named list of argument-taking heads does not grow on its own. It is the
 Readout whitelist's shape — fails closed, and adding a string is a deliberate act
-somebody has to write down.
+somebody has to write down. Enforced by `fence:commands-no-prefix-match`.
 
 The sentence ADR-0003 defends the whole-message rule with — "Neither of roma's two
 takes an argument, so there is nothing this rule turns away that was meant for
@@ -231,7 +256,12 @@ model and the Menu. This is not a lesser version of Claude Code's no-argument
 `/model`: that one is `local-jsx`, a picker, and a picker has no form in a chat
 message. Reporting is what that gesture can honestly mean in a text channel, and
 roma can answer it without a process, without a Turn and without money, because
-it owns the answer.
+it owns the answer — and without interrupting whatever the Conversation is waiting
+on, so asking is never the slow thing.
+
+The current model is named as a Caller would type it where the Menu carries it,
+and as the bare id where it does not, so a report never sets an id beside a list
+of aliases and leaves the reader to map one vocabulary onto the other.
 
 ### The Model Menu is roma's whitelist, not Claude Code's vocabulary
 
@@ -244,14 +274,37 @@ without clearing what it has said.
 
 **Amended 2026-08-31 — `fable` was added, and first** (#196). The order is
 descending cost, which is the order both Channels draw and the order a Caller
-reads to see what they are reaching for. The pinned build already served
+reads to see what they are reaching for. Enforced by
+`fence:menu-model-ordered-by-cost`. The pinned build already served
 `claude-fable-5`, so the question was never capability but whether roma is
-willing to put the Shared Window behind it at twice Opus 5's per-token rate. It
-is, and that judgement is recorded above `MENU` in `src/model-menu.ts` — beside
-the `[1m]` exclusion's, which is the same question decided the other way.
+willing to put the Shared Window behind it at twice Opus 5's per-token rate —
+$10/$50 per MTok against $5/$25 on the first-party API. roma draws on a
+subscription rather than metered billing, so that ratio is how fast the shared
+quota drains rather than a bill roma pays. It is. Willingness is per entry, and
+the `[1m]` exclusion below is the same question decided the other way. What
+would revisit either is evidence, and `/usage` answers out of the Audit Records.
+
+**Amended 2026-10-29 — the names stand, two of the ids behind them moved, and
+the Menu now runs ahead of the pinned build's alias table on purpose.** `fable`
+resolves to `claude-fable-5-1` and `opus` to `claude-opus-5-5`: a name on the
+Menu means the current release of its line upstream, which may be newer than
+what the pin's own alias table expands it to. The id is what roma sends and what
+the seam 2 check's first leg guards; its second leg asks only that the alias
+reach the same line. The earlier releases are off the Menu rather than kept
+beside them, for the reason above `MENU` in `src/model-menu.ts`, and a record
+naming one is refused (`ChosenModelNotOffered`). fable's willingness judgement
+now stands at two and a half times Opus 5.5's per-token rate.
+
+**Amended 2026-11-09 — `sonnet` and `haiku` follow, with the pin (#160).** On
+Claude Code 2.1.319, `sonnet` expands to `claude-sonnet-5-5` and `haiku` to
+`claude-haiku-5-5`, so the Menu's two lower names now resolve to those ids, for
+the reason the paragraph above gives for fable and opus. The order holds: the
+2.1.319 bundle's pricing table puts Sonnet 5.5 at $2/$10 per MTok and Haiku 5.5
+at $0.1/$0.5, below Opus 5.5's $4/$20. Seam 2 ran all four ids as themselves.
 
 Not on it: the `[1m]` variants, and arbitrary full model ids. Upstream accepts
-both.
+both. The `[1m]` multiplier is context rather than price, and they are off the
+Menu because more context per Turn is still more of a window everybody shares.
 
 This is a spending boundary rather than a typo filter, and it is named for the
 reason `CONTEXT.md` names an Installation: a term that is the whole of a security
@@ -306,14 +359,20 @@ from disk at spawn the way it already reads `resuming` from `existsSync(cwd)`.
 
 **The Operator Log's `swap` gains a reason.** It already exists for the
 credential, and already explains itself as "money moving" rather than as roma
-making room. A model change is money moving by the same argument, and the two
-differ only in what prompted them — which is exactly how `evict` and `reap`
-already share one shape:
+making room — which is also why it is its own path rather than a kind of
+eviction: the two are read by different people looking for different things. A
+model change is money moving by the same argument, and the two differ only in
+what prompted them — which is exactly how `evict` and `reap` already share one
+shape:
 
 ```
 readonly event: 'swap'
 readonly reason: 'credential' | 'model'
 ```
+
+The `spawn` record carries the model as well, though the Audit Record also will:
+the record says what a Task was spent on, the spawn what a *process* was started
+for — a swap says the terms changed, and the spawn after it says to what.
 
 **The Audit Record gains the model.** Optional, and read as the Pinned Model when
 absent. The Q7 argument requires it: a decision whose whole justification is that
@@ -397,7 +456,7 @@ a process, the process ends for reasons the Caller cannot observe, and the next
 one starts on the pin. The result is not model switching but a setting that
 reverts at random. It is also refused by the Readout membership rule as written —
 "changes no state of the Session or of Claude Code" — and ADR-0012 names `/model`
-specifically as a string that must not be relayed.
+specifically as a string that must not be relayed. *Not enforced (ADR-0031).*
 
 **Relay it *and* remember it,** so a live process switches without a cold start
 and the choice is re-applied at the next spawn. Rejected, though it is the only

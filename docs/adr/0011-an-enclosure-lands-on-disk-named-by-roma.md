@@ -151,6 +151,25 @@ quietly contradict; a Task can be stopped. And the size is chosen by whoever sen
 the message, so eager buffering puts roma's memory under the control of anybody
 who can message it.
 
+**Amended — late means once the Session is known, not once the Turn runs.**
+The Core redeems an Enclosure as soon as it has worked out the Session, and that
+is before the Task joins the Task Queue. So a Task that waits in the queue, or is
+stopped there, has already fetched its bytes. Only two downloads are actually
+avoided: a message whose Session cannot be worked out, and a Relay, which has
+nowhere to name the file. Enforced by `fence:core-enclosures-redeemed-late` and
+by `fence:core-relay-redeems-nothing`. The other reasons above still hold. The
+bytes are on disk before the Task queues, so a queued or Parked Task holds no
+buffer. Fetching any later would mean redeeming inside the queue's slot, and
+this was accepted as it is.
+
+**Amended — held, not streamed.** `redeem` yields a `Uint8Array`, so each
+Enclosure is in memory once, briefly, for the length of its write; the sender
+still sizes that moment. A streaming redemption would be faithful to the word
+used above and would cost every Adapter a stream to produce; what this ADR
+argued was *when*, and that is kept. Worth revisiting if a Channel ever carries
+something big enough for the difference to matter, which is the same moment the
+deferred size policy comes due.
+
 Synchronous rather than async because making `toIngress` return a promise
 conscripts every future Channel into an async read path for one Channel's
 property. ADR-0003's interface is marked provisional and the second Channel is
@@ -185,7 +204,11 @@ Turn. That is accepted: a DM to roma is a message to roma.
 
 No new instruction kind. `failure` already means "this Task has no result, and
 here is why", and a Task whose Enclosure never arrived is exactly that. The
-Caller is told, in the Conversation, with the reason.
+Caller is told, in the Conversation, with the reason — not with the one
+sentence about roma having failed that any other error gets, because what failed
+is *their* attachment and they are the only person who can do anything about it.
+For a Channel with an unreachable class of attachment, such as Chat's
+`driveDataRef`, this is the normal path rather than an edge case.
 
 ## Consequences
 
@@ -224,8 +247,9 @@ is the coupling ADR-0003 exists to prevent.
 
 **Make `toIngress` async and put the bytes in `IngressMessage`.** Rejected above:
 it widens the Channel contract for one Channel's property, buffers attacker-sized
-payloads in memory across queueing and Parking, and pays for downloads that
-`/stop` and the Shared Window make worthless.
+payloads in memory across queueing and Parking, and pays for downloads that a
+message roma cannot place makes worthless. (The design chosen still downloads
+before queueing; see the amendment above. What it avoids is the buffering.)
 
 **Fetch nothing; give the agent a shim, as the Minter gives it credentials.**
 Rejected, and it is the tempting one because the pattern is already in the repo.
@@ -239,7 +263,7 @@ somebody pasted it in order to be looked at.
 denylist, and the failure of a denylist is silent and total. Since the name is
 wanted for its meaning rather than for addressing anything, there is no reason
 for it to be a path — and a string that is never a path needs no sanitising to be
-safe.
+safe. *Not enforced (ADR-0031).*
 
 **Accept any attachment, not only images.** Not rejected — deferred, and it costs
 nothing to defer, which is the reason the file route was chosen over content

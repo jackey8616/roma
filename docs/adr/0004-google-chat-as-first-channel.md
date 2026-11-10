@@ -24,6 +24,18 @@ inbound path is therefore nearly empty: it subscribes and republishes into the
 core's ingress format. No HTTPS receiver, no open port, and the VM's firewall
 denies all ingress.
 
+roma creates nothing it reads. The topic, the subscription, the service account,
+the grant that lets Chat publish, and the flow-control and lease settings the
+subscription is read with are the deployment's to provision. A program that
+created its own subscription could silently create the wrong one and then sit
+listening to it.
+
+The lease's default is roma's (`ROMA_PUBSUB_MAX_LEASE_MINUTES`, an hour) rather
+than the client library's, so that an operator who was
+answered twice can find the number. An hour covers a Turn and not always a
+parked Task. Raising it makes a second run rarer, not impossible; Pub/Sub's own
+ceiling is a day.
+
 ADR-0003 requires events to reach the core over a queue and removes the ~30s
 webhook response deadline that a minutes-long turn cannot meet. Google Chat
 satisfies that requirement natively. That is Chat's convenience, not the
@@ -44,7 +56,7 @@ own adapter.
   deprecated `space.type == "DM"` — never by the absence of a thread, because
   Chat puts a thread on every message including a DM's, and that one names the
   single message. Read as the key it would make every message in a DM its own
-  session.
+  session. Enforced by `fence:gchat-conversation-key-from-the-space`.
 
 #### Corrected 2026-07-29, against the API reference
 
@@ -54,13 +66,15 @@ and never run. Both are corrected in place, per the same rule ADR-0003 follows.
 - **A thread's resource name is `spaces/{space}/threads/{thread}`,** not
   `spaces/{space}/messages/{message}` — that is a *message's* name. An adapter
   built on the old text would parse a real thread key as malformed and never
-  reply in a space at all.
+  reply in a space at all. Enforced by
+  `fence:gchat-reply-into-a-thread-name`.
 - **`spaceThreadingState` is not the DM test.** It is documented **output only**
   on the Space resource, so an event payload need not carry it; and
   `GROUPED_MESSAGES` spaces have threads too, so "not `THREADED_MESSAGES`" does
   not mean "no threads". Keying on it sends every message in a space down the DM
   path: one session for a whole space, with everybody's context in everybody
-  else's replies.
+  else's replies. Enforced by
+  `fence:gchat-conversation-key-from-the-space`.
 
 Sources, both read on 2026-07-29:
 [spaces.messages](https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces.messages)
@@ -117,14 +131,16 @@ Tracked separately rather than here.
 Messages are **plain text**. Nothing in the core's outbound instructions needs a
 card yet, and a long answer inside a card is worse than a plain one at the two
 things the separate-result rule exists for: being searched for and being quoted.
-Cards arrive with Overflow, which needs a button anyone can press; until then
-they would be decoration with a schema attached.
+Cards arrive with Overflow, which needs a button anyone can press, and Chat has no
+way to put a button on plain text; until then they would be decoration with a
+schema attached.
 
 **Chat's text limit is 4096 characters, and it is the ordinary case rather than
 an edge** — the recorded generating turn in `test/fixtures/claude-stream/` is
 17706. A result longer than that is therefore posted as several messages, broken
 at a paragraph boundary where there is one. The alternative is that the longest
-answers, which are the ones worth having, are the ones that never arrive.
+answers, which are the ones worth having, are the ones that never arrive. Enforced by
+`fence:gchat-split-under-the-limit`.
 
 Two consequences worth naming, because neither is obvious from the core side:
 

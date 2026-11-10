@@ -6,9 +6,6 @@ import { liveCodexCwd } from './live-codex.js'
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url))
 
-// The Codex live test's claim that can be wrong quietly, asserted for free: the
-// same isolation `live-claude.test.ts` holds seam 2 to (#101), for the file Codex
-// walks up looking for.
 describe('Codex live working directories', () => {
   const probe = 'isolation-probe'
 

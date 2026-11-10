@@ -79,10 +79,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Created here rather than assumed to exist. The label is how a later run
-          # finds this report again, so a first run in a repository that has never
-          # had one must not fail on it — and `--force` makes the step idempotent
-          # rather than conditional.
+          # Enforced by `fence:drift-creates-its-label`.
           gh label create "${LABEL}" --force \
             --color 'BFD4F2' \
             --description 'The pinned Claude Code has fallen behind the published one (notify-only)'

@@ -12,14 +12,6 @@ import {
   seededCodexHome,
 } from '../test/support/live-codex.js'
 
-// A real `codex app-server`. Slow, and it spends Codex's Shared Window, not
-// Claude Code's. Excluded from `npm test` and from seam 2 alike; run it with
-// `npm run test:codex-live`.
-//
-// #149's floor: a handshake, a thread on the pinned model, and one completed
-// Turn against the operator-seeded credential. What this prints is what
-// `docs/codex-app-server-verification.md` records.
-
 const PING = 'Reply with exactly the word PING and nothing else. Do not run any commands.'
 
 describe('a real codex app-server', () => {
@@ -32,8 +24,6 @@ describe('a real codex app-server', () => {
   let turn: CodexTurn
 
   beforeAll(async () => {
-    // Only what the process needs to find itself and its binary: the developer's
-    // own environment is not the container's.
     const inherit: Record<string, string> = {}
     for (const name of ['PATH', 'HOME', 'TMPDIR']) {
       const value = process.env[name]

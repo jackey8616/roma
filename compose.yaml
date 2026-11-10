@@ -1,0 +1,110 @@
+# roma behind its egress gateway (ADR-0035, GHSA-7hpq-f638-956r).
+#
+# `inside` is created with `internal: true`, so it has no route out at all: the
+# only thing on it that can reach the internet is `egress`, which is also on
+# `outside`. roma refuses to start if it can get out without the gateway.
+#
+# The gateway lets through whoever carries the token in `egress.token`, and
+# nobody else. roma reads it as root before it drops to `node`, so the agent,
+# which runs as `node` beside it, cannot. The agent's own requests go to a
+# proxy inside roma, which forwards only the hosts on the agent's allowlist —
+# GitHub, the npm registry, Google's APIs when a Google Reach is configured,
+# and whatever ROMA_EGRESS_ALLOW adds.
+#
+# Before the first `docker compose up`:
+#
+#   openssl rand -hex 32 > secrets/egress.token
+#   sudo chown root secrets/egress.token secrets/github-app.pem
+#   sudo chmod 0400 secrets/egress.token secrets/github-app.pem
+#
+# ROMA_VERSION is required and is a release, such as 0.1.0. Releases publish
+# that tag alone and never `latest` (ADR-0006).
+#
+# Every variable is read from the shell or `.env` under the name the README
+# gives it. The three key files are given as paths on the host, and mounted at
+# fixed paths inside; unset, the mount is /dev/null and roma sees nothing set.
+#
+#   GOOGLE_APPLICATION_CREDENTIALS  roma's own identity, for Google Chat. It must
+#     be a key file here: the metadata server is an address on the host's
+#     network, which `inside` cannot reach. Google's libraries read it after
+#     roma drops to `node`, so it stays readable by uid 1000 (ADR-0032).
+#   ROMA_CLOUD_KEY_FILE, ROMA_DOCUMENT_KEY_FILE  the agent's Reaches. 0400 and
+#     owned by root, like the App's key.
+#
+# The gateway reads the same token file. It runs as root only to read it; it
+# has no agent beside it, and needs no capability and no setuid program, so it
+# also runs with no-new-privileges. roma cannot: its Launcher is setuid, and
+# sets no_new_privs on every agent itself (ADR-0036, ADR-0038). Both run on a
+# read-only root with tmpfs where they write, as the README's `docker run` does.
+
+name: roma
+
+x-image: &image ghcr.io/jackey8616/roma:${ROMA_VERSION:?set ROMA_VERSION to a release, such as 0.1.0}
+
+services:
+  roma:
+    image: *image
+    restart: unless-stopped
+    networks: [inside]
+    depends_on: [egress]
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, CHOWN, FOWNER, KILL, DAC_OVERRIDE]
+    tmpfs:
+      - /tmp:exec,mode=1777
+      - /var/tmp:mode=1777
+      - /run/roma:uid=1000,gid=1000,mode=0711
+      - /run/roma-launch:mode=0755
+      - /var/lib/roma/work:exec,uid=1000,gid=1000,mode=0711
+    environment:
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      ROMA_PUBSUB_PROJECT_ID: ${ROMA_PUBSUB_PROJECT_ID:-}
+      ROMA_PUBSUB_SUBSCRIPTION: ${ROMA_PUBSUB_SUBSCRIPTION:-}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:+/run/secrets/google-application.json}
+      ROMA_DISCORD_BOT_TOKEN: ${ROMA_DISCORD_BOT_TOKEN:-}
+      ROMA_DISCORD_GATEWAY_URL: ${ROMA_DISCORD_GATEWAY_URL:-}
+      ROMA_DISCORD_API_BASE: ${ROMA_DISCORD_API_BASE:-}
+      ROMA_AUDIT_ROOT: /var/lib/roma/audit
+      ROMA_CLAUDE_CONFIG_DIR: /var/lib/roma/claude
+      ROMA_GITHUB_APP_ID: ${ROMA_GITHUB_APP_ID:?}
+      ROMA_GITHUB_PRIVATE_KEY_FILE: /run/secrets/github-app.pem
+      ROMA_CLOUD_KEY_FILE: ${ROMA_CLOUD_KEY_FILE:+/run/secrets/cloud-reach.json}
+      ROMA_DOCUMENT_KEY_FILE: ${ROMA_DOCUMENT_KEY_FILE:+/run/secrets/document-reach.json}
+      ROMA_DOCUMENT_DEPOT: ${ROMA_DOCUMENT_DEPOT:-}
+      ROMA_EGRESS_GATEWAY: http://egress:3128
+      ROMA_EGRESS_TOKEN_FILE: /run/secrets/egress.token
+      ROMA_EGRESS_ALLOW: ${ROMA_EGRESS_ALLOW:-}
+    volumes:
+      - roma-audit:/var/lib/roma/audit
+      - roma-claude:/var/lib/roma/claude
+      - ./secrets/github-app.pem:/run/secrets/github-app.pem:ro
+      - ./secrets/egress.token:/run/secrets/egress.token:ro
+      - ${GOOGLE_APPLICATION_CREDENTIALS:-/dev/null}:/run/secrets/google-application.json:ro
+      - ${ROMA_CLOUD_KEY_FILE:-/dev/null}:/run/secrets/cloud-reach.json:ro
+      - ${ROMA_DOCUMENT_KEY_FILE:-/dev/null}:/run/secrets/document-reach.json:ro
+
+  egress:
+    image: *image
+    restart: unless-stopped
+    networks:
+      inside:
+        aliases: [egress]
+      outside: {}
+    entrypoint: ['/usr/bin/tini', '--']
+    command: ['node', '/app/dist/egress/gateway.js']
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      ROMA_EGRESS_TOKEN_FILE: /run/secrets/egress.token
+    volumes:
+      - ./secrets/egress.token:/run/secrets/egress.token:ro
+
+networks:
+  inside:
+    internal: true
+  outside: {}
+
+volumes:
+  roma-audit:
+  roma-claude:

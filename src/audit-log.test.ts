@@ -6,7 +6,6 @@ import { AuditLog, type UnstampedRecord } from './audit-log.js'
 import { CAVEMAN_MENU, CAVEMAN_NOT_PINNED, OFF_MENU_WENYAN } from './caveman.js'
 import { EFFORT_MENU, EFFORT_NOT_APPLIED } from './effort-menu.js'
 
-/** The month the clock below is in, as the file on disk names it. */
 const MONTH = '2026-07'
 
 let dirs: string[] = []
@@ -17,7 +16,6 @@ function newDir(): string {
   return dir
 }
 
-/** One Task's worth of record, with the real cost of a real recorded Turn. */
 function entry(overrides: Partial<UnstampedRecord> = {}): UnstampedRecord {
   return {
     taskId: 'task-one',
@@ -34,6 +32,23 @@ function entry(overrides: Partial<UnstampedRecord> = {}): UnstampedRecord {
   }
 }
 
+const OLD_RECORDS =
+  'A record written before an optional field existed must still be readable, and an absent ' +
+  'field left absent (ADR-0002: the Audit Record is the only per-user ledger, and the ' +
+  'Overflow cap is enforced against its month). readRecord drops a line it cannot read and ' +
+  'a dropped line leaves the month, so requiring a new field silently resets the month across ' +
+  'the deploy that added it and lets the cap through; and reading an absent effort or Caveman ' +
+  'as a level would invent a fact nobody recorded (ADR-0016, ADR-0030; #67, #81, #99, #110, ' +
+  '#115, #132, #167, #192).'
+
+const TORN =
+  'An optional field that is present and of the wrong type makes the line unreadable, never a ' +
+  'record with a hole in it or one read under the default (ADR-0002, ADR-0014, ADR-0015 §10, ' +
+  'ADR-0016, ADR-0019, ADR-0022 §9, ADR-0030). Each field answers one question about who spent ' +
+  'the month, and a line answering it with the wrong kind of value answers it wrongly; an ' +
+  'unreadable line is reported, where a wrong one is not (#67, #81, #99, #110, #115, #132, ' +
+  '#167, #192).'
+
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-07-29T10:00:00.000Z'))
@@ -46,15 +61,11 @@ afterEach(() => {
 })
 
 describe('what a Task leaves behind', () => {
-  // The whole point of writing it down: per-user attribution does not exist at
-  // the provider, so a record roma held in memory would be the only copy of a
-  // number nobody can reconstruct, thrown away on the next deploy.
   it('is still there for a roma that has restarted', () => {
     const dir = newDir()
 
     new AuditLog({ auditRoot: dir }).record(entry())
 
-    // A second AuditLog over the same directory is what a restarted roma has.
     expect(new AuditLog({ auditRoot: dir }).totalFor(MONTH)).toEqual({
       month: MONTH,
       tasks: 1,
@@ -66,8 +77,6 @@ describe('what a Task leaves behind', () => {
     })
   })
 
-  // The one ending that would otherwise leave no trace at all: nobody was told
-  // anything, the Turn produced nothing, and the Task still happened.
   it('records a Task that failed and one that was stopped, like any other', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
@@ -106,9 +115,6 @@ describe('what a Task leaves behind', () => {
 })
 
 describe('adding a calendar month up', () => {
-  // What the monthly Overflow cap is: a sum over a month and nothing else. A
-  // record belongs to the month its Task ended in, so a month that has been
-  // totalled and acted on is never appended to afterwards.
   it('counts the month asked for and no other', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
@@ -134,9 +140,6 @@ describe('adding a calendar month up', () => {
     })
   })
 
-  // The cap is on metered spend. Shared Window Tasks cost money too, in quota
-  // rather than in dollars, and a cap that counted them would refuse Overflow
-  // for spending that never reached an invoice.
   it('counts one credential where that is what was asked', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
@@ -147,36 +150,31 @@ describe('adding a calendar month up', () => {
     expect(log.totalFor(MONTH)).toMatchObject({ tasks: 2, costUsd: 0.91 })
   })
 
-  // ADR-0002's silent-degradation mode, caught after the fact: roma believed it
-  // was drawing on the subscription and Claude Code says a key was paying. The
-  // total is still returned — refusing to answer would leave the cap
-  // unenforceable — but it now says out loud that it is describing money that
-  // came out of somewhere else.
   it('says how many Tasks were not paid for by the credential roma ran them on', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ credential: 'shared-window', apiKeySource: 'ANTHROPIC_API_KEY' }))
     log.record(entry({ credential: 'shared-window', apiKeySource: 'none' }))
-    // No Turn reached `system/init`, so nothing paid and nothing disagrees.
     log.record(entry({ credential: 'shared-window', apiKeySource: null }))
 
     expect(log.totalFor(MONTH)).toMatchObject({ tasks: 3, mismatched: 1 })
   })
 })
 
-/**
- * ADR-0027: `/usage` needs both credentials' figures out of one month, and the
- * two must never be added together — a Shared Window Task carries a cost because
- * Claude Code prices every Turn, and nobody is billed it.
- */
 describe('a calendar month split by credential', () => {
-  it('keeps the two apart, in the order a report reads them', () => {
+  const NEVER_SUMMED =
+    'Each Runtime-and-credential bucket is kept apart and never added to another (ADR-0027, ' +
+    'ADR-0025). A Shared Window Task carries a costUsd nobody is billed, so a sum across ' +
+    'credentials reports subscription draw as money, and a sum across Runtimes reports two ' +
+    'subscriptions as one (#167).'
+
+  it('keeps the two apart, in the order a report reads them [fence:audit-buckets-never-summed]', () => {
     const log = new AuditLog({ auditRoot: newDir() })
     log.record(entry({ costUsd: 0.01 }))
     log.record(entry({ kind: 'relay', taskId: 'relay-one', costUsd: 0 }))
     log.record(entry({ credential: 'overflow', apiKeySource: 'ANTHROPIC_API_KEY', costUsd: 0.9 }))
 
-    expect(log.breakdownFor(MONTH)).toEqual({
+    expect(log.breakdownFor(MONTH), NEVER_SUMMED).toEqual({
       month: MONTH,
       unreadable: 0,
       spend: [
@@ -202,33 +200,27 @@ describe('a calendar month split by credential', () => {
     })
   })
 
-  // **Why the walk exists.** A line that cannot be read belongs to no credential,
-  // so it is counted once for the month — where the two filtered totals it
-  // replaces count it in each of them, and a report built from those would say
-  // one torn record twice. `totalFor` goes on doing that on purpose, because a
-  // cap that assumed the line it could not read was not spending is the wrong way
-  // to be wrong.
-  it('counts a line it cannot read once, for the month rather than for a credential', () => {
+  it('counts a line it cannot read once, for the month rather than for a credential [fence:audit-unreadable-counted-once]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ costUsd: 0.01 }))
     appendFileSync(join(dir, `${MONTH}.jsonl`), '{"at":"2026-07-29T10:00:00.000Z","cos')
 
     const { spend, unreadable } = log.breakdownFor(MONTH)
-    expect(unreadable).toBe(1)
-    expect(spend.map(({ credential, tasks }) => [credential, tasks])).toEqual([
+    expect(unreadable, ONCE).toBe(1)
+    expect(
+      spend.map(({ credential, tasks }) => [credential, tasks]),
+      ONCE,
+    ).toEqual([
       ['shared-window', 1],
       ['overflow', 0],
     ])
     expect(
       log.totalFor(MONTH, 'shared-window').unreadable + log.totalFor(MONTH, 'overflow').unreadable,
+      ONCE,
     ).toBe(2)
   })
 
-  // Both are facts about a record that read back perfectly well and named its
-  // credential, so both land on it. What a report may not do is print the
-  // mismatch beside that credential's figure — the count says the credential on
-  // the record is not to be believed.
   it('files an unpriced Turn and a credential that disagreed under their own', () => {
     const log = new AuditLog({ auditRoot: newDir() })
     log.record(entry({ apiKeySource: 'ANTHROPIC_API_KEY', costUsd: 0.02 }))
@@ -269,10 +261,6 @@ describe('a calendar month split by credential', () => {
     })
   })
 
-  // The fold, from the other side: what the Overflow cap reads is this walk
-  // added up, filtered where it asked for one credential. Its `mismatched` stays
-  // filtered with it — that number is about the credential the cap is enforcing
-  // on, and it is the one caller entitled to read it that way.
   it('adds up to what the month’s total says, filtered and whole', () => {
     const log = new AuditLog({ auditRoot: newDir() })
     log.record(entry({ apiKeySource: 'ANTHROPIC_API_KEY', costUsd: 0.02 }))
@@ -293,34 +281,62 @@ describe('a calendar month split by credential', () => {
   })
 })
 
+const ONCE =
+  'An unreadable line is counted, once, for the month: never thrown, never skipped, never ' +
+  'counted per bucket (ADR-0002, ADR-0027). Thrown, the total cannot be computed and the ' +
+  'Overflow cap is unenforceable; skipped, spend is under-reported and the cap let through; ' +
+  'walked once per credential, one torn record is reported as two (#28, #167).'
+const FOR_WHAT_IT_IS_FOR =
+  'readRecord checks a line against what a record is for, not what a total needs (ADR-0002). ' +
+  'A line that lost `caller` adds up perfectly and answers nothing; a line with no cost would ' +
+  'be summed as a Task that was free (#28).'
+
 describe('reading records that a machine got half way through writing', () => {
-  // A power loss mid-append leaves exactly this. Losing the month's total to it
-  // would leave the cap unenforceable over one truncated line, and skipping it
-  // silently would under-report spend and let the cap through.
-  it('costs the month one record rather than all of them', () => {
+  it('costs the month one record rather than all of them [fence:audit-unreadable-counted-once]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ costUsd: 0.01 }))
     appendFileSync(join(dir, `${MONTH}.jsonl`), '{"at":"2026-07-29T10:00:00.000Z","cos')
     log.record(entry({ costUsd: 0.02 }))
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 2, costUsd: 0.03, unreadable: 1 })
-    expect(log.readMonth(MONTH)).toHaveLength(2)
+    expect(log.totalFor(MONTH), ONCE).toMatchObject({ tasks: 2, costUsd: 0.03, unreadable: 1 })
+    expect(log.readMonth(MONTH), ONCE).toHaveLength(2)
   })
 
-  // A line that parses but has no cost on it must not be totalled as a Task that
-  // was free — that is under-reporting wearing the shape of a valid record.
-  it('does not read a line with no cost on it as a Task that cost nothing', () => {
+  it('starts the next record on a line of its own, however the file came to be torn [fence:audit-append-mends-a-torn-tail]', () => {
+    const why =
+      'Every append starts a new line first when the file ends mid-line, checked on every ' +
+      'append rather than once per file per run (ADR-0002: the month is the figure the ' +
+      'Overflow cap is enforced against). A power loss leaves a line with no newline, and ' +
+      'appending onto it joins the next record to the wreckage, so a Task that really happened ' +
+      'leaves the month too; a once-per-run check misses whatever else wrote to the file ' +
+      'since, a second roma over the same volume or somebody’s script (#28).'
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
-    appendFileSync(join(dir, `${MONTH}.jsonl`), '{"at":"2026-07-29T10:00:00.000Z","taskId":"x"}\n')
+    log.record(entry({ taskId: 'before', costUsd: 0.01 }))
+    appendFileSync(join(dir, `${MONTH}.jsonl`), '{"at":"2026-07-29T10:00:00.000Z","cos')
+    log.record(entry({ taskId: 'after', costUsd: 0.02 }))
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 0, unreadable: 1 })
+    expect(
+      log.readMonth(MONTH).map(({ taskId }) => taskId),
+      why,
+    ).toEqual(['before', 'after'])
   })
 
-  // It would add up perfectly and answer none of the questions this file exists
-  // for, which makes it unreadable here rather than a record with a hole in it.
-  it('does not read a line that lost the caller as a record', () => {
+  it('does not read a line with no cost on it as a Task that cost nothing [fence:audit-record-is-what-it-is-for]', () => {
+    const dir = newDir()
+    const log = new AuditLog({ auditRoot: dir })
+    const { costUsd, ...noCost } = entry()
+    void costUsd
+    appendFileSync(
+      join(dir, `${MONTH}.jsonl`),
+      `${JSON.stringify({ at: '2026-07-29T10:00:00.000Z', ...noCost })}\n`,
+    )
+
+    expect(log.totalFor(MONTH), FOR_WHAT_IT_IS_FOR).toMatchObject({ tasks: 0, unreadable: 1 })
+  })
+
+  it('does not read a line that lost the caller as a record [fence:audit-record-is-what-it-is-for]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     const { caller, ...noCaller } = entry()
@@ -330,15 +346,10 @@ describe('reading records that a machine got half way through writing', () => {
       `${JSON.stringify({ at: '2026-07-29T10:00:00.000Z', ...noCaller })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 0, unreadable: 1 })
+    expect(log.totalFor(MONTH), FOR_WHAT_IT_IS_FOR).toMatchObject({ tasks: 0, unreadable: 1 })
   })
 
-  // Every record roma wrote before ADR-0009 has no `callerName` on it, and the
-  // month's total is the figure the Overflow cap is enforced against. Reading
-  // those as unreadable would reset the month to whatever has been written since
-  // and let the cap through — which is exactly why `callerName` went beside
-  // `caller` rather than inside it.
-  it('reads a record written before the caller had a name on it', () => {
+  it('reads a record written before the caller had a name on it [fence:audit-old-records-stay-readable]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     const { callerName, ...beforeTheField } = entry()
@@ -348,16 +359,16 @@ describe('reading records that a machine got half way through writing', () => {
       `${JSON.stringify({ at: '2026-07-29T10:00:00.000Z', ...beforeTheField })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, costUsd: 0.0103129, unreadable: 0 })
-    expect(log.readMonth(MONTH)[0]?.caller).toBe('someone')
+    expect(log.totalFor(MONTH), OLD_RECORDS).toMatchObject({
+      tasks: 1,
+      costUsd: 0.0103129,
+      unreadable: 0,
+    })
+    expect(log.readMonth(MONTH)[0]?.caller, OLD_RECORDS).toBe('someone')
   })
 })
 
 describe('a Task nothing ever priced', () => {
-  // Its cost is not zero and not a number: the Turn began, tokens went out, and
-  // the terminal event that would have priced them never arrived. Counted as a
-  // Task and left out of the money, so a cap reading this knows the figure is a
-  // floor rather than the answer.
   it('counts as a Task, stays out of the money, and says so', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
@@ -378,23 +389,24 @@ describe('a Task nothing ever priced', () => {
 })
 
 describe('a record that cannot be written', () => {
-  // It is written on the way to telling somebody how their Task went. A Task
-  // that ran, spent money, and then answered nobody because the disk was full is
-  // the worse of the two failures — so the record goes somewhere else instead of
-  // the write becoming the Task's problem.
-  it('does not become the failure of the Task it was describing', () => {
+  const NEVER_THROWS =
+    'AuditLog.record must never throw; a record it cannot write goes to onWriteFailed, stderr ' +
+    'by default (ADR-0002). It is called on the way to telling somebody how their Task went, ' +
+    'and a Task that ran, spent money and then answered nobody because the disk was full is ' +
+    'the worse of the two failures (#28).'
+
+  it('does not become the failure of the Task it was describing [fence:audit-record-never-throws]', () => {
     const dir = newDir()
     const lost: unknown[] = []
     const log = new AuditLog({ auditRoot: dir, onWriteFailed: (record) => lost.push(record) })
     rmSync(dir, { recursive: true, force: true })
 
-    expect(() => log.record(entry())).not.toThrow()
-    expect(lost).toEqual([expect.objectContaining({ taskId: 'task-one', costUsd: 0.0103129 })])
+    expect(() => log.record(entry()), NEVER_THROWS).not.toThrow()
+    expect(lost, NEVER_THROWS).toEqual([
+      expect.objectContaining({ taskId: 'task-one', costUsd: 0.0103129 }),
+    ])
   })
 
-  // Somewhere beats nowhere: the container's log stream is not the audit log,
-  // but a record on stderr can still be recovered by hand, and the only copy of
-  // a number nobody can reconstruct must not be dropped on the floor.
   it('goes to stderr when nobody said where else to put it', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
@@ -417,29 +429,29 @@ describe('a record that cannot be written', () => {
 })
 
 describe('telling a Relay from a Task', () => {
-  // The reason the field exists. Folded into `tasks`, a Conversation where
-  // somebody checked `/context` forty times reads as forty Tasks.
-  it('counts them apart', () => {
+  const APART =
+    '`tasks` must not count Relays (ADR-0018). It is read as "how much work did this month ' +
+    'ask for"; folded in, a Conversation where somebody checked /context forty times reads as ' +
+    'forty Tasks (#120).'
+
+  it('counts them apart [fence:audit-relays-counted-apart]', () => {
     const log = new AuditLog({ auditRoot: newDir() })
 
     log.record(entry())
     log.record(entry({ kind: 'relay', taskId: 'relay-one', costUsd: 0 }))
     log.record(entry({ kind: 'relay', taskId: 'relay-two', costUsd: 0 }))
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, relays: 2 })
+    expect(log.totalFor(MONTH), APART).toMatchObject({ tasks: 1, relays: 2 })
   })
 
-  // A record written before ADR-0012 has no kind and can only ever have been a
-  // Task. It must still be readable: `readRecord` drops what it cannot read, and
-  // a dropped line leaves the month the Overflow cap is enforced against.
-  it('reads a record with no kind as a Task', () => {
+  it('reads a record with no kind as a Task [fence:audit-old-records-stay-readable]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry())
 
     const [record] = log.readMonth(MONTH)
-    expect(record?.kind).toBeUndefined()
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, relays: 0, unreadable: 0 })
+    expect(record?.kind, OLD_RECORDS).toBeUndefined()
+    expect(log.totalFor(MONTH), OLD_RECORDS).toMatchObject({ tasks: 1, relays: 0, unreadable: 0 })
   })
 
   it('keeps the kind across a restart', () => {
@@ -450,14 +462,6 @@ describe('telling a Relay from a Task', () => {
     expect(record?.kind).toBe('relay')
   })
 
-  // **The ADR-0018 rename is a breaking change to the ledger, and this is what
-  // it breaks.** `readout` is what every Relay record written before the rename
-  // says, and it is now a kind this version cannot name — so those lines are
-  // dropped and their cost leaves the month's `costUsd`, which is the figure the
-  // Overflow cap is enforced against. Chosen with that in view: the alternative
-  // is a synonym that can never be deleted. It is not silent — the lines are
-  // counted in `unreadable` — and it is avoidable by scheduling, which is why
-  // this lands at a month boundary and the loss falls entirely in a closed month.
   it('drops a record written under the retired spelling', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
@@ -467,7 +471,6 @@ describe('telling a Relay from a Task', () => {
       `${JSON.stringify({ ...entry(), kind: 'readout', costUsd: 0.05, at: new Date().toISOString() })}\n`,
     )
 
-    // The five cents are gone from the month, not merely uncounted as a Relay.
     expect(log.totalFor(MONTH)).toMatchObject({
       tasks: 1,
       relays: 0,
@@ -476,11 +479,7 @@ describe('telling a Relay from a Task', () => {
     })
   })
 
-  // A kind this version cannot name is unreadable rather than assumed to be a
-  // Task. Guessing would defeat the whole point of the field — one kind read as
-  // the other is exactly what it exists to prevent — and an unreadable line is
-  // reported, where a wrong one is not.
-  it('refuses a kind it does not know', () => {
+  it('refuses a kind it does not know [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry())
@@ -489,15 +488,9 @@ describe('telling a Relay from a Task', () => {
       `${JSON.stringify({ ...entry(), kind: 'something-later', at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, relays: 0, unreadable: 1 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, relays: 0, unreadable: 1 })
   })
 
-  // What the record is insurance against, and since ADR-0018 it is also the
-  // ordinary case. Most of the Relay list is expected to cost nothing on the
-  // pinned build and the list is a person's judgement, so a cost that turns up
-  // on one of those is summed like any other — and a `/compact` is expected to
-  // cost money and is summed the same way. Either way it reaches the figure the
-  // Overflow cap is enforced on.
   it('puts what a Relay spent into the month', () => {
     const log = new AuditLog({ auditRoot: newDir() })
 
@@ -512,12 +505,6 @@ describe('telling a Relay from a Task', () => {
   })
 })
 
-/**
- * ADR-0027: the credential on a record says which of the two *bills* a Task
- * landed on and nothing about whose subscription. A Shared Window is one per
- * Runtime, so a month added up without this sums two separate quotas into one
- * figure the day there are two.
- */
 describe('which Runtime served a Task', () => {
   it('keeps the Runtime across a restart', () => {
     const dir = newDir()
@@ -527,32 +514,25 @@ describe('which Runtime served a Task', () => {
     expect(record?.runtime).toBe('claude-code')
   })
 
-  // Absent is Claude Code, the way an absent `kind` is a Task: it is what every
-  // record written while there was one Runtime ran on, since nothing else was
-  // reachable. Requiring it would make all of them unreadable at once — a
-  // dropped line leaves the month's total, and the month's total is what the
-  // Overflow cap is enforced against.
-  it('reads a record with no Runtime on it as Claude Code’s', () => {
+  it('reads a record with no Runtime on it as Claude Code’s [fence:audit-old-records-stay-readable]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ costUsd: 0.01 }))
 
     const [record] = log.readMonth(MONTH)
-    // Absent, and left absent. Nothing here fills the field in on the way back.
-    expect(record?.runtime).toBeUndefined()
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 0, costUsd: 0.01 })
-    expect(log.breakdownFor(MONTH).spend).toMatchObject([
+    expect(record?.runtime, OLD_RECORDS).toBeUndefined()
+    expect(log.totalFor(MONTH), OLD_RECORDS).toMatchObject({
+      tasks: 1,
+      unreadable: 0,
+      costUsd: 0.01,
+    })
+    expect(log.breakdownFor(MONTH).spend, OLD_RECORDS).toMatchObject([
       { runtime: 'claude-code', credential: 'shared-window', tasks: 1, costUsd: 0.01 },
       { runtime: 'claude-code', credential: 'overflow', tasks: 0 },
     ])
   })
 
-  // **`codex` is not a Runtime this version can name, and that is the whole
-  // point of writing the field now.** Read as Claude Code it would put another
-  // subscription's draw into Claude Code's figure, which is the one confusion
-  // the field exists to remove — so the line is unreadable, and an unreadable
-  // line is reported where a wrong one is not.
-  it('refuses a Runtime it does not know', () => {
+  it('refuses a Runtime it does not know [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ costUsd: 0.01 }))
@@ -561,14 +541,9 @@ describe('which Runtime served a Task', () => {
       `${JSON.stringify({ ...entry(), runtime: 'codex', costUsd: 0.05, at: new Date().toISOString() })}\n`,
     )
 
-    // The five cents are out of the month rather than filed under Claude Code.
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1, costUsd: 0.01 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, unreadable: 1, costUsd: 0.01 })
   })
 
-  // A line that cannot be read names no Runtime either, so it stays the month's.
-  // Counted onto the buckets it would be counted once per figure the report
-  // prints — one torn record read as two the day there are two Runtimes, which
-  // is the double count `breakdownFor` was built to stop one dimension down.
   it('keeps an unreadable line the month’s, whatever the month is split by', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
@@ -587,11 +562,6 @@ describe('which Runtime served a Task', () => {
     ])
   })
 
-  // **The Overflow cap's only caller, and a second dimension may not move it.**
-  // A month with both credentials, a Turn nothing priced, a credential Claude
-  // Code contradicted, a torn line, and records with and without the field: the
-  // figures are what the same month gave before it existed, because `totalFor`
-  // filters by credential and never by Runtime.
   it('leaves what the Overflow cap reads exactly where it was', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
@@ -620,10 +590,6 @@ describe('which Runtime served a Task', () => {
   })
 })
 
-/**
- * ADR-0014: a Chosen Model is a Caller moving the shared bill, and nothing else
- * would remember which Task did.
- */
 describe('which model spent the month', () => {
   it('keeps the model across a restart', () => {
     const dir = newDir()
@@ -633,12 +599,7 @@ describe('which model spent the month', () => {
     expect(record?.model).toBe('claude-opus-5')
   })
 
-  // Every record roma wrote before ADR-0014 lacks the field and ran on the
-  // Pinned Model, because nothing else was reachable. Requiring it would make all
-  // of them unreadable at once — and `readRecord` drops what it cannot read, so
-  // the month the Overflow cap is enforced against would silently reset across
-  // the deploy that added the field.
-  it('reads a record written before a Session could be moved', () => {
+  it('reads a record written before a Session could be moved [fence:audit-old-records-stay-readable]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     appendFileSync(
@@ -647,16 +608,15 @@ describe('which model spent the month', () => {
     )
 
     const [record] = log.readMonth(MONTH)
-    expect(record?.model).toBeUndefined()
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 0, costUsd: 0.0103129 })
+    expect(record?.model, OLD_RECORDS).toBeUndefined()
+    expect(log.totalFor(MONTH), OLD_RECORDS).toMatchObject({
+      tasks: 1,
+      unreadable: 0,
+      costUsd: 0.0103129,
+    })
   })
 
-  // Absent is the Pinned Model; present and not a name is a torn line. Counted
-  // as unreadable rather than read as a record with a hole in it, for the reason
-  // a missing cost is: the one question this field answers is which model spent
-  // the shared window, and a line that answers it with a number answers it
-  // wrongly.
-  it('refuses a model that is not a name', () => {
+  it('refuses a model that is not a name [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ model: 'claude-sonnet-5' }))
@@ -665,15 +625,10 @@ describe('which model spent the month', () => {
       `${JSON.stringify({ ...entry(), model: 5, at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, unreadable: 1 })
   })
 })
 
-/**
- * ADR-0016: the same argument as the model beside it, for a setting roma has
- * weaker evidence about — and the record has to be spelled so that the
- * difference is visible.
- */
 describe('what effort spent the month', () => {
   it('keeps the effort across a restart', () => {
     const dir = newDir()
@@ -683,17 +638,7 @@ describe('what effort spent the month', () => {
     expect(record?.effort).toBe('max')
   })
 
-  /**
-   * The one place this differs from `model`, and it is not a formality.
-   *
-   * An absent `model` reads as the Pinned Model, because nothing else was
-   * reachable before ADR-0014. An absent `effort` reads as **unknown**: a record
-   * written before this field ran on whatever the shared settings file happened
-   * to say, and roma genuinely does not know what that was. Labelling those
-   * retroactively would be inventing a fact — the discipline `costUsd` already
-   * keeps by distinguishing free from unpriced.
-   */
-  it('reads a record written before roma knew what effort it was running at', () => {
+  it('reads a record written before roma knew what effort it was running at [fence:audit-old-records-stay-readable]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     appendFileSync(
@@ -702,15 +647,14 @@ describe('what effort spent the month', () => {
     )
 
     const [record] = log.readMonth(MONTH)
-    // Absent, and left absent. Nothing here fills it in with the Pinned Effort.
-    expect(record?.effort).toBeUndefined()
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 0, costUsd: 0.0103129 })
+    expect(record?.effort, OLD_RECORDS).toBeUndefined()
+    expect(log.totalFor(MONTH), OLD_RECORDS).toMatchObject({
+      tasks: 1,
+      unreadable: 0,
+      costUsd: 0.0103129,
+    })
   })
 
-  // Where the Effort Matrix says the model takes none, the record says that
-  // rather than naming a level nothing ran at — and the word is deliberately not
-  // spelled like a level, so a ledger read months later cannot mistake it for
-  // one.
   it('keeps a record that says the effort did not apply at all', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
@@ -721,7 +665,7 @@ describe('what effort spent the month', () => {
     expect(EFFORT_MENU).not.toContain(record?.effort)
   })
 
-  it('refuses an effort that is not a name', () => {
+  it('refuses an effort that is not a name [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ effort: 'high' }))
@@ -730,15 +674,10 @@ describe('what effort spent the month', () => {
       `${JSON.stringify({ ...entry(), effort: 3, at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, unreadable: 1 })
   })
 })
 
-/**
- * ADR-0030: the third instance of the argument the two fields above are here
- * on, and the first of the three that is not trivially true from the day it
- * lands — which is what makes it the urgent one.
- */
 describe('how short a Task was asked to be', () => {
   it('keeps the Caveman across a restart', () => {
     const dir = newDir()
@@ -748,13 +687,7 @@ describe('how short a Task was asked to be', () => {
     expect(record?.caveman).toBe('ultra')
   })
 
-  // Absent reads as unknown, which is the effort's rule rather than the model's:
-  // a record written before this field ran on whatever the deployment's spawn
-  // arguments happened to carry, and roma does not know what that was. Requiring
-  // it would make every one of them unreadable at once — a dropped line leaves
-  // the month's total, and the month's total is what the Overflow cap is
-  // enforced against.
-  it('reads a record written before roma knew how short it had asked for', () => {
+  it('reads a record written before roma knew how short it had asked for [fence:audit-old-records-stay-readable]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     appendFileSync(
@@ -763,14 +696,14 @@ describe('how short a Task was asked to be', () => {
     )
 
     const [record] = log.readMonth(MONTH)
-    expect(record?.caveman).toBeUndefined()
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 0, costUsd: 0.0103129 })
+    expect(record?.caveman, OLD_RECORDS).toBeUndefined()
+    expect(log.totalFor(MONTH), OLD_RECORDS).toMatchObject({
+      tasks: 1,
+      unreadable: 0,
+      costUsd: 0.0103129,
+    })
   })
 
-  // A deployment that pinned `off` chose something and a deployment that named
-  // nothing did not, and `off` is a level on the Menu — so a month of records
-  // spelled `off` would attribute every Task to a setting nobody made. The word
-  // is deliberately not one of the levels, on `EFFORT_NOT_APPLIED`'s reasoning.
   it('keeps a record that says nothing named a Caveman at all', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
@@ -782,7 +715,7 @@ describe('how short a Task was asked to be', () => {
     expect(OFF_MENU_WENYAN).not.toContain(record?.caveman)
   })
 
-  it('refuses a Caveman that is not a name', () => {
+  it('refuses a Caveman that is not a name [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ caveman: 'lite' }))
@@ -791,16 +724,17 @@ describe('how short a Task was asked to be', () => {
       `${JSON.stringify({ ...entry(), caveman: 2, at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, unreadable: 1 })
   })
 })
 
-/**
- * ADR-0030: the figure beside the Caveman, and the other half of what makes the
- * question answerable from a deployment's own traffic rather than from a
- * synthetic prompt.
- */
 describe('what a Task produced', () => {
+  const UNMEASURED =
+    'outputTokens must keep zero and null apart (ADR-0030, its first verification question). ' +
+    'Zero is a Turn that produced nothing; null is a Turn that began and nothing measured. ' +
+    'Written as zero, an unmeasured Turn reports real work as nothing, and a month compared ' +
+    'against another reads the wrong way round, flattering the setting under test (#192).'
+
   it('keeps the output tokens across a restart', () => {
     const dir = newDir()
     new AuditLog({ auditRoot: dir }).record(entry({ outputTokens: 1978 }))
@@ -809,7 +743,7 @@ describe('what a Task produced', () => {
     expect(record?.outputTokens).toBe(1978)
   })
 
-  it('reads a record written before roma wrote down what a Turn produced', () => {
+  it('reads a record written before roma wrote down what a Turn produced [fence:audit-old-records-stay-readable]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     appendFileSync(
@@ -818,31 +752,31 @@ describe('what a Task produced', () => {
     )
 
     const [record] = log.readMonth(MONTH)
-    expect(record?.outputTokens).toBeUndefined()
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 0, costUsd: 0.0103129 })
+    expect(record?.outputTokens, OLD_RECORDS).toBeUndefined()
+    expect(log.totalFor(MONTH), OLD_RECORDS).toMatchObject({
+      tasks: 1,
+      unreadable: 0,
+      costUsd: 0.0103129,
+    })
   })
 
-  // `costUsd`'s discipline, on the field beside it: a Turn nobody can measure
-  // and a Turn that produced nothing are different facts, and only one of them
-  // can be compared with a month elsewhere. Zero is a claim and is only made
-  // where it is certain — a Task stopped in the queue drove no Turn.
-  it('tells a Task that produced nothing from one nothing measured', () => {
+  it('tells a Task that produced nothing from one nothing measured [fence:audit-unmeasured-is-not-zero]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
 
     log.record(entry({ taskId: 'produced-nothing', outputTokens: 0 }))
     log.record(entry({ taskId: 'never-measured', outputTokens: null }))
 
-    expect(log.readMonth(MONTH).map((record) => [record.taskId, record.outputTokens])).toEqual([
+    expect(
+      log.readMonth(MONTH).map((record) => [record.taskId, record.outputTokens]),
+      UNMEASURED,
+    ).toEqual([
       ['produced-nothing', 0],
       ['never-measured', null],
     ])
   })
 
-  // A torn line rather than a record with a hole in it, for the reason a missing
-  // cost is one: a line answering "how much did this Turn produce" with a word
-  // answers it wrongly, and the month is compared against other months on it.
-  it('refuses a figure that is not one', () => {
+  it('refuses a figure that is not one [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ outputTokens: 21 }))
@@ -851,14 +785,10 @@ describe('what a Task produced', () => {
       `${JSON.stringify({ ...entry(), outputTokens: 'lots', at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, unreadable: 1 })
   })
 })
 
-/**
- * ADR-0015 §10: whoever pays the Google Cloud bill can narrow unexplained
- * activity on the service account to the Tasks that touched it.
- */
 describe('whether a Task used the Cloud Reach', () => {
   it('keeps the answer across a restart', () => {
     const dir = newDir()
@@ -868,13 +798,7 @@ describe('whether a Task used the Cloud Reach', () => {
     expect(record?.cloudReach).toBe(true)
   })
 
-  // Every record roma wrote before there were Cloud Reaches lacks the field, and
-  // none of those Tasks could have obtained a Cloud Token — there was no way to.
-  // Requiring it would make all of them unreadable at once, which is the failure
-  // `model` and `callerName` already carry the reasoning for: a dropped line
-  // leaves the month's total, and the month's total is what the Overflow cap is
-  // enforced against.
-  it('reads a record written before there was a cloud to reach', () => {
+  it('reads a record written before there was a cloud to reach [fence:audit-old-records-stay-readable]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     appendFileSync(
@@ -883,14 +807,11 @@ describe('whether a Task used the Cloud Reach', () => {
     )
 
     const [record] = log.readMonth(MONTH)
-    expect(record?.cloudReach).toBeUndefined()
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 0 })
+    expect(record?.cloudReach, OLD_RECORDS).toBeUndefined()
+    expect(log.totalFor(MONTH), OLD_RECORDS).toMatchObject({ tasks: 1, unreadable: 0 })
   })
 
-  // A yes or a no. A line answering with a number is answering a different
-  // question — the count ADR-0015 refused, because one token does unlimited API
-  // calls for an hour and a number would be read as a measure of what was done.
-  it('refuses an answer that is not a yes or a no', () => {
+  it('refuses an answer that is not a yes or a no [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ cloudReach: false }))
@@ -899,19 +820,10 @@ describe('whether a Task used the Cloud Reach', () => {
       `${JSON.stringify({ ...entry(), cloudReach: 3, at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, unreadable: 1 })
   })
 })
 
-/**
- * ADR-0022 §9: the same question about the Document Reach, and it answers one
- * the field above does not have to.
- *
- * Everything the agent does in a Depot is done as one service account, so
- * Drive's own record of what happened there names the account and never the
- * person — and one Depot holds every Conversation's work. This is the only half
- * of "who put this here" that exists at all.
- */
 describe('whether a Task used the Document Reach', () => {
   it('keeps the answer across a restart', () => {
     const dir = newDir()
@@ -921,14 +833,7 @@ describe('whether a Task used the Document Reach', () => {
     expect(record?.documentReach).toBe(true)
   })
 
-  // Story 31, and the field's whole reason for being optional. Every record roma
-  // wrote before there were Document Reaches lacks it, and none of those Tasks
-  // could have obtained a Document Token — there was no way to. Requiring it
-  // would make all of them unreadable at once: `readRecord` drops a line it
-  // cannot read, a dropped line leaves the month's total, and the month's total
-  // is what the Overflow cap is enforced against. **This is the test protecting
-  // the month.**
-  it('reads a record written before there were documents to reach', () => {
+  it('reads a record written before there were documents to reach [fence:audit-old-records-stay-readable]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     appendFileSync(
@@ -937,14 +842,11 @@ describe('whether a Task used the Document Reach', () => {
     )
 
     const [record] = log.readMonth(MONTH)
-    expect(record?.documentReach).toBeUndefined()
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 0 })
+    expect(record?.documentReach, OLD_RECORDS).toBeUndefined()
+    expect(log.totalFor(MONTH), OLD_RECORDS).toMatchObject({ tasks: 1, unreadable: 0 })
   })
 
-  // Story 30. A line answering with a number is answering a different question —
-  // the count ADR-0015 §10 refused and ADR-0022 §9 refuses again, because one
-  // token does unlimited work for an hour.
-  it('refuses an answer that is not a yes or a no', () => {
+  it('refuses an answer that is not a yes or a no [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ documentReach: false }))
@@ -953,12 +855,9 @@ describe('whether a Task used the Document Reach', () => {
       `${JSON.stringify({ ...entry(), documentReach: 3, at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, unreadable: 1 })
   })
 
-  // The two fields are independent facts about one Task, and a record that
-  // carries both has to read back as both: a Task that wrote a document while
-  // reaching nothing in the cloud is an ordinary Task, not a contradiction.
   it('keeps its answer apart from the cloud’s', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
@@ -970,12 +869,15 @@ describe('whether a Task used the Document Reach', () => {
 })
 
 describe('whether a Compaction happened inside a Task', () => {
-  /** As the reader hands one over, off a real `system/compact_boundary`. */
+  const SHAPE =
+    'A written Compaction is checked for its shape, never for its fields: every one is ' +
+    'nullable on the way in, because the stream is not roma’s (ADR-0019). Requiring non-null ' +
+    'token counts makes readRecord drop the line, and the record and its cost leave the ' +
+    'month — when "a Compaction happened" still answers why this Task cost five times its ' +
+    'neighbours (#115).'
+
   const COMPACTION = { trigger: 'auto', preTokens: 61486, postTokens: 1375 } as const
 
-  // The largest unexplained variation there is in what a Task costs — 4.9 times
-  // a quiet Turn, measured — and the record is the only place the question is
-  // answerable afterwards.
   it('keeps what happened across a restart', () => {
     const dir = newDir()
     new AuditLog({ auditRoot: dir }).record(entry({ compaction: COMPACTION }))
@@ -984,11 +886,7 @@ describe('whether a Compaction happened inside a Task', () => {
     expect(record?.compaction).toEqual(COMPACTION)
   })
 
-  // Absent is no Compaction, which is what every record written before roma could
-  // see one says. Requiring it would make all of them unreadable at once — a
-  // dropped line leaves the month's total, and the month's total is what the
-  // Overflow cap is enforced against.
-  it('reads a record written before roma could see one', () => {
+  it('reads a record written before roma could see one [fence:audit-old-records-stay-readable]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     appendFileSync(
@@ -997,14 +895,11 @@ describe('whether a Compaction happened inside a Task', () => {
     )
 
     const [record] = log.readMonth(MONTH)
-    expect(record?.compaction).toBeUndefined()
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 0 })
+    expect(record?.compaction, OLD_RECORDS).toBeUndefined()
+    expect(log.totalFor(MONTH), OLD_RECORDS).toMatchObject({ tasks: 1, unreadable: 0 })
   })
 
-  // A torn line rather than a record with a hole in it. This field is the whole
-  // account of why one Task cost several times what its neighbours did, and a
-  // line answering it with a string answers it wrongly.
-  it('refuses a line whose Compaction is not one', () => {
+  it('refuses a line whose Compaction is not one [fence:audit-wrong-type-is-torn]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ compaction: COMPACTION }))
@@ -1013,19 +908,15 @@ describe('whether a Compaction happened inside a Task', () => {
       `${JSON.stringify({ ...entry(), compaction: 'auto', at: new Date().toISOString() })}\n`,
     )
 
-    expect(log.totalFor(MONTH)).toMatchObject({ tasks: 1, unreadable: 1 })
+    expect(log.totalFor(MONTH), TORN).toMatchObject({ tasks: 1, unreadable: 1 })
   })
 
-  // The stream is not roma's, and a build that stopped reporting the trigger
-  // would still have compacted. What is checked is the shape, because that is the
-  // part a torn line loses — and "a Compaction happened" is still the answer to
-  // why this Task cost what it did.
-  it('reads one whose fields the stream did not fill in', () => {
+  it('reads one whose fields the stream did not fill in [fence:audit-compaction-shape-not-fields]', () => {
     const dir = newDir()
     const log = new AuditLog({ auditRoot: dir })
     log.record(entry({ compaction: { trigger: null, preTokens: null, postTokens: null } }))
 
-    expect(log.readMonth(MONTH)[0]?.compaction).toEqual({
+    expect(log.readMonth(MONTH)[0]?.compaction, SHAPE).toEqual({
       trigger: null,
       preTokens: null,
       postTokens: null,

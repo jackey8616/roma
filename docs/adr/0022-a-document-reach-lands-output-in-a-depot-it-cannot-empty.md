@@ -112,6 +112,12 @@ Two things about roma shape everything below.
 key never enters the space the agent can reach, and that what the agent gets is
 hour-long. That rule is not reopened here.
 
+**Amended 2026-11-09 by ADR-0032.** The rule was a premise rather than a fact when this was
+written: the agent shared roma's uid and could read the Document key from its file, from
+roma's environment and from roma's memory (GHSA-v52v-hcv8-cr23). ADR-0032 is what makes it
+hold, and it asks one thing of this Reach: `ROMA_DOCUMENT_KEY_FILE` mounted 0400 and owned by
+root.
+
 **roma has no database.** The Session id derives from the Conversation Key and the Session
 Generation, which is why. Anything this record needs to remember across Tasks has to live
 somewhere that is not roma.
@@ -210,7 +216,8 @@ otherwise unbounded. A broad `spreadsheets` or `documents` scope is **not folder
 it reaches every file of that kind the account can see, so any employee who shares a
 spreadsheet with the account's email address hands it to every Conversation, silently and
 with no roma change. Under `drive.file` that widening **cannot touch the write side at
-all**, because `drive.file` does not care what was shared — only what was created.
+all**, because `drive.file` does not care what was shared — only what was created. Enforced by
+`fence:documents-both-drive-scopes`.
 
 `drive.readonly` is the read side, and it does not have that property: it reaches
 everything shared with the account. It is here for two things. Somebody may put reference
@@ -287,7 +294,9 @@ boot:
 
 1. the key mints a token — which is thrown away, ADR-0015 §8's proof exactly;
 2. `GET /drive/v3/files/{depot}?fields=id,name,capabilities&supportsAllDrives=true`
-   answers, so the Depot exists and the account can see it;
+   answers, so the Depot exists and the account can see it — `fields` because
+   `capabilities` is not in Drive's default projection, and `supportsAllDrives`
+   because without it the call is a My Drive call;
 3. that answer's `capabilities.canAddChildren` is true, so the account can actually put
    something there.
 
@@ -412,6 +421,8 @@ The Document Reach's announcement carries the Depot's id, what the agent may do 
 delete — and that this is Google's answer rather than roma's), the `appProperties`
 convention from §7, and one sentence of fact: **everything in the Depot is visible to every
 Conversation and to everyone who can message roma.**
+Each item answers a user story: the Shortcut and that re-running it is free (37, 38), the
+id (34), what may and may not be done (35, 36), the tagging (41).
 
 That sentence is there because of an asymmetry the agent has no way to guess. Every place
 roma has ever given it is private — the Working Directory is one per Session, seen by

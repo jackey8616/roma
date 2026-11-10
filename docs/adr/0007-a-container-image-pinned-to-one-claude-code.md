@@ -124,7 +124,8 @@ default nobody had to type — so the documented `docker run`, which mounted one
 volume, put the Transcript in the container's writable layer and discarded it on
 every replacement. roma was doing the deleting after all, on a schedule nobody
 chose, by a route the decision not to delete never looked down. #54 took the
-default out and gave the documented run a second volume.
+default out and gave the documented run a second volume. Enforced by
+`fence:image-no-default-for-data`.
 
 The paragraph below is the argument that already existed for the audit root. It
 is true of the Transcript word for word, which is the point: nothing new had to be
@@ -150,6 +151,8 @@ and then lose the first Audit Record, or the first Transcript, to a permission
 error — the same data gone by a longer route, and gone at the point where the
 refusal has stopped protecting anything. A bind mount carries the host's
 ownership regardless, so the README says to `chown` both.
+
+Enforced by `fence:volume-paths-owned-by-node`.
 
 ### The image is verified against two questions, and roma is not booted in CI
 
@@ -215,7 +218,9 @@ It runs as a non-root user, on `node:22-slim`.
   protection still doing work" under `bypassPermissions`, and it still does not
   exist. A pullable image that starts with one command makes it *easier* to run
   an agent with unrestricted network access, not harder. A published image reads
-  like "deployment is done"; it is not.
+  like "deployment is done"; it is not. **Amended by ADR-0035:** the allowlist
+  exists now, for a deployment that runs the Egress Gateway as `compose.yaml`
+  does. The image alone, started with `docker run`, still has none.
 - **Nothing here narrows ADR-0003's other accepted risk.** Any member of any
   connected channel can still direct Claude Code to do anything inside the
   container.
@@ -240,7 +245,9 @@ It runs as a non-root user, on `node:22-slim`.
   unresolvable pin, an unparseable `ARG`, a missing `Dockerfile` or a failed
   registry lookup ends the run **red** — only a successful comparison is allowed
   to be quiet. A drift check that swallowed its own failures would pass forever
-  while watching nothing, and a green tick reads as "the pin is current".
+  while watching nothing, and a green tick reads as "the pin is current". Enforced by
+  `fence:drift-check-fails-loud` for the parsing and by `fence:drift-io-fails-loud`
+  for the missing `Dockerfile`, the failed lookup and a failing `grep`.
 
   **This makes upgrading visible, not safe.** The re-verification this ADR asks
   for is still a human spending Shared Window money and reading a behavioural
@@ -295,7 +302,7 @@ default it, and #54 took the default out.)*
 an *anonymous* volume, and `docker run --rm` — which is what `README.md`'s
 example uses — removes anonymous volumes on exit. It would read as protection in
 the Dockerfile and lose the Transcript anyway, which is worse than no protection:
-the operator stops looking.
+the operator stops looking. Enforced by `fence:image-adds-no-skills-or-volumes`.
 
 **Boot roma in CI to prove the image works.** Rejected. It needs a Shared Window
 token and Google credentials in a public repository's secrets, and the startup
