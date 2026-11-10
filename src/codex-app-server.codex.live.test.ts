@@ -1,0 +1,64 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import {
+  CodexAppServer,
+  type CodexInitialized,
+  type CodexThread,
+  type CodexTurn,
+} from './codex-app-server.js'
+import {
+  liveCodexCwd,
+  PINNED_CODEX_MODEL,
+  pinnedCodexBuild,
+  seededCodexHome,
+} from '../test/support/live-codex.js'
+
+const PING = 'Reply with exactly the word PING and nothing else. Do not run any commands.'
+
+describe('a real codex app-server', () => {
+  const codexHome = seededCodexHome()
+  const model = PINNED_CODEX_MODEL
+  const cwd = liveCodexCwd('harness')
+  let server: CodexAppServer
+  let initialized: CodexInitialized
+  let thread: CodexThread
+  let turn: CodexTurn
+  let build: string
+
+  beforeAll(async () => {
+    build = pinnedCodexBuild()
+    const inherit: Record<string, string> = {}
+    for (const name of ['PATH', 'HOME', 'TMPDIR']) {
+      const value = process.env[name]
+      if (value !== undefined) inherit[name] = value
+    }
+
+    server = new CodexAppServer({ codexHome, cwd, inherit })
+    initialized = await server.initialize('0.0.0-live')
+    thread = await server.startThread({ model, cwd })
+    turn = await server.runTurn({ threadId: thread.threadId, text: PING })
+
+    console.log(JSON.stringify({ build, initialized, thread, turn }, null, 2))
+  })
+
+  afterAll(async () => {
+    await server?.close()
+  })
+
+  it('resolves the CODEX_HOME it was handed, and no other', () => {
+    expect(initialized.codexHome).toBe(codexHome)
+  })
+
+  it('starts the thread on the pinned model', () => {
+    expect(thread.model).toBe(model)
+  })
+
+  it('completes one Turn and answers it', () => {
+    expect(turn.status).toBe('completed')
+    expect(turn.error).toBeNull()
+    expect(turn.text).toContain('PING')
+  })
+
+  it('reports token usage for the Turn', () => {
+    expect(turn.tokenUsage?.last.totalTokens).toBeGreaterThan(0)
+  })
+})

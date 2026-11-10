@@ -9,7 +9,7 @@ import { fronted } from './fronted.js'
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url))
 
-const SEAM2_ROOT = join(
+export const SEAM2_ROOT = join(
   tmpdir(),
   `roma-seam2-${createHash('sha256').update(REPO_ROOT).digest('hex').slice(0, 12)}`,
 )
@@ -60,7 +60,7 @@ function liveConfigDir(): string {
   return configDir
 }
 
-function readDotEnv(): Record<string, string> {
+export function readDotEnv(): Record<string, string> {
   let contents: string
   try {
     contents = readFileSync(`${REPO_ROOT}.env`, 'utf8')

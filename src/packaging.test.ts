@@ -7,6 +7,8 @@ const CLAUDE_CODE_VERSION = '2.1.319'
 
 const GH_VERSION = '2.96.0'
 
+const CODEX_VERSION = '0.167.0'
+
 describe('the image carries its own Claude Code, pinned exactly', () => {
   it('installs the version every measurement in this repo was taken against', () => {
     const pinned = CLAUDE_CODE_VERSION.replaceAll('.', String.raw`\.`)
@@ -19,6 +21,21 @@ describe('the image carries its own Claude Code, pinned exactly', () => {
     )
 
     expect(specifiers).toEqual(['@${CLAUDE_CODE_VERSION}'])
+  })
+})
+
+describe('the image carries its own Codex, pinned exactly', () => {
+  it('installs the version the Codex readings were taken against', () => {
+    const pinned = CODEX_VERSION.replaceAll('.', String.raw`\.`)
+    expect(dockerfile()).toMatch(new RegExp(`^ARG CODEX_VERSION=${pinned}$`, 'm'))
+  })
+
+  it('installs that version rather than whatever npm would resolve today', () => {
+    const specifiers = [...dockerfile().matchAll(/@openai\/codex(\S*)/g)].map(
+      ([, specifier]) => specifier,
+    )
+
+    expect(specifiers).toEqual(['@${CODEX_VERSION}'])
   })
 })
 
@@ -144,6 +161,10 @@ describe('the image starts roma as root so roma can stop being root (ADR-0032)',
     expect(cmd, why).toHaveLength(1)
     expect(cmd[0], why).toContain('"--disable-sigusr1"')
   })
+
+  it('sets no Codex home — it holds that Runtime’s Transcript and its only credential', () => {
+    expect(dockerfile()).not.toMatch(/(ROMA_)?CODEX_HOME[\s=]/)
+  })
 })
 
 describe('the image keeps out of what Claude Code reads [fence:image-adds-no-skills-or-volumes]', () => {
@@ -223,17 +244,23 @@ describe('the lists that rest on the pin say so [fence:pin-lists-name-the-versio
   })
 })
 
-describe('nothing CI runs can reach seam 2', () => {
-  it('runs no seam 2 test and is handed no Shared Window token', () => {
+describe('nothing CI runs can spend a subscription', () => {
+  it('runs no live test and is handed neither Runtime’s credential', () => {
     const offenders = automation().filter(({ source }) =>
-      SEAM_2.some((pattern) => pattern.test(withoutComments(source))),
+      PAID_RUNS.some((pattern) => pattern.test(withoutComments(source))),
     )
 
     expect(offenders.map(({ file }) => file)).toEqual([])
   })
 })
 
-const SEAM_2 = [/\btest:seam2\b/, /\.live\.test\b/, /\bCLAUDE_CODE_OAUTH_TOKEN\b/]
+const PAID_RUNS = [
+  /\btest:seam2\b/,
+  /\btest:codex-live\b/,
+  /\.live\.test\b/,
+  /\bCLAUDE_CODE_OAUTH_TOKEN\b/,
+  /\bROMA_CODEX_HOME\b/,
+]
 
 function dockerfile(): string {
   return withoutComments(readFileSync(fromRoot('Dockerfile'), 'utf8'))
