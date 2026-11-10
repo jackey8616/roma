@@ -140,5 +140,13 @@ was checked again, and what was not.
 - **The handshake.** Q1 again, free, against a scratch `CODEX_HOME`: the same reply
   shape, with `codexHome` the scratch directory and the user agent
   `roma/0.167.0 (…) (roma; 0.10.0)`.
-- **Not re-run: Q3's paid Turn.** It spends Codex's Shared Window and needs a seeded
-  credential. `npm run test:codex-live` on 0.167.0 is what would close it.
+- **Q3's paid Turn, again.** `npm run test:codex-live` on 0.167.0, spending Codex's
+  Shared Window, against a `CODEX_HOME` logged into directly
+  (`CODEX_HOME=<dir> codex login --device-auth`): four assertions passing, 7.2 s for the
+  file. The thread reported `gpt-5.6-sol` and a `null` effort, the Turn completed with
+  `PING`, and all six usage fields arrived: 13,700 total, 13,695 input of which 11,264
+  cached, 5 output. That is about 550 more input tokens than 0.165.0's first Turn, with
+  the same cached amount — the Runtime's own instructions grew. The rollout file was
+  99,533 bytes, against about 94 kB. The home held the same databases at the same
+  versions as Q2 (`state_5`, `logs_2`, `goals_1`, `memories_1`, `queue_1`,
+  `thread_history_1`) and `thread-writer-locks/`.
