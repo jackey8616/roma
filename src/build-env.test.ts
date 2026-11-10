@@ -195,6 +195,46 @@ describe('buildEnv', () => {
     expect(env['CLAUDE_SECURESTORAGE_CONFIG_DIR'], why).toBe(CONFIG_DIR)
   })
 
+  describe('behind an egress gateway', () => {
+    const PROXIES = [
+      'HTTPS_PROXY',
+      'https_proxy',
+      'HTTP_PROXY',
+      'http_proxy',
+      'ALL_PROXY',
+      'all_proxy',
+    ]
+
+    it('points every proxy variable a tool reads at roma’s egress proxy, and loopback at nothing [fence:buildenv-agent-traffic-through-egress-proxy]', () => {
+      const why =
+        'curl, git, npm and Claude Code each read a different spelling. One left unset is a tool ' +
+        'that tries the network directly and fails, which the agent reads as an outage; loopback ' +
+        'left out of NO_PROXY sends Claude Code’s own API calls to the egress proxy, which refuses them.'
+      const env = buildEnv({
+        credential: fronted(SHARED_WINDOW),
+        inherit: { ...HOST, HTTPS_PROXY: 'http://roma:the-gateway-token@egress:3128' },
+        configDir: CONFIG_DIR,
+        egressProxy: 'http://127.0.0.1:41000',
+      })
+
+      for (const name of PROXIES)
+        expect(env[name], `${name}: ${why}`).toBe('http://127.0.0.1:41000')
+      expect(env['NO_PROXY'], why).toBe('127.0.0.1,localhost,::1')
+      expect(env['no_proxy'], why).toBe('127.0.0.1,localhost,::1')
+      expect(JSON.stringify(env)).not.toContain('the-gateway-token')
+    })
+
+    it('sets none of them without one, and inherits none of roma’s', () => {
+      const env = buildEnv({
+        credential: fronted(SHARED_WINDOW),
+        inherit: { ...HOST, HTTPS_PROXY: 'http://roma:the-gateway-token@egress:3128' },
+        configDir: CONFIG_DIR,
+      })
+
+      for (const name of [...PROXIES, 'NO_PROXY', 'no_proxy']) expect(name in env, name).toBe(false)
+    })
+  })
+
   describe('with Credential Shims in front of a Session’s tools', () => {
     const SHIMS = {
       sessionId: 'a-session',

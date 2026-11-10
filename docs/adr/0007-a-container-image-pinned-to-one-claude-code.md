@@ -218,7 +218,9 @@ It runs as a non-root user, on `node:22-slim`.
   protection still doing work" under `bypassPermissions`, and it still does not
   exist. A pullable image that starts with one command makes it *easier* to run
   an agent with unrestricted network access, not harder. A published image reads
-  like "deployment is done"; it is not.
+  like "deployment is done"; it is not. **Amended by ADR-0035:** the allowlist
+  exists now, for a deployment that runs the Egress Gateway as `compose.yaml`
+  does. The image alone, started with `docker run`, still has none.
 - **Nothing here narrows ADR-0003's other accepted risk.** Any member of any
   connected channel can still direct Claude Code to do anything inside the
   container.

@@ -1,4 +1,5 @@
 import type { Fronted } from './credential-proxy.js'
+import { LOOPBACK } from './egress/route.js'
 import { MINTER_SOCKET_VAR, SESSION_ID_VAR } from './shim-protocol.js'
 
 export type Credential =
@@ -21,15 +22,27 @@ export interface BuildEnvOptions {
   readonly credential: Fronted
   readonly configDir: string
   readonly shims?: SessionShims
+  readonly egressProxy?: string
   readonly inherit?: Readonly<Record<string, string | undefined>>
 }
 
 const PASSTHROUGH = ['PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'TMPDIR'] as const
 
+const PROXY_VARS = [
+  'HTTPS_PROXY',
+  'https_proxy',
+  'HTTP_PROXY',
+  'http_proxy',
+  'ALL_PROXY',
+  'all_proxy',
+] as const
+const NO_PROXY_VARS = ['NO_PROXY', 'no_proxy'] as const
+
 export function buildEnv({
   credential,
   configDir,
   shims,
+  egressProxy,
   inherit = process.env,
 }: BuildEnvOptions): Record<string, string> {
   const env: Record<string, string> = {}
@@ -46,6 +59,11 @@ export function buildEnv({
   else env['ANTHROPIC_API_KEY'] = credential.standIn
   env['ANTHROPIC_BASE_URL'] = credential.baseUrl
   env['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'] = '1'
+
+  if (egressProxy !== undefined) {
+    for (const name of PROXY_VARS) env[name] = egressProxy
+    for (const name of NO_PROXY_VARS) env[name] = LOOPBACK
+  }
 
   if (shims !== undefined) {
     env[SESSION_ID_VAR] = shims.sessionId

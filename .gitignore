@@ -18,6 +18,8 @@
 # a file in the repo root is one `git add -A` away from being permanent. Ignored
 # by extension rather than by name because the name is the operator's choice.
 *.pem
+# compose.yaml mounts its key files from here, the egress token among them.
+secrets/
 
 # Logs
 *.log

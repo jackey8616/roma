@@ -1,11 +1,23 @@
 import { fileURLToPath } from 'node:url'
 import { CLOUD_KEY_FILE_VAR, readCloudEnv } from '../cloud/env-config.js'
+import { CLOUD_AGENT_HOSTS } from '../cloud/egress.js'
 import { cloudReachFrom } from '../cloud/reach.js'
 import type { CoreLogRecord } from '../core.js'
 import { DOCUMENT_KEY_FILE_VAR, readDocumentEnv } from '../documents/env-config.js'
+import { DOCUMENT_AGENT_HOSTS } from '../documents/egress.js'
 import { documentReachFrom } from '../documents/reach.js'
 import { dropRoot, realRootSystem, type Dropped, type RootSystem } from '../drop-root.js'
+import { agentAllowlist } from '../egress/allowlist.js'
+import type { Gateway } from '../egress/egress-proxy.js'
+import { EGRESS_TOKEN_FILE_VAR, readEgressEnv } from '../egress/env-config.js'
+import {
+  EgressRefused,
+  probeDirectEgress,
+  routeThroughGateway,
+  type DirectProbe,
+} from '../egress/route.js'
 import { envValue, readConfiguration, type Environment } from '../env-config.js'
+import { GITHUB_AGENT_HOSTS } from '../github/egress.js'
 import { PRIVATE_KEY_FILE_VAR, readMinterEnv } from '../github/env-config.js'
 import { githubReachFrom } from '../github/reach.js'
 import { gitConfig } from '../github/shims.js'
@@ -13,7 +25,7 @@ import { writeToStderr, type OperatorLog } from '../operator-log.js'
 import { serve, type ChannelBinding, type IngressLogRecord, type Serving } from '../serve.js'
 import type { PoolLogRecord } from '../session-pool.js'
 import type { ShimLogRecord } from '../shim-server.js'
-import type { ReachLogRecord } from '../startup.js'
+import type { EgressOptions as StartRomaEgress, ReachLogRecord } from '../startup.js'
 import type { SelfCheckLogRecord, StartupSelfCheckReport } from '../startup-self-check.js'
 import { discordBinding, type DiscordLogRecord } from './discord/binding.js'
 import { readDiscordEnv } from './discord/env-config.js'
@@ -27,6 +39,18 @@ type ProcessLogRecord =
   | { readonly event: 'serving'; readonly selfCheck: StartupSelfCheckReport }
   | { readonly event: 'stopping'; readonly signal: NodeJS.Signals }
   | ({ readonly event: 'privileges' } & Dropped)
+  | {
+      readonly event: 'egress'
+      readonly gateway: string | null
+      readonly allow: readonly string[] | null
+    }
+
+export interface EgressSystem {
+  readonly probe: DirectProbe
+  readonly route: (gateway: Gateway) => void
+}
+
+const REAL_EGRESS: EgressSystem = { probe: probeDirectEgress, route: routeThroughGateway }
 
 type RomaLog = OperatorLog<
   | PoolLogRecord
@@ -44,6 +68,7 @@ export async function startConfiguredRoma(
   env: Environment = process.env,
   log: RomaLog = writeToStderr,
   rootSystem: RootSystem = realRootSystem(),
+  egressSystem: EgressSystem = REAL_EGRESS,
 ): Promise<Serving> {
   const { roma, channels, minterEnv, cloudEnv, documentEnv } = readConfiguration(
     env,
@@ -52,8 +77,26 @@ export async function startConfiguredRoma(
     readCloudEnv,
     readDocumentEnv,
   )
+  const egressEnv = readEgressEnv(env)
   log({ event: 'privileges', ...dropRoot(keyFilesIn(env), rootSystem) })
   const { shimDir, ...core } = roma
+
+  let egress: StartRomaEgress | undefined
+  if (egressEnv === null) {
+    log({ event: 'egress', gateway: null, allow: null })
+  } else {
+    const { gateway, extra } = egressEnv
+    if (await egressSystem.probe()) throw new EgressRefused(gateway.url)
+    egressSystem.route(gateway)
+    const allow = agentAllowlist(
+      GITHUB_AGENT_HOSTS,
+      cloudEnv === null ? [] : CLOUD_AGENT_HOSTS,
+      documentEnv === null ? [] : DOCUMENT_AGENT_HOSTS,
+      extra,
+    )
+    log({ event: 'egress', gateway: gateway.url, allow })
+    egress = { gateway, allow }
+  }
 
   const bound: ChannelBinding[] = []
   if (channels.chat !== null) bound.push(await googleChatBinding(channels.chat, log))
@@ -68,12 +111,18 @@ export async function startConfiguredRoma(
     },
     shims: { dir: shimDir, gitConfig: gitConfig() },
     channels: bound,
+    ...(egress === undefined ? {} : { egress }),
     log,
   })
 }
 
 function keyFilesIn(env: Environment): { variable: string; path: string }[] {
-  return [PRIVATE_KEY_FILE_VAR, CLOUD_KEY_FILE_VAR, DOCUMENT_KEY_FILE_VAR].flatMap((variable) => {
+  return [
+    PRIVATE_KEY_FILE_VAR,
+    CLOUD_KEY_FILE_VAR,
+    DOCUMENT_KEY_FILE_VAR,
+    EGRESS_TOKEN_FILE_VAR,
+  ].flatMap((variable) => {
     const path = envValue(env, variable)
     return path === null ? [] : [{ variable, path }]
   })

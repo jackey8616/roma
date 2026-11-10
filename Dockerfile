@@ -3,7 +3,7 @@
 #
 # Two stages, because they want opposite things. The builder needs the whole
 # toolchain — TypeScript, the test-only dependencies, the lot — and produces one
-# directory. The runtime needs that directory, the two runtime dependencies, and
+# directory. The runtime needs that directory, the runtime dependencies, and
 # Claude Code, and nothing the builder used is allowed to follow it in.
 
 # The Claude Code this image carries, exact rather than floating.
@@ -63,7 +63,7 @@ COPY src ./src
 RUN npm run build
 
 # ---------------------------------------------------------------------------
-# Runtime: `dist/`, the two dependencies it imports, and an agent's userland.
+# Runtime: `dist/`, the dependencies it imports, and an agent's userland.
 # ---------------------------------------------------------------------------
 FROM node:22-slim AS runtime
 
@@ -108,8 +108,9 @@ RUN curl --fail --silent --show-error --location \
 
 WORKDIR /app
 
-# `--omit=dev` leaves @google-cloud/pubsub and google-auth-library, which is
-# every dependency `dist/` has. `tsx` is not among them: the image runs compiled
+# `--omit=dev` leaves @google-cloud/pubsub and google-auth-library, plus undici
+# and https-proxy-agent for the egress gateway (ADR-0035), which is every
+# dependency `dist/` has. `tsx` is not among them: the image runs compiled
 # JavaScript, so the reason the README used to give for keeping it at runtime has
 # expired along with "deployment is out of scope".
 COPY package.json package-lock.json ./

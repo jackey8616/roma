@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ContainmentRefused, type RootSystem } from '../drop-root.js'
 import { ConfigurationMissing } from '../env-config.js'
+import type { Gateway } from '../egress/egress-proxy.js'
+import { EgressRefused } from '../egress/route.js'
 import { startConfiguredRoma } from './main.js'
 
 const MINIMAL = {
@@ -54,15 +56,18 @@ describe('the keys roma reads at boot', () => {
       ROMA_GITHUB_PRIVATE_KEY_FILE: join(dir, 'github-app.pem'),
       ROMA_CLOUD_KEY_FILE: join(dir, 'cloud.json'),
       ROMA_DOCUMENT_KEY_FILE: join(dir, 'documents.json'),
+      ROMA_EGRESS_TOKEN_FILE: join(dir, 'egress.token'),
     }
     writeFileSync(files.ROMA_GITHUB_PRIVATE_KEY_FILE, 'not-a-real-pem')
     writeFileSync(files.ROMA_CLOUD_KEY_FILE, serviceAccount)
     writeFileSync(files.ROMA_DOCUMENT_KEY_FILE, serviceAccount)
+    writeFileSync(files.ROMA_EGRESS_TOKEN_FILE, 'e'.repeat(64))
     return {
       files,
       env: {
         ...MINIMAL,
         ...files,
+        ROMA_EGRESS_GATEWAY: 'http://egress:3128',
         ROMA_DOCUMENT_DEPOT: 'a-folder-id',
         ROMA_DISCORD_BOT_TOKEN: 'a-bot-token',
       },
@@ -113,5 +118,51 @@ describe('the keys roma reads at boot', () => {
 
     await expect(startConfiguredRoma(missing, () => {}, root)).rejects.toThrow(ConfigurationMissing)
     expect(becameUser).toBe(false)
+  })
+})
+
+describe('the network roma is started on', () => {
+  const dirs: string[] = []
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+  })
+
+  const notRoot: RootSystem = {
+    uid: () => 1000,
+    becomeUser: () => {},
+    procOwner: () => 1000,
+    canRead: () => true,
+    nodeFlags: () => [],
+  }
+
+  function behindGateway() {
+    const dir = mkdtempSync(join(tmpdir(), 'roma-main-egress-'))
+    dirs.push(dir)
+    const tokenFile = join(dir, 'egress.token')
+    writeFileSync(tokenFile, 'e'.repeat(64))
+    return {
+      ...MINIMAL,
+      ROMA_GITHUB_PRIVATE_KEY_FILE: join(dir, 'github-app.pem'),
+      ROMA_DISCORD_BOT_TOKEN: 'a-bot-token',
+      ROMA_EGRESS_GATEWAY: 'http://egress:3128',
+      ROMA_EGRESS_TOKEN_FILE: tokenFile,
+    }
+  }
+
+  it('is refused when it lets roma out without the gateway, before roma routes anything through it [fence:startup-refuses-an-open-network]', async () => {
+    const env = behindGateway()
+    writeFileSync(env.ROMA_GITHUB_PRIVATE_KEY_FILE, 'not-a-real-pem')
+    const routed: Gateway[] = []
+    const logged: unknown[] = []
+
+    const started = startConfiguredRoma(env, (record) => logged.push(record), notRoot, {
+      probe: () => Promise.resolve(true),
+      route: (gateway) => routed.push(gateway),
+    })
+
+    await expect(started).rejects.toThrow(EgressRefused)
+    await expect(started).rejects.toThrow(/--internal/)
+    expect(routed).toEqual([])
+    expect(logged).not.toContainEqual(expect.objectContaining({ event: 'egress' }))
   })
 })

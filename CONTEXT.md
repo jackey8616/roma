@@ -902,6 +902,17 @@ take it away (ADR-0034).
 _Avoid_: gateway, API proxy (it proxies nothing but credentials), and calling
 the stand-in a token
 
+**Egress Gateway**:
+The only way out of the network roma runs on: a CONNECT proxy, beside roma rather
+than inside it, that tunnels for whoever carries its token and refuses everyone
+else. Only roma holds the token, so everything the agent reaches it reaches
+through roma, which forwards only what the **agent's allowlist** names — the npm
+registry, GitHub's hosts, Google's APIs with a Google Reach, and what the
+operator adds. roma's own traffic goes through the gateway unrestricted
+(ADR-0035).
+_Avoid_: firewall (it is not one), egress proxy for the gateway (that is the
+proxy inside roma), and calling it the Credential Proxy
+
 **Parked**:
 What a Task is while it waits on something that is neither roma nor the queue:
 kept, said out loud, holding no concurrency slot and no process, and stoppable

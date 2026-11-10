@@ -257,6 +257,9 @@ Terraform cannot do, in the order they have to happen.
 | `ROMA_CLOUD_KEY_FILE` | A path to a service account key file, and the whole of what gives the agent a **Cloud Reach**. Unset — the usual case — roma starts normally, announces nothing about the cloud, and `roma-cloud-token` says this deployment has none. Set, roma reads the key at boot **by exactly that path**, mints one token with it and throws it away, and refuses to start if any of that fails; it never falls back to another identity, because the fallback on a Google host is roma's own. The roles on that identity are the entire boundary — every Conversation reaches all of it, and so does everyone who can message roma. It must not be the identity above. `infra/README.md` has the steps and says which project to put it in. **Mount it read-only, 0400 and owned by root**, for `ROMA_GITHUB_PRIVATE_KEY_FILE`'s reason; roma refuses to start if the agent could read it. |
 | `ROMA_DOCUMENT_KEY_FILE` | A path to a service account key file, and half of what gives the agent a **Document Reach** — the identity it creates the team's Docs and Sheets as. Unset, roma starts normally, announces nothing about documents, and `roma-document-token` says this deployment has none. Set, roma reads the key at boot **by exactly that path**, proves it, and refuses to start if that fails; it never falls back to another identity, for `ROMA_CLOUD_KEY_FILE`'s reason. Required **whenever** the line below is set, and vice versa. What has been shared with that identity is the entire boundary — every Conversation reaches all of it, and so does everyone who can message roma. **Mount it read-only, 0400 and owned by root**, for `ROMA_GITHUB_PRIVATE_KEY_FILE`'s reason; roma refuses to start if the agent could read it. |
 | `ROMA_DOCUMENT_DEPOT` | The id of the folder roma works in — the **Depot**. It must be a folder in a **shared drive**, with the identity above as a **Contributor**: that role can create and edit and cannot move, trash or delete, which is what makes "roma leaves work there and a person takes it away" the permission model rather than a convention. A folder in somebody's My Drive does not work, and fails in two ways at once (`infra/README.md`). roma proves at boot that the folder exists **and** that the account can add to it, so a typo, an account never added, and an account added as Viewer are three different refusals rather than one failure inside somebody's first Task. **One Depot for the whole deployment**: everything in it is readable by every Conversation and by everyone who can message roma, and it grows monotonically because nothing roma has can empty it (ADR-0022). |
+| `ROMA_EGRESS_GATEWAY` | The Egress Gateway, as `http://<host>:<port>` — `http://egress:3128` in `compose.yaml`. Set, every connection roma makes goes through it, the agent's only through roma's own proxy and only to its allowlist, and **roma refuses to start if it can reach the internet without it**: a network with another way out would make the allowlist hold nothing. Unset, roma has no egress control and says so in its log (ADR-0035). Requires the next line, and vice versa. |
+| `ROMA_EGRESS_TOKEN_FILE` | A path to the token the gateway accepts, and nobody else may present — `openssl rand -hex 32`. The gateway reads the same file. **Mount it read-only, 0400 and owned by root**, for `ROMA_GITHUB_PRIVATE_KEY_FILE`'s reason; roma refuses to start if the agent could read it, because with it the agent could use the gateway as roma. |
+| `ROMA_EGRESS_ALLOW` | Hosts the agent may reach beyond its default list, comma-separated: `pypi.org,*.pythonhosted.org`. A `*.` pattern matches subdomains, not the name itself. Names only — an address or a port is refused, since the gateway connects only to names on 443. The whole list is written to the operator log at boot. |
 | `ROMA_OVERFLOW_API_KEY` | Metered billing. Absent, roma has no Overflow and never offers it. |
 | `ROMA_OVERFLOW_MONTHLY_CAP_USD` | Required **whenever** the line above is set, and vice versa. There is no default: how much of your money roma may spend is not roma's to decide. |
 | `ROMA_MODEL` | Overrides the pinned model. The self-check asserts on whatever this resolves to. |
@@ -274,11 +277,32 @@ a whole deployment because a shell profile mentioned it.
 
 ### What running it against a real Workspace means today
 
-There is a container now. There is still **no egress allowlist** — which ADR-0003 describes
-as the only protection still doing real work under `bypassPermissions` — and no firewall.
-A pullable image makes it *easier* to stand that agent up, not safer: an image reads like
-"deployment is done" and it is not. An agent reachable from Chat by any Workspace member,
-with unrestricted network access, is what you get until that protection exists.
+**Run it with `compose.yaml`, not with the `docker run` above.** The compose file puts roma
+on a network with no route out and starts the **Egress Gateway** beside it, which is the
+egress allowlist ADR-0003 describes as the only protection still doing real work under
+`bypassPermissions` (ADR-0035). The agent then reaches GitHub, the npm registry, Google's
+APIs when it has a Google Reach, and whatever `ROMA_EGRESS_ALLOW` adds — and nothing else.
+roma refuses to start if the network lets it out some other way.
+
+```bash
+openssl rand -hex 32 > secrets/egress.token
+sudo chown root secrets/egress.token secrets/github-app.pem
+sudo chmod 0400 secrets/egress.token secrets/github-app.pem
+ROMA_VERSION=0.1.0 docker compose up -d
+```
+
+`ROMA_VERSION` is required: releases publish their version and no `latest`. Every other
+variable is read from the shell or `.env` under the name the table above gives it. The key
+files — `GOOGLE_APPLICATION_CREDENTIALS`, `ROMA_CLOUD_KEY_FILE`, `ROMA_DOCUMENT_KEY_FILE` —
+are given as paths on the host, and compose mounts each at a fixed path inside. Behind the
+gateway, roma's own Google credential has to be a key file: the metadata server is out of
+reach.
+
+Know what that does not stop. An agent reachable by any Workspace member can still push to a
+repository an attacker owns on `github.com`, or publish to npm with an attacker's token: a
+shared host on the list is open to everyone's resources on it. And the plain `docker run`
+above has **no allowlist at all** — roma logs `"gateway":null` to say so, and the agent then
+has unrestricted network access.
 
 ## Where the Channel-specific code goes
 

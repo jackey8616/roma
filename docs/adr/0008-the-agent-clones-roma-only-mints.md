@@ -361,7 +361,10 @@ spared.
   real escalation path.** The agent can rewrite what counts as passing, and CI is
   usually where a repository's secrets are. It bypasses code review and reaches
   credentials in the same move. This is not an argument against the decision —
-  it is why the decision is written down instead of assumed.
+  it is why the decision is written down instead of assumed. **Amended by
+  ADR-0035:** behind the Egress Gateway the agent reaches only its allowlist, but
+  that list includes `github.com` and `api.github.com`, so this path is narrowed
+  for exfiltration elsewhere and unchanged for GitHub itself.
 - **Every Conversation reaches every repository in the Installation.** Anyone who
   can message roma has that reach. Which repositories the App is installed on is
   now the only control, and choosing that list is an operational decision with no

@@ -11,6 +11,8 @@ import type { RetryBudget } from './config.js'
 import { ReachUse } from './reach-use.js'
 import { Core, type CoreLogRecord, type CoreOptions } from './core.js'
 import { CredentialProxy, type Fronted } from './credential-proxy.js'
+import { allows } from './egress/allowlist.js'
+import { EgressProxy, type Gateway } from './egress/egress-proxy.js'
 import { FreshTokens } from './fresh-tokens.js'
 import { eachReach, type Reach, type Reaches } from './reach.js'
 import type { BoundChannel, ChannelBinding } from './serve.js'
@@ -78,6 +80,12 @@ export interface StartRomaOptions {
   readonly selfCheckCwd?: string
   readonly selfCheckTimeoutMs?: number
   readonly anthropicApi?: string
+  readonly egress?: EgressOptions
+}
+
+export interface EgressOptions {
+  readonly gateway: Gateway
+  readonly allow: readonly string[]
 }
 
 export interface Roma {
@@ -91,12 +99,19 @@ export interface Roma {
 }
 
 export async function startRoma(options: StartRomaOptions): Promise<Roma> {
-  const proxy = await CredentialProxy.listen(
-    options.anthropicApi === undefined ? {} : { upstream: options.anthropicApi },
-  )
+  const { anthropicApi, egress } = options
+  const proxy = await CredentialProxy.listen({
+    ...(anthropicApi === undefined ? {} : { upstream: anthropicApi }),
+    ...(egress === undefined ? {} : { via: egress.gateway }),
+  })
+  let agentEgress: EgressProxy | null = null
   try {
-    return await startBehind(proxy, options)
+    if (egress !== undefined) {
+      agentEgress = await EgressProxy.listen({ allow: allows(egress.allow), via: egress.gateway })
+    }
+    return await startBehind(proxy, agentEgress, options)
   } catch (error) {
+    await agentEgress?.close()
     await proxy.close()
     throw error
   }
@@ -104,6 +119,7 @@ export async function startRoma(options: StartRomaOptions): Promise<Roma> {
 
 async function startBehind(
   proxy: CredentialProxy,
+  agentEgress: EgressProxy | null,
   {
     credential,
     overflow,
@@ -136,7 +152,8 @@ async function startBehind(
   const pinnedCaveman = caveman ?? CAVEMAN_OFF
 
   const fronted = proxy.front(credential)
-  const env = buildEnv({ credential: fronted, configDir })
+  const egressProxy = agentEgress === null ? {} : { egressProxy: agentEgress.url }
+  const env = buildEnv({ credential: fronted, configDir, ...egressProxy })
 
   const probeCwd = selfCheckCwd ?? mkdtempSync(join(tmpdir(), 'roma-self-check-'))
   let selfCheck: StartupSelfCheckReport
@@ -181,6 +198,7 @@ async function startBehind(
       credential: from,
       configDir,
       shims: { sessionId, socketPath, gitConfigPath },
+      ...egressProxy,
     })
   const envs: CredentialEnvs = {
     [credential.kind]: sessionEnv(fronted),
@@ -238,6 +256,7 @@ async function startBehind(
         await pool.shutdown()
       } finally {
         await shimServer.close()
+        await agentEgress?.close()
         await proxy.close()
       }
     },

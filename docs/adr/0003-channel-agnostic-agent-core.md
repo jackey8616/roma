@@ -434,6 +434,10 @@ roughly how much, never what.
   start — faster, and avoids repeated use of git credentials.
 - Egress allowlist: the Anthropic API, our git remote, and package registries
   only. Under `bypassPermissions` this is the only protection still doing work.
+  **Amended by ADR-0035:** this was not built until then, and the sentence above
+  read as if it had been (GHSA-7hpq-f638-956r). It is built as an Egress Gateway
+  that only roma can use and a proxy inside roma that gives the agent its own,
+  narrower list — and only for a deployment that runs the gateway.
 
 ### Permissions
 

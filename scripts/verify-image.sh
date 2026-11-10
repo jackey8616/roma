@@ -250,3 +250,152 @@ for route in claude-environ transcript; do
   expect_line control "${i2_control}" "${route} REACHED"
 done
 echo "the agent recovers no Shared Window token, which it does when claude holds one"
+
+# ---------------------------------------------------------------------------
+# 7. The agent reaches only what its allowlist names, and only through roma's
+#    egress gateway; roma's own traffic still gets out.
+#
+# GHSA-7hpq-f638-956r, ADR-0035. Proxy variables alone constrain nothing — the
+# agent has a shell and `curl --noproxy '*'` — so the contained run puts the
+# container on a Docker network created with `--internal`, whose only way out is
+# the gateway, started here from this same image as compose.yaml starts it. The
+# gateway refuses whoever lacks its token; roma's in-process proxy forwards the
+# agent's CONNECTs to it, and only for hosts on the agent's allowlist.
+#
+# Run against the image's real pinned `claude` and a fake Messages API, so it
+# spends nothing. It does need the internet: `listed REACHED` is a real
+# `git ls-remote` to this repository, which is the half that says the contained
+# run still works. `roma-through-gateway REACHED` is the same for roma's own
+# `fetch`.
+#
+# The control runs on Docker's default network with no gateway, as roma did
+# before the fix, and must get out directly — otherwise a probe that silently
+# stopped working would report containment it is not checking.
+# ---------------------------------------------------------------------------
+egress_harness="$(dirname "$0")/egress-harness.mjs"
+egress_tag="roma-verify-$$"
+egress_dir="$(mktemp -d)"
+
+egress_cleanup() {
+  docker rm -f "${egress_tag}-gateway" >/dev/null 2>&1 || true
+  docker network rm "${egress_tag}-inside" "${egress_tag}-outside" >/dev/null 2>&1 || true
+  rm -rf "${egress_dir}"
+}
+trap egress_cleanup EXIT
+
+od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > "${egress_dir}/egress.token"
+chmod 0644 "${egress_dir}/egress.token"
+
+docker network create --internal "${egress_tag}-inside" >/dev/null
+docker network create "${egress_tag}-outside" >/dev/null
+docker run -d --name "${egress_tag}-gateway" --network "${egress_tag}-outside" --user node \
+  -v "${egress_dir}/egress.token:/run/secrets/egress.token:ro" \
+  -e ROMA_EGRESS_TOKEN_FILE=/run/secrets/egress.token \
+  --entrypoint node "${image}" /app/dist/egress/gateway.js >/dev/null
+docker network connect --alias egress "${egress_tag}-inside" "${egress_tag}-gateway"
+
+egress() {
+  # $1: mode.
+  local network=()
+  [ "$1" = contained ] && network=(
+    --network "${egress_tag}-inside"
+    -v "${egress_dir}/egress.token:/run/secrets/egress.token:ro"
+    -e ROMA_EGRESS_TOKEN_FILE=/run/secrets/egress.token
+    -e EGRESS_GATEWAY=http://egress:3128
+  )
+  docker run --rm -i --user node ${network[@]+"${network[@]}"} \
+    -e EGRESS_LISTED_REPO=https://github.com/jackey8616/roma \
+    --entrypoint node "${image}" --input-type=module - "$1" < "${egress_harness}"
+}
+
+egress_contained="$(egress contained)"
+egress_control="$(egress control)"
+
+expect_line contained "${egress_contained}" 'turns 2'
+for check in roma-direct direct unlisted exfiltrate gateway-without-token; do
+  expect_line contained "${egress_contained}" "${check} BLOCKED"
+done
+for check in roma-through-gateway listed; do
+  expect_line contained "${egress_contained}" "${check} REACHED"
+done
+expect_line contained "${egress_contained}" 'gateway-answer 407'
+expect_line control "${egress_control}" 'turns 2'
+for check in roma-direct direct unlisted exfiltrate listed; do
+  expect_line control "${egress_control}" "${check} REACHED"
+done
+echo "the agent reaches only its allowlist, through the gateway, which it does not when roma has none"
+
+# ---------------------------------------------------------------------------
+# 8. compose.yaml hands roma every Channel and Reach it can be configured with,
+#    and the key files behind them, and names a release.
+#
+# ADR-0035 makes compose.yaml the deployment that has the gateway, so a variable
+# it drops is a deployment that cannot use the gateway and that feature at once:
+# a Discord-only roma with no Channel, a Chat key path with no file behind it.
+# Rendered with `docker compose config`, so the interpolation itself is checked,
+# and with `--env-file /dev/null`, so a `.env` beside it is never read.
+#
+# Each key file is given as a host path and must arrive as a mount at the path
+# roma is told; unset, roma must be told nothing. Without ROMA_VERSION it must
+# refuse, since releases publish no `latest` (ADR-0006).
+# ---------------------------------------------------------------------------
+compose_file="$(dirname "$0")/../compose.yaml"
+compose() {
+  env -i PATH="${PATH}" HOME="${HOME}" DOCKER_HOST="${DOCKER_HOST:-}" \
+    ROMA_GITHUB_APP_ID=1 "$@" \
+    docker compose -f "${compose_file}" --env-file /dev/null config --format json
+}
+
+if compose >/dev/null 2>&1; then
+  echo "compose.yaml renders with no ROMA_VERSION, so it pulls a tag no release publishes" >&2
+  exit 1
+fi
+
+compose_check='
+let text = ""
+for await (const chunk of process.stdin) text += chunk
+const roma = JSON.parse(text).services.roma
+const [mode, ...expected] = process.argv.slice(1)
+const mounts = new Map(roma.volumes.filter((v) => v.type === "bind").map((v) => [v.target, v.source]))
+for (const pair of expected) {
+  const [name, value] = pair.split("=")
+  const given = roma.environment[name]
+  if (given === undefined) console.log(`${name} not passed`)
+  else if (mode === "files" && value !== "") {
+    if (given === "" || mounts.get(given) !== value) console.log(`${name} not mounted from ${value}`)
+  } else if (given !== value) console.log(`${name}=${given}, expected ${value}`)
+}
+console.log("checked")
+'
+compose_run() {
+  docker run --rm -i --entrypoint node "${image}" --input-type=module -e "${compose_check}" "$@"
+}
+compose_expect() {
+  # $1: run name, $2: output.
+  if [ "$2" != checked ]; then
+    echo "compose.yaml, $1:" >&2
+    echo "$2" >&2
+    exit 1
+  fi
+}
+
+compose_vars=(
+  ROMA_PUBSUB_PROJECT_ID=project ROMA_PUBSUB_SUBSCRIPTION=subscription
+  ROMA_DISCORD_BOT_TOKEN=bot ROMA_DISCORD_GATEWAY_URL=wss://gateway.example
+  ROMA_DISCORD_API_BASE=https://api.example ROMA_DOCUMENT_DEPOT=depot
+)
+compose_files=(
+  GOOGLE_APPLICATION_CREDENTIALS=/srv/roma/google.json
+  ROMA_CLOUD_KEY_FILE=/srv/roma/cloud.json
+  ROMA_DOCUMENT_KEY_FILE=/srv/roma/document.json
+)
+compose_unset=()
+for pair in "${compose_vars[@]}" "${compose_files[@]}"; do compose_unset+=("${pair%%=*}="); done
+
+compose_expect 'every variable set' \
+  "$(compose ROMA_VERSION=0.1.0 "${compose_vars[@]}" "${compose_files[@]}" | compose_run values "${compose_vars[@]}")"
+compose_expect 'every key file set' \
+  "$(compose ROMA_VERSION=0.1.0 "${compose_files[@]}" | compose_run files "${compose_files[@]}")"
+compose_expect 'nothing optional set' \
+  "$(compose ROMA_VERSION=0.1.0 | compose_run values "${compose_unset[@]}")"
+echo "compose.yaml passes every Channel and Reach, mounts their keys, and names a release"

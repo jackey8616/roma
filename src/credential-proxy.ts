@@ -11,7 +11,9 @@ import {
 } from 'node:http'
 import { Agent as HttpsAgent, request as httpsRequest } from 'node:https'
 import type { AddressInfo } from 'node:net'
+import { HttpsProxyAgent } from 'https-proxy-agent'
 import type { Credential, CredentialKind } from './build-env.js'
+import { proxyUrl, type Gateway } from './egress/egress-proxy.js'
 
 export const ANTHROPIC_API = 'https://api.anthropic.com'
 
@@ -26,29 +28,33 @@ export interface Fronted {
 
 export interface CredentialProxyOptions {
   readonly upstream?: string
+  readonly via?: Gateway
 }
 
 export class CredentialProxy {
   readonly #server: Server
   readonly #upstream: URL
-  readonly #agent: HttpAgent | HttpsAgent
+  readonly #agent: HttpAgent | HttpsAgent | HttpsProxyAgent<string>
   readonly #baseUrl: string
   readonly #bearers = new Map<string, string>()
   readonly #apiKeys = new Map<string, string>()
 
-  private constructor(server: Server, upstream: URL, baseUrl: string) {
+  private constructor(server: Server, upstream: URL, baseUrl: string, via: Gateway | undefined) {
     this.#server = server
     this.#upstream = upstream
     this.#baseUrl = baseUrl
     this.#agent =
-      upstream.protocol === 'https:'
-        ? new HttpsAgent({ keepAlive: true })
-        : new HttpAgent({ keepAlive: true })
+      via !== undefined
+        ? new HttpsProxyAgent(proxyUrl(via), { keepAlive: true })
+        : upstream.protocol === 'https:'
+          ? new HttpsAgent({ keepAlive: true })
+          : new HttpAgent({ keepAlive: true })
     server.on('request', (req, res) => this.#forward(req, res))
   }
 
   static async listen({
     upstream = ANTHROPIC_API,
+    via,
   }: CredentialProxyOptions = {}): Promise<CredentialProxy> {
     const target = new URL(upstream)
     if (target.protocol !== 'https:' && target.protocol !== 'http:') {
@@ -63,7 +69,7 @@ export class CredentialProxy {
       })
     })
     const { port } = server.address() as AddressInfo
-    return new CredentialProxy(server, target, `http://127.0.0.1:${port}`)
+    return new CredentialProxy(server, target, `http://127.0.0.1:${port}`, via)
   }
 
   front(credential: Credential): Fronted {
