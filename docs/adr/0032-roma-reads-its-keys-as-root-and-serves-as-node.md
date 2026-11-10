@@ -52,7 +52,7 @@ inside roma whatever the kernel says about dumping. The image runs
 The order is held by `fence:main-drops-root-after-reading-keys`, and the image keeping its
 side — no `USER`, so roma has root to drop — by `fence:image-starts-as-root`.
 `scripts/verify-image.sh` §5 proves the whole of it against the built image: the image's own
-compiled `dropRoot`, `buildEnv` and `spawnClaudeProcess`, an agent spawned as roma's real
+compiled `dropRoot`, `buildEnv` and `spawnRuntimeProcess`, an agent spawned as roma's real
 child, which must reach neither the key file, roma's environment, roma's memory nor the
 inspector — and a control run started as `node`, which must reach them, so the probe is
 known to work.
