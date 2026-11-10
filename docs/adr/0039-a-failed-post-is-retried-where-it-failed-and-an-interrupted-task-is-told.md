@@ -41,7 +41,8 @@ What is worth repeating is a 429, a 5xx, or a call Chat never answered (a reset 
 timed-out connection). Any other 4xx says the post itself is wrong and is thrown at
 once. Enforced by `fence:gchat-refused-for-good-not-retried`. The binding reads
 these off the HTTP client's error into a `ChatRefusal`, so the Adapter decides on a
-status and never on a library's error shape.
+status and never on a library's error shape — including the client's own `Headers`
+class, which is not the global one. Enforced by `fence:gchat-retry-after-read-off-gaxios`.
 
 **Every attempt at one post carries the same `requestId`.** Chat answers a request id
 it has seen with the message it already made, so a post that landed but whose answer
@@ -70,7 +71,9 @@ now does:
    has not yet answered that it was interrupted** — a new `OutboundInstruction` kind,
    `interrupted`, which each Channel renders as *"roma was restarted before it could
    finish this task. Send it again once roma is back."* Queued and parked Tasks are
-   told as well as running ones. Each one is logged as `task-interrupted`. Enforced by
+   told as well as running ones, and a message that arrives while the others are being
+told is told the same rather than started. Enforced by
+`fence:serve-shutdown-interrupts-late-arrivals`. Each one is logged as `task-interrupted`. Enforced by
    `fence:serve-shutdown-tells-what-it-cannot-hand-back`.
 3. Transports close and the Resident Sessions end (unchanged).
 

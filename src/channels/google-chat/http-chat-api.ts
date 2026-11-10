@@ -132,8 +132,12 @@ function isUnanswered(error: object): boolean {
 }
 
 function headerOf(headers: unknown, name: string): string | null {
-  if (headers instanceof Headers) return headers.get(name)
   if (typeof headers !== 'object' || headers === null) return null
+  const { get } = headers as { get?: unknown }
+  if (typeof get === 'function') {
+    const value: unknown = get.call(headers, name)
+    return typeof value === 'string' ? value : null
+  }
   const value = (headers as Record<string, unknown>)[name]
   return typeof value === 'string' ? value : null
 }

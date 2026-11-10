@@ -167,6 +167,7 @@ export class Core {
   readonly #log: CoreLog
   readonly #running = new Set<RunningTask>()
   readonly #unanswered = new Set<Unanswered>()
+  #interrupting = false
   readonly #openings = new Map<string, Promise<void>>()
 
   constructor({
@@ -207,6 +208,13 @@ export class Core {
   }
 
   async handle(message: IngressMessage): Promise<void> {
+    if (this.#interrupting) {
+      await this.#channel.deliver({
+        kind: 'interrupted',
+        ...addressOf({ ...message, taskId: randomUUID() }),
+      })
+      return
+    }
     const command = readCommand(message.text)
     if (command !== null) return await this.#runCommand(command, message)
     const opened = this.#open(message)
@@ -218,6 +226,7 @@ export class Core {
   }
 
   async interrupt(): Promise<void> {
+    this.#interrupting = true
     const cut = [...this.#unanswered].filter((unanswered) => !unanswered.interrupted)
     for (const unanswered of cut) {
       unanswered.interrupted = true
@@ -790,6 +799,7 @@ export class Core {
   }
 
   async takeOverflow(taskId: string): Promise<boolean> {
+    if (this.#interrupting) return false
     const task = [...this.#running].find(
       (candidate) => candidate.taskId === taskId && candidate.parked?.offered === true,
     )

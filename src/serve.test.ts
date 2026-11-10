@@ -629,6 +629,37 @@ describe('shutting down where nothing can be handed back', () => {
     expect(outcomesOf(roma.channel)).toEqual(['result', 'result'])
   })
 
+  it('tells a Task that arrives while it is telling the others, rather than starting it [fence:serve-shutdown-interrupts-late-arrivals]', async () => {
+    const why =
+      'A message that arrives after shutdown began telling Tasks they were interrupted must ' +
+      'be told the same, and not started (ADR-0039). Started, it is killed with the rest and ' +
+      'its person hears only that it failed — the silence #171 exists to end, for whoever ' +
+      'happened to write during the window.'
+    const roma = await booted({ redelivers: false })
+    const release = roma.channel.hold('interrupted')
+
+    const first = roma.transport.deliver(said('hello', 'early'), 'm-1')
+    await flush()
+    const serving = await roma.serving
+    const stopping = serving.shutdown()
+    await flush()
+    const started = roma.claude.processes.length
+    const late = roma.transport.deliver(said('hello', 'late'), 'm-2')
+    await flush()
+    release()
+    await stopping
+    await Promise.allSettled([first, late])
+
+    const told = roma.channel.instructions.filter(
+      ({ conversationKey }) => conversationKey === 'late',
+    )
+    expect(
+      told.map(({ kind }) => kind),
+      why,
+    ).toEqual(['interrupted'])
+    expect(roma.claude.processes, why).toHaveLength(started)
+  })
+
   it('says nothing where the queue will deliver the Task again [fence:serve-shutdown-silent-where-redelivered]', async () => {
     const why =
       'On a Transport that redelivers, shutdown must not tell a Task it was interrupted ' +
