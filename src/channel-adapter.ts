@@ -61,6 +61,7 @@ export type OutboundInstruction = TaskAddress &
         readonly kind: 'result'
         readonly text: string
         readonly overflowCostUsd?: number | null
+        readonly contextPercent?: number
       }
     | {
         readonly kind: 'blocked'

@@ -63,6 +63,7 @@ import {
   upToFirst,
   withApiKeySource,
   withCompactionError,
+  withContextHeld,
   withoutCompactionTokens,
   withResultText,
   withTotalCostUsd,
@@ -3254,6 +3255,7 @@ describe('a Compaction that failed', () => {
         sessionId: sessionIdFor(KEY),
         code: 'exhausted',
         severity: 'unreducible',
+        trigger: 'auto',
       },
     ])
   })
@@ -4222,13 +4224,11 @@ describe('relaying a `/compact`, which costs money', () => {
 })
 
 describe('a `/compact` that did not compact', () => {
-  it('writes no operator line, because roma is not the one classifying it [fence:core-manual-compaction-is-the-callers]', async () => {
+  it('writes no operator line for the one sentence measured harmless [fence:core-manual-compaction-benign-sentence]', async () => {
     const why =
-      "A Compaction that fails inside a /compact is the Relay's own answer, never " +
-      'classified by roma and never checked for work it did not do (ADR-0018, ' +
-      'ADR-0019): the manual path sends a sentence where the auto path sends a code, so ' +
-      'classifying it, or a two-directional drift check, writes an operator line every ' +
-      'time somebody /compacts a short thread.'
+      'A /compact on a short thread fails with "Not enough messages to compact." and is ' +
+      'the most common manual failure there is (ADR-0019): it is the one sentence measured ' +
+      'benign, and an operator line for it would be a line per /compact on a short thread.'
     const { log, say } = newCore()
 
     await say('/compact', { events: MANUAL_COMPACTION_REFUSED })
@@ -4248,23 +4248,60 @@ describe('a `/compact` that did not compact', () => {
     })
   })
 
-  it('says nothing of its own about one that sounds serious [fence:core-manual-compaction-is-the-callers]', async () => {
+  it('tells the operator about any other failure, verbatim and unjudged [fence:core-manual-compaction-unexplained]', async () => {
     const why =
-      "A Compaction that fails inside a /compact is the Relay's own answer (ADR-0018): " +
-      'roma cannot tell a serious code from the benign sentence without reading ' +
-      'sentences, so it classifies neither.'
-    const { adapter, log, say } = newCore()
-    const exhausted = withCompactionError(
-      MANUAL_COMPACTION_REFUSED,
-      'Compaction failed · conversation could not be reduced below the context limit',
+      'Every manual Compaction failure but the measured benign sentence goes to the ' +
+      'Operator Log as unexplained with the sentence verbatim (ADR-0019, #121): nothing ' +
+      'on stdout separates exhausted from the rest, and skipping all of them hides the ' +
+      'one Session that will not serve another Turn from the operator.'
+    const sentence = 'Compaction failed · conversation could not be reduced below the context limit'
+    const { log, say } = newCore()
+
+    await say('/compact', { events: withCompactionError(MANUAL_COMPACTION_REFUSED, sentence) })
+
+    expect(log, why).toEqual([
+      {
+        event: 'compaction-failed',
+        taskId: expect.any(String),
+        sessionId: sessionIdFor(KEY),
+        code: sentence,
+        severity: 'unexplained',
+        trigger: 'manual',
+      },
+    ])
+  })
+
+  it('does not tell the Caller their thread is finished on a sentence [fence:core-manual-compaction-tells-no-caller]', async () => {
+    const why =
+      'roma never sends context-full on the manual path (ADR-0019): it would be roma ' +
+      "judging one build's sentence, and the Caller already has Claude Code's own words."
+    const { adapter, say } = newCore()
+    const sentence = 'Compaction failed · conversation could not be reduced below the context limit'
+    const exhausted = withResultText(
+      withCompactionError(MANUAL_COMPACTION_REFUSED, sentence),
+      sentence,
     )
 
     await say('/compact', { events: exhausted })
 
-    expect(log, why).toEqual([])
     expect(posted(adapter.instructions), why).not.toContainEqual(
       expect.objectContaining({ kind: 'context-full' }),
     )
+    expect(posted(adapter.instructions).at(-1)).toMatchObject({
+      kind: 'result',
+      text: 'Compaction failed · conversation could not be reduced below the context limit',
+    })
+  })
+
+  it('writes nothing for a /compact somebody stopped', async () => {
+    const { core, log, start } = newCore()
+
+    const { task, proc } = await start('/compact')
+    await core.handle(ingress('/stop'))
+    feed(proc, withCompactionError(MANUAL_COMPACTION_REFUSED, 'Compaction canceled.'))
+    await task
+
+    expect(log).toEqual([])
   })
 
   it('leaves the classifier alone for a Compaction nobody asked for', async () => {
@@ -4277,6 +4314,172 @@ describe('a `/compact` that did not compact', () => {
       kind: 'context-full',
       conversationKey: KEY,
     })
+  })
+})
+
+describe('a context that is nearly full', () => {
+  const FULL = 850_000
+
+  it('adds Claude Code’s own recommendation to the reply, as no message of its own [fence:core-nearly-full-in-the-reply]', async () => {
+    const why =
+      'The warning rides on the reply to the Task that crossed 80% (ADR-0040): a ' +
+      'message of its own is roma speaking unprompted, which ADR-0010 sets a high bar for.'
+    const { adapter, say } = newCore()
+
+    await say('hello', { events: withContextHeld(OK, FULL) })
+
+    expect(
+      posted(adapter.instructions).map(({ kind }) => kind),
+      why,
+    ).toEqual(['result', 'progress', 'result'])
+    expect(posted(adapter.instructions).at(-1), why).toMatchObject({
+      kind: 'result',
+      contextPercent: 85,
+    })
+  })
+
+  it('says nothing below the threshold', async () => {
+    const { adapter, say } = newCore()
+
+    await say('hello', { events: withContextHeld(OK, 790_000) })
+
+    expect(posted(adapter.instructions).at(-1)).not.toHaveProperty('contextPercent')
+  })
+
+  it('says it once for each time the context fills [fence:core-nearly-full-once-per-fill]', async () => {
+    const why =
+      'A context near the threshold stays near it (ADR-0040): warning on every Task ' +
+      'makes the warning noise, and noise gets muted.'
+    const { adapter, say } = newCore()
+
+    await say('hello', { events: withContextHeld(OK, FULL) })
+    await say('again', { events: withContextHeld(OK, FULL + 10_000) })
+
+    const results = adapter.instructions.filter(({ kind }) => kind === 'result')
+    expect(results.at(-1), why).not.toHaveProperty('contextPercent')
+  })
+
+  it('remembers it said so across a restart [fence:core-nearly-full-survives-eviction]', async () => {
+    const why =
+      'Whether the warning was given lives in the Work Root, not the process (ADR-0040): ' +
+      'otherwise every Eviction and Reaping re-gives it at a moment nobody can see.'
+    const first = newCore()
+    await first.say('hello', { events: withContextHeld(OK, FULL) })
+
+    const second = newCore({ workRoot: first.workRoot })
+    await second.say('again', { events: withContextHeld(OK, FULL) })
+
+    expect(second.adapter.instructions.at(-1), why).not.toHaveProperty('contextPercent')
+  })
+
+  it('remembers it said so only once the reply is delivered [fence:core-nearly-full-remembered-after-delivery]', async () => {
+    const why =
+      'The .context-warned record is written after the reply carrying the warning is ' +
+      'delivered (ADR-0040): written before, a reply the Channel failed to post marks a ' +
+      'warning nobody saw as given, and the next Task stays silent.'
+    const shared = newCore()
+    let refused = false
+    const delivered: OutboundInstruction[] = []
+    const core = coreOver(
+      shared,
+      channelThat((instruction) => {
+        if (!refused && instruction.kind === 'result' && instruction.contextPercent !== undefined) {
+          refused = true
+          return Promise.reject(new Error('the Channel is down'))
+        }
+        delivered.push(instruction)
+      }),
+    )
+    const say = async (text: string, events: readonly ClaudeEvent[]) => {
+      const task = core.handle(ingress(text))
+      task.catch(() => {})
+      await flush()
+      feed(shared.procFor(KEY), events)
+      await task.catch(() => {})
+    }
+
+    await say('hello', withContextHeld(OK, FULL))
+    await say('again', withContextHeld(OK, FULL + 10_000))
+
+    expect(refused).toBe(true)
+    expect(delivered.at(-1), why).toMatchObject({ kind: 'result', contextPercent: 86 })
+  })
+
+  it('forgets it said so the moment a Compaction is read, not when the Task ends [fence:core-nearly-full-reset-on-the-boundary]', async () => {
+    const why =
+      'The .context-warned record is removed as soon as a compact_boundary is read ' +
+      '(ADR-0040): a Task that compacts and then waits on the Shared Window may be cut ' +
+      'off by a restart, and a reset that waited for its ending would be lost.'
+    const { say, start, work } = newCore()
+    await say('hello', { events: withContextHeld(OK, FULL) })
+    const record = work.contextWarnedRecord(sessionIdFor(KEY))
+    expect(work.readRecord(record)).not.toBeNull()
+
+    const { task, proc } = await start('OK')
+    feed(proc, upToFirst(COMPACTED, 'system/compact_boundary'))
+    await flush()
+
+    expect(work.readRecord(record), why).toBeNull()
+    feed(proc, COMPACTED.slice(upToFirst(COMPACTED, 'system/compact_boundary').length))
+    await task
+  })
+
+  it('does not let a warning still being posted outlive a Compaction [fence:core-nearly-full-belongs-to-its-fill]', async () => {
+    const why =
+      'A warning is remembered only if no Compaction happened while it was being posted ' +
+      '(ADR-0040): otherwise a slow post finishing after a /compact writes the record ' +
+      'back, and the next time the context fills nobody is told.'
+    const shared = newCore()
+    let release: () => void = () => {}
+    const delivered: OutboundInstruction[] = []
+    const core = coreOver(
+      shared,
+      channelThat((instruction) => {
+        delivered.push(instruction)
+        if (instruction.kind === 'result' && instruction.contextPercent === 85) {
+          return new Promise<void>((resolve) => {
+            release = resolve
+          })
+        }
+      }),
+    )
+    const say = async (text: string, events: readonly ClaudeEvent[]) => {
+      const task = core.handle(ingress(text))
+      await flush()
+      feed(shared.procFor(KEY), events)
+      return { task }
+    }
+
+    const slow = await say('hello', withContextHeld(OK, FULL))
+    await flush()
+    await (
+      await say('/compact', COMPACTED_MANUALLY)
+    ).task
+    release()
+    await slow.task
+    await (
+      await say('again', withContextHeld(OK, FULL + 10_000))
+    ).task
+
+    expect(delivered.at(-1), why).toMatchObject({ kind: 'result', contextPercent: 86 })
+  })
+
+  it('says it again once a Compaction has emptied the context and it fills up again', async () => {
+    const { adapter, say } = newCore()
+
+    await say('hello', { events: withContextHeld(OK, FULL) })
+    await say('OK', { events: COMPACTED })
+    await say('again', { events: withContextHeld(OK, FULL) })
+
+    expect(adapter.instructions.at(-1)).toMatchObject({ kind: 'result', contextPercent: 85 })
+  })
+
+  it('never adds it to a Relay', async () => {
+    const { adapter, say } = newCore()
+
+    await say('/compact', { events: withContextHeld(COMPACTED_MANUALLY, FULL) })
+
+    expect(adapter.instructions.at(-1)).not.toHaveProperty('contextPercent')
   })
 })
 

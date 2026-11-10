@@ -92,6 +92,26 @@ export function withCompactionError(events: readonly ClaudeEvent[], code: string
   )
 }
 
+export function withContextHeld(events: readonly ClaudeEvent[], tokens: number): ClaudeEvent[] {
+  return events.map((event) => {
+    if (event.type !== 'assistant') return event
+    const message = event['message'] as Record<string, unknown>
+    const usage = message['usage'] as Record<string, unknown>
+    return {
+      ...event,
+      message: {
+        ...message,
+        usage: {
+          ...usage,
+          input_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: tokens,
+        },
+      },
+    }
+  })
+}
+
 export function withoutCompactionTokens(events: readonly ClaudeEvent[]): ClaudeEvent[] {
   return events.map((event) => {
     if (event['subtype'] !== 'compact_boundary') return event

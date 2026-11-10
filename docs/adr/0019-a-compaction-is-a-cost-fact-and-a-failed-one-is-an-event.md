@@ -21,6 +21,10 @@ schema decision of its own because this field would carry it. This is that field
 Nothing here implements `/compact`; what it does is make the value `trigger:
 "manual"` meaningful before there is anything to produce one.
 
+**Amended 2026-11-10 (#121)**: a failed manual `/compact` now writes an Operator
+Log line unless it is the one sentence measured benign. See *The manual path*
+below. The decision about the automatic path is unchanged.
+
 ### Verification status
 
 **Measured, on the pinned build (2.1.220, ADR-0007)** — all of it #100's:
@@ -213,6 +217,54 @@ a message and roma is deciding whether to tell somebody their Session is
 finished, and `error` is a catch-all that says nothing about that. Only the code
 reaches stdout in any case, so roma has to enumerate either way.
 
+### The manual path: the operator is told, the Caller is not (amended, #121)
+
+ADR-0018's implementation (#120) skipped every failure inside a `/compact`,
+because `compact_error` carries a **sentence** there rather than a code. That
+removed the noise and also removed the operator's only signal for a manual
+`exhausted`. #121 asked for that to be settled.
+
+**There is no structural key on stdout.** Read off the pinned build: the
+`/compact` command returns `{type:"text", value, level:"error"}` for the three
+serious failures and plain `{type:"text", value}` for too few groups. `level`
+only picks `<local-command-stderr>` over `<local-command-stdout>` inside a
+`system/local_command` message — and that message is not written to stdout. The
+too-few-groups capture has none. Both reach roma as the same `system/status`
+event and a terminal `result` with `is_error: false`. The sentence is the only
+difference.
+
+So roma does what this ADR already does on the automatic path — **list what it
+believes harmless and let everything else fall outward**:
+
+| manual-path sentence | Operator Log | the Caller |
+| --- | --- | --- |
+| `Not enough messages to compact.` (measured) | no | Claude Code's sentence |
+| anything else | **yes**, `unexplained`, sentence verbatim | Claude Code's sentence |
+| anything, on a Task somebody stopped | no | `Stopped.` |
+
+The line carries `trigger: "manual"`, and the automatic path's line now carries
+`trigger: "auto"`, so an operator can tell the two apart. Enforced by
+`fence:core-manual-compaction-unexplained`. Enforced by
+`fence:core-manual-compaction-benign-sentence`.
+
+**Matching the benign sentence is not the `shared-window.ts` mistake.** That
+mistake was guessing which values are *serious* and treating the rest as fine,
+which fails silently. This list goes the other way. If a later build rewords
+the sentence, the cost is one `unexplained` line per short-thread `/compact`
+until somebody updates the list — noise, not silence.
+
+**The Caller is never told `context-full` on this path.** That sentence must be
+one roma can stand behind, and `exhausted` has never been seen on the manual
+path. The Caller already has Claude Code's own words. Enforced by
+`fence:core-manual-compaction-tells-no-caller`. Enforced by
+`fence:compaction-manual-never-unreducible`.
+
+**#121's first question — does the next ordinary message fail on the automatic
+path with `exhausted` as a code? — is still unmeasured.** It costs filling a real
+context. It matters less now: the operator gets a line on the manual failure
+itself, and ADR-0040's warning should name `/compact` well before the context is
+past saving.
+
 ### roma does not clear it, and says `/clear` instead
 
 Rejected on ADR-0002's precedent: Overflow is *offered* per-Task at the moment of
@@ -266,9 +318,8 @@ it is stated here rather than left implicit in an unset variable.
   this is untested against a real stream, exactly as ADR-0018 records.
 - `unexplained` is a category that should be empty in practice, and an operator
   seeing entries in it is the signal that the pin has moved under this file.
-- **Nothing here warns anybody before a Compaction happens.** #113 is that, and
-  until it lands the people best served by this are the ones reading their Audit
-  Records afterwards.
+- **Nothing here warns anybody before a Compaction happens.** #113 was that, and
+  ADR-0040 decides it: the reply that crosses 80% says so, in Claude Code's words.
 
 ## Alternatives considered
 

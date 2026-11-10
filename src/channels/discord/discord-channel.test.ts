@@ -1478,6 +1478,19 @@ describe('what a Conversation is told', () => {
     ])
   })
 
+  it('puts a nearly-full context in the reply, not in a message of its own [fence:discord-nearly-full-in-the-reply]', async () => {
+    const why =
+      'The nearly-full warning is a paragraph of the reply it rides on (ADR-0040), never ' +
+      'a message of its own, which is the bar ADR-0010 sets for roma speaking unprompted.'
+    const channel = await messaged(inDm())
+
+    await channel.adapter.deliver(to(DM, { kind: 'result', text: 'done', contextPercent: 85 }))
+
+    expect(channel.api.texts, why).toEqual([
+      'done\n\nContext is 85% full. Autocompact will trigger soon, which discards older messages. Use /compact now to control what gets kept.',
+    ])
+  })
+
   it('posts the answer and then what an Overflow Turn cost', async () => {
     const channel = await messaged(inDm())
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { severityOf } from './compaction.js'
+import { manualSeverityOf, severityOf } from './compaction.js'
 import { readCompaction, readCompactionFailure } from './stream-events.js'
 import { ofKind, recordedStream } from '../test/support/recorded-stream.js'
 
@@ -98,5 +98,28 @@ describe('how seriously roma takes one', () => {
     expect(severityOf('some_code_a_later_release_added'), why).toBe('unexplained')
     expect(severityOf('error'), why).toBe('unexplained')
     expect(severityOf(null), why).toBe('unexplained')
+  })
+})
+
+describe('judging a /compact that failed', () => {
+  it('lets the one measured sentence pass as benign', () => {
+    expect(manualSeverityOf('Not enough messages to compact.')).toBe('benign')
+  })
+
+  it('never calls a sentence unreducible, and leaves every other one unexplained [fence:compaction-manual-never-unreducible]', () => {
+    const why =
+      'manualSeverityOf lists only the sentence measured harmless and answers unexplained ' +
+      'for everything else (ADR-0019, #121): exhausted has never been seen on the manual ' +
+      'path, so a guessed sentence that said unreducible would tell somebody their thread ' +
+      'is finished on one build of evidence.'
+    expect(
+      manualSeverityOf(
+        'Compaction failed · conversation could not be reduced below the context limit',
+      ),
+      why,
+    ).toBe('unexplained')
+    expect(manualSeverityOf('Compaction canceled.'), why).toBe('unexplained')
+    expect(manualSeverityOf('too_few_groups'), why).toBe('unexplained')
+    expect(manualSeverityOf(null), why).toBe('unexplained')
   })
 })

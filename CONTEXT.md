@@ -339,17 +339,29 @@ sentence, and roma answers it three ways rather than two: **benign** is told to
 nobody, **unreducible** goes to the Operator Log and to the Caller with `/clear`
 named, and **unexplained** — a code roma has never seen — goes to the operator and
 no further, because telling somebody their thread is finished is a sentence roma
-has to be able to stand behind (ADR-0019). On the asked-for kind roma judges
-nothing: the same field carries a **sentence** there rather than a code, so the
-Caller gets Claude Code's own words relayed and the Operator Log gets nothing.
-Not a gap left open — the alternative is roma enumerating one build's error text,
-which is a mistake it has made once already — and the repair is deferred rather
-than lost, because a Session that truly cannot be reduced fails the next ordinary
-message on the automatic path, where the code is a code.
+has to be able to stand behind (ADR-0019). On the asked-for kind the same field
+carries a **sentence** rather than a code, and nothing on stdout says which
+failure it was, so roma judges no further than it can: the Caller gets Claude
+Code's own words relayed and never `context-full`, and the operator gets an
+**unexplained** line carrying the sentence — except for the one sentence measured
+benign, too little conversation, which is the common one and gets nothing.
+Before any of this, a reply whose Turn left the context at 80% or more carries
+Claude Code's own recommendation to `/compact` — once per fill, see **Nearly Full**.
 _Avoid_: clearing (that is `/clear`, and it is roma's), summarising (that is how
 it works, not what it is), truncation (nothing is cut off — older messages are
 replaced), and using this for anything that happens to the Transcript, which loses
 nothing because roma never deletes it
+
+**Nearly Full**:
+A Session whose last API call held 80% or more of the model's context window —
+the point at which Claude Code's own `/context` recommends `/compact`. roma says
+so once, as a paragraph after the reply of the Task that got there, in Claude
+Code's words, and not again until a Compaction has emptied the context or `/clear`
+has replaced the Session. Remembered in the Work Root so an Eviction does not
+repeat it (ADR-0040). Not roma's own figure for `/context` — roma never shows the
+number anywhere else, and the threshold and the sentence are Claude Code's.
+_Avoid_: context full (that is the unreducible failure, after the fact), quota,
+limit
 
 **Resident Session**:
 A Session whose Claude Code process is currently alive, so the next message

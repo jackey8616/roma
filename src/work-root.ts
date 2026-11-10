@@ -23,6 +23,8 @@ const CAVEMAN_SUFFIX = '.caveman'
 
 const OPENED_SUFFIX = '.opened'
 
+const CONTEXT_WARNED_SUFFIX = '.context-warned'
+
 const USED_SUFFIX = '.used'
 
 const SPAWNED_SUFFIX = '.spawned'
@@ -147,6 +149,10 @@ export class WorkRoot {
 
   openedRecord(sessionId: string): string {
     return join(this.#root, `${sessionId}${OPENED_SUFFIX}`)
+  }
+
+  contextWarnedRecord(sessionId: string): string {
+    return join(this.#root, `${sessionId}${CONTEXT_WARNED_SUFFIX}`)
   }
 
   readRecord(path: string): string | null {

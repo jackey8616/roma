@@ -26,7 +26,8 @@ import type {
 } from './channel-adapter.js'
 import { TranscriptNotFound, TurnFailedError, wasInterrupted, type Turn } from './claude-session.js'
 import { readCommand, type Command, type CommandRequest } from './commands.js'
-import { severityOf, type CompactionSeverity } from './compaction.js'
+import { manualSeverityOf, severityOf, type CompactionSeverity } from './compaction.js'
+import { nearlyFull } from './context-fill.js'
 import {
   EFFORT_NAMES,
   EFFORT_NOT_APPLIED,
@@ -58,10 +59,13 @@ import { RetryStormError, type SessionPool } from './session-pool.js'
 import {
   readCompaction,
   readCompactionFailure,
+  readContextHeld,
+  readContextWindow,
   readSharedWindow,
   readSystemInit,
   type ClaudeEvent,
   type Compaction,
+  type ContextHeld,
 } from './stream-events.js'
 import type { TaskQueue } from './task-queue.js'
 import type { WorkRoot } from './work-root.js'
@@ -94,6 +98,7 @@ export type CoreLogRecord =
       readonly sessionId: string
       readonly code: string | null
       readonly severity: Exclude<CompactionSeverity, 'benign'>
+      readonly trigger: 'auto' | 'manual'
     }
   | {
       readonly event: 'task-interrupted'
@@ -138,9 +143,16 @@ interface RunningTask extends TaskAddress {
   caveman: string | null
   stopped: boolean
   toldContextFull: boolean
+  contextHeld: ContextHeld | null
+  contextWindow: number | null
   readonly attempts: Attempts
   readonly unanswered: Unanswered
   parked: Parked | null
+}
+
+interface Warned {
+  readonly sessionId: string
+  readonly fill: number
 }
 
 interface Parked {
@@ -170,6 +182,8 @@ export class Core {
   #interrupting = false
   readonly #notices = new Set<Promise<void>>()
   readonly #openings = new Map<string, Promise<void>>()
+  readonly #warning = new Map<string, number>()
+  readonly #fills = new Map<string, number>()
 
   constructor({
     channel,
@@ -650,6 +664,7 @@ export class Core {
 
     let instruction: OutboundInstruction
     let running: RunningTask | null = null
+    let warned: Warned | null = null
     const attempts = new Attempts(this.#credential)
     try {
       const sessionId = this.#sessions.sessionFor(conversationKey)
@@ -661,6 +676,8 @@ export class Core {
         caveman: null,
         stopped: false,
         toldContextFull: false,
+        contextHeld: null,
+        contextWindow: null,
         attempts,
         unanswered,
         parked: null,
@@ -684,50 +701,62 @@ export class Core {
       if (relay !== null && instruction.kind === 'result') {
         instruction = { ...instruction, text: relayReply(attempts.compaction(), instruction.text) }
       }
+      const contextPercent = this.#contextWarning(task, instruction)
+      if (contextPercent !== null && instruction.kind === 'result') {
+        instruction = { ...instruction, contextPercent }
+        warned = { sessionId: task.sessionId, fill: this.#fillOf(task.sessionId) }
+      }
     } catch (error) {
       instruction = { kind: 'failure', ...address, reason: reasonFor(error) }
     } finally {
       if (running !== null) this.#running.delete(running)
     }
 
-    const answeredOn = attempts.answeredOn() ?? this.#credential
-    const durationMs = Date.now() - startedAt
-    const outcome = outcomeOf(instruction)
-    const cloudReach = this.#usedCloudReach(taskId)
-    const documentReach = this.#usedDocumentReach(taskId)
-    for (const credential of [
-      answeredOn,
-      ...attempts.credentials().filter((c) => c !== answeredOn),
-    ]) {
-      const paid = attempts.spentOn(credential)
-      if (credential !== answeredOn && !paid.costUsd && paid.compaction === null) continue
-      this.#audit.record({
-        ...(relay === null ? {} : { kind: 'relay' as const }),
-        taskId,
-        caller: message.caller,
-        callerName: message.callerName,
-        sessionId: running?.sessionId ?? null,
-        outcome,
-        costUsd: paid.costUsd,
-        durationMs,
-        turnMs: paid.turnMs,
-        credential,
-        runtime: EVERY_SESSION_RUNS_ON,
-        model: running?.model ?? this.#models.pinned,
-        effort: effortOn(
-          running?.model ?? this.#models.pinned,
-          running?.effort ?? this.#efforts.pinned,
-        ),
-        caveman: this.#cavemanOnRecord(running?.caveman ?? null),
-        outputTokens: paid.outputTokens,
-        cloudReach,
-        documentReach,
-        ...(paid.compaction === null ? {} : { compaction: paid.compaction }),
-        apiKeySource: attempts.apiKeySource(),
-      })
-    }
+    try {
+      const answeredOn = attempts.answeredOn() ?? this.#credential
+      const durationMs = Date.now() - startedAt
+      const outcome = outcomeOf(instruction)
+      const cloudReach = this.#usedCloudReach(taskId)
+      const documentReach = this.#usedDocumentReach(taskId)
+      for (const credential of [
+        answeredOn,
+        ...attempts.credentials().filter((c) => c !== answeredOn),
+      ]) {
+        const paid = attempts.spentOn(credential)
+        if (credential !== answeredOn && !paid.costUsd && paid.compaction === null) continue
+        this.#audit.record({
+          ...(relay === null ? {} : { kind: 'relay' as const }),
+          taskId,
+          caller: message.caller,
+          callerName: message.callerName,
+          sessionId: running?.sessionId ?? null,
+          outcome,
+          costUsd: paid.costUsd,
+          durationMs,
+          turnMs: paid.turnMs,
+          credential,
+          runtime: EVERY_SESSION_RUNS_ON,
+          model: running?.model ?? this.#models.pinned,
+          effort: effortOn(
+            running?.model ?? this.#models.pinned,
+            running?.effort ?? this.#efforts.pinned,
+          ),
+          caveman: this.#cavemanOnRecord(running?.caveman ?? null),
+          outputTokens: paid.outputTokens,
+          cloudReach,
+          documentReach,
+          ...(paid.compaction === null ? {} : { compaction: paid.compaction }),
+          apiKeySource: attempts.apiKeySource(),
+        })
+      }
 
-    await this.#answer(unanswered, instruction)
+      await this.#answer(unanswered, instruction)
+      if (warned !== null) this.#rememberWarned(warned)
+    } finally {
+      if (warned !== null && this.#warning.get(warned.sessionId) === warned.fill) {
+        this.#warning.delete(warned.sessionId)
+      }
+    }
   }
 
   #cavemanOnRecord(ranAt: string | null): string {
@@ -876,8 +905,42 @@ export class Core {
     task.parked = null
   }
 
+  #contextWarning(task: RunningTask, instruction: OutboundInstruction): number | null {
+    if (task.relay !== null || instruction.kind !== 'result') return null
+    const percent = nearlyFull(task.contextHeld, task.contextWindow)
+    const fill = this.#fillOf(task.sessionId)
+    if (percent === null || this.#warning.get(task.sessionId) === fill) return null
+    try {
+      if (this.#workRoot.readRecord(this.#workRoot.contextWarnedRecord(task.sessionId)) !== null) {
+        return null
+      }
+    } catch {
+      return null
+    }
+    this.#warning.set(task.sessionId, fill)
+    return percent
+  }
+
+  #fillOf(sessionId: string): number {
+    return this.#fills.get(sessionId) ?? 0
+  }
+
+  #rememberWarned({ sessionId, fill }: Warned): void {
+    if (this.#fillOf(sessionId) !== fill) return
+    try {
+      this.#workRoot.writeRecord(this.#workRoot.contextWarnedRecord(sessionId), '')
+    } catch {}
+  }
+
+  #forgetWarned(sessionId: string): void {
+    this.#fills.set(sessionId, this.#fillOf(sessionId) + 1)
+    try {
+      this.#workRoot.forgetRecord(this.#workRoot.contextWarnedRecord(sessionId))
+    } catch {}
+  }
+
   #compactionFailed(task: RunningTask, code: string | null): void {
-    if (task.relay !== null) return
+    if (task.relay !== null) return this.#manualCompactionFailed(task, code)
 
     const severity = severityOf(code)
     if (severity === 'benign') return
@@ -888,10 +951,26 @@ export class Core {
       sessionId: task.sessionId,
       code,
       severity,
+      trigger: 'auto',
     })
     if (severity !== 'unreducible' || task.toldContextFull) return
     task.toldContextFull = true
     void this.#tell(task, { kind: 'context-full', ...addressOf(task) })
+  }
+
+  #manualCompactionFailed(task: RunningTask, sentence: string | null): void {
+    if (task.stopped || task.unanswered.interrupted) return
+    const severity = manualSeverityOf(sentence)
+    if (severity === 'benign') return
+
+    this.#log({
+      event: 'compaction-failed',
+      taskId: task.taskId,
+      sessionId: task.sessionId,
+      code: sentence,
+      severity,
+      trigger: 'manual',
+    })
   }
 
   async #tell(task: RunningTask, instruction: OutboundInstruction): Promise<void> {
@@ -920,9 +999,16 @@ export class Core {
       const window = readSharedWindow(event)
       if (window !== null) attempts.saw(window)
       const compaction = readCompaction(event)
-      if (compaction !== null) attempts.compacted(compaction)
+      if (compaction !== null) {
+        attempts.compacted(compaction)
+        this.#forgetWarned(sessionId)
+      }
       const failed = readCompactionFailure(event)
       if (failed !== null) this.#compactionFailed(task, failed.code)
+      const held = readContextHeld(event)
+      if (held !== null) task.contextHeld = held
+      const contextWindow = readContextWindow(event, task.contextHeld?.model ?? task.model)
+      if (contextWindow !== null) task.contextWindow = contextWindow
       reporter.observe(event)
     }
     const onTurnStart = (id: string): void => {
