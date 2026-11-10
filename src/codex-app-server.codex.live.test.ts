@@ -6,9 +6,9 @@ import {
   type CodexTurn,
 } from './codex-app-server.js'
 import {
-  codexVersion,
   liveCodexCwd,
   PINNED_CODEX_MODEL,
+  pinnedCodexBuild,
   seededCodexHome,
 } from '../test/support/live-codex.js'
 
@@ -22,8 +22,10 @@ describe('a real codex app-server', () => {
   let initialized: CodexInitialized
   let thread: CodexThread
   let turn: CodexTurn
+  let build: string
 
   beforeAll(async () => {
+    build = pinnedCodexBuild()
     const inherit: Record<string, string> = {}
     for (const name of ['PATH', 'HOME', 'TMPDIR']) {
       const value = process.env[name]
@@ -35,7 +37,7 @@ describe('a real codex app-server', () => {
     thread = await server.startThread({ model, cwd })
     turn = await server.runTurn({ threadId: thread.threadId, text: PING })
 
-    console.log(JSON.stringify({ build: codexVersion(), initialized, thread, turn }, null, 2))
+    console.log(JSON.stringify({ build, initialized, thread, turn }, null, 2))
   })
 
   afterAll(async () => {
