@@ -1008,6 +1008,21 @@ describe('a Task the Shared Window has blocked', () => {
   })
 })
 
+describe('saying a context is nearly full', () => {
+  it('puts Claude Code’s own recommendation in the reply, not in a message of its own [fence:gchat-nearly-full-in-the-reply]', async () => {
+    const why =
+      'The nearly-full warning is a paragraph of the reply it rides on (ADR-0040), never ' +
+      'a message of its own, which is the bar ADR-0010 sets for roma speaking unprompted.'
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, { kind: 'result', text: 'done', contextPercent: 85 }))
+
+    expect(api.texts, why).toEqual([
+      `${TO}done\n\nContext is 85% full. Autocompact will trigger soon, which discards older messages. Use /compact now to control what gets kept.`,
+    ])
+  })
+})
+
 describe('showing what an Overflow Task spent', () => {
   it('posts the answer and then what it cost', async () => {
     const { adapter, api } = newAdapter()

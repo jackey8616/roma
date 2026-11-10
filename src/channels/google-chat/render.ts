@@ -1,5 +1,6 @@
 import type { OutboundInstruction, TaskProgress } from '../../channel-adapter.js'
 import type { Command } from '../../commands.js'
+import { withNearlyFull } from '../../context-fill.js'
 import { progressPhrase } from '../../progress-phrase.js'
 
 export const MAX_TEXT = 4096
@@ -17,7 +18,7 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
   const to = addressedTo(instruction.caller)
   switch (instruction.kind) {
     case 'result': {
-      const messages = split(to, instruction.text)
+      const messages = split(to, withNearlyFull(instruction.text, instruction.contextPercent))
       if (instruction.overflowCostUsd !== undefined) {
         messages.push(overflowSpentText(instruction.overflowCostUsd))
       }

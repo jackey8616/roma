@@ -90,6 +90,33 @@ export function readCompactionFailure(event: ClaudeEvent): CompactionFailure | n
   return { code: asString(event['compact_error']) }
 }
 
+export interface ContextHeld {
+  readonly model: string | null
+  readonly tokens: number
+}
+
+export function readContextHeld(event: ClaudeEvent): ContextHeld | null {
+  if (event.type !== 'assistant') return null
+  const message = fieldsOf(event['message'])
+  const usage = fieldsOf(message['usage'])
+  const parts = [
+    usage['input_tokens'],
+    usage['cache_read_input_tokens'],
+    usage['cache_creation_input_tokens'],
+  ].map(asNumber)
+  if (parts.every((part) => part === null)) return null
+  return {
+    model: asString(message['model']),
+    tokens: parts.reduce<number>((sum, part) => sum + (part ?? 0), 0),
+  }
+}
+
+export function readContextWindow(event: ClaudeEvent, model: string): number | null {
+  if (event.type !== 'result') return null
+  const window = asNumber(fieldsOf(fieldsOf(event['modelUsage'])[model])['contextWindow'])
+  return window !== null && window > 0 ? window : null
+}
+
 export function readCompacting(event: ClaudeEvent): boolean {
   return (
     event.type === 'system' && event['subtype'] === 'status' && event['status'] === 'compacting'

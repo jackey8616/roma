@@ -559,7 +559,7 @@ reads this object — ADR-0012's rejected alternative measured
 work, not that it must: a `/compact` that fails with too little conversation to
 summarise does none, at a delta of zero, and a two-directional check would report
 that as drift every time somebody typed `/compact` into a short thread. Enforced by
-`fence:core-manual-compaction-is-the-callers`.
+`fence:core-manual-compaction-benign-sentence`.
 
 **And a check that fires before the money moves, not after.** One seam 2 case per
 Relay entry, asserting its cost class against the pinned build — the shape

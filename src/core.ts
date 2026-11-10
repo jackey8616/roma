@@ -26,7 +26,8 @@ import type {
 } from './channel-adapter.js'
 import { TranscriptNotFound, TurnFailedError, wasInterrupted, type Turn } from './claude-session.js'
 import { readCommand, type Command, type CommandRequest } from './commands.js'
-import { severityOf, type CompactionSeverity } from './compaction.js'
+import { manualSeverityOf, severityOf, type CompactionSeverity } from './compaction.js'
+import { nearlyFull } from './context-fill.js'
 import {
   EFFORT_NAMES,
   EFFORT_NOT_APPLIED,
@@ -58,10 +59,13 @@ import { RetryStormError, type SessionPool } from './session-pool.js'
 import {
   readCompaction,
   readCompactionFailure,
+  readContextHeld,
+  readContextWindow,
   readSharedWindow,
   readSystemInit,
   type ClaudeEvent,
   type Compaction,
+  type ContextHeld,
 } from './stream-events.js'
 import type { TaskQueue } from './task-queue.js'
 import type { WorkRoot } from './work-root.js'
@@ -94,6 +98,7 @@ export type CoreLogRecord =
       readonly sessionId: string
       readonly code: string | null
       readonly severity: Exclude<CompactionSeverity, 'benign'>
+      readonly trigger: 'auto' | 'manual'
     }
   | {
       readonly event: 'task-interrupted'
@@ -138,6 +143,8 @@ interface RunningTask extends TaskAddress {
   caveman: string | null
   stopped: boolean
   toldContextFull: boolean
+  contextHeld: ContextHeld | null
+  contextWindow: number | null
   readonly attempts: Attempts
   readonly unanswered: Unanswered
   parked: Parked | null
@@ -661,6 +668,8 @@ export class Core {
         caveman: null,
         stopped: false,
         toldContextFull: false,
+        contextHeld: null,
+        contextWindow: null,
         attempts,
         unanswered,
         parked: null,
@@ -683,6 +692,10 @@ export class Core {
       )
       if (relay !== null && instruction.kind === 'result') {
         instruction = { ...instruction, text: relayReply(attempts.compaction(), instruction.text) }
+      }
+      const contextPercent = this.#contextWarning(task, instruction)
+      if (contextPercent !== null && instruction.kind === 'result') {
+        instruction = { ...instruction, contextPercent }
       }
     } catch (error) {
       instruction = { kind: 'failure', ...address, reason: reasonFor(error) }
@@ -876,8 +889,22 @@ export class Core {
     task.parked = null
   }
 
+  #contextWarning(task: RunningTask, instruction: OutboundInstruction): number | null {
+    const record = this.#workRoot.contextWarnedRecord(task.sessionId)
+    try {
+      if (task.attempts.compaction() !== null) this.#workRoot.forgetRecord(record)
+      if (task.relay !== null || instruction.kind !== 'result') return null
+      const percent = nearlyFull(task.contextHeld, task.contextWindow)
+      if (percent === null || this.#workRoot.readRecord(record) !== null) return null
+      this.#workRoot.writeRecord(record, String(percent))
+      return percent
+    } catch {
+      return null
+    }
+  }
+
   #compactionFailed(task: RunningTask, code: string | null): void {
-    if (task.relay !== null) return
+    if (task.relay !== null) return this.#manualCompactionFailed(task, code)
 
     const severity = severityOf(code)
     if (severity === 'benign') return
@@ -888,10 +915,26 @@ export class Core {
       sessionId: task.sessionId,
       code,
       severity,
+      trigger: 'auto',
     })
     if (severity !== 'unreducible' || task.toldContextFull) return
     task.toldContextFull = true
     void this.#tell(task, { kind: 'context-full', ...addressOf(task) })
+  }
+
+  #manualCompactionFailed(task: RunningTask, sentence: string | null): void {
+    if (task.stopped || task.unanswered.interrupted) return
+    const severity = manualSeverityOf(sentence)
+    if (severity === 'benign') return
+
+    this.#log({
+      event: 'compaction-failed',
+      taskId: task.taskId,
+      sessionId: task.sessionId,
+      code: sentence,
+      severity,
+      trigger: 'manual',
+    })
   }
 
   async #tell(task: RunningTask, instruction: OutboundInstruction): Promise<void> {
@@ -923,6 +966,10 @@ export class Core {
       if (compaction !== null) attempts.compacted(compaction)
       const failed = readCompactionFailure(event)
       if (failed !== null) this.#compactionFailed(task, failed.code)
+      const held = readContextHeld(event)
+      if (held !== null) task.contextHeld = held
+      const contextWindow = readContextWindow(event, task.contextHeld?.model ?? task.model)
+      if (contextWindow !== null) task.contextWindow = contextWindow
       reporter.observe(event)
     }
     const onTurnStart = (id: string): void => {

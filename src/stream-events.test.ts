@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   readAssistantText,
+  readContextHeld,
+  readContextWindow,
   readTerminalResult,
   readTextDelta,
   type ClaudeEvent,
@@ -47,5 +49,31 @@ describe('the output tokens a terminal event reports', () => {
     }
 
     expect(readTerminalResult(oneSaysNothing)?.cumulativeOutputTokens, why).toBe(4)
+  })
+})
+
+describe('how much context a Session holds', () => {
+  const turn = recordedStream('tool-use-turn').turn(1)
+  const held = turn.map(readContextHeld).filter((reading) => reading !== null)
+  const [result] = turn.filter((event) => event.type === 'result') as [ClaudeEvent]
+
+  it('is read off the last API call, never off the Turn’s summed usage [fence:stream-context-held-is-the-last-call]', () => {
+    const why =
+      'readContextHeld reads one assistant message’s usage, and roma takes the last one ' +
+      '(ADR-0040): `result.usage` is summed over every API call in a Turn, so a three-call ' +
+      'tool-use Turn reports about three times the context it holds.'
+    const usage = result['usage'] as Record<string, number>
+    const summed =
+      (usage['input_tokens'] ?? 0) +
+      (usage['cache_read_input_tokens'] ?? 0) +
+      (usage['cache_creation_input_tokens'] ?? 0)
+
+    expect(held.at(-1), why).toEqual({ model: 'claude-sonnet-5', tokens: 32_625 })
+    expect(summed, why).toBeGreaterThan(90_000)
+  })
+
+  it('reads the window of the model that answered', () => {
+    expect(readContextWindow(result, 'claude-sonnet-5')).toBe(1_000_000)
+    expect(readContextWindow(result, 'a-model-that-did-not-run')).toBeNull()
   })
 })
