@@ -33,7 +33,8 @@ twice. `readConfiguration` now collects its problems rather than throwing them;
 `startConfiguredRoma` drops root, proves every Reach it can (still one at a time,
 `code` first, ADR-0020 §4) and checks `ROMA_CODEX_HOME` as `node` (#218), adding what
 each finds to the same list, and refuses once. A refusal of another kind — the
-forge's own errors, a containment, isolation or egress refusal — passes through
+forge's own errors, a containment, isolation or egress refusal, or the filesystem
+refusing roma at the audit root — passes through
 unchanged when it is the only thing wrong and joins the one `ConfigurationMissing`
 when it is not. `startRoma` takes the accounts already proved, so nothing is proved
 twice. Enforced by `fence:main-one-refusal-across-live-checks`.

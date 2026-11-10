@@ -218,7 +218,16 @@ function isBootRefusal(error: unknown): boolean {
     error instanceof ConfigurationMissing ||
     error instanceof ContainmentRefused ||
     error instanceof IsolationRefused ||
-    error instanceof EgressRefused
+    error instanceof EgressRefused ||
+    isSystemError(error)
+  )
+}
+
+function isSystemError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    typeof (error as NodeJS.ErrnoException).code === 'string' &&
+    typeof (error as NodeJS.ErrnoException).syscall === 'string'
   )
 }
 

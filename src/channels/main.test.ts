@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -6,7 +6,7 @@ import { ContainmentRefused, type RootSystem } from '../drop-root.js'
 import { ConfigurationMissing } from '../env-config.js'
 import type { Gateway } from '../egress/egress-proxy.js'
 import { EgressRefused } from '../egress/route.js'
-import type { AuditSealSystem } from '../audit-seal.js'
+import { realAuditSealSystem, type AuditSealSystem } from '../audit-seal.js'
 import { startConfiguredRoma } from './main.js'
 import { FakeLauncher } from '../../test/support/fake-launcher.js'
 import { FakeCloudMinter, FakeMinter, fakeReaches } from '../../test/support/fake-minter.js'
@@ -404,6 +404,57 @@ describe('one refusal, whatever found the problem [fence:main-one-refusal-across
     const problems = await refusal(start({ ...env, ROMA_CODEX_HOME: codexHome }, {}))
 
     expect(problems, why).toEqual([expect.stringContaining(join(codexHome, 'auth.json'))])
+  })
+
+  it.skipIf(process.getuid?.() === 0)(
+    'names an auth.json roma cannot read beside a missing variable',
+    async () => {
+      const { env, dir } = deployment()
+      const codexHome = join(dir, 'codex')
+      mkdirSync(codexHome)
+      const auth = join(codexHome, 'auth.json')
+      writeFileSync(auth, '{}')
+      chmodSync(auth, 0o000)
+
+      try {
+        const problems = await refusal(
+          start({ ...env, ROMA_AUDIT_ROOT: undefined, ROMA_CODEX_HOME: codexHome }, {}),
+        )
+        expect(problems, why).toEqual([
+          'ROMA_AUDIT_ROOT is not set.',
+          expect.stringContaining(`${auth} is there`),
+        ])
+      } finally {
+        chmodSync(auth, 0o600)
+      }
+    },
+  )
+
+  it('keeps what it found when the audit root cannot be made, and names both', async () => {
+    const { env, dir } = deployment()
+    const audit = join(dir, 'audit')
+    writeFileSync(audit, 'not a directory')
+    const started = startConfiguredRoma(
+      {
+        ...env,
+        ROMA_AUDIT_ROOT: audit,
+        ROMA_DISCORD_BOT_TOKEN: undefined,
+        ROMA_DISCORD_API_BASE: 'https://discord.com/api/v10',
+      },
+      () => {},
+      rootThatDrops(),
+      launcher(),
+      { probe: () => Promise.resolve(false), route: () => {} },
+      { ...realAuditSealSystem(), seats: () => [{ uid: 20000, gid: 20000 }] },
+      () => fakeReaches({}),
+    )
+    started.catch(() => {})
+
+    const problems = await refusal(started)
+    expect(problems, why).toEqual([
+      expect.stringContaining('ROMA_DISCORD_BOT_TOKEN'),
+      expect.stringContaining('EEXIST'),
+    ])
   })
 
   it('checks ROMA_CODEX_HOME once roma is node, which is who has to write to it [fence:main-checks-codex-home-after-drop]', async () => {

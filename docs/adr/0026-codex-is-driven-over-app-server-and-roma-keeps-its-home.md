@@ -27,7 +27,7 @@ the item ADR-0030 added to it.
 
 **Amended 2026-11-10** by #218. `ROMA_CODEX_HOME` is checked at boot, before any
 Runtime exists to use it: set but relative, missing, not a directory, unwritable or
-holding no `auth.json`, roma refuses to start, naming it in the same single refusal
+holding no `auth.json` it can both read and write, roma refuses to start, naming it in the same single refusal
 as every other configuration problem (ADR-0015 §8, #103). The writability half runs
 after the drop to `node` (ADR-0032), since root can write anywhere. Enforced by
 `fence:main-checks-codex-home-after-drop`.

@@ -41,6 +41,15 @@ export function codexHomeProblems(codexHome: string): string[] {
       `${auth} does not exist. Seed it by logging in straight into this directory — ` +
         `\`CODEX_HOME=${codexHome} codex login\` — never by copying an auth.json from elsewhere.`,
     )
+    return problems
+  }
+  try {
+    accessSync(auth, constants.R_OK | constants.W_OK)
+  } catch {
+    problems.push(
+      `${auth} is there, but roma cannot both read it and write to it. Codex reads the ` +
+        'login from it and rewrites it every time it refreshes, so it must be both.',
+    )
   }
   return problems
 }
