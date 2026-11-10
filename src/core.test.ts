@@ -30,7 +30,7 @@ import { SessionPool, type PoolLogRecord } from './session-pool.js'
 import { WorkRoot } from './work-root.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { TaskQueue } from './task-queue.js'
-import { flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
+import { flush, type FakeRuntimeProcess } from '../test/support/fake-runtime.js'
 import { FakeLauncher } from '../test/support/fake-launcher.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
 import { romaFixture, teardownRoma, type RomaFixture } from '../test/support/roma-fixture.js'
@@ -200,7 +200,7 @@ function newCore({
   const start = async (
     text: string,
     key = KEY,
-  ): Promise<{ task: Promise<void>; proc: FakeClaudeProcess }> => {
+  ): Promise<{ task: Promise<void>; proc: FakeRuntimeProcess }> => {
     const task = core.handle(ingress(text, key))
     task.catch(() => {})
     await flush()
@@ -4259,7 +4259,7 @@ describe('what somebody sent along with a message', () => {
     redeem: () => Promise.resolve(new TextEncoder().encode(content)),
   })
 
-  const spawned = async (procFor: (key: string) => FakeClaudeProcess) => {
+  const spawned = async (procFor: (key: string) => FakeRuntimeProcess) => {
     for (let waited = 0; waited < 5_000; waited += 5) {
       await flush()
       try {

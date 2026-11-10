@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { AuditLog, monthOf } from '/app/dist/audit-log.js'
 import { sealAudit } from '/app/dist/audit-seal.js'
 import { buildEnv } from '/app/dist/build-env.js'
-import { spawnClaudeProcess } from '/app/dist/claude-process.js'
+import { spawnRuntimeProcess } from '/app/dist/runtime-process.js'
 import { dropRoot } from '/app/dist/drop-root.js'
 import { realLauncher } from '/app/dist/launcher.js'
 
@@ -76,7 +76,7 @@ done
 check audit-swap "$moved"
 `
 
-const control = spawnClaudeProcess({
+const control = spawnRuntimeProcess({
   command: 'sh',
   args: [
     '-c',

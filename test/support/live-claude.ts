@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { spawnClaudeProcess, type SpawnClaudeProcess } from '../../src/claude-process.js'
+import { spawnRuntimeProcess, type SpawnRuntimeProcess } from '../../src/runtime-process.js'
 import type { Fronted } from '../../src/credential-proxy.js'
 import { fronted } from './fronted.js'
 
@@ -25,9 +25,9 @@ export function sharedWindowCredential(): Fronted {
   return fronted({ kind: 'shared-window', oauthToken: token })
 }
 
-export const liveSpawn: SpawnClaudeProcess = ({ seat: _seat, ...request }) => {
+export const liveSpawn: SpawnRuntimeProcess = ({ seat: _seat, ...request }) => {
   mkdirSync(request.cwd, { recursive: true })
-  return spawnClaudeProcess(request)
+  return spawnRuntimeProcess(request)
 }
 
 export function liveSessionDirs(name: string): { configDir: string; cwd: string } {

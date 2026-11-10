@@ -1,11 +1,11 @@
 import { EventEmitter } from 'node:events'
 import { CAVEMAN_OFF, cavemanRuleset } from './caveman.js'
 import {
-  spawnClaudeProcess,
-  type ClaudeProcess,
+  spawnRuntimeProcess,
+  type RuntimeProcess,
   type SeatOutcome,
-  type SpawnClaudeProcess,
-} from './claude-process.js'
+  type SpawnRuntimeProcess,
+} from './runtime-process.js'
 import {
   ClaudeExitedError,
   ClaudeSession,
@@ -170,7 +170,7 @@ export interface SessionPoolOptions {
   readonly launcher?: SessionLauncher
   readonly reclaimIntervalMs?: number
   readonly retryBudget?: RetryBudget
-  readonly spawn?: SpawnClaudeProcess
+  readonly spawn?: SpawnRuntimeProcess
   readonly log?: PoolLog
 }
 
@@ -220,7 +220,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   readonly #announcements: readonly string[]
   readonly #maxResident: number
   readonly #retryBudget: RetryBudget
-  readonly #spawnProcess: SpawnClaudeProcess
+  readonly #spawnProcess: SpawnRuntimeProcess
   readonly #seats: Seats
   readonly #launcher: SessionLauncher
   readonly #log: PoolLog
@@ -251,7 +251,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     }
     this.#launcher = options.launcher ?? realLauncher()
     this.#retryBudget = options.retryBudget ?? defaultConfig.retryBudget
-    this.#spawnProcess = options.spawn ?? spawnClaudeProcess
+    this.#spawnProcess = options.spawn ?? spawnRuntimeProcess
     this.#log = options.log ?? logToStderr
 
     this.#reclaimTimer = setInterval(
@@ -509,7 +509,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     return resident
   }
 
-  #seated(process: ClaudeProcess, seat: number, sessionId: string): ClaudeProcess {
+  #seated(process: RuntimeProcess, seat: number, sessionId: string): RuntimeProcess {
     let settled = false
     const settle = (outcome: SeatOutcome | undefined): void => {
       if (settled) return

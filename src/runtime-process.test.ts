@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { spawnThrough, type ClaudeProcessExit } from './claude-process.js'
+import { spawnThrough, type RuntimeProcessExit } from './runtime-process.js'
 
 let dirs: string[] = []
 
@@ -29,7 +29,7 @@ const seated = (launcher: string) =>
     seat: { seat: 3, sessionId: '00000000-0000-4000-8000-000000000001' },
   })
 
-const exitOf = (process: ReturnType<typeof seated>): Promise<ClaudeProcessExit> =>
+const exitOf = (process: ReturnType<typeof seated>): Promise<RuntimeProcessExit> =>
   new Promise((done) => process.onExit(done))
 
 describe('what the Launcher says on its report pipe', () => {

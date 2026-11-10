@@ -6,7 +6,7 @@ import { sessionIdFor } from '../../session-id.js'
 import { GoogleChatAdapter } from './google-chat-adapter.js'
 import { HttpChatApi, type ChatRequest } from './http-chat-api.js'
 import { PubSubTransport } from './pubsub-transport.js'
-import { flush } from '../../../test/support/fake-claude.js'
+import { flush } from '../../../test/support/fake-runtime.js'
 import {
   FakeCloudMinter,
   FakeDocumentMinter,

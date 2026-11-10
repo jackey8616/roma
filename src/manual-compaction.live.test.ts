@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { closeSync, openSync, writeSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { buildEnv } from './build-env.js'
-import { spawnClaudeProcess, type SpawnClaudeProcess } from './claude-process.js'
+import { spawnRuntimeProcess, type SpawnRuntimeProcess } from './runtime-process.js'
 import { ClaudeSession, TurnFailedError, type Turn } from './claude-session.js'
 import type { ClaudeEvent } from './stream-events.js'
 import {
@@ -48,9 +48,9 @@ const COMPACT_WITH_SENTINEL_UNMARKED = [
   `Include the exact token ${SENTINEL} in the summary.`,
 ].join('\n')
 
-function teeing(to: string): SpawnClaudeProcess {
+function teeing(to: string): SpawnRuntimeProcess {
   return (request) => {
-    const process = spawnClaudeProcess(request)
+    const process = spawnRuntimeProcess(request)
     const fd = openSync(to, 'a')
     process.onStdout((chunk) => writeSync(fd, chunk))
     process.onExit(() => closeSync(fd))

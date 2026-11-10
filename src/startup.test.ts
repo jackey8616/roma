@@ -17,12 +17,12 @@ import { sessionIdFor } from './session-id.js'
 import { askMinter } from './shim-client.js'
 import { seatSocketPathIn } from './shim-protocol.js'
 import type { Core } from './core.js'
-import type { FakeClaudeProcess } from '../test/support/fake-claude.js'
+import type { FakeRuntimeProcess } from '../test/support/fake-runtime.js'
 import type { Reaches } from './reach.js'
 import { bind, type ChannelBinding } from './serve.js'
 import { startRoma, type Roma, type StartRomaOptions } from './startup.js'
 import { StartupSelfCheckFailed } from './startup-self-check.js'
-import { flush } from '../test/support/fake-claude.js'
+import { flush } from '../test/support/fake-runtime.js'
 import { FakeLauncher } from '../test/support/fake-launcher.js'
 import { IsolationRefused } from './launcher.js'
 import { SELF_CHECK_SEAT } from './seats.js'
@@ -130,7 +130,7 @@ function boot({
 
 async function holdingSeatZero(
   core: Core,
-  procFor: (key: string) => FakeClaudeProcess,
+  procFor: (key: string) => FakeRuntimeProcess,
 ): Promise<() => Promise<void>> {
   const handled = core.handle({
     conversationKey: KEY,

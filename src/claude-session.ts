@@ -1,10 +1,10 @@
 import { EventEmitter } from 'node:events'
 import {
-  spawnClaudeProcess,
-  type ClaudeProcess,
-  type ClaudeProcessExit,
-  type SpawnClaudeProcess,
-} from './claude-process.js'
+  spawnRuntimeProcess,
+  type RuntimeProcess,
+  type RuntimeProcessExit,
+  type SpawnRuntimeProcess,
+} from './runtime-process.js'
 import {
   parseEvent,
   readAssistantText,
@@ -59,9 +59,9 @@ export class TranscriptNotFound extends TurnFailedError {
 }
 
 export class ClaudeExitedError extends Error {
-  readonly exit: ClaudeProcessExit
+  readonly exit: RuntimeProcessExit
 
-  constructor(exit: ClaudeProcessExit) {
+  constructor(exit: RuntimeProcessExit) {
     super(`claude exited mid-Turn (code=${exit.code}, signal=${exit.signal})`)
     this.name = 'ClaudeExitedError'
     this.exit = exit
@@ -76,7 +76,7 @@ export interface ClaudeSessionOptions {
   readonly model?: string
   readonly effort?: string
   readonly appendSystemPrompt?: string
-  readonly spawn?: SpawnClaudeProcess
+  readonly spawn?: SpawnRuntimeProcess
 }
 
 export interface ClaudeSessionEvents {
@@ -84,7 +84,7 @@ export interface ClaudeSessionEvents {
   'turn-end': [turn: Turn]
   event: [event: ClaudeEvent]
   stderr: [chunk: string]
-  exit: [exit: ClaudeProcessExit]
+  exit: [exit: RuntimeProcessExit]
 }
 
 interface PendingTurn {
@@ -110,10 +110,10 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
   readonly #model: string
   readonly #effort: string
   readonly #appendSystemPrompt: string | undefined
-  readonly #spawn: SpawnClaudeProcess
+  readonly #spawn: SpawnRuntimeProcess
 
-  #process: ClaudeProcess | null = null
-  #exit: ClaudeProcessExit | null = null
+  #process: RuntimeProcess | null = null
+  #exit: RuntimeProcessExit | null = null
   #pending: PendingTurn | null = null
   #stdoutBuffer = ''
   #controlRequests = 0
@@ -129,7 +129,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     this.#model = options.model ?? PINNED_MODEL
     this.#effort = options.effort ?? PINNED_EFFORT
     this.#appendSystemPrompt = options.appendSystemPrompt
-    this.#spawn = options.spawn ?? spawnClaudeProcess
+    this.#spawn = options.spawn ?? spawnRuntimeProcess
   }
 
   get alive(): boolean {
@@ -224,12 +224,12 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     return true
   }
 
-  async terminate(signal: NodeJS.Signals = 'SIGTERM'): Promise<ClaudeProcessExit> {
+  async terminate(signal: NodeJS.Signals = 'SIGTERM'): Promise<RuntimeProcessExit> {
     const proc = this.#process
     if (proc === null) throw new Error(`Session ${this.sessionId} has not been started`)
     if (this.#exit !== null) return this.#exit
 
-    const exited = new Promise<ClaudeProcessExit>((resolve) => this.once('exit', resolve))
+    const exited = new Promise<RuntimeProcessExit>((resolve) => this.once('exit', resolve))
     proc.kill(signal)
     return await exited
   }
@@ -328,7 +328,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     )
   }
 
-  #onExit(exit: ClaudeProcessExit): void {
+  #onExit(exit: RuntimeProcessExit): void {
     this.#exit = exit
     this.#failPending(new ClaudeExitedError(exit))
     this.emit('exit', exit)

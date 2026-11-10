@@ -176,7 +176,7 @@ echo "an empty environment is refused, naming the durable paths and the GitHub A
 # is roma starting as root, reading the keys, and dropping to `node` — after
 # which the key file is root's and the kernel has marked roma not dumpable. This
 # is the only place that can be proved: it takes the image's real CMD flags, its
-# real compiled `dropRoot`, `buildEnv` and `spawnClaudeProcess`, a real kernel,
+# real compiled `dropRoot`, `buildEnv` and `spawnRuntimeProcess`, a real kernel,
 # and the agent spawned as roma's real child. `scripts/containment-harness.mjs`
 # is roma's half; the probe it spawns is the agent's.
 #
