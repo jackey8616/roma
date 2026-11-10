@@ -27,13 +27,13 @@ export class HttpDiscordApi implements DiscordApi {
 
   async message(channelId: string, messageId: string): Promise<DiscordMessage> {
     const response = await this.#call(`/channels/${channelId}/messages/${messageId}`)
-    refuseUnless(response, 'a message roma was pointed at')
+    await refuseUnless(response, 'a message roma was pointed at')
     return (await response.json()) as DiscordMessage
   }
 
   async download(url: string): Promise<Uint8Array> {
     const response = await this.#fetch(url)
-    refuseUnless(response, 'an attachment — its links expire, and a Task can wait hours')
+    await refuseUnless(response, 'an attachment — its links expire, and a Task can wait hours')
     return new Uint8Array(await response.arrayBuffer())
   }
 
@@ -48,7 +48,7 @@ export class HttpDiscordApi implements DiscordApi {
       ...(buttons.length === 0 ? {} : { components: componentRows(buttons) }),
       ...ALLOWED_MENTIONS,
     })
-    refuseUnless(response, 'a message roma tried to post')
+    await refuseUnless(response, 'a message roma tried to post')
     return asString(asRecord(await response.json())?.['id']) ?? ''
   }
 
@@ -57,7 +57,7 @@ export class HttpDiscordApi implements DiscordApi {
       content: text,
       ...ALLOWED_MENTIONS,
     })
-    refuseUnless(response, 'an acknowledgement roma tried to edit')
+    await refuseUnless(response, 'an acknowledgement roma tried to edit')
   }
 
   async startThread(channelId: string, messageId: string, name: string): Promise<string> {
@@ -67,7 +67,7 @@ export class HttpDiscordApi implements DiscordApi {
       { name },
     )
     if (!response.ok && (await codeOf(response)) !== THREAD_ALREADY_CREATED) {
-      refuseUnless(response, 'a thread roma tried to open')
+      await refuseUnless(response, 'a thread roma tried to open')
     }
     return messageId
   }
@@ -76,7 +76,7 @@ export class HttpDiscordApi implements DiscordApi {
     const response = await this.#call(`/interactions/${interactionId}/${token}/callback`, 'POST', {
       type: DEFERRED_UPDATE_MESSAGE,
     })
-    refuseUnless(response, 'a press roma had three seconds to answer')
+    await refuseUnless(response, 'a press roma had three seconds to answer')
   }
 
   #call(path: string, method = 'GET', body?: unknown): Promise<Response> {
@@ -125,15 +125,17 @@ async function codeOf(response: Response): Promise<number | null> {
   }
 }
 
-function refuseUnless(response: Response, what: string): void {
+async function refuseUnless(response: Response, what: string): Promise<void> {
   if (response.ok) return
   const seconds =
     asSeconds(response.headers.get('retry-after')) ??
     asSeconds(response.headers.get('x-ratelimit-reset-after'))
+  const code = await codeOf(response)
   throw new DiscordRefusal(
-    `Discord answered ${response.status} for ${what}`,
+    `Discord answered ${response.status}${code === null ? '' : ` (code ${code})`} for ${what}`,
     response.status,
     seconds === null ? null : Math.round(seconds * 1000),
+    code,
   )
 }
 

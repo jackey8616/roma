@@ -10,6 +10,19 @@ export interface ChatMessage {
   readonly text: string
   readonly replyOption?: 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD'
   readonly actions?: readonly ChatAction[]
+  readonly requestId?: string
+}
+
+export class ChatRefusal extends Error {
+  readonly status: number | null
+  readonly retryAfterMs: number | null
+
+  constructor(message: string, status: number | null, retryAfterMs: number | null = null) {
+    super(message)
+    this.name = 'ChatRefusal'
+    this.status = status
+    this.retryAfterMs = retryAfterMs
+  }
 }
 
 export interface ChatApi {

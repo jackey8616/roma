@@ -5,9 +5,15 @@ import { readCommand } from '../../commands.js'
 import { EFFORT_NAMES } from '../../effort-menu.js'
 import { MENU_NAMES } from '../../model-menu.js'
 import { sessionIdFor } from '../../session-id.js'
-import { GoogleChatAdapter } from './google-chat-adapter.js'
+import { ChatRefusal } from './chat-api.js'
+import {
+  ATTEMPTS,
+  GoogleChatAdapter,
+  RETRY_CEILING_MS,
+  RETRY_FLOOR_MS,
+} from './google-chat-adapter.js'
 import type { ChatEvent, ChatEventLogRecord } from './chat-events.js'
-import { MAX_TEXT } from './render.js'
+import { INTERRUPTED, MAX_TEXT } from './render.js'
 import { RecordingChatApi } from '../../../test/support/recording-chat-api.js'
 
 const SPACE = 'spaces/AAAA'
@@ -48,10 +54,19 @@ function inDm(text = 'hello', overrides: Record<string, unknown> = {}): ChatEven
 function newAdapter() {
   const api = new RecordingChatApi()
   const logged: ChatEventLogRecord[] = []
+  const waits: number[] = []
   return {
     api,
     logged,
-    adapter: new GoogleChatAdapter({ api, log: (entry) => logged.push(entry) }),
+    waits,
+    adapter: new GoogleChatAdapter({
+      api,
+      log: (entry) => logged.push(entry),
+      wait: (ms) => {
+        waits.push(ms)
+        return Promise.resolve()
+      },
+    }),
   }
 }
 
@@ -485,6 +500,7 @@ describe('replying in Chat', () => {
       thread: THREAD,
       text: `${TO}the answer`,
       replyOption: 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD',
+      requestId: expect.any(String),
     })
   })
 
@@ -493,7 +509,12 @@ describe('replying in Chat', () => {
 
     await adapter.deliver(to(DM, { kind: 'result', text: 'the answer' }))
 
-    expect(api.messages[0]?.posted).toEqual({ space: DM, thread: null, text: `${TO}the answer` })
+    expect(api.messages[0]?.posted).toEqual({
+      space: DM,
+      thread: null,
+      text: `${TO}the answer`,
+      requestId: expect.any(String),
+    })
   })
 
   it('needs nothing it was told earlier to know where to reply', async () => {
@@ -647,6 +668,143 @@ describe('the acknowledgement', () => {
     await adapter.deliver(to(THREAD, { kind: 'progress', progress: { phase: 'working' } }))
 
     expect(api.calls).toEqual(['post', 'post', 'post'])
+  })
+})
+
+describe('a post Chat refused', () => {
+  it('is tried again rather than repaired by running the Turn again [fence:gchat-outcome-retried-in-deliver]', async () => {
+    const why =
+      'An outcome Chat refused with a 503 must be posted again by `deliver` (ADR-0028, ' +
+      'ADR-0039). Thrown at once, the only remedy left is the queue: the Delivery is handed ' +
+      'back, Pub/Sub redelivers it and roma runs the whole Turn again — minutes and real ' +
+      'money — to repeat one HTTP POST (#168).'
+    const { adapter, api, waits } = newAdapter()
+    api.failNextPost(new ChatRefusal('Chat answered 503', 503))
+
+    await adapter.deliver(to(THREAD, { kind: 'result', text: 'the answer' }))
+
+    expect(api.texts, why).toEqual([`${TO}the answer`])
+    expect(waits, why).toEqual([RETRY_FLOOR_MS])
+  })
+
+  it('backs off further each time it is refused', async () => {
+    const { adapter, api, waits } = newAdapter()
+    api.failNextPost(new ChatRefusal('503', 503), new ChatRefusal('500', 500))
+
+    await adapter.deliver(to(THREAD, { kind: 'result', text: 'the answer' }))
+
+    expect(waits).toEqual([RETRY_FLOOR_MS, RETRY_FLOOR_MS * 2])
+  })
+
+  it('waits as long as Chat asked, where it named a time', async () => {
+    const { adapter, api, waits } = newAdapter()
+    api.failNextPost(new ChatRefusal('429', 429, 4_000))
+
+    await adapter.deliver(to(THREAD, { kind: 'result', text: 'the answer' }))
+
+    expect(waits).toEqual([4_000])
+  })
+
+  it('tries again where Chat never answered at all', async () => {
+    const { adapter, api } = newAdapter()
+    api.failNextPost(new ChatRefusal('socket hang up', null))
+
+    await adapter.deliver(to(THREAD, { kind: 'result', text: 'the answer' }))
+
+    expect(api.texts).toEqual([`${TO}the answer`])
+  })
+
+  it('is one message however many times it is tried [fence:gchat-retry-posts-one-message]', async () => {
+    const why =
+      'Every attempt at one post must carry the same requestId, and each post its own ' +
+      '(ADR-0039). Chat answers a requestId it has seen with the message it already made, ' +
+      'so a post that landed but whose answer was lost is not posted twice; a fresh id per ' +
+      'attempt turns a dropped connection into a duplicate answer (#168).'
+    const { adapter, api } = newAdapter()
+    api.failNextPost(new ChatRefusal('503', 503), new ChatRefusal('no answer', null))
+
+    await adapter.deliver(to(THREAD, { kind: 'result', text: 'x'.repeat(MAX_TEXT * 2) }))
+
+    const ids = api.attempted.map((message) => message.requestId)
+    expect(
+      ids.every((id) => typeof id === 'string' && id !== ''),
+      why,
+    ).toBe(true)
+    const [first, second, third, ...rest] = ids
+    expect([second, third], why).toEqual([first, first])
+    expect(rest.length, why).toBeGreaterThan(0)
+    expect(rest, why).not.toContain(first)
+  })
+
+  it('gives up rather than trying for ever [fence:gchat-attempts-bounded]', async () => {
+    const why =
+      `A Chat post must be tried at most ATTEMPTS (${ATTEMPTS}) times (ADR-0039). A fault ` +
+      'that survives that many is not transient, and a loop that kept going holds the Task, ' +
+      "its Session's Opening and everything queued behind them for as long as Chat is down; " +
+      'the hand-back to the queue stays the outer ring for exactly this case (#168).'
+    const { adapter, api } = newAdapter()
+    api.failEveryPost(new ChatRefusal('Chat answered 503', 503))
+
+    await expect(
+      adapter.deliver(to(THREAD, { kind: 'result', text: 'the answer' })),
+      why,
+    ).rejects.toThrow(/503/)
+    expect(
+      api.calls.filter((call) => call === 'post'),
+      why,
+    ).toHaveLength(ATTEMPTS)
+  })
+
+  it('gives up rather than sleeping through a wait too long to be a blip', async () => {
+    const { adapter, api, waits } = newAdapter()
+    api.failNextPost(new ChatRefusal('429', 429, RETRY_CEILING_MS + 1))
+
+    await expect(
+      adapter.deliver(to(THREAD, { kind: 'result', text: 'the answer' })),
+    ).rejects.toThrow(/429/)
+    expect(waits).toEqual([])
+  })
+
+  it('does not try again what Chat refused for good [fence:gchat-refused-for-good-not-retried]', async () => {
+    const why =
+      'A 4xx other than 429 says the post itself is wrong — a space roma was removed from, a ' +
+      'message Chat will not take — and must not be tried again (ADR-0039). Repeating it ' +
+      'spends write quota on a post that will be refused every time.'
+    const { adapter, api, waits } = newAdapter()
+    api.failNextPost(new ChatRefusal('Chat answered 403', 403))
+
+    await expect(
+      adapter.deliver(to(THREAD, { kind: 'result', text: 'the answer' })),
+      why,
+    ).rejects.toThrow(/403/)
+    expect(waits, why).toEqual([])
+    expect(api.calls, why).toEqual(['post'])
+  })
+
+  it('leaves an acknowledgement to the next update rather than trying it again [fence:gchat-progress-not-retried]', async () => {
+    const why =
+      'A progress update must not be retried (ADR-0039). The next update supersedes it, and ' +
+      'Chat’s quota for edits is not specified (ADR-0004), so a retry spends that quota on ' +
+      'text that is already out of date.'
+    const { adapter, api, waits } = newAdapter()
+    api.failNextPost(new ChatRefusal('503', 503))
+
+    await expect(
+      adapter.deliver(to(THREAD, { kind: 'progress', progress: { phase: 'working' } })),
+      why,
+    ).rejects.toThrow('503')
+    expect(waits, why).toEqual([])
+    expect(api.calls, why).toEqual(['post'])
+  })
+})
+
+describe('a Task roma was restarted out of', () => {
+  it('is told to send it again, addressed to whoever asked', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, { kind: 'interrupted' }))
+
+    expect(api.texts).toEqual([`${TO}${INTERRUPTED}`])
   })
 })
 

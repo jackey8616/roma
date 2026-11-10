@@ -164,7 +164,8 @@ This exposes the shape of the existing arrangement rather than only serving the
 new one. The Chat Adapter has no retry anywhere in its outbound path, so today a
 transient 503 from Chat is repaired by re-running a Turn that costs minutes and
 money. That is a defect this ADR names and does not fix; it is filed separately
-as #168, because it is Chat's and predates Discord.
+as #168, because it is Chat's and predates Discord. **Amended by ADR-0039**, which
+gives the Chat Adapter its retry.
 
 ## Consequences
 
@@ -185,7 +186,8 @@ as #168, because it is Chat's and predates Discord.
   lose running Tasks; where nothing can be handed back, that protection is gone
   and the person is told nothing (#171). The alternative it is traded against is
   not free either — `src/serve.ts` already records that a redelivered Task can be
-  *"answered **and** run again"*.
+  *"answered **and** run again"*. **Amended by ADR-0039**: on such a Transport,
+  shutdown now tells each interrupted Task to be sent again.
 - **The glossary loses three assumptions.** **Transport** is no longer *"the wire
   the ingress queue runs on"*, **Settling** is no longer always *"one of two
   ways"*, and a **Delivery**'s id is no longer explained by *"a queue that
@@ -217,6 +219,7 @@ Rejected for now. `serve.ts` would not branch on it today — a no-op `nack` and
 declared inability produce identical behaviour — and a flag nothing reads is a
 second thing to keep true. #171 is what would give it something to branch on —
 the day roma wants to say something to a Conversation whose work it is about to
-drop.
+drop. **Reversed by ADR-0039**, which is that day: `Transport.redelivers` exists, and
+shutdown branches on it.
 
 **Per-Channel fairness in the queue.** Rejected. See the first consequence.

@@ -1,5 +1,9 @@
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { Gaxios } from 'gaxios'
 import { describe, expect, it } from 'vitest'
-import { CHAT_API, HttpChatApi, type ChatRequest } from './http-chat-api.js'
+import { ChatRefusal } from './chat-api.js'
+import { CHAT_API, HttpChatApi, refusalOf, type ChatRequest } from './http-chat-api.js'
 
 const SPACE = 'spaces/AAAA'
 const THREAD = `${SPACE}/threads/thread-1`
@@ -220,3 +224,83 @@ function buttonWidgetsOf(body: Readonly<Record<string, unknown>> | undefined): B
     readonly { card: { sections: readonly { widgets: ButtonWidget[] }[] } }[] | undefined
   return cards?.[0]?.card.sections[0]?.widgets ?? []
 }
+
+describe('a post that names its request', () => {
+  it('asks Chat to answer a repeat with the message it already made', async () => {
+    const { api, last } = recording()
+
+    await api.post({
+      space: SPACE,
+      thread: THREAD,
+      text: 'hello',
+      replyOption: 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD',
+      requestId: 'req-1',
+    })
+
+    expect(last()?.url).toBe(
+      `${CHAT_API}/${SPACE}/messages?messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD&requestId=req-1`,
+    )
+  })
+})
+
+describe('what Chat refused', () => {
+  it('reads the wait Chat asked for off the HTTP client roma really uses [fence:gchat-retry-after-read-off-gaxios]', async () => {
+    const why =
+      'A Retry-After on a refusal the Chat client really throws must be read (ADR-0039). ' +
+      'Gaxios hands back its own Headers, not the global one, so a reader that only knows ' +
+      'the global class sees no wait at all: a 429 asking for 60 s is retried after 1 s ' +
+      'and 2 s instead of being given up on, spending quota Chat said to leave alone (#168).'
+    const server = createServer((_request, response) => {
+      response.writeHead(429, { 'retry-after': '60', 'content-type': 'application/json' })
+      response.end('{}')
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as AddressInfo
+    try {
+      const thrown = await new Gaxios()
+        .request({ url: `http://127.0.0.1:${port}/v1/spaces/AAAA/messages`, method: 'POST' })
+        .then(
+          () => null,
+          (error: unknown) => error,
+        )
+
+      expect(refusalOf(thrown), why).toMatchObject({ status: 429, retryAfterMs: 60_000 })
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('is read off the status Chat answered, with the wait it asked for', () => {
+    const refusal = refusalOf(
+      Object.assign(new Error('Service Unavailable'), {
+        response: { status: 503, headers: new Headers({ 'retry-after': '2' }) },
+      }),
+    )
+
+    expect(refusal).toBeInstanceOf(ChatRefusal)
+    expect(refusal).toMatchObject({ status: 503, retryAfterMs: 2_000 })
+  })
+
+  it('reads headers handed over as a plain object too', () => {
+    const refusal = refusalOf(
+      Object.assign(new Error('Too Many Requests'), {
+        response: { status: 429, headers: { 'retry-after': '1.5' } },
+      }),
+    )
+
+    expect(refusal).toMatchObject({ status: 429, retryAfterMs: 1_500 })
+  })
+
+  it('is a refusal with no status where Chat never answered', () => {
+    const refusal = refusalOf(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }))
+
+    expect(refusal).toBeInstanceOf(ChatRefusal)
+    expect(refusal).toMatchObject({ status: null, retryAfterMs: null })
+  })
+
+  it('is left as it was where it is neither', () => {
+    const error = new Error('something roma did')
+
+    expect(refusalOf(error)).toBe(error)
+  })
+})

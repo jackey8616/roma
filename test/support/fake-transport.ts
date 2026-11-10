@@ -7,10 +7,15 @@ export interface Settlement {
 
 export class FakeTransport<Event = unknown> implements Transport<Event> {
   readonly settlements: Settlement[] = []
+  readonly redelivers: boolean
   closed = false
 
   #receiver: Receiver<Event> | null = null
   #delivered = 0
+
+  constructor({ redelivers = true }: { redelivers?: boolean } = {}) {
+    this.redelivers = redelivers
+  }
 
   get receiving(): boolean {
     return this.#receiver !== null

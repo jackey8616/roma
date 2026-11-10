@@ -29,6 +29,8 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
       return split(to, instruction.text)
     case 'stopped':
       return [`${to}Stopped.`]
+    case 'interrupted':
+      return [to + INTERRUPTED]
     case 'command-outcome':
       return [to + commandText(instruction.command, instruction.carriedOut)]
     case 'blocked':
@@ -49,6 +51,9 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
       ]
   }
 }
+
+export const INTERRUPTED =
+  'roma was restarted before it could finish this task. Send it again once roma is back.'
 
 function blockedText(resetsAt: number): string {
   const at = new Date(resetsAt * 1000).toISOString().replace('T', ' ').slice(0, 16)

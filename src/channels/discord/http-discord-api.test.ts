@@ -273,6 +273,24 @@ describe('what a refusal carries back', () => {
     expect(refusal.retryAfterMs, RETRY_AFTER_IS_READ).toBe(250)
   })
 
+  it('reads the code Discord gave its refusal', async () => {
+    const refusal = await refusalFrom(
+      new Response(JSON.stringify({ message: 'Thread is locked', code: 160005 }), {
+        status: 403,
+      }),
+    )
+
+    expect(refusal.status).toBe(403)
+    expect(refusal.code).toBe(160005)
+    expect(refusal.message).toContain('160005')
+  })
+
+  it('has no code where Discord gave none', async () => {
+    const refusal = await refusalFrom(new Response('not json', { status: 502 }))
+
+    expect(refusal.code).toBeNull()
+  })
+
   it('says nothing about waiting where Discord named no time [fence:discord-retry-after-is-read]', async () => {
     const refusal = await refusalFrom(new Response('', { status: 503 }))
 

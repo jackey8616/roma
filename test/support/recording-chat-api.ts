@@ -11,8 +11,11 @@ export class RecordingChatApi implements ChatApi {
   readonly messages: RecordedMessage[] = []
   readonly calls: ('post' | 'edit' | 'download')[] = []
   readonly downloads: string[] = []
+  readonly attempted: ChatMessage[] = []
 
-  #failNextPost: Error | null = null
+  readonly #failing: Error[] = []
+  #failEveryPost: Error | null = null
+  readonly #byRequest = new Map<string, string>()
   readonly #content = new Map<string, Uint8Array>()
 
   holds(resourceName: string, content: Uint8Array | string): void {
@@ -31,19 +34,25 @@ export class RecordingChatApi implements ChatApi {
       : Promise.resolve(content)
   }
 
-  failNextPost(error: Error): void {
-    this.#failNextPost = error
+  failNextPost(...errors: Error[]): void {
+    this.#failing.push(...errors)
+  }
+
+  failEveryPost(error: Error): void {
+    this.#failEveryPost = error
   }
 
   post(message: ChatMessage): Promise<string> {
     this.calls.push('post')
-    const failure = this.#failNextPost
-    if (failure !== null) {
-      this.#failNextPost = null
-      return Promise.reject(failure)
-    }
+    this.attempted.push(message)
+    const failure = this.#failing.shift() ?? this.#failEveryPost
+    if (failure !== null) return Promise.reject(failure)
+    const already =
+      message.requestId === undefined ? undefined : this.#byRequest.get(message.requestId)
+    if (already !== undefined) return Promise.resolve(already)
     const name = `${message.space}/messages/posted-${this.messages.length + 1}`
     this.messages.push({ name, posted: message, text: message.text, edits: 0 })
+    if (message.requestId !== undefined) this.#byRequest.set(message.requestId, name)
     return Promise.resolve(name)
   }
 
