@@ -14,7 +14,7 @@ import { allows } from './egress/allowlist.js'
 import { EgressProxy, type Gateway } from './egress/egress-proxy.js'
 import { FreshTokens } from './fresh-tokens.js'
 import { IsolationRefused, isolating, realLauncher, type Launcher } from './launcher.js'
-import type { SeatOutcome, SpawnClaudeProcess } from './claude-process.js'
+import type { SeatOutcome, SpawnRuntimeProcess } from './runtime-process.js'
 import { moveTranscripts } from './transcript-move.js'
 import { eachReach, type Reach, type Reaches } from './reach.js'
 import type { BoundChannel, ChannelBinding } from './serve.js'
@@ -189,7 +189,7 @@ async function startBehind(
 
   const probe = randomUUID()
   let probeEnded: Promise<SeatOutcome | undefined> = Promise.resolve(undefined)
-  const probeSpawn: SpawnClaudeProcess = (request) => {
+  const probeSpawn: SpawnRuntimeProcess = (request) => {
     const process = launcher.spawn({
       ...request,
       seat: { seat: SELF_CHECK_SEAT, sessionId: probe },

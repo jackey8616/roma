@@ -19,7 +19,7 @@ import {
   type SelfCheckLogRecord,
 } from './startup-self-check.js'
 import type { ClaudeEvent } from './stream-events.js'
-import { FakeClaude, flush } from '../test/support/fake-claude.js'
+import { FakeRuntime, flush } from '../test/support/fake-runtime.js'
 import { fronted } from '../test/support/fronted.js'
 import {
   EFFORT_ANSWERS,
@@ -70,7 +70,7 @@ function selfCheck({
   events = ON_PIN,
   effortAnswer = EFFORT_ANSWERS.at(effort ?? PINNED_EFFORT),
 }: SelfCheckRun = {}) {
-  const claude = new FakeClaude({ exitOnKill: true })
+  const claude = new FakeRuntime({ exitOnKill: true })
   const cwd = mkdtempSync(join(tmpdir(), 'roma-self-check-'))
   dirs.push(cwd)
   const log: SelfCheckLogRecord[] = []

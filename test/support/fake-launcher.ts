@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { SpawnClaudeProcess } from '../../src/claude-process.js'
+import type { SpawnRuntimeProcess } from '../../src/runtime-process.js'
 import type { Launcher, LauncherRoots } from '../../src/launcher.js'
 
 export interface Enclosed {
@@ -10,7 +10,7 @@ export interface Enclosed {
 }
 
 export class FakeLauncher implements Launcher {
-  readonly spawn: SpawnClaudeProcess
+  readonly spawn: SpawnRuntimeProcess
   readonly enclosed: Enclosed[] = []
   readonly reclaimed: string[] = []
   readonly calls: string[] = []
@@ -21,7 +21,7 @@ export class FakeLauncher implements Launcher {
 
   constructor(
     workRoot: string,
-    spawn: SpawnClaudeProcess,
+    spawn: SpawnRuntimeProcess,
     { failing = [] }: { readonly failing?: readonly string[] } = {},
   ) {
     this.#workRoot = workRoot

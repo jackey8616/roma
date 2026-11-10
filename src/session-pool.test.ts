@@ -14,7 +14,7 @@ import {
 import type { CredentialKind } from './build-env.js'
 import { cavemanRuleset } from './caveman.js'
 import type { Turn } from './claude-session.js'
-import { FakeClaude, flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
+import { FakeRuntime, flush, type FakeRuntimeProcess } from '../test/support/fake-runtime.js'
 import { FakeLauncher } from '../test/support/fake-launcher.js'
 import {
   feed,
@@ -74,7 +74,7 @@ function newPool(
   } = {},
 ) {
   const { holdStart, ...poolOptions } = options
-  const claude = new FakeClaude({ exitOnKill: true, holdStart: holdStart ?? false })
+  const claude = new FakeRuntime({ exitOnKill: true, holdStart: holdStart ?? false })
   const workRoot = options.workRoot ?? mkdtempSync(join(tmpdir(), 'roma-pool-'))
   workRoots.push(workRoot)
   const log: PoolLogRecord[] = []
@@ -98,7 +98,7 @@ function newPool(
   })
   pools.push(pool)
 
-  const processFor = (id: string): FakeClaudeProcess => claude.processFor(join(workRoot, id))
+  const processFor = (id: string): FakeRuntimeProcess => claude.processFor(join(workRoot, id))
 
   const send = async (
     id: string,
@@ -1120,7 +1120,7 @@ describe('giving up on a retry storm', () => {
 
 async function newTurnOn(
   pool: SessionPool,
-  processFor: (id: string) => FakeClaudeProcess,
+  processFor: (id: string) => FakeRuntimeProcess,
   id: string,
 ): Promise<Turn> {
   const turn = pool.send(id, 'and now something that works')

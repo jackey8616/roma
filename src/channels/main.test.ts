@@ -9,9 +9,9 @@ import { EgressRefused } from '../egress/route.js'
 import type { AuditSealSystem } from '../audit-seal.js'
 import { startConfiguredRoma } from './main.js'
 import { FakeLauncher } from '../../test/support/fake-launcher.js'
-import { FakeClaude } from '../../test/support/fake-claude.js'
+import { FakeRuntime } from '../../test/support/fake-runtime.js'
 
-const launcher = () => new FakeLauncher('/nonexistent', new FakeClaude().spawn)
+const launcher = () => new FakeLauncher('/nonexistent', new FakeRuntime().spawn)
 
 function sealable(calls: string[] = [], uid: () => number = () => 1000): AuditSealSystem {
   return {

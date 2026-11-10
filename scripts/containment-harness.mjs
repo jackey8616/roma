@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { buildEnv } from '/app/dist/build-env.js'
-import { spawnClaudeProcess } from '/app/dist/claude-process.js'
+import { spawnRuntimeProcess } from '/app/dist/runtime-process.js'
 import { dropRoot } from '/app/dist/drop-root.js'
 
 const KEY = '/tmp/roma-secrets/github-app.pem'
@@ -44,7 +44,7 @@ const s = require("net").connect(9229, "127.0.0.1")
 s.on("connect", () => { console.log("open"); s.end() }); s.on("error", () => {})' 2>/dev/null)"
 `
 
-const agent = spawnClaudeProcess({
+const agent = spawnRuntimeProcess({
   command: 'sh',
   args: ['-c', PROBE, 'probe', String(process.pid), KEY, KEY_CANARY],
   cwd: '/tmp',

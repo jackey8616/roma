@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { PINNED_EFFORT, PINNED_MODEL } from '../../src/claude-session.js'
 import { sessionIdFor } from '../../src/session-id.js'
 import type { ClaudeEvent } from '../../src/stream-events.js'
-import { FakeClaude, flush, type FakeClaudeProcess } from './fake-claude.js'
+import { FakeRuntime, flush, type FakeRuntimeProcess } from './fake-runtime.js'
 import { FakeLauncher } from './fake-launcher.js'
 import { EFFORT_ANSWERS, feed, OK, withInit } from './recorded-stream.js'
 
@@ -15,13 +15,13 @@ export interface RomaDirectories {
 }
 
 export interface RomaFixture {
-  readonly claude: FakeClaude
+  readonly claude: FakeRuntime
   readonly launcher: FakeLauncher
   readonly dirs: RomaDirectories
   readonly roots: readonly string[]
   alsoRemove(root: string): void
-  procFor(conversationKey: string): FakeClaudeProcess
-  procIn(sessionId: string): FakeClaudeProcess
+  procFor(conversationKey: string): FakeRuntimeProcess
+  procIn(sessionId: string): FakeRuntimeProcess
   answerProbe(events?: readonly ClaudeEvent[], effort?: readonly ClaudeEvent[]): Promise<void>
 }
 
@@ -29,7 +29,7 @@ export function romaFixture(
   name: string,
   { workRoot = mkdtempSync(join(tmpdir(), `roma-${name}-`)) }: { workRoot?: string } = {},
 ): RomaFixture {
-  const claude = new FakeClaude({ exitOnKill: true })
+  const claude = new FakeRuntime({ exitOnKill: true })
   const auditRoot = mkdtempSync(join(tmpdir(), `roma-${name}-audit-`))
   const configDir = mkdtempSync(join(tmpdir(), `roma-${name}-claude-`))
   const procIn = (sessionId: string) => claude.processFor(join(workRoot, sessionId))

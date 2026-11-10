@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { chmodSync, chownSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { LAUNCHER, seatName, spawnThrough, type SpawnClaudeProcess } from './claude-process.js'
+import { LAUNCHER, seatName, spawnThrough, type SpawnRuntimeProcess } from './runtime-process.js'
 
 export const ROOTS_FILE = '/run/roma-launch/roots'
 
@@ -17,7 +17,7 @@ export interface SessionLauncher {
 }
 
 export interface Launcher extends SessionLauncher {
-  readonly spawn: SpawnClaudeProcess
+  readonly spawn: SpawnRuntimeProcess
   writeRoots(roots: LauncherRoots): void
   sweep(): Promise<void>
   handOutSockets(): Promise<void>

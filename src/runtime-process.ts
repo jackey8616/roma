@@ -11,7 +11,7 @@ export interface SeatLease {
 export type SeatOutcome =
   { readonly returned: true } | { readonly returned: false; readonly reason: string }
 
-export interface ClaudeProcessExit {
+export interface RuntimeProcessExit {
   readonly code: number | null
   readonly signal: NodeJS.Signals | null
   readonly seat?: SeatOutcome
@@ -25,7 +25,7 @@ export interface SpawnRequest {
   readonly seat?: SeatLease
 }
 
-export interface ClaudeProcess {
+export interface RuntimeProcess {
   readonly pid: number | undefined
   readonly started: Promise<boolean>
   write(line: string): void
@@ -33,11 +33,11 @@ export interface ClaudeProcess {
   kill(signal: NodeJS.Signals): void
   onStdout(listener: (chunk: string) => void): void
   onStderr(listener: (chunk: string) => void): void
-  onExit(listener: (exit: ClaudeProcessExit) => void): void
+  onExit(listener: (exit: RuntimeProcessExit) => void): void
   onError(listener: (error: Error) => void): void
 }
 
-export type SpawnClaudeProcess = (request: SpawnRequest) => ClaudeProcess
+export type SpawnRuntimeProcess = (request: SpawnRequest) => RuntimeProcess
 
 export function seatName(seat: number): string {
   return String(seat).padStart(2, '0')
@@ -64,7 +64,7 @@ export function launcherArgs(
   }
 }
 
-export function spawnThrough(launcher: string): SpawnClaudeProcess {
+export function spawnThrough(launcher: string): SpawnRuntimeProcess {
   return (request) => {
     const { command, args } = launcherArgs(launcher, request)
     const seated = request.seat !== undefined
@@ -85,7 +85,7 @@ function spawned(child: ChildProcess): Promise<boolean> {
   })
 }
 
-export const spawnClaudeProcess: SpawnClaudeProcess = spawnThrough(LAUNCHER)
+export const spawnRuntimeProcess: SpawnRuntimeProcess = spawnThrough(LAUNCHER)
 
 function reportOf(
   child: ChildProcess,
@@ -128,7 +128,7 @@ function wrap(
   command: string,
   seat: Promise<SeatOutcome> | null,
   started: Promise<boolean>,
-): ClaudeProcess {
+): RuntimeProcess {
   const { stdin, stdout, stderr } = child
   if (stdin === null || stdout === null || stderr === null) {
     throw new Error(`${command} spawned without piped stdio`)
