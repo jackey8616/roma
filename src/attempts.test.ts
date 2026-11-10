@@ -59,7 +59,7 @@ describe('which credential answered', () => {
   it('is the credential of the last Attempt, not of the one that first paid [fence:answered-by-the-last-attempt]', () => {
     const why =
       'answeredOn must be the credential of the last Attempt, in the order Attempts happened ' +
-      '(ADR-0002: the Audit Record is the only place per-user attribution exists, and the ' +
+      '(ADR-0002: the Audit Record is the only per-user account of spending, and the ' +
       'Overflow cap is counted from it). Grouped by credential, a Task blocked on the window, ' +
       'rerun on Overflow, blocked again and answered by the window names Overflow, which ' +
       'produced nothing (#56).'

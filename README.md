@@ -154,7 +154,8 @@ Claude Code changes underneath it, which is the whole thing the pin exists to pr
 untouched and it is reclaimed anyway. **`ROMA_AUDIT_ROOT` and `ROMA_CLAUDE_CONFIG_DIR` are
 not**, because losing either is data loss and where they go is not the image's to decide —
 run it with no volumes and it refuses to start, naming both. Mount something durable at
-each: the Audit Records are the only place per-user attribution exists (ADR-0002), and the
+each: the provider attributes no spending to a person (ADR-0002), so the Audit Records are
+the only account of who spent what that `/usage` and the Overflow cap can add up, and the
 Transcript is the only account there is of what an agent did (ADR-0005), which roma deletes
 nothing from (ADR-0006).
 
@@ -164,6 +165,12 @@ even though it points nothing at either. A **bind mount** brings the host's own 
 instead, so `chown 1000:1000` each host directory first — otherwise roma starts, clears the
 refusal, and then loses the first Audit Record or the first Transcript to a permission
 error, which is the same data gone by a longer route.
+
+The audit root is roma's alone: at boot, as `node`, roma makes it 0700 — closing a volume an
+earlier image left 0755 — and refuses to start if `node` does not own it, or if any directory
+above it is one a Seat could rename it out of (ADR-0037). The image's path and any volume
+mounted there pass; a custom `ROMA_AUDIT_ROOT` should be a mount point, or sit under
+directories no Seat can write.
 
 It also carries **`gh`, pinned to v2.96.0** by release tarball and hardcoded sha256. That
 pin exists so that a rebuild cannot move it with nobody deciding to, and for no stronger

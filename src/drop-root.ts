@@ -18,13 +18,11 @@ export type Dropped = { readonly dropped: true; readonly user: string }
 export class ContainmentRefused extends Error {
   readonly problems: readonly string[]
 
-  constructor(problems: readonly string[]) {
-    super(
-      [
-        'roma refused to start — it could not keep its keys out of the agent’s reach.',
-        ...problems.map((problem) => `  - ${problem}`),
-      ].join('\n'),
-    )
+  constructor(
+    problems: readonly string[],
+    headline = 'roma refused to start — it could not keep its keys out of the agent’s reach.',
+  ) {
+    super([headline, ...problems.map((problem) => `  - ${problem}`)].join('\n'))
     this.name = 'ContainmentRefused'
     this.problems = problems
   }

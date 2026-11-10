@@ -191,7 +191,7 @@ RUN printf '#!/bin/sh\nexec node /app/dist/documents/document-token.js "$@"\n' >
 # defaulting either here would re-open that hole from a new direction, with the
 # data in the container's writable layer, gone with the container. ADR-0002 is
 # explicit that per-user attribution does not exist at the provider, so the Audit
-# Records are the only place it ever exists — and ADR-0005 makes the Transcript
+# Records are the only account of spending roma can add up — and ADR-0005 makes the Transcript
 # the only account there is of what an agent did, which ADR-0006 then decided
 # roma deletes nothing from. A default is roma doing the deleting anyway, on a
 # schedule nobody chose.

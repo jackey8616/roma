@@ -87,7 +87,7 @@ describe('the image defaults the one path whose loss is by design', () => {
       'The image must default neither ROMA_AUDIT_ROOT nor ROMA_CLAUDE_CONFIG_DIR (ADR-0006, ' +
       'ADR-0007; #54). readRomaEnv refuses to start without either on purpose; a default puts ' +
       'that data in the container’s writable layer, where it vanishes with every container ' +
-      'replacement — the Audit Records, the only place per-user attribution exists (ADR-0002), ' +
+      'replacement — the Audit Records, the only per-user account of spending (ADR-0002), ' +
       'or the Transcript, the only account of what an agent did (ADR-0005).'
     expect(dockerfile(), why).not.toMatch(/ROMA_AUDIT_ROOT[\s=]/)
     expect(dockerfile(), why).not.toMatch(/ROMA_CLAUDE_CONFIG_DIR[\s=]/)

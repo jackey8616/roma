@@ -6,11 +6,28 @@ import { ContainmentRefused, type RootSystem } from '../drop-root.js'
 import { ConfigurationMissing } from '../env-config.js'
 import type { Gateway } from '../egress/egress-proxy.js'
 import { EgressRefused } from '../egress/route.js'
+import type { AuditSealSystem } from '../audit-seal.js'
 import { startConfiguredRoma } from './main.js'
 import { FakeLauncher } from '../../test/support/fake-launcher.js'
 import { FakeClaude } from '../../test/support/fake-claude.js'
 
 const launcher = () => new FakeLauncher('/nonexistent', new FakeClaude().spawn)
+
+function sealable(calls: string[] = [], uid: () => number = () => 1000): AuditSealSystem {
+  return {
+    self: () => ({ uid: uid(), gid: uid() }),
+    seats: () => [{ uid: 20000, gid: 20000 }],
+    makeDirectory: () => {},
+    inspect: () => {
+      calls.push(`sealedAs:${uid()}`)
+      return { uid: uid(), gid: uid(), mode: 0o40700 }
+    },
+    owner: () => 0,
+    mountPoint: () => false,
+    realPath: (path) => path,
+    tighten: () => {},
+  }
+}
 
 const MINIMAL = {
   CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token',
@@ -201,11 +218,60 @@ describe('the network roma is started on', () => {
         probe: () => Promise.resolve(true),
         route: (gateway) => routed.push(gateway),
       },
+      sealable(),
     )
 
     await expect(started).rejects.toThrow(EgressRefused)
     await expect(started).rejects.toThrow(/--internal/)
     expect(routed).toEqual([])
     expect(logged).not.toContainEqual(expect.objectContaining({ event: 'egress' }))
+  })
+})
+
+describe('the Audit Records', () => {
+  const dirs: string[] = []
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('are sealed from every Seat once roma is node, before anything is served [fence:main-seals-audit-after-drop]', async () => {
+    const why =
+      'ADR-0037: roma owns the audit root and must seal it as the uid that owns it, after the ' +
+      'drop and before a Session exists. Sealed as root it would check the wrong owner; sealed ' +
+      'later, an agent could already be running beside an open ledger.'
+    const dir = mkdtempSync(join(tmpdir(), 'roma-main-audit-'))
+    dirs.push(dir)
+    const key = join(dir, 'github-app.pem')
+    writeFileSync(key, 'not-a-real-pem')
+    let uid = 0
+    const calls: string[] = []
+    const root: RootSystem = {
+      uid: () => uid,
+      becomeUser: () => {
+        calls.push('becomeUser')
+        uid = 1000
+      },
+      procOwner: () => 0,
+      canRead: () => false,
+      nodeFlags: () => ['--disable-sigusr1'],
+    }
+    const logged: unknown[] = []
+
+    await startConfiguredRoma(
+      { ...MINIMAL, ROMA_GITHUB_PRIVATE_KEY_FILE: key, ROMA_DISCORD_BOT_TOKEN: 'a-bot-token' },
+      (record) => logged.push(record),
+      root,
+      launcher(),
+      { probe: () => Promise.resolve(true), route: () => {} },
+      sealable(calls, () => uid),
+    ).catch(() => {})
+
+    expect(calls[0], why).toBe('becomeUser')
+    expect(
+      calls.slice(1).every((call) => call === 'sealedAs:1000'),
+      why,
+    ).toBe(true)
+    expect(calls.length, why).toBeGreaterThan(1)
+    expect(logged, why).toContainEqual({ event: 'audit', sealed: true, tightened: false })
   })
 })

@@ -6,6 +6,7 @@ import type { CoreLogRecord } from '../core.js'
 import { DOCUMENT_KEY_FILE_VAR, readDocumentEnv } from '../documents/env-config.js'
 import { DOCUMENT_AGENT_HOSTS } from '../documents/egress.js'
 import { documentReachFrom } from '../documents/reach.js'
+import { realAuditSealSystem, sealAudit, type AuditSealSystem, type Sealed } from '../audit-seal.js'
 import { dropRoot, realRootSystem, type Dropped, type RootSystem } from '../drop-root.js'
 import { agentAllowlist } from '../egress/allowlist.js'
 import type { Gateway } from '../egress/egress-proxy.js'
@@ -44,6 +45,7 @@ type ProcessLogRecord =
   | { readonly event: 'serving'; readonly selfCheck: StartupSelfCheckReport }
   | { readonly event: 'stopping'; readonly signal: NodeJS.Signals }
   | ({ readonly event: 'privileges' } & Dropped)
+  | ({ readonly event: 'audit' } & Sealed)
   | {
       readonly event: 'egress'
       readonly gateway: string | null
@@ -76,6 +78,7 @@ export async function startConfiguredRoma(
   rootSystem: RootSystem = realRootSystem(),
   launcher: Launcher = realLauncher(),
   egressSystem: EgressSystem = REAL_EGRESS,
+  auditSeal: AuditSealSystem = realAuditSealSystem(),
 ): Promise<Serving> {
   const { roma, channels, minterEnv, cloudEnv, documentEnv } = readConfiguration(
     env,
@@ -92,6 +95,7 @@ export async function startConfiguredRoma(
     )
   }
   log({ event: 'privileges', ...dropRoot(keyFilesIn(env), rootSystem) })
+  log({ event: 'audit', ...sealAudit(roma.auditRoot, auditSeal) })
 
   let egress: StartRomaEgress | undefined
   if (egressEnv === null) {

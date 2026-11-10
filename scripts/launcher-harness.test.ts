@@ -111,6 +111,6 @@ describe('the image is proved on exactly the capabilities the README names [fenc
 
   it('runs every harness that boots the image on that set', () => {
     const runs = verifyImage().match(/docker run [^\n]*"\$\{minimum_caps\[@\]\}"/g) ?? []
-    expect(runs, why).toHaveLength(4)
+    expect(runs, why).toHaveLength(5)
   })
 })

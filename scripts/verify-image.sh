@@ -16,7 +16,7 @@ set -euo pipefail
 image="${1:?usage: scripts/verify-image.sh <image ref>}"
 
 # The capabilities README.md tells an Operator on --cap-drop=ALL to add back.
-# §5, §6, §9 and §10 run on exactly these, so a list one short fails here first.
+# §5, §6, §9, §10 and §11 run on exactly these, so a list one short fails here first.
 minimum_caps=(--cap-drop=ALL --cap-add=SETUID --cap-add=SETGID --cap-add=CHOWN --cap-add=FOWNER --cap-add=KILL --cap-add=DAC_OVERRIDE)
 
 # ---------------------------------------------------------------------------
@@ -454,3 +454,35 @@ if printf '%s\n' "${launcher}" | grep -q '^FAIL '; then
   exit 1
 fi
 echo "the Launcher refuses everyone but roma and empties a Seat before it is reused"
+
+# ---------------------------------------------------------------------------
+# 11. No Seat can read, change or swap the Audit Records.
+#
+# GHSA-g6x2-mcq8-3hm3, ADR-0037. Every agent is a Seat and the records are
+# roma's, so roma seals the audit root 0700 after the drop and refuses a path a
+# Seat could rename away. The harness starts from a volume an earlier image left
+# 0755, seals it with roma's real compiled `sealAudit`, and has a Seat, spawned
+# through the real Launcher, try to read, append, rewrite, add a month, delete and
+# rename the directory or any above it. The month must read back exactly what
+# roma wrote. The same probe run as roma, against a ledger of its own, must reach
+# every one, or the probe is checking nothing. A second run puts the records
+# under a directory every Seat can write: roma must refuse to start.
+# ---------------------------------------------------------------------------
+audit_checks=(audit-read audit-append audit-rewrite audit-new-month audit-delete audit-swap)
+audit_run() {
+  docker run --rm -i --network none "${minimum_caps[@]}" \
+    --entrypoint node "${image}" --disable-sigusr1 --input-type=module - "$@" \
+    < "$(dirname "$0")/audit-harness.mjs"
+}
+audit_sealed="$(audit_run old-volume)"
+audit_exposed="$(audit_run exposed)"
+
+expect_line sealed "${audit_sealed}" 'audit tightened true'
+expect_line sealed "${audit_sealed}" 'seat uid 20000'
+for check in "${audit_checks[@]}"; do
+  expect_line control "${audit_sealed}" "control ${check} REACHED"
+  expect_line sealed "${audit_sealed}" "seat ${check} BLOCKED"
+done
+expect_line sealed "${audit_sealed}" 'ledger intact'
+expect_line exposed "${audit_exposed}" 'audit refused'
+echo "no Seat reaches the Audit Records, which roma itself does"
