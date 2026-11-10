@@ -73,7 +73,9 @@ now does:
    finish this task. Send it again once roma is back."* Queued and parked Tasks are
    told as well as running ones, and a message that arrives while the others are being
 told is told the same rather than started. Enforced by
-`fence:serve-shutdown-interrupts-late-arrivals`. Each one is logged as `task-interrupted`. Enforced by
+`fence:serve-shutdown-interrupts-late-arrivals`. Shutdown waits, inside the same window, until
+those late notices are sent as well, since the process exits as soon as it returns.
+Enforced by `fence:serve-shutdown-waits-for-late-notices`. Each one is logged as `task-interrupted`. Enforced by
    `fence:serve-shutdown-tells-what-it-cannot-hand-back`.
 3. Transports close and the Resident Sessions end (unchanged).
 

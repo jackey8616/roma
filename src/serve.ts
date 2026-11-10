@@ -119,12 +119,16 @@ export async function serve(options: ServeOptions): Promise<Serving> {
     ...roma,
     shutdown: async () => {
       for (const channel of receiving) channel.stop()
-      const told = await within(
-        interruptWindowMs,
-        Promise.allSettled(receiving.map((channel) => channel.interrupt())),
-      )
-      if (!told) log({ event: 'ingress-interrupt-unfinished', windowMs: interruptWindowMs })
+      const deadline = Date.now() + interruptWindowMs
+      const interrupting = () =>
+        within(
+          deadline - Date.now(),
+          Promise.allSettled(receiving.map((channel) => channel.interrupt())),
+        )
+      let told = await interrupting()
       const closed = await Promise.allSettled(receiving.map((channel) => channel.close()))
+      if (told) told = await interrupting()
+      if (!told) log({ event: 'ingress-interrupt-unfinished', windowMs: interruptWindowMs })
       await roma.shutdown()
       for (const closing of closed) {
         if (closing.status === 'rejected') throw closing.reason
@@ -134,6 +138,7 @@ export async function serve(options: ServeOptions): Promise<Serving> {
 }
 
 function within(ms: number, work: Promise<unknown>): Promise<boolean> {
+  if (ms <= 0) return Promise.resolve(false)
   let timer: NodeJS.Timeout | undefined
   const expired = new Promise<boolean>((resolve) => {
     timer = setTimeout(() => resolve(false), ms)

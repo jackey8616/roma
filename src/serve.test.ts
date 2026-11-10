@@ -660,6 +660,40 @@ describe('shutting down where nothing can be handed back', () => {
     expect(roma.claude.processes, why).toHaveLength(started)
   })
 
+  it('waits for a late arrival to be told before it finishes stopping [fence:serve-shutdown-waits-for-late-notices]', async () => {
+    const why =
+      'Shutdown must not resolve while a late arrival is still being told it was interrupted ' +
+      '(ADR-0039). main exits the process the moment shutdown resolves, so a notice merely ' +
+      'started is a notice cut off mid-post, and that person hears nothing at all (#171).'
+    const roma = await booted({ redelivers: false, interruptWindowMs: 1_000 })
+    const order: string[] = []
+    const release = roma.channel.hold('interrupted')
+    const deliver = roma.channel.deliver.bind(roma.channel)
+    roma.channel.deliver = (instruction) => {
+      if (instruction.kind !== 'interrupted' || instruction.conversationKey !== 'late') {
+        return deliver(instruction)
+      }
+      return new Promise<void>((resolve) => {
+        setTimeout(() => {
+          order.push('late told')
+          resolve()
+        }, 100)
+      })
+    }
+
+    const first = roma.transport.deliver(said('hello', 'early'), 'm-1')
+    await flush()
+    const stopping = (await roma.serving).shutdown().then(() => order.push('stopped'))
+    await flush()
+    const late = roma.transport.deliver(said('hello', 'late'), 'm-2')
+    await flush()
+    release()
+    await stopping
+    await Promise.allSettled([first, late])
+
+    expect(order, why).toEqual(['late told', 'stopped'])
+  })
+
   it('says nothing where the queue will deliver the Task again [fence:serve-shutdown-silent-where-redelivered]', async () => {
     const why =
       'On a Transport that redelivers, shutdown must not tell a Task it was interrupted ' +

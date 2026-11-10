@@ -168,6 +168,7 @@ export class Core {
   readonly #running = new Set<RunningTask>()
   readonly #unanswered = new Set<Unanswered>()
   #interrupting = false
+  readonly #notices = new Set<Promise<void>>()
   readonly #openings = new Map<string, Promise<void>>()
 
   constructor({
@@ -209,10 +210,18 @@ export class Core {
 
   async handle(message: IngressMessage): Promise<void> {
     if (this.#interrupting) {
-      await this.#channel.deliver({
-        kind: 'interrupted',
-        ...addressOf({ ...message, taskId: randomUUID() }),
-      })
+      const notice = Promise.resolve(
+        this.#channel.deliver({
+          kind: 'interrupted',
+          ...addressOf({ ...message, taskId: randomUUID() }),
+        }),
+      )
+      this.#notices.add(notice)
+      try {
+        await notice
+      } finally {
+        this.#notices.delete(notice)
+      }
       return
     }
     const command = readCommand(message.text)
@@ -239,6 +248,7 @@ export class Core {
         this.#deliverAfter(opened, { kind: 'interrupted', ...address }),
       ),
     )
+    while (this.#notices.size > 0) await Promise.allSettled([...this.#notices])
   }
 
   #answering(address: TaskAddress, opened: Promise<void>, reporter: ProgressReporter): Unanswered {
