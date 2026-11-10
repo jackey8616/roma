@@ -355,6 +355,16 @@ A Session whose Claude Code process is currently alive, so the next message
 skips cold start.
 _Avoid_: warm session, active session, hot session
 
+**Seat**:
+One of a fixed number of uids an agent runs as, leased to a Resident Session for
+as long as it is resident and returned when its process ends. It is the boundary
+between Sessions: two Sessions are kept apart because they never hold the same
+Seat at once, and a Seat is emptied — its processes killed, its Session's files
+given to a uid nothing runs as — before anyone holds it again. Proposed in ADR-0036.
+_Avoid_: slot, sandbox (it confines nothing but other Sessions), user (that
+reads as a Caller), and saying a Session *has* a uid — it holds one only while
+resident
+
 **Session Pool**:
 What decides which Sessions are resident, and for how long. It owns spawning,
 Eviction, Reaping, and abandoning a Turn that has spent its retry budget, and it

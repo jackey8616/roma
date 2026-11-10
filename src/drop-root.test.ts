@@ -29,14 +29,16 @@ describe('dropRoot', () => {
     expect(calls).toEqual(['becomeUser:node'])
   })
 
-  it('leaves a process that was never root alone, and says the agent can reach its keys [fence:drop-root-not-root-is-reported]', () => {
+  it('refuses a process that was never root, which can keep no Session from another [fence:drop-root-refuses-when-not-root]', () => {
+    const why =
+      'ADR-0036: without root there is no Launcher to change uid, so every agent runs as ' +
+      'roma and as each other, which is GHSA-mqhq-64x8-xj73 open. ADR-0032 let roma run on ' +
+      'and log `dropped: false`; an operator who did not mean to would never find out.'
     const { host, calls } = system({ uid: () => 1000 })
 
-    const result = dropRoot([PEM], host)
-
-    expect(calls).toEqual([])
-    expect(result.dropped).toBe(false)
-    if (!result.dropped) expect(result.reason).toMatch(/same uid/)
+    expect(() => dropRoot([PEM], host), why).toThrow(ContainmentRefused)
+    expect(() => dropRoot([PEM], host), why).toThrow(/was not started as root/)
+    expect(calls, why).toEqual([])
   })
 
   it('refuses when SIGUSR1 can still open an inspector [fence:drop-root-requires-sigusr1-disabled]', () => {

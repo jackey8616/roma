@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -22,6 +23,18 @@ const CAVEMAN_SUFFIX = '.caveman'
 
 const OPENED_SUFFIX = '.opened'
 
+const USED_SUFFIX = '.used'
+
+const SPAWNED_SUFFIX = '.spawned'
+
+const LEGACY_SPAWN_FILE = '.roma-session'
+
+export type RemoveWorkDir = (sessionId: string, cwd: string) => Promise<void>
+
+const removeDirectly: RemoveWorkDir = async (_sessionId, cwd) => {
+  rmSync(cwd, { recursive: true, force: true })
+}
+
 function isMissing(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT'
 }
@@ -34,9 +47,15 @@ export interface Reclaimed {
 
 export class WorkRoot {
   readonly #root: string
+  readonly #remove: RemoveWorkDir
 
-  constructor(root: string) {
+  constructor(root: string, remove: RemoveWorkDir = removeDirectly) {
     this.#root = root
+    this.#remove = remove
+  }
+
+  get root(): string {
+    return this.#root
   }
 
   sessionDir(sessionId: string): string {
@@ -44,13 +63,29 @@ export class WorkRoot {
   }
 
   touch(sessionId: string): void {
+    const record = this.#usedRecord(sessionId)
     const seconds = Date.now() / 1000
     try {
-      utimesSync(this.sessionDir(sessionId), seconds, seconds)
-    } catch {}
+      utimesSync(record, seconds, seconds)
+    } catch {
+      try {
+        this.writeRecord(record, '')
+      } catch {}
+    }
   }
 
-  reclaimIdle(inUse: ReadonlySet<string>): readonly Reclaimed[] {
+  hasSpawned(sessionId: string): boolean {
+    return (
+      existsSync(this.#spawnedRecord(sessionId)) ||
+      existsSync(join(this.sessionDir(sessionId), LEGACY_SPAWN_FILE))
+    )
+  }
+
+  markSpawned(sessionId: string): void {
+    this.writeRecord(this.#spawnedRecord(sessionId), '')
+  }
+
+  async reclaimIdle(inUse: ReadonlySet<string>): Promise<readonly Reclaimed[]> {
     let entries
     try {
       entries = readdirSync(this.#root, { withFileTypes: true })
@@ -66,18 +101,32 @@ export class WorkRoot {
       if (inUse.has(sessionId)) continue
 
       const cwd = this.sessionDir(sessionId)
-      let idleMs: number
-      try {
-        idleMs = now - statSync(cwd).mtimeMs
-      } catch {
-        continue
-      }
-      if (idleMs < WORK_DIR_TTL_MS) continue
+      const idleMs = now - this.#lastUsedMs(sessionId, cwd)
+      if (Number.isNaN(idleMs) || idleMs < WORK_DIR_TTL_MS) continue
 
-      rmSync(cwd, { recursive: true, force: true })
+      await this.#remove(sessionId, cwd)
+      this.forgetRecord(this.#usedRecord(sessionId))
+      this.forgetRecord(this.#spawnedRecord(sessionId))
       reclaimed.push({ sessionId, cwd, idleMs })
     }
     return reclaimed
+  }
+
+  #lastUsedMs(sessionId: string, cwd: string): number {
+    for (const path of [this.#usedRecord(sessionId), cwd]) {
+      try {
+        return statSync(path).mtimeMs
+      } catch {}
+    }
+    return Number.NaN
+  }
+
+  #usedRecord(sessionId: string): string {
+    return join(this.#root, `${sessionId}${USED_SUFFIX}`)
+  }
+
+  #spawnedRecord(sessionId: string): string {
+    return join(this.#root, `${sessionId}${SPAWNED_SUFFIX}`)
   }
 
   generationRecord(sessionId: string): string {
@@ -114,7 +163,7 @@ export class WorkRoot {
   writeRecord(path: string, contents: string): void {
     mkdirSync(this.#root, { recursive: true })
     const pending = `${path}.pending`
-    writeFileSync(pending, contents, 'utf8')
+    writeFileSync(pending, contents, { encoding: 'utf8', mode: 0o600 })
     renameSync(pending, path)
   }
 

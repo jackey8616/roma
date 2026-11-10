@@ -15,6 +15,7 @@ import type { CredentialKind } from './build-env.js'
 import { cavemanRuleset } from './caveman.js'
 import type { Turn } from './claude-session.js'
 import { FakeClaude, flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
+import { FakeLauncher } from '../test/support/fake-launcher.js'
 import {
   feed,
   OK,
@@ -67,9 +68,13 @@ let pools: SessionPool[] = []
 let workRoots: string[] = []
 
 function newPool(
-  options: Partial<Omit<SessionPoolOptions, 'workRoot'>> & { readonly workRoot?: string } = {},
+  options: Partial<Omit<SessionPoolOptions, 'workRoot'>> & {
+    readonly workRoot?: string
+    readonly holdStart?: boolean
+  } = {},
 ) {
-  const claude = new FakeClaude({ exitOnKill: true })
+  const { holdStart, ...poolOptions } = options
+  const claude = new FakeClaude({ exitOnKill: true, holdStart: holdStart ?? false })
   const workRoot = options.workRoot ?? mkdtempSync(join(tmpdir(), 'roma-pool-'))
   workRoots.push(workRoot)
   const log: PoolLogRecord[] = []
@@ -88,7 +93,7 @@ function newPool(
     },
     spawn: claude.spawn,
     log: (record) => log.push(record),
-    ...options,
+    ...poolOptions,
     workRoot: new WorkRoot(workRoot),
   })
   pools.push(pool)
@@ -691,7 +696,7 @@ describe('reclaiming working directories', () => {
     await pool.evict(A)
     ageWorkDir(join(workRoot, A), 8 * DAY)
 
-    expect(pool.reclaimIdleWorkDirs()).toEqual([A])
+    expect(await pool.reclaimIdleWorkDirs()).toEqual([A])
     expect(existsSync(join(workRoot, A))).toBe(false)
   })
 
@@ -701,7 +706,7 @@ describe('reclaiming working directories', () => {
     await pool.evict(A)
     ageWorkDir(join(workRoot, A), 6 * DAY)
 
-    expect(pool.reclaimIdleWorkDirs()).toEqual([])
+    expect(await pool.reclaimIdleWorkDirs()).toEqual([])
     expect(existsSync(join(workRoot, A))).toBe(true)
   })
 
@@ -715,7 +720,7 @@ describe('reclaiming working directories', () => {
     ageWorkDir(join(workRoot, A), 8 * DAY)
     for (const record of records) ageWorkDir(record, 8 * DAY)
 
-    expect(pool.reclaimIdleWorkDirs()).toEqual([A])
+    expect(await pool.reclaimIdleWorkDirs()).toEqual([A])
     expect(records.map((record) => existsSync(record))).toEqual([true, true])
   })
 
@@ -724,7 +729,7 @@ describe('reclaiming working directories', () => {
     await send(A, 'hello', OK)
     ageWorkDir(join(workRoot, A), 8 * DAY)
 
-    expect(pool.reclaimIdleWorkDirs()).toEqual([])
+    expect(await pool.reclaimIdleWorkDirs()).toEqual([])
     expect(existsSync(join(workRoot, A))).toBe(true)
   })
 
@@ -733,14 +738,15 @@ describe('reclaiming working directories', () => {
     await send(A, 'hello', OK)
     await pool.evict(A)
     ageWorkDir(join(workRoot, A), 8 * DAY)
-    pool.reclaimIdleWorkDirs()
+    await pool.reclaimIdleWorkDirs()
 
     await send(A, 'much later', OK)
 
     expect(
       claude.spawns[1]?.args,
-      'The record that a Session was spawned must live inside its Working Directory, so the ' +
-        'reclaim takes it along and the next message creates the Session again (ADR-0003, #105).',
+      'The reclaim must forget that a Session was spawned along with its Working Directory, so ' +
+        'the next message creates the Session again (ADR-0003, #105). The record is roma’s, ' +
+        'beside the directory, because the directory is the Seat’s (ADR-0036).',
     ).toContain('--session-id')
   })
 
@@ -833,7 +839,7 @@ describe('what an operator can see', () => {
     await pool.evict(A)
     ageWorkDir(join(workRoot, A), 8 * DAY)
 
-    pool.reclaimIdleWorkDirs()
+    await pool.reclaimIdleWorkDirs()
 
     expect(log).toContainEqual(expect.objectContaining({ event: 'reclaim', sessionId: A }))
   })
@@ -1126,6 +1132,7 @@ async function newTurnOn(
 function ageWorkDir(path: string, ageMs: number): void {
   const seconds = (Date.now() - ageMs) / 1000
   utimesSync(path, seconds, seconds)
+  if (existsSync(`${path}.used`)) utimesSync(`${path}.used`, seconds, seconds)
 }
 
 describe('running a Turn on the other credential', () => {
@@ -1522,5 +1529,131 @@ describe('the ports the pool asks at every spawn', () => {
       'effort',
       'caveman',
     ])
+  })
+})
+
+describe('every Resident Session holds a Seat of its own', () => {
+  const SEATED =
+    'ADR-0036: one uid per Resident Session is the boundary between Sessions. Two residents on ' +
+    'one Seat read each other as if nothing had changed, and a Seat leased again before the ' +
+    'Launcher has emptied it hands the last holder’s processes and files to the next.'
+
+  it('asks the Launcher for a Seat no other resident holds', async () => {
+    const { claude, send } = newPool()
+
+    await send(A, 'hello', OK)
+    await send(B, 'hello', OK)
+
+    expect(
+      claude.spawns.map((spawn) => spawn.seat),
+      SEATED,
+    ).toEqual([
+      { seat: 0, sessionId: A },
+      { seat: 1, sessionId: B },
+    ])
+  })
+
+  it('leases a Seat again only once its process has ended', async () => {
+    const { claude, pool, processFor, send } = newPool({ seats: [7], maxResident: 1 })
+    await send(A, 'hello', OK)
+    processFor(A).ignore('SIGTERM')
+
+    const second = pool.send(B, 'hello')
+    await flush()
+    expect(claude.spawns, SEATED).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(
+      claude.spawns.map((spawn) => spawn.seat?.seat),
+      SEATED,
+    ).toEqual([7, 7])
+    feed(processFor(B), OK)
+    await second
+  })
+
+  it('refuses more residents than there are Seats, keeping one for the Startup Self-Check [fence:seats-outnumber-residents]', () => {
+    const why =
+      'ADR-0036: roma refuses to start unless there are more Seats than maxResident. A pool ' +
+      'allowed more residents than Seats waits on a Seat it can never get, and the Startup ' +
+      'Self-Check needs the spare.'
+
+    expect(() => newPool({ maxResident: 16 }), why).toThrow(/15 Seats/)
+    expect(() => newPool({ maxResident: 15 }), why).not.toThrow()
+  })
+
+  it('never leases a Seat the Launcher could not empty [fence:quarantined-seat-is-never-leased]', async () => {
+    const why =
+      'ADR-0036: a Seat whose return failed may still hold a process or a file of the Session ' +
+      'that held it. Leasing it again hands that to the next Session; a lost Seat costs only ' +
+      'capacity, and the Operator Log must say which one and why.'
+    const { claude, log, processFor, send } = newPool({ seats: [3, 4], maxResident: 2 })
+    await send(A, 'hello', OK)
+    processFor(A).emitExit({
+      code: 0,
+      signal: null,
+      seat: {
+        returned: false,
+        reason: 'quarantine seat 03: its processes could not all be killed',
+      },
+    })
+    await flush()
+
+    await send(B, 'hello', OK)
+    await send(A, 'again', OK)
+
+    expect(
+      claude.spawns.map((spawn) => spawn.seat?.seat),
+      why,
+    ).toEqual([3, 4, 4])
+    expect(log, why).toContainEqual({
+      event: 'quarantine',
+      seat: 3,
+      sessionId: A,
+      reason: 'quarantine seat 03: its processes could not all be killed',
+    })
+  })
+
+  it('encloses only once the Launcher says the Seat has started [fence:pool-encloses-after-the-seat-starts]', async () => {
+    const why =
+      'ADR-0036: roma-launch run refuses a Seat that still has a process, then prepares the ' +
+      'Working Directory, and only then says started. An Enclosure written before that finds ' +
+      'no directory, or is the Seat’s process that makes run refuse and quarantine the Seat.'
+    const workRoot = mkdtempSync(join(tmpdir(), 'roma-pool-'))
+    const launcher = new FakeLauncher(workRoot, () => {
+      throw new Error('the pool spawns through its own spawn')
+    })
+    const { pool, processFor } = newPool({ workRoot, launcher, holdStart: true })
+
+    const enclosing = pool.enclose(A, 'shared-window', 'a.png', new Uint8Array([1]))
+    await flush()
+    await flush()
+    expect(launcher.enclosed, why).toEqual([])
+
+    processFor(A).emitStarted()
+    await enclosing
+    expect(launcher.enclosed, why).toEqual([{ seat: 0, sessionId: A, name: 'a.png' }])
+  })
+
+  it('encloses nothing into a Seat the Launcher never started', async () => {
+    const workRoot = mkdtempSync(join(tmpdir(), 'roma-pool-'))
+    const launcher = new FakeLauncher(workRoot, () => {
+      throw new Error('the pool spawns through its own spawn')
+    })
+    const { pool, processFor } = newPool({ workRoot, launcher, holdStart: true })
+
+    const enclosing = pool.enclose(A, 'shared-window', 'a.png', new Uint8Array([1]))
+    await flush()
+    processFor(A).emitStarted(false)
+
+    await expect(enclosing).rejects.toThrow(/never started/)
+    expect(launcher.enclosed).toEqual([])
+  })
+
+  it('says so when every Seat is quarantined, rather than waiting forever', async () => {
+    const { pool, processFor, send } = newPool({ seats: [3], maxResident: 1 })
+    await send(A, 'hello', OK)
+    processFor(A).emitExit({ code: 0, signal: null, seat: { returned: false, reason: 'x' } })
+    await flush()
+
+    await expect(pool.send(B, 'hello')).rejects.toThrow(/quarantined/)
   })
 })

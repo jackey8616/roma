@@ -23,7 +23,6 @@ npm install
 
 | command | does |
 | --- | --- |
-| `npm start` | Runs roma against whichever Channels the environment configures, from the sources, via `tsx`. See below. |
 | `npm test` | The default run. Fast, free, deterministic. |
 | `npm run test:watch` | The same, watching. |
 | `npm run typecheck` | `tsc --noEmit`, over `src` **and** `test`. |
@@ -49,13 +48,18 @@ architecture rests on goes unchecked.
 
 ## Running it
 
-`npm start` is roma over every Channel the environment names: it reads the configuration
+roma is run as the image, and only as the image. It needs the Launcher and the Seats the
+image carries, and root at boot, to give every Resident Session a uid of its own; without
+them it refuses to start rather than let one Session's agent read another's (ADR-0036).
+`npm start` from the sources therefore stops at that refusal: develop roma's parts with
+`npm test` and check the whole with `scripts/verify-image.sh`.
+
+The image is roma over every Channel the environment names: it reads the configuration
 whole, proves the credential with the startup self-check, and only then subscribes. Each
 Channel is optional and **at least one is required** — a roma with none would start,
 subscribe to nothing and answer nobody, so it refuses instead. There are two, Google Chat
 and Discord, and one process serves however many there are: one Core each, over one pool,
-one queue, one Audit Log and one Work Root (ADR-0028). In development that runs the
-TypeScript directly through `tsx`, from a normal `npm install`.
+one queue, one Audit Log and one Work Root (ADR-0028).
 
 Discord answers in **plain text**, not embeds and not an attached file: a long answer
 inside a card is worse at the two things a separate Result exists for, being searched for
@@ -101,9 +105,13 @@ docker run --rm \
 optional keys below. The container starts as root, roma reads the keys, and then it becomes
 `node` — the uid every agent runs as — before it builds a Channel or spawns anything. After
 that the agent can open neither the key files nor roma's `/proc`, and roma checks both and
-refuses to start if either does not hold (ADR-0032). So do not add `--user`: roma would run
-without the drop, and say so in its log. If you run with `--cap-drop=ALL`, add
-`--cap-add=SETUID --cap-add=SETGID` back for the drop itself.
+refuses to start if either does not hold (ADR-0032). Each agent then runs as a Seat — a uid
+of its own, leased while its Session is resident — through the image's setuid Launcher, so
+no agent reaches another's Working Directory, Enclosures or Transcript (ADR-0036). So do not
+add `--user`: roma refuses to start without root. If you run with `--cap-drop=ALL`, add back
+`--cap-add=SETUID --cap-add=SETGID --cap-add=CHOWN --cap-add=FOWNER --cap-add=KILL
+--cap-add=DAC_OVERRIDE`, which the drop and the Launcher need; roma itself holds none of them
+once it is `node`.
 
 Add two more to give the agent a Cloud Reach — the identity it acts as in Google Cloud. Most
 deployments have none and are unaffected; see `ROMA_CLOUD_KEY_FILE` below and
@@ -320,7 +328,7 @@ and Discord's Transport decides things (ADR-0029). What did **not** move is
 Adapter rather than a rewrite.
 
 The one file that names *every* Channel is the composition root, `src/channels/main.ts`,
-which is what `npm start` and the image run. It sits under `src/channels/` and inside no
+which is what the image runs. It sits under `src/channels/` and inside no
 Channel's directory, because a root naming two of them cannot live in either (ADR-0028).
 
 Nearly all of roma's user-facing wording lives there too, because how a fact reads to a

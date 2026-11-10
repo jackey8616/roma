@@ -1,12 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { randomUUID } from 'node:crypto'
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { AuditLog } from './audit-log.js'
 import { buildEnv, type Credential } from './build-env.js'
 import { CAVEMAN_OFF } from './caveman.js'
 import { PINNED_EFFORT, PINNED_MODEL } from './claude-session.js'
 import type { CredentialEnvs } from './session-pool.js'
-import type { SpawnClaudeProcess } from './claude-process.js'
 import type { RetryBudget } from './config.js'
 import { ReachUse } from './reach-use.js'
 import { Core, type CoreLogRecord, type CoreOptions } from './core.js'
@@ -14,6 +13,9 @@ import { CredentialProxy, type Fronted } from './credential-proxy.js'
 import { allows } from './egress/allowlist.js'
 import { EgressProxy, type Gateway } from './egress/egress-proxy.js'
 import { FreshTokens } from './fresh-tokens.js'
+import { IsolationRefused, isolating, realLauncher, type Launcher } from './launcher.js'
+import type { SeatOutcome, SpawnClaudeProcess } from './claude-process.js'
+import { moveTranscripts } from './transcript-move.js'
 import { eachReach, type Reach, type Reaches } from './reach.js'
 import type { BoundChannel, ChannelBinding } from './serve.js'
 import {
@@ -24,7 +26,8 @@ import {
 } from './session-generation.js'
 import type { OperatorLog } from './operator-log.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
-import { socketPathIn, type CredentialWanted } from './shim-protocol.js'
+import { seatSocketPathIn, type CredentialWanted } from './shim-protocol.js'
+import { SEATS, SELF_CHECK_SEAT } from './seats.js'
 import {
   ShimServer,
   type ServedReach,
@@ -56,6 +59,12 @@ export type ReachLogRecord =
       readonly account: string | null
     }
 
+export type IsolationLogRecord = {
+  readonly event: 'transcripts-moved'
+  readonly moved: number
+  readonly unattributed: readonly string[]
+}
+
 export interface StartRomaOptions {
   readonly credential: Credential
   readonly overflow?: {
@@ -73,11 +82,15 @@ export interface StartRomaOptions {
   readonly caveman?: string
   readonly maxConcurrentTasks?: number
   readonly retryBudget?: RetryBudget
-  readonly spawn?: SpawnClaudeProcess
+  readonly launcher?: Launcher
   readonly log?: OperatorLog<
-    PoolLogRecord | CoreLogRecord | ShimLogRecord | ReachLogRecord | SelfCheckLogRecord
+    | PoolLogRecord
+    | CoreLogRecord
+    | ShimLogRecord
+    | ReachLogRecord
+    | SelfCheckLogRecord
+    | IsolationLogRecord
   >
-  readonly selfCheckCwd?: string
   readonly selfCheckTimeoutMs?: number
   readonly anthropicApi?: string
   readonly egress?: EgressOptions
@@ -134,9 +147,8 @@ async function startBehind(
     caveman,
     maxConcurrentTasks,
     retryBudget,
-    spawn,
+    launcher = realLauncher(),
     log,
-    selfCheckCwd,
     selfCheckTimeoutMs,
   }: StartRomaOptions,
 ): Promise<Roma> {
@@ -155,57 +167,113 @@ async function startBehind(
   const egressProxy = agentEgress === null ? {} : { egressProxy: agentEgress.url }
   const env = buildEnv({ credential: fronted, configDir, ...egressProxy })
 
-  const probeCwd = selfCheckCwd ?? mkdtempSync(join(tmpdir(), 'roma-self-check-'))
-  let selfCheck: StartupSelfCheckReport
+  for (const [root, mode] of [
+    [workRoot, 0o711],
+    [configDir, 0o711],
+    [auditRoot, 0o700],
+  ] as const) {
+    mkdirSync(root, { recursive: true, mode })
+    chmodSync(root, mode)
+  }
+  const transcripts = moveTranscripts({ configDir, workRoot })
+  if (transcripts.moved.length > 0 || transcripts.unattributed.length > 0) {
+    log?.({
+      event: 'transcripts-moved',
+      moved: transcripts.moved.length,
+      unattributed: transcripts.unattributed,
+    })
+  }
+  await isolating('sweep every Seat and park every Session', () => launcher.sweep())
+
+  const work = new WorkRoot(workRoot, (sessionId) => launcher.reclaim(sessionId))
+
+  const probe = randomUUID()
+  let probeEnded: Promise<SeatOutcome | undefined> = Promise.resolve(undefined)
+  const probeSpawn: SpawnClaudeProcess = (request) => {
+    const process = launcher.spawn({
+      ...request,
+      seat: { seat: SELF_CHECK_SEAT, sessionId: probe },
+    })
+    probeEnded = new Promise((ended) => {
+      process.onExit((exit) => ended(exit.seat))
+      process.onError(() => ended(undefined))
+    })
+    return process
+  }
+  let selfCheck: StartupSelfCheckReport | null = null
+  let selfCheckFailed: unknown = null
   try {
     selfCheck = await startupSelfCheck({
       credential,
       env,
-      cwd: probeCwd,
+      cwd: work.sessionDir(probe),
       ...(model === undefined ? {} : { model }),
       effort: pinnedEffort,
-      ...(spawn === undefined ? {} : { spawn }),
+      spawn: probeSpawn,
       ...(selfCheckTimeoutMs === undefined ? {} : { timeoutMs: selfCheckTimeoutMs }),
       ...(log === undefined ? {} : { log }),
     })
-  } finally {
-    if (selfCheckCwd === undefined) rmSync(probeCwd, { recursive: true, force: true })
+  } catch (error) {
+    selfCheckFailed = error
   }
+  const probeSeat = await probeEnded
+  if (probeSeat?.returned === false) {
+    throw new IsolationRefused([
+      `the Startup Self-Check's Seat could not be emptied after it: ${probeSeat.reason}`,
+    ])
+  }
+  await launcher.reclaim(probe).catch(() => {})
+  if (selfCheckFailed !== null || selfCheck === null) throw selfCheckFailed
 
-  mkdirSync(shims.dir, { recursive: true, mode: 0o700 })
+  mkdirSync(shims.dir, { recursive: true, mode: 0o711 })
+  chmodSync(shims.dir, 0o711)
   const gitConfigPath = join(shims.dir, 'gitconfig')
-  writeFileSync(gitConfigPath, shims.gitConfig, { mode: 0o600 })
-  const socketPath = socketPathIn(shims.dir)
+  writeFileSync(gitConfigPath, shims.gitConfig, { mode: 0o644 })
+  chmodSync(gitConfigPath, 0o644)
 
   const queue = new TaskQueue(
     maxConcurrentTasks === undefined ? {} : { maxConcurrent: maxConcurrentTasks },
   )
   const cloudUse = new ReachUse()
   const documentUse = new ReachUse()
-  const shimServer = await ShimServer.listen({
-    socketPath,
-    reaches: servedReaches(reaches, proved, log),
-    onCredential: (taskId, credential) => {
-      if (credential === 'cloud') cloudUse.minted(taskId)
-      if (credential === 'documents') documentUse.minted(taskId)
-    },
-    taskFor: (sessionId) => queue.taskFor(sessionId),
-    ...(log === undefined ? {} : { log }),
-  })
+  const served = servedReaches(reaches, proved, log)
+  const holders: { pool: SessionPool | null } = { pool: null }
+  const shimServers: ShimServer[] = []
+  for (let seat = 0; seat < SEATS; seat++) {
+    shimServers.push(
+      await ShimServer.listen({
+        socketPath: seatSocketPathIn(shims.dir, seat),
+        reaches: served,
+        onCredential: (taskId, credential) => {
+          if (credential === 'cloud') cloudUse.minted(taskId)
+          if (credential === 'documents') documentUse.minted(taskId)
+        },
+        taskFor: (sessionId) => queue.taskFor(sessionId),
+        holder: () => holders.pool?.sessionOn(seat) ?? null,
+        ...(log === undefined ? {} : { log }),
+      }),
+    )
+  }
+  try {
+    await isolating('give each Seat its own Credential Shim socket', () =>
+      launcher.handOutSockets(),
+    )
+  } catch (error) {
+    await Promise.all(shimServers.map((server) => server.close()))
+    throw error
+  }
 
-  const sessionEnv = (from: Fronted) => (sessionId: string) =>
+  const sessionEnv = (from: Fronted) => (sessionId: string, seat: number) =>
     buildEnv({
       credential: from,
       configDir,
-      shims: { sessionId, socketPath, gitConfigPath },
+      shims: { sessionId, socketPath: seatSocketPathIn(shims.dir, seat), gitConfigPath },
       ...egressProxy,
     })
   const envs: CredentialEnvs = {
     [credential.kind]: sessionEnv(fronted),
     ...(overflow === undefined ? {} : { overflow: sessionEnv(proxy.front(overflow.credential)) }),
   }
-
-  const work = new WorkRoot(workRoot)
 
   const models = chosenModels({ workRoot: work, pinnedModel })
   const efforts = chosenEfforts({ workRoot: work, pinnedEffort })
@@ -219,9 +287,11 @@ async function startBehind(
     cavemen,
     announcements: eachReach(reaches).map((reach) => reach.announce()),
     ...(retryBudget === undefined ? {} : { retryBudget }),
-    ...(spawn === undefined ? {} : { spawn }),
+    spawn: launcher.spawn,
+    launcher,
     ...(log === undefined ? {} : { log }),
   })
+  holders.pool = pool
   const sessions = new SessionGenerations({ workRoot: work })
   const audit = new AuditLog({ auditRoot })
 
@@ -255,7 +325,7 @@ async function startBehind(
       try {
         await pool.shutdown()
       } finally {
-        await shimServer.close()
+        await Promise.all(shimServers.map((server) => server.close()))
         await agentEgress?.close()
         await proxy.close()
       }

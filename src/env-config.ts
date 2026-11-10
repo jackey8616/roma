@@ -2,6 +2,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path'
 import type { Credential } from './build-env.js'
 import { CAVEMAN_MENU, isPinnableCaveman, OFF_MENU_WENYAN } from './caveman.js'
 import { EFFORT_MENU, isPinnableEffort, ULTRACODE } from './effort-menu.js'
+import type { LauncherRoots } from './launcher.js'
 import type { StartRomaOptions } from './startup.js'
 
 export type RomaEnv = Pick<
@@ -144,6 +145,10 @@ export function readRomaEnv(env: Environment): RomaEnv {
     ...(caveman === null ? {} : { caveman }),
     ...(maxConcurrentTasks === null ? {} : { maxConcurrentTasks }),
   }
+}
+
+export function launcherRootsOf(roma: RomaEnv): LauncherRoots {
+  return { work: roma.workRoot, config: roma.configDir, shim: roma.shimDir }
 }
 
 function readEffort(env: Environment, problems: string[]): string | null {

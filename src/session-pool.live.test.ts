@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildEnv } from './build-env.js'
 import type { Turn } from './claude-session.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
-import { liveWorkRoot, sharedWindowCredential } from '../test/support/live-claude.js'
+import { liveSpawn, liveWorkRoot, sharedWindowCredential } from '../test/support/live-claude.js'
 import { WorkRoot } from './work-root.js'
 
 const PING = 'Reply with exactly the word PING and nothing else. Do not use any tools.'
@@ -27,6 +27,7 @@ describe('a Session that outlives its process', () => {
             inherit: process.env,
           }),
       },
+      spawn: liveSpawn,
       log: (record) => log.push(record),
     })
 

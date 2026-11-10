@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  statSync,
   rmSync,
   utimesSync,
   writeFileSync,
@@ -84,13 +85,29 @@ describe('where a Session works', () => {
 })
 
 describe('marking a Session as used', () => {
-  it('moves the directory the sweep reads', () => {
+  it('moves the directory the sweep reads', async () => {
     const { work } = newRoot()
     sessionUsed(work, A, 8 * DAY)
 
     work.touch(A)
 
-    expect(work.reclaimIdle(new Set())).toEqual([])
+    expect(await work.reclaimIdle(new Set())).toEqual([])
+  })
+
+  it('marks it in a record of roma’s, never in the Working Directory [fence:workroot-touch-is-a-record]', async () => {
+    const why =
+      'ADR-0036: a Working Directory belongs to the Seat holding its Session, or to roma-parked, ' +
+      'and only an owner may set its mtime. roma marks use in a record of its own, so the ' +
+      'seven-day reclaim still sees a Session that was used today.'
+    const { root, work } = newRoot()
+    const cwd = sessionUsed(work, A, 8 * DAY)
+
+    work.touch(A)
+
+    expect(statSync(cwd).mtimeMs, why).toBeLessThan(Date.now() - 7 * DAY)
+    expect(readdirSync(cwd), why).toEqual([])
+    expect(readdirSync(root).sort(), why).toEqual([A, `${A}.used`].sort())
+    expect(await work.reclaimIdle(new Set()), why).toEqual([])
   })
 
   it('says nothing about a directory that is gone', () => {
@@ -101,23 +118,25 @@ describe('marking a Session as used', () => {
 })
 
 describe('reclaiming what nothing has used', () => {
-  it('deletes a working directory idle for more than seven days', () => {
+  it('deletes a working directory idle for more than seven days', async () => {
     const { work } = newRoot()
     const cwd = sessionUsed(work, A, 8 * DAY)
 
-    expect(work.reclaimIdle(new Set())).toEqual([{ sessionId: A, cwd, idleMs: expect.any(Number) }])
+    expect(await work.reclaimIdle(new Set())).toEqual([
+      { sessionId: A, cwd, idleMs: expect.any(Number) },
+    ])
     expect(existsSync(cwd)).toBe(false)
   })
 
-  it('keeps one that is younger than seven days', () => {
+  it('keeps one that is younger than seven days', async () => {
     const { work } = newRoot()
     const cwd = sessionUsed(work, A, 6 * DAY)
 
-    expect(work.reclaimIdle(new Set())).toEqual([])
+    expect(await work.reclaimIdle(new Set())).toEqual([])
     expect(existsSync(cwd)).toBe(true)
   })
 
-  it('keeps a Session that is resident, however old its directory looks [fence:workroot-in-use-is-required]', () => {
+  it('keeps a Session that is resident, however old its directory looks [fence:workroot-in-use-is-required]', async () => {
     const why =
       'reclaimIdle must be told which Sessions are in use, and the type must require it (#105): ' +
       'a forgotten argument read as an empty set deletes the directory out from under every ' +
@@ -128,11 +147,11 @@ describe('reclaiming what nothing has used', () => {
     const forgot: () => unknown = () => work.reclaimIdle()
 
     expect(typeof forgot, why).toBe('function')
-    expect(work.reclaimIdle(new Set([A])), why).toEqual([])
+    expect(await work.reclaimIdle(new Set([A])), why).toEqual([])
     expect(existsSync(cwd), why).toBe(true)
   })
 
-  it('steps over every file, however old [fence:workroot-records-survive-the-sweep]', () => {
+  it('steps over every file, however old [fence:workroot-records-survive-the-sweep]', async () => {
     const { root, work } = newRoot()
     const records = [
       `${A}.generation`,
@@ -147,11 +166,11 @@ describe('reclaiming what nothing has used', () => {
       age(path, 400 * DAY)
     }
 
-    expect(work.reclaimIdle(new Set()), SURVIVES).toEqual([])
+    expect(await work.reclaimIdle(new Set()), SURVIVES).toEqual([])
     expect(readdirSync(root).sort(), SURVIVES).toEqual([...records].sort())
   })
 
-  it('keeps every record roma writes, written its own way [fence:workroot-records-survive-the-sweep]', () => {
+  it('keeps every record roma writes, written its own way [fence:workroot-records-survive-the-sweep]', async () => {
     const { root, work } = newRoot()
     const records = [
       work.generationRecord(A),
@@ -163,7 +182,7 @@ describe('reclaiming what nothing has used', () => {
     for (const record of records) work.writeRecord(record, 'kept')
     for (const entry of readdirSync(root)) age(join(root, entry), 400 * DAY)
 
-    work.reclaimIdle(new Set())
+    await work.reclaimIdle(new Set())
 
     expect(
       records.map((record) => work.readRecord(record)),
@@ -171,31 +190,51 @@ describe('reclaiming what nothing has used', () => {
     ).toEqual(records.map(() => 'kept'))
   })
 
-  it('reclaims only what is idle, leaving the rest', () => {
+  it('reclaims only what is idle, leaving the rest', async () => {
     const { work } = newRoot()
     const stale = sessionUsed(work, A, 8 * DAY)
     const fresh = sessionUsed(work, B, 1 * MINUTE)
 
-    expect(work.reclaimIdle(new Set()).map(({ sessionId }) => sessionId)).toEqual([A])
+    expect((await work.reclaimIdle(new Set())).map(({ sessionId }) => sessionId)).toEqual([A])
     expect(existsSync(stale)).toBe(false)
     expect(existsSync(fresh)).toBe(true)
   })
 
-  it('says how idle each one was', () => {
+  it('says how idle each one was', async () => {
     const { work } = newRoot()
     sessionUsed(work, A, 9 * DAY)
 
-    const [reclaimed] = work.reclaimIdle(new Set())
+    const [reclaimed] = await work.reclaimIdle(new Set())
 
     expect(reclaimed?.idleMs).toBeGreaterThanOrEqual(9 * DAY)
     expect(reclaimed?.idleMs).toBeLessThan(10 * DAY)
   })
 
-  it('reclaims nothing when the root is not there', () => {
+  it('deletes through the remover it was given, and forgets that the Session was spawned [fence:workroot-reclaims-through-the-launcher]', async () => {
+    const why =
+      'ADR-0036: a parked Working Directory is roma-parked’s, so roma as node cannot delete it; ' +
+      'the deletion is the Launcher’s. Forgetting the spawn keeps the old rule that a ' +
+      'reclaimed Session starts with --session-id and is corrected to --resume.'
+    const root = mkdtempSync(join(tmpdir(), 'roma-work-root-'))
+    roots.push(root)
+    const removed: string[] = []
+    const work = new WorkRoot(root, async (sessionId) => {
+      removed.push(sessionId)
+    })
+    work.markSpawned(A)
+    sessionUsed(work, A, 8 * DAY)
+
+    await work.reclaimIdle(new Set())
+
+    expect(removed, why).toEqual([A])
+    expect(work.hasSpawned(A), why).toBe(false)
+  })
+
+  it('reclaims nothing when the root is not there', async () => {
     const { root, work } = newRoot()
     rmSync(root, { recursive: true, force: true })
 
-    expect(work.reclaimIdle(new Set())).toEqual([])
+    expect(await work.reclaimIdle(new Set())).toEqual([])
   })
 })
 

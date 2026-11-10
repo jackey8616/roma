@@ -32,6 +32,13 @@ export type ShimLogRecord =
       readonly event: 'shim-unreadable'
       readonly reason: string
     }
+  | {
+      readonly event: 'credential-refused'
+      readonly claimed: string
+      readonly holder: string | null
+      readonly path: string | null
+      readonly credential: CredentialWanted
+    }
 
 export type ServedReach =
   | { readonly tokens: FreshTokens; readonly account: string | null }
@@ -48,6 +55,7 @@ export interface ShimServerOptions {
     path: string | null,
   ) => void
   readonly taskFor: (sessionId: string) => string | null
+  readonly holder?: () => string | null
   readonly log?: OperatorLog<ShimLogRecord>
 }
 
@@ -61,6 +69,7 @@ export class ShimServer {
     path: string | null,
   ) => void
   readonly #taskFor: (sessionId: string) => string | null
+  readonly #holder: (() => string | null) | undefined
   readonly #log: OperatorLog<ShimLogRecord>
   readonly #open = new Set<Socket>()
 
@@ -70,6 +79,7 @@ export class ShimServer {
     this.#reaches = options.reaches
     this.#onCredential = options.onCredential ?? (() => {})
     this.#taskFor = options.taskFor
+    this.#holder = options.holder
     this.#log = options.log ?? writeToStderr
   }
 
@@ -130,9 +140,16 @@ export class ShimServer {
     }
 
     const sessionId = request.session
-    const taskId = this.#taskFor(sessionId)
     const path = request.path ?? null
     const credential = request.credential ?? 'code'
+    if (this.#holder !== undefined) {
+      const holder = this.#holder()
+      if (holder !== sessionId) {
+        this.#log({ event: 'credential-refused', claimed: sessionId, holder, path, credential })
+        return { token: null, reason: 'this socket does not belong to that Session.' }
+      }
+    }
+    const taskId = this.#taskFor(sessionId)
     const where = { sessionId, taskId, path, credential } as const
     const reach = this.#reaches[credential]
 

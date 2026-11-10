@@ -15,6 +15,10 @@ set -euo pipefail
 
 image="${1:?usage: scripts/verify-image.sh <image ref>}"
 
+# The capabilities README.md tells an Operator on --cap-drop=ALL to add back.
+# §5, §6, §9 and §10 run on exactly these, so a list one short fails here first.
+minimum_caps=(--cap-drop=ALL --cap-add=SETUID --cap-add=SETGID --cap-add=CHOWN --cap-add=FOWNER --cap-add=KILL --cap-add=DAC_OVERRIDE)
+
 # ---------------------------------------------------------------------------
 # 1. The Claude Code in the image is the one the image says it carries.
 #
@@ -180,7 +184,7 @@ contained_flags=(--disable-sigusr1)
 containment() {
   # $1: the `docker run` user, or empty for the image's own. $2...: node flags.
   local user="$1"; shift
-  docker run --rm -i ${user:+--user "${user}"} \
+  docker run --rm -i ${user:+--user "${user}"} "${minimum_caps[@]}" \
     -e ROMA_OVERFLOW_API_KEY=FAKE-CANARY-ROMA-ENV \
     --entrypoint node "${image}" "$@" --input-type=module - < "${harness}"
 }
@@ -232,7 +236,7 @@ i2() {
   # $1: mode. The contained run starts as the image's own user, root, as roma does.
   local user=''
   [ "$1" = control ] && user=node
-  docker run --rm -i ${user:+--user "${user}"} --entrypoint node "${image}" \
+  docker run --rm -i ${user:+--user "${user}"} "${minimum_caps[@]}" --entrypoint node "${image}" \
     --disable-sigusr1 --input-type=module - "$1" < "${proxy_harness}"
 }
 
@@ -399,3 +403,54 @@ compose_expect 'every key file set' \
 compose_expect 'nothing optional set' \
   "$(compose ROMA_VERSION=0.1.0 | compose_run values "${compose_unset[@]}")"
 echo "compose.yaml passes every Channel and Reach, mounts their keys, and names a release"
+
+# ---------------------------------------------------------------------------
+# 9. One Session's agent reaches nothing of another Session's.
+#
+# GHSA-mqhq-64x8-xj73 and GHSA-4vw6-r2rj-xcqf, ADR-0036. Session B plants a
+# Working Directory file, an Enclosure written by roma's real `writeEnclosures`,
+# a stand-in Transcript (0600, as Claude Code writes one) and a file in its
+# TMPDIR, then waits. Session A, spawned through the same compiled spawn path,
+# tries to read and write all of it, read B's environment, signal B, and ask the
+# Credential Shim for a credential as B. Every one must be BLOCKED.
+#
+# B runs the same probe against its own data first, as the control: every check
+# must be REACHED there, or a probe that silently stopped working would report
+# isolation it is not checking. `scripts/isolation-harness.mjs` is roma's half.
+# ---------------------------------------------------------------------------
+isolation_checks=(
+  work-dir-read enclosure-read transcript-read tmp-read
+  work-dir-write transcript-write environ-read signal shim-claim
+)
+isolation="$(docker run --rm -i --network none "${minimum_caps[@]}" \
+  --entrypoint node "${image}" --disable-sigusr1 --input-type=module - \
+  < "$(dirname "$0")/isolation-harness.mjs")"
+
+for check in "${isolation_checks[@]}"; do
+  expect_line control "${isolation}" "control ${check} REACHED"
+  expect_line isolated "${isolation}" "a ${check} BLOCKED"
+done
+echo "one Session's agent reaches nothing of another's, which its own agent does"
+
+# ---------------------------------------------------------------------------
+# 10. The Launcher does what ADR-0036 says, and nothing an agent can turn.
+#
+# `scripts/launcher-harness.sh` runs in the image as root, plays roma's part by
+# hand, and asks the real setuid binary: who it refuses, what a Runtime runs as,
+# that a Seat is emptied — orphans killed, shared /tmp purged, files parked —
+# before it is reused, that a symlink in a Session's tree reaches nothing of
+# root's, and that Enclosures and the reclaim stay inside the Session. Every
+# line must be PASS.
+# ---------------------------------------------------------------------------
+launcher="$(docker run --rm -i --network none "${minimum_caps[@]}" --entrypoint sh "${image}" -s \
+  < "$(dirname "$0")/launcher-harness.sh" 2>&1)" || {
+  echo "the Launcher harness failed:" >&2
+  echo "${launcher}" >&2
+  exit 1
+}
+expect_line launcher "${launcher}" 'failures 0'
+if printf '%s\n' "${launcher}" | grep -q '^FAIL '; then
+  echo "${launcher}" >&2
+  exit 1
+fi
+echo "the Launcher refuses everyone but roma and empties a Seat before it is reused"

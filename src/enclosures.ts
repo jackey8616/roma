@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import type { PendingEnclosure } from './channel-adapter.js'
 
-const DIRECTORY = '.enclosures'
+export const ENCLOSURE_DIRECTORY = '.enclosures'
+
+export type Enclose = (name: string, content: Uint8Array) => Promise<void>
 
 export interface WrittenEnclosure {
   readonly path: string
@@ -13,23 +13,26 @@ export interface WrittenEnclosure {
 
 export async function writeEnclosures(
   enclosures: readonly PendingEnclosure[],
-  cwd: string,
+  enclose: Enclose,
 ): Promise<readonly WrittenEnclosure[]> {
-  if (enclosures.length === 0) return []
-
-  await mkdir(join(cwd, DIRECTORY), { recursive: true })
-
-  const written: WrittenEnclosure[] = []
+  const redeemed: { readonly enclosure: PendingEnclosure; readonly content: Uint8Array }[] = []
   for (const enclosure of enclosures) {
-    const path = `./${DIRECTORY}/${mintedName(enclosure.name)}`
-    let content: Uint8Array
     try {
-      content = await enclosure.redeem()
+      redeemed.push({ enclosure, content: await enclosure.redeem() })
     } catch (error) {
       throw new EnclosureUnreadable(enclosure.name, error)
     }
-    await writeFile(join(cwd, path), content)
-    written.push({ path, name: enclosure.name, from: enclosure.from })
+  }
+
+  const written: WrittenEnclosure[] = []
+  for (const { enclosure, content } of redeemed) {
+    const minted = mintedName(enclosure.name)
+    await enclose(minted, content)
+    written.push({
+      path: `./${ENCLOSURE_DIRECTORY}/${minted}`,
+      name: enclosure.name,
+      from: enclosure.from,
+    })
   }
   return written
 }

@@ -15,12 +15,17 @@ import {
 import { ConfigurationMissing } from './env-config.js'
 import { sessionIdFor } from './session-id.js'
 import { askMinter } from './shim-client.js'
-import { socketPathIn } from './shim-protocol.js'
+import { seatSocketPathIn } from './shim-protocol.js'
+import type { Core } from './core.js'
+import type { FakeClaudeProcess } from '../test/support/fake-claude.js'
 import type { Reaches } from './reach.js'
 import { bind, type ChannelBinding } from './serve.js'
 import { startRoma, type Roma, type StartRomaOptions } from './startup.js'
 import { StartupSelfCheckFailed } from './startup-self-check.js'
 import { flush } from '../test/support/fake-claude.js'
+import { FakeLauncher } from '../test/support/fake-launcher.js'
+import { IsolationRefused } from './launcher.js'
+import { SELF_CHECK_SEAT } from './seats.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
 import { FakeTransport } from '../test/support/fake-transport.js'
 import {
@@ -63,12 +68,14 @@ function boot({
   cloudMinter,
   documentMinter,
   caveman,
+  failing = [],
   overflow,
 }: {
   minter?: FakeMinter
   cloudMinter?: FakeCloudMinter
   documentMinter?: FakeDocumentMinter
   caveman?: string
+  failing?: readonly string[]
   overflow?: StartRomaOptions['overflow']
 } = {}) {
   const fixture = romaFixture('startup')
@@ -77,6 +84,7 @@ function boot({
   fixture.alsoRemove(shims.dir)
   const channel = new RecordingAdapter()
   const log: ReachLogRecord[] = []
+  const launcher = new FakeLauncher(fixture.dirs.workRoot, fixture.claude.spawn, { failing })
 
   let resolved = false
   const starting = startRoma({
@@ -89,7 +97,7 @@ function boot({
       documentMinter: documentMinter ?? null,
     }),
     shims,
-    spawn: fixture.claude.spawn,
+    launcher,
     log: (record) => log.push(record as ReachLogRecord),
     selfCheckTimeoutMs: 1_000,
     ...(caveman === undefined ? {} : { caveman }),
@@ -103,6 +111,7 @@ function boot({
 
   return {
     claude: fixture.claude,
+    launcher,
     channel,
     workRoot: fixture.dirs.workRoot,
     auditRoot: fixture.dirs.auditRoot,
@@ -116,6 +125,25 @@ function boot({
     answerProbe: fixture.answerProbe,
     procFor: fixture.procFor,
     roots: fixture.roots,
+  }
+}
+
+async function holdingSeatZero(
+  core: Core,
+  procFor: (key: string) => FakeClaudeProcess,
+): Promise<() => Promise<void>> {
+  const handled = core.handle({
+    conversationKey: KEY,
+    caller: 'someone',
+    callerName: 'Someone',
+    text: 'hello',
+    enclosures: [],
+    quotation: null,
+  })
+  await flush()
+  return async () => {
+    feed(procFor(KEY), OK)
+    await handled
   }
 }
 
@@ -146,7 +174,7 @@ describe('starting roma', () => {
     await flush()
     expect(roma.hasStarted(), BEFORE_THE_CHECK).toBe(false)
     expect(roma.claude.spawns, BEFORE_THE_CHECK).toHaveLength(1)
-    expect(existsSync(socketPathIn(roma.shims.dir)), BEFORE_THE_CHECK).toBe(false)
+    expect(existsSync(seatSocketPathIn(roma.shims.dir, 0)), BEFORE_THE_CHECK).toBe(false)
 
     await roma.answerProbe()
     await expect(roma.starting).resolves.toMatchObject({ core: expect.anything() })
@@ -575,13 +603,15 @@ describe('proving the Document Reach before anything can ask to use it', () => {
     })
     const roma = boot({ documentMinter })
     await roma.answerProbe()
-    await roma.starting
-    const socket = socketPathIn(roma.shims.dir)
+    const { core } = await roma.starting
+    const finish = await holdingSeatZero(core, roma.procFor)
+    const socket = seatSocketPathIn(roma.shims.dir, 0)
     const ask = () =>
       askMinter(socket, { session: sessionIdFor(KEY), operation: 'get', credential: 'documents' })
 
     await ask()
     await ask()
+    await finish()
 
     expect(
       roma.log.filter((r) => r.event === 'reach-token-minted' && r.credential === 'documents'),
@@ -607,13 +637,15 @@ describe('serving three credentials over one socket', () => {
     })
     const roma = boot({ cloudMinter, documentMinter })
     await roma.answerProbe()
-    await roma.starting
-    const socket = socketPathIn(roma.shims.dir)
+    const { core } = await roma.starting
+    const finish = await holdingSeatZero(core, roma.procFor)
+    const socket = seatSocketPathIn(roma.shims.dir, 0)
     const asking = { session: sessionIdFor(KEY), operation: 'get' } as const
 
     const code = await askMinter(socket, asking)
     const cloud = await askMinter(socket, { ...asking, credential: 'cloud' })
     const documents = await askMinter(socket, { ...asking, credential: 'documents' })
+    await finish()
 
     expect(code.token, why).toMatch(/^token-/)
     expect(code.account, why).toBe('a-team')
@@ -626,13 +658,15 @@ describe('serving three credentials over one socket', () => {
   it('answers a documents request with a sentence where there is no Document Reach', async () => {
     const roma = boot({ cloudMinter: new FakeCloudMinter() })
     await roma.answerProbe()
-    await roma.starting
+    const { core } = await roma.starting
+    const finish = await holdingSeatZero(core, roma.procFor)
 
-    const answer = await askMinter(socketPathIn(roma.shims.dir), {
+    const answer = await askMinter(seatSocketPathIn(roma.shims.dir, 0), {
       session: sessionIdFor(KEY),
       operation: 'get',
       credential: 'documents',
     })
+    await finish()
 
     expect(answer.token).toBeNull()
     expect(answer.reason).toContain('no Document Reach')
@@ -705,7 +739,7 @@ describe('whether a Task used the Document Reach', () => {
       quotation: null,
     })
     await flush()
-    await askMinter(socketPathIn(roma.shims.dir), {
+    await askMinter(seatSocketPathIn(roma.shims.dir, 0), {
       session: sessionIdFor(KEY),
       operation: 'get',
       credential: 'documents',
@@ -733,7 +767,7 @@ describe('whether a Task used the Document Reach', () => {
       quotation: null,
     })
     await flush()
-    await askMinter(socketPathIn(roma.shims.dir), {
+    await askMinter(seatSocketPathIn(roma.shims.dir, 0), {
       session: sessionIdFor(KEY),
       operation: 'get',
       credential: 'cloud',
@@ -772,14 +806,16 @@ describe('watching for a mint storm', () => {
     const cloudMinter = new FakeCloudMinter({ account: 'agent@a-project.iam.gserviceaccount.com' })
     const roma = boot({ cloudMinter })
     await roma.answerProbe()
-    await roma.starting
-    const socket = socketPathIn(roma.shims.dir)
+    const { core } = await roma.starting
+    const finish = await holdingSeatZero(core, roma.procFor)
+    const socket = seatSocketPathIn(roma.shims.dir, 0)
     const ask = () =>
       askMinter(socket, { session: sessionIdFor(KEY), operation: 'get', credential: 'cloud' })
 
     await ask()
     await ask()
     await ask()
+    await finish()
 
     expect(
       roma.log.filter((r) => r.event === 'reach-token-minted' && r.credential === 'cloud'),
@@ -795,11 +831,13 @@ describe('watching for a mint storm', () => {
   it('records a mint for the forge as well, which it never used to', async () => {
     const roma = boot()
     await roma.answerProbe()
-    await roma.starting
-    const socket = socketPathIn(roma.shims.dir)
+    const { core } = await roma.starting
+    const finish = await holdingSeatZero(core, roma.procFor)
+    const socket = seatSocketPathIn(roma.shims.dir, 0)
 
     await askMinter(socket, { session: sessionIdFor(KEY), operation: 'get' })
     await askMinter(socket, { session: sessionIdFor(KEY), operation: 'get' })
+    await finish()
 
     expect(
       roma.log.filter((r) => r.event === 'reach-token-minted' && r.credential === 'code'),
@@ -891,23 +929,14 @@ describe('where a Cloud Token may be', () => {
     await roma.answerProbe()
     const { core } = await roma.starting
 
-    const served = await askMinter(socketPathIn(roma.shims.dir), {
+    const finish = await holdingSeatZero(core, roma.procFor)
+    const served = await askMinter(seatSocketPathIn(roma.shims.dir, 0), {
       session: sessionIdFor(KEY),
       operation: 'get',
       credential: 'cloud',
     })
-    const handled = core.handle({
-      conversationKey: KEY,
-      caller: 'someone',
-      callerName: 'Someone',
-      text: 'hello',
-      enclosures: [],
-      quotation: null,
-    })
-    await flush()
     const { env } = roma.claude.lastSpawn
-    feed(roma.procFor(KEY), OK)
-    await handled
+    await finish()
 
     const tokens = cloudMinter.minted.map(({ token }) => token)
     expect(tokens, why).toContain(served.token)
@@ -941,7 +970,7 @@ describe('whether a Task used the Cloud Reach', () => {
       quotation: null,
     })
     await flush()
-    await askMinter(socketPathIn(roma.shims.dir), {
+    await askMinter(seatSocketPathIn(roma.shims.dir, 0), {
       session: sessionIdFor(KEY),
       operation: 'get',
       credential: 'cloud',
@@ -966,7 +995,7 @@ describe('whether a Task used the Cloud Reach', () => {
       quotation: null,
     })
     await flush()
-    await askMinter(socketPathIn(roma.shims.dir), {
+    await askMinter(seatSocketPathIn(roma.shims.dir, 0), {
       session: sessionIdFor(KEY),
       operation: 'get',
     })
@@ -998,6 +1027,63 @@ describe('whether a Task used the Cloud Reach', () => {
 })
 
 describe('putting a credential in front of a Session’s tools', () => {
+  it('believes the socket a request came in on, never the Session it names [fence:shim-identity-is-the-socket]', async () => {
+    const why =
+      'ADR-0036, GHSA-4vw6-r2rj-xcqf: each Seat has a socket only it can connect to, and the ' +
+      'lease says which Session holds the Seat. A request that names another Session is one ' +
+      'agent asking for a credential as somebody else, which puts its use on their Audit ' +
+      'Record; one on a Seat nobody holds is an agent that outlived its lease.'
+    const roma = boot({ cloudMinter: new FakeCloudMinter() })
+    await roma.answerProbe()
+    const { core } = await roma.starting
+    const other = 'conversation-two'
+    const message = (conversationKey: string) => ({
+      conversationKey,
+      caller: 'someone',
+      callerName: 'Someone',
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
+    const first = core.handle(message(KEY))
+    const second = core.handle(message(other))
+    const seatOf = (conversationKey: string) =>
+      roma.claude.spawns.find((spawn) => spawn.seat?.sessionId === sessionIdFor(conversationKey))
+        ?.seat?.seat
+    for (let waited = 0; waited < 100 && seatOf(other) === undefined; waited++) await flush()
+    const seatOfFirst = seatOf(KEY)
+    const seatOfSecond = seatOf(other)
+    const asking = { operation: 'get', credential: 'cloud' } as const
+
+    const spoofed = await askMinter(seatSocketPathIn(roma.shims.dir, seatOfSecond ?? -1), {
+      ...asking,
+      session: sessionIdFor(KEY),
+    })
+    const unheld = await askMinter(seatSocketPathIn(roma.shims.dir, 9), {
+      ...asking,
+      session: sessionIdFor(KEY),
+    })
+    const own = await askMinter(seatSocketPathIn(roma.shims.dir, seatOfFirst ?? -1), {
+      ...asking,
+      session: sessionIdFor(KEY),
+    })
+    feed(roma.procFor(KEY), OK)
+    feed(roma.procFor(other), OK)
+    await Promise.all([first, second])
+
+    expect([seatOfFirst, seatOfSecond], why).toEqual([0, 1])
+    expect(spoofed.token, why).toBeNull()
+    expect(unheld.token, why).toBeNull()
+    expect(own.token, why).toMatch(/^cloud-token-/)
+    expect(roma.log, why).toContainEqual({
+      event: 'credential-refused',
+      claimed: sessionIdFor(KEY),
+      holder: sessionIdFor(other),
+      path: null,
+      credential: 'cloud',
+    })
+  })
+
   it('tells every Session what it can reach', async () => {
     const roma = boot()
     await roma.answerProbe()
@@ -1038,7 +1124,7 @@ describe('putting a credential in front of a Session’s tools', () => {
     await handled
 
     expect(env['ROMA_SESSION_ID']).toBe(sessionIdFor(KEY))
-    expect(env['ROMA_MINTER_SOCKET']).toBe(socketPathIn(roma.shims.dir))
+    expect(env['ROMA_MINTER_SOCKET']).toBe(seatSocketPathIn(roma.shims.dir, 0))
     expect(env['GIT_CONFIG_GLOBAL']).toBe(join(roma.shims.dir, 'gitconfig'))
   })
 
@@ -1052,7 +1138,7 @@ describe('putting a credential in front of a Session’s tools', () => {
     await roma.answerProbe()
     await roma.starting
 
-    expect(existsSync(socketPathIn(roma.shims.dir)), why).toBe(true)
+    expect(existsSync(seatSocketPathIn(roma.shims.dir, 0)), why).toBe(true)
     expect(readFileSync(join(roma.shims.dir, 'gitconfig'), 'utf8'), why).toBe(roma.shims.gitConfig)
     expect(readdirSync(roma.workRoot), why).toEqual([])
   })
@@ -1182,7 +1268,7 @@ function bootChannels({
     ...fixture.dirs,
     reaches: fakeReaches(),
     shims,
-    spawn: fixture.claude.spawn,
+    launcher: fixture.launcher,
     log: () => {},
     selfCheckTimeoutMs: 1_000,
     ...(maxConcurrentTasks === undefined ? {} : { maxConcurrentTasks }),
@@ -1213,7 +1299,7 @@ describe('what a roma serving several Channels is made of', () => {
 
     await expect(roma.starting, BEFORE_THE_CHECK).rejects.toThrow(StartupSelfCheckFailed)
     expect(roma.built.cores, BEFORE_THE_CHECK).toBe(0)
-    expect(existsSync(socketPathIn(roma.shims.dir)), BEFORE_THE_CHECK).toBe(false)
+    expect(existsSync(seatSocketPathIn(roma.shims.dir, 0)), BEFORE_THE_CHECK).toBe(false)
   })
 
   it('answers each Channel’s messages on that Channel [fence:startup-each-core-on-its-own-channel]', async () => {
@@ -1303,9 +1389,9 @@ describe('what a roma serving several Channels is made of', () => {
       running.pool.shutdown = shutdown
     }
 
-    expect(existsSync(socketPathIn(roma.shims.dir)), why).toBe(false)
+    expect(existsSync(seatSocketPathIn(roma.shims.dir, 0)), why).toBe(false)
     await expect(
-      askMinter(socketPathIn(roma.shims.dir), { session: 'anyone', operation: 'get' }),
+      askMinter(seatSocketPathIn(roma.shims.dir, 0), { session: 'anyone', operation: 'get' }),
       why,
     ).rejects.toThrow()
   })
@@ -1322,7 +1408,7 @@ describe('what a roma serving several Channels is made of', () => {
     const shutdown = running.pool.shutdown.bind(running.pool)
     let askedWhileStopping: Promise<unknown> | undefined
     running.pool.shutdown = async () => {
-      askedWhileStopping = askMinter(socketPathIn(roma.shims.dir), {
+      askedWhileStopping = askMinter(seatSocketPathIn(roma.shims.dir, 0), {
         session: 'anyone',
         operation: 'get',
       })
@@ -1366,5 +1452,38 @@ describe('what startRoma will not be started without', () => {
     const reaches: Reaches = noCode
 
     expect(Object.keys(reaches).sort(), why).toEqual(['cloud', 'documents'])
+  })
+})
+
+describe('keeping one Session out of another’s reach from the first message', () => {
+  it.each([
+    ['sweep', 'sweep every Seat'],
+    ['seats', 'give each Seat its own Credential Shim socket'],
+  ])(
+    'refuses to start when the Launcher cannot %s, having built nothing that takes a message [fence:refuses-to-start-without-isolation]',
+    async (mode, what) => {
+      const why =
+        'ADR-0036: if roma cannot isolate Sessions it refuses to start, naming what is missing. ' +
+        'A roma that served on anyway would be GHSA-mqhq-64x8-xj73 open while reading as ' +
+        'fixed, and the operator would not find out.'
+      const roma = boot({ failing: [mode] })
+      if (mode === 'seats') await roma.answerProbe()
+
+      await expect(roma.starting, why).rejects.toThrow(IsolationRefused)
+      await expect(roma.starting, why).rejects.toThrow(what)
+      expect(existsSync(seatSocketPathIn(roma.shims.dir, 0)), why).toBe(false)
+    },
+  )
+
+  it('sweeps before the Startup Self-Check, and runs it on the Seat no Session is leased', async () => {
+    const roma = boot()
+    await roma.answerProbe()
+    await roma.starting
+
+    const [probe] = roma.claude.spawns
+    expect(roma.launcher.calls.slice(0, 1)).toEqual(['sweep'])
+    expect(probe?.seat?.seat).toBe(SELF_CHECK_SEAT)
+    expect(roma.launcher.reclaimed).toEqual([probe?.seat?.sessionId])
+    expect(roma.launcher.calls.at(-1)).toBe('seats')
   })
 })

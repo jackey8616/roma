@@ -77,7 +77,7 @@ function boot({ overflow = true, channels = 1 }: BootOptions = {}) {
     ...(overflow ? { overflow: { credential: METERED, monthlyCapUsd: 100 } } : {}),
     channels: bound.map(({ channel, transport }) => bind(channel, transport)),
     ...fixture.dirs,
-    spawn: fixture.claude.spawn,
+    launcher: fixture.launcher,
     log: ingressOnly(log),
     selfCheckTimeoutMs: 1_000,
   }).then((roma) => {

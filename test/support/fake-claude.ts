@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs'
 import type {
   ClaudeProcess,
   ClaudeProcessExit,
@@ -11,8 +12,10 @@ export class FakeClaudeProcess implements ClaudeProcess {
   readonly written: string[] = []
   readonly signals: NodeJS.Signals[] = []
   stdinClosed = false
+  readonly started: Promise<boolean>
 
   readonly #exitOnKill: boolean
+  readonly #start: (started: boolean) => void
   readonly #ignored = new Set<NodeJS.Signals>()
   #exited = false
   #stdout: ((chunk: string) => void)[] = []
@@ -20,10 +23,20 @@ export class FakeClaudeProcess implements ClaudeProcess {
   #exit: ((exit: ClaudeProcessExit) => void)[] = []
   #error: ((error: Error) => void)[] = []
 
-  constructor(pid: number, cwd: string, exitOnKill = false) {
+  constructor(pid: number, cwd: string, exitOnKill = false, held = false) {
     this.pid = pid
     this.cwd = cwd
     this.#exitOnKill = exitOnKill
+    let start: (started: boolean) => void = () => {}
+    this.started = new Promise((resolve) => {
+      start = resolve
+    })
+    this.#start = start
+    if (!held) start(true)
+  }
+
+  emitStarted(started = true): void {
+    this.#start(started)
   }
 
   ignore(signal: NodeJS.Signals): void {
@@ -79,6 +92,7 @@ export class FakeClaudeProcess implements ClaudeProcess {
 
   emitExit(exit: ClaudeProcessExit): void {
     this.#exited = true
+    this.#start(false)
     for (const listener of this.#exit) listener(exit)
   }
 
@@ -93,6 +107,7 @@ export function flush(): Promise<void> {
 
 export interface FakeClaudeOptions {
   readonly exitOnKill?: boolean
+  readonly holdStart?: boolean
 }
 
 export class FakeClaude {
@@ -100,14 +115,22 @@ export class FakeClaude {
   readonly processes: FakeClaudeProcess[] = []
 
   readonly #exitOnKill: boolean
+  readonly #holdStart: boolean
 
-  constructor({ exitOnKill = false }: FakeClaudeOptions = {}) {
+  constructor({ exitOnKill = false, holdStart = false }: FakeClaudeOptions = {}) {
     this.#exitOnKill = exitOnKill
+    this.#holdStart = holdStart
   }
 
   readonly spawn: SpawnClaudeProcess = (request) => {
     this.spawns.push(request)
-    const proc = new FakeClaudeProcess(4200 + this.processes.length, request.cwd, this.#exitOnKill)
+    if (request.seat !== undefined) mkdirSync(request.cwd, { recursive: true })
+    const proc = new FakeClaudeProcess(
+      4200 + this.processes.length,
+      request.cwd,
+      this.#exitOnKill,
+      this.#holdStart,
+    )
     this.processes.push(proc)
     return proc
   }

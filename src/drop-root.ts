@@ -13,9 +13,7 @@ export interface RootSystem {
   nodeFlags(): readonly string[]
 }
 
-export type Dropped =
-  | { readonly dropped: true; readonly user: string }
-  | { readonly dropped: false; readonly reason: string }
+export type Dropped = { readonly dropped: true; readonly user: string }
 
 export class ContainmentRefused extends Error {
   readonly problems: readonly string[]
@@ -41,13 +39,11 @@ export function dropRoot(
   system: RootSystem = realRootSystem(),
 ): Dropped {
   if (system.uid() !== 0) {
-    return {
-      dropped: false,
-      reason:
-        'roma was not started as root, so the agent runs under the same uid with nothing ' +
-        'between them: it can read every key file roma was given, roma’s environment and ' +
-        'roma’s memory.',
-    }
+    throw new ContainmentRefused([
+      'roma was not started as root, so there is no Launcher to give each Session a Seat of ' +
+        'its own: every agent would run as roma and as each other, reading every key file, ' +
+        'every Working Directory and every Transcript (ADR-0036). Run roma as the image does.',
+    ])
   }
 
   if (!system.nodeFlags().includes(DISABLE_SIGUSR1)) {

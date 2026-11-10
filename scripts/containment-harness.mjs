@@ -16,7 +16,10 @@ writeFileSync(
 )
 globalThis.heldKey = readFileSync(KEY, 'utf8')
 
-const dropped = dropRoot([{ variable: 'ROMA_GITHUB_PRIVATE_KEY_FILE', path: KEY }])
+const dropped =
+  process.getuid() === 0
+    ? dropRoot([{ variable: 'ROMA_GITHUB_PRIVATE_KEY_FILE', path: KEY }])
+    : { dropped: false }
 process.stderr.write(`harness: ${JSON.stringify(dropped)}\n`)
 
 const PROBE = String.raw`
@@ -46,7 +49,11 @@ const agent = spawnClaudeProcess({
   args: ['-c', PROBE, 'probe', String(process.pid), KEY, KEY_CANARY],
   cwd: '/tmp',
   env: buildEnv({
-    credential: { kind: 'overflow', apiKey: 'FAKE-CANARY-AGENT-OWN' },
+    credential: {
+      kind: 'overflow',
+      standIn: 'FAKE-CANARY-AGENT-OWN',
+      baseUrl: 'http://127.0.0.1:9',
+    },
     configDir: '/tmp',
   }),
 })

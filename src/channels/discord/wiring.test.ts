@@ -155,7 +155,7 @@ async function boot({ model = PINNED_MODEL }: { model?: string } = {}) {
     ],
     ...(model === PINNED_MODEL ? {} : { model }),
     ...fixture.dirs,
-    spawn: fixture.claude.spawn,
+    launcher: fixture.launcher,
     log: (record) => {
       if ('deliveryId' in record) ingress.push(record)
     },

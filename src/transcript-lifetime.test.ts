@@ -5,18 +5,37 @@ import { sources } from '../test/support/sources.js'
 describe('the Transcript is not roma’s to delete', () => {
   it('lets only the files that build a process environment name a config directory', () => {
     const offenders = sources()
-      .filter(({ file }) => !ENVIRONMENT_BUILDERS.includes(file))
+      .filter(({ file }) => !ENVIRONMENT_BUILDERS.includes(file) && file !== THE_ONE_MOVE)
       .filter(({ source }) => NAMES_A_CONFIG_DIR.test(codeOnly(source)))
 
     expect(offenders.map(({ file }) => file)).toEqual([])
   })
 
   it('never joins, reads or deletes anything under one', () => {
-    const offenders = sources().filter(({ source }) => reachesInside(source))
+    const offenders = sources()
+      .filter(({ file }) => file !== THE_ONE_MOVE)
+      .filter(({ source }) => reachesInside(source))
 
     expect(offenders.map(({ file }) => file)).toEqual([])
   })
+
+  it('lets the one move into per-Session directories rename and nothing else [fence:transcripts-are-moved-never-copied-or-deleted]', () => {
+    const why =
+      'ADR-0036 moves each Transcript from the shared config directory into its own ' +
+      'Session’s, once, and amends ADR-0006 for that move alone. A copy is a second copy of ' +
+      'a conversation; a delete or a read is roma doing to a Transcript what ADR-0006 says ' +
+      'it never does.'
+    const move = sources().find(({ file }) => file === THE_ONE_MOVE)
+
+    expect(move, why).toBeDefined()
+    expect(codeOnly(move?.source ?? ''), why).not.toMatch(TOUCHES_CONTENT)
+  })
 })
+
+const THE_ONE_MOVE = 'transcript-move.ts'
+
+const TOUCHES_CONTENT =
+  /\b(rmSync|rm|rmdirSync|unlinkSync|unlink|readFileSync|createReadStream|writeFileSync|copyFileSync|cpSync|copyFile|cp|open|openSync)\b/
 
 const ENVIRONMENT_BUILDERS = ['env-config.ts', 'build-env.ts', 'startup.ts']
 

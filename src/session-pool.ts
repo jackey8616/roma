@@ -1,8 +1,11 @@
 import { EventEmitter } from 'node:events'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { CAVEMAN_OFF, cavemanRuleset } from './caveman.js'
-import { spawnClaudeProcess, type SpawnClaudeProcess } from './claude-process.js'
+import {
+  spawnClaudeProcess,
+  type ClaudeProcess,
+  type SeatOutcome,
+  type SpawnClaudeProcess,
+} from './claude-process.js'
 import {
   ClaudeExitedError,
   ClaudeSession,
@@ -15,14 +18,15 @@ import {
 } from './claude-session.js'
 import type { CredentialKind } from './build-env.js'
 import { defaultConfig, type RetryBudget } from './config.js'
+import { realLauncher, type SessionLauncher } from './launcher.js'
 import { writeToStderr, type OperatorLog } from './operator-log.js'
 import { readApiRetry, type ApiRetry, type ClaudeEvent } from './stream-events.js'
+import { POOL_SEATS, Seats } from './seats.js'
 import type { WorkRoot } from './work-root.js'
 
 const MAX_RESIDENT = 10
 const IDLE_REAP_MS = 15 * 60_000
 const RECLAIM_INTERVAL_MS = 60 * 60_000
-const SPAWN_FILE = '.roma-session'
 const ALREADY_IN_USE = /session id .* is already in use/i
 
 export type PoolLogRecord =
@@ -85,6 +89,17 @@ export type PoolLogRecord =
       readonly cwd: string
       readonly idleMs: number
     }
+  | {
+      readonly event: 'reclaim-failed'
+      readonly sessionId: string
+      readonly reason: string
+    }
+  | {
+      readonly event: 'quarantine'
+      readonly seat: number
+      readonly sessionId: string
+      readonly reason: string
+    }
 
 interface Correction {
   readonly event: 'resume-lost' | 'transcript-survived'
@@ -113,7 +128,7 @@ export class RetryStormError extends Error {
   }
 }
 
-export type BuildSessionEnv = (sessionId: string) => Readonly<Record<string, string>>
+export type BuildSessionEnv = (sessionId: string, seat: number) => Readonly<Record<string, string>>
 
 export type CredentialEnvs = Readonly<Partial<Record<CredentialKind, BuildSessionEnv>>>
 
@@ -151,6 +166,8 @@ export interface SessionPoolOptions {
   readonly cavemen?: SessionCavemen
   readonly announcements?: readonly string[]
   readonly maxResident?: number
+  readonly seats?: readonly number[]
+  readonly launcher?: SessionLauncher
   readonly reclaimIntervalMs?: number
   readonly retryBudget?: RetryBudget
   readonly spawn?: SpawnClaudeProcess
@@ -172,12 +189,14 @@ interface RetryWatch {
 
 interface Resident {
   readonly sessionId: string
+  readonly seat: number
   readonly cwd: string
   readonly credential: CredentialKind
   readonly model: string
   readonly effort: string
   readonly caveman: string
   readonly appendSystemPrompt: string | undefined
+  started: Promise<boolean>
   readonly session: ClaudeSession
   readonly resumed: boolean
   stderr: string
@@ -202,9 +221,12 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   readonly #maxResident: number
   readonly #retryBudget: RetryBudget
   readonly #spawnProcess: SpawnClaudeProcess
+  readonly #seats: Seats
+  readonly #launcher: SessionLauncher
   readonly #log: PoolLog
 
   readonly #residents = new Map<string, Resident>()
+  readonly #leases = new Map<number, string>()
   #spawning: Promise<unknown> = Promise.resolve()
   readonly #reclaimTimer: NodeJS.Timeout
 
@@ -220,12 +242,20 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     this.#cavemen = options.cavemen
     this.#announcements = options.announcements ?? []
     this.#maxResident = options.maxResident ?? MAX_RESIDENT
+    this.#seats = new Seats(options.seats ?? POOL_SEATS)
+    if (this.#maxResident > this.#seats.size) {
+      throw new Error(
+        `maxResident is ${this.#maxResident} but there are ${this.#seats.size} Seats to lease: ` +
+          'every Resident Session holds a Seat of its own (ADR-0036).',
+      )
+    }
+    this.#launcher = options.launcher ?? realLauncher()
     this.#retryBudget = options.retryBudget ?? defaultConfig.retryBudget
     this.#spawnProcess = options.spawn ?? spawnClaudeProcess
     this.#log = options.log ?? logToStderr
 
     this.#reclaimTimer = setInterval(
-      () => this.reclaimIdleWorkDirs(),
+      () => void this.reclaimIdleWorkDirs(),
       options.reclaimIntervalMs ?? RECLAIM_INTERVAL_MS,
     )
     this.#reclaimTimer.unref?.()
@@ -243,6 +273,10 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     return await this.#turn(await this.#acquire(sessionId, credential), text)
   }
 
+  sessionOn(seat: number): string | null {
+    return this.#leases.get(seat) ?? null
+  }
+
   cavemanOn(sessionId: string): string | null {
     return this.#residents.get(sessionId)?.caveman ?? null
   }
@@ -258,15 +292,38 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     return true
   }
 
-  reclaimIdleWorkDirs(): string[] {
-    const reclaimed: string[] = []
-    for (const { sessionId, cwd, idleMs } of this.#workRoot.reclaimIdle(
-      new Set(this.#residents.keys()),
-    )) {
-      reclaimed.push(sessionId)
+  async enclose(
+    sessionId: string,
+    credential: CredentialKind,
+    name: string,
+    content: Uint8Array,
+  ): Promise<void> {
+    const resident = await this.#acquire(sessionId, credential)
+    if (!(await resident.started)) {
+      throw new Error(
+        `Session ${sessionId}'s Seat ${resident.seat} never started, so its Enclosure ` +
+          `${name} has nowhere to go`,
+      )
+    }
+    await this.#launcher.enclose(resident.seat, sessionId, name, content)
+  }
+
+  async reclaimIdleWorkDirs(): Promise<string[]> {
+    let reclaimed: readonly { sessionId: string; cwd: string; idleMs: number }[]
+    try {
+      reclaimed = await this.#workRoot.reclaimIdle(new Set(this.#residents.keys()))
+    } catch (error) {
+      this.#log({
+        event: 'reclaim-failed',
+        sessionId: '',
+        reason: error instanceof Error ? error.message : String(error),
+      })
+      return []
+    }
+    for (const { sessionId, cwd, idleMs } of reclaimed) {
       this.#log({ event: 'reclaim', sessionId, cwd, idleMs })
     }
-    return reclaimed
+    return reclaimed.map(({ sessionId }) => sessionId)
   }
 
   async shutdown(): Promise<void> {
@@ -370,26 +427,35 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       throw new Error(`no environment is configured for the ${credential} credential`)
     }
     await this.#makeRoom()
+    const seat = await this.#seats.lease()
+    this.#leases.set(seat, sessionId)
 
     const cwd = this.#workRoot.sessionDir(sessionId)
-    const spawnFile = join(cwd, SPAWN_FILE)
-    const resuming = resume ?? existsSync(spawnFile)
-    mkdirSync(cwd, { recursive: true })
-    writeFileSync(spawnFile, '')
+    const resuming = resume ?? this.#workRoot.hasSpawned(sessionId)
+    this.#workRoot.markSpawned(sessionId)
     this.#workRoot.touch(sessionId)
 
     const session = new ClaudeSession({
       sessionId,
       cwd,
-      env: buildEnvFor(sessionId),
+      env: buildEnvFor(sessionId, seat),
       resume: resuming,
-      spawn: this.#spawnProcess,
+      spawn: (request) => {
+        const process = this.#seated(
+          this.#spawnProcess({ ...request, seat: { seat, sessionId } }),
+          seat,
+          sessionId,
+        )
+        resident.started = process.started
+        return process
+      },
       model,
       effort,
       ...(appendSystemPrompt === undefined ? {} : { appendSystemPrompt }),
     })
     const resident: Resident = {
       sessionId,
+      seat,
       cwd,
       credential,
       model,
@@ -397,6 +463,7 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       caveman,
       appendSystemPrompt,
       session,
+      started: Promise.resolve(false),
       resumed: resuming,
       stderr: '',
       busy: false,
@@ -442,8 +509,29 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
     return resident
   }
 
+  #seated(process: ClaudeProcess, seat: number, sessionId: string): ClaudeProcess {
+    let settled = false
+    const settle = (outcome: SeatOutcome | undefined): void => {
+      if (settled) return
+      settled = true
+      if (this.#leases.get(seat) === sessionId) this.#leases.delete(seat)
+      if (outcome === undefined || outcome.returned) {
+        this.#seats.give(seat)
+        return
+      }
+      this.#seats.quarantine(seat)
+      this.#log({ event: 'quarantine', seat, sessionId, reason: outcome.reason })
+    }
+    process.onExit((exit) => settle(exit.seat))
+    process.onError(() => settle(undefined))
+    return process
+  }
+
   async #makeRoom(): Promise<void> {
-    while (this.#residents.size >= this.#maxResident) {
+    while (
+      this.#residents.size > 0 &&
+      this.#residents.size >= Math.min(this.#maxResident, this.#seats.size)
+    ) {
       const victim = [...this.#residents.values()].find((resident) => !resident.busy)
       if (victim === undefined) {
         throw new Error(`every one of the ${this.#residents.size} resident Sessions is busy`)

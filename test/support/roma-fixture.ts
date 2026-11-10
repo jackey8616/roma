@@ -5,6 +5,7 @@ import { PINNED_EFFORT, PINNED_MODEL } from '../../src/claude-session.js'
 import { sessionIdFor } from '../../src/session-id.js'
 import type { ClaudeEvent } from '../../src/stream-events.js'
 import { FakeClaude, flush, type FakeClaudeProcess } from './fake-claude.js'
+import { FakeLauncher } from './fake-launcher.js'
 import { EFFORT_ANSWERS, feed, OK, withInit } from './recorded-stream.js'
 
 export interface RomaDirectories {
@@ -15,6 +16,7 @@ export interface RomaDirectories {
 
 export interface RomaFixture {
   readonly claude: FakeClaude
+  readonly launcher: FakeLauncher
   readonly dirs: RomaDirectories
   readonly roots: readonly string[]
   alsoRemove(root: string): void
@@ -35,6 +37,7 @@ export function romaFixture(
 
   return {
     claude,
+    launcher: new FakeLauncher(workRoot, claude.spawn),
     dirs: { workRoot, auditRoot, configDir },
     roots,
     alsoRemove: (root) => {

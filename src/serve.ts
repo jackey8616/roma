@@ -4,7 +4,13 @@ import { reasonOf, writeToStderr, type OperatorLog } from './operator-log.js'
 import type { PoolLogRecord } from './session-pool.js'
 import type { ShimLogRecord } from './shim-server.js'
 import type { SelfCheckLogRecord } from './startup-self-check.js'
-import { startRoma, type ReachLogRecord, type Roma, type StartRomaOptions } from './startup.js'
+import {
+  startRoma,
+  type IsolationLogRecord,
+  type ReachLogRecord,
+  type Roma,
+  type StartRomaOptions,
+} from './startup.js'
 import type { Delivery, Settle, Transport } from './transport.js'
 
 export type IngressLogRecord =
@@ -39,6 +45,7 @@ export type ServeLog = OperatorLog<
   | IngressLogRecord
   | ShimLogRecord
   | ReachLogRecord
+  | IsolationLogRecord
   | SelfCheckLogRecord
 >
 

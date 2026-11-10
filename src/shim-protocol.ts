@@ -21,3 +21,7 @@ export const SESSION_ID_VAR = 'ROMA_SESSION_ID'
 export function socketPathIn(directory: string): string {
   return `${directory}/minter.sock`
 }
+
+export function seatSocketPathIn(directory: string, seat: number): string {
+  return `${directory}/seat-${String(seat).padStart(2, '0')}.sock`
+}

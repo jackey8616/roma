@@ -16,8 +16,9 @@ import {
   routeThroughGateway,
   type DirectProbe,
 } from '../egress/route.js'
-import { envValue, readConfiguration, type Environment } from '../env-config.js'
+import { envValue, launcherRootsOf, readConfiguration, type Environment } from '../env-config.js'
 import { GITHUB_AGENT_HOSTS } from '../github/egress.js'
+import { isolating, realLauncher, type Launcher } from '../launcher.js'
 import { PRIVATE_KEY_FILE_VAR, readMinterEnv } from '../github/env-config.js'
 import { githubReachFrom } from '../github/reach.js'
 import { gitConfig } from '../github/shims.js'
@@ -25,7 +26,11 @@ import { writeToStderr, type OperatorLog } from '../operator-log.js'
 import { serve, type ChannelBinding, type IngressLogRecord, type Serving } from '../serve.js'
 import type { PoolLogRecord } from '../session-pool.js'
 import type { ShimLogRecord } from '../shim-server.js'
-import type { EgressOptions as StartRomaEgress, ReachLogRecord } from '../startup.js'
+import type {
+  EgressOptions as StartRomaEgress,
+  IsolationLogRecord,
+  ReachLogRecord,
+} from '../startup.js'
 import type { SelfCheckLogRecord, StartupSelfCheckReport } from '../startup-self-check.js'
 import { discordBinding, type DiscordLogRecord } from './discord/binding.js'
 import { readDiscordEnv } from './discord/env-config.js'
@@ -60,6 +65,7 @@ type RomaLog = OperatorLog<
   | ChatLogRecord
   | DiscordLogRecord
   | ReachLogRecord
+  | IsolationLogRecord
   | SelfCheckLogRecord
   | ProcessLogRecord
 >
@@ -68,6 +74,7 @@ export async function startConfiguredRoma(
   env: Environment = process.env,
   log: RomaLog = writeToStderr,
   rootSystem: RootSystem = realRootSystem(),
+  launcher: Launcher = realLauncher(),
   egressSystem: EgressSystem = REAL_EGRESS,
 ): Promise<Serving> {
   const { roma, channels, minterEnv, cloudEnv, documentEnv } = readConfiguration(
@@ -78,8 +85,13 @@ export async function startConfiguredRoma(
     readDocumentEnv,
   )
   const egressEnv = readEgressEnv(env)
-  log({ event: 'privileges', ...dropRoot(keyFilesIn(env), rootSystem) })
   const { shimDir, ...core } = roma
+  if (rootSystem.uid() === 0) {
+    await isolating('be told where Sessions live', async () =>
+      launcher.writeRoots(launcherRootsOf(roma)),
+    )
+  }
+  log({ event: 'privileges', ...dropRoot(keyFilesIn(env), rootSystem) })
 
   let egress: StartRomaEgress | undefined
   if (egressEnv === null) {
@@ -110,6 +122,7 @@ export async function startConfiguredRoma(
       documents: documentReachFrom(documentEnv),
     },
     shims: { dir: shimDir, gitConfig: gitConfig() },
+    launcher,
     channels: bound,
     ...(egress === undefined ? {} : { egress }),
     log,

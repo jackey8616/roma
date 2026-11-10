@@ -7,6 +7,10 @@ import { ConfigurationMissing } from '../env-config.js'
 import type { Gateway } from '../egress/egress-proxy.js'
 import { EgressRefused } from '../egress/route.js'
 import { startConfiguredRoma } from './main.js'
+import { FakeLauncher } from '../../test/support/fake-launcher.js'
+import { FakeClaude } from '../../test/support/fake-claude.js'
+
+const launcher = () => new FakeLauncher('/nonexistent', new FakeClaude().spawn)
 
 const MINIMAL = {
   CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token',
@@ -95,6 +99,7 @@ describe('the keys roma reads at boot', () => {
       env,
       (record) => logged.push(record),
       rootThatLeavesKeysReadable(),
+      launcher(),
     )
 
     await expect(started).rejects.toThrow(ContainmentRefused)
@@ -116,8 +121,35 @@ describe('the keys roma reads at boot', () => {
       },
     }
 
-    await expect(startConfiguredRoma(missing, () => {}, root)).rejects.toThrow(ConfigurationMissing)
+    await expect(startConfiguredRoma(missing, () => {}, root, launcher())).rejects.toThrow(
+      ConfigurationMissing,
+    )
     expect(becameUser).toBe(false)
+  })
+
+  it('tell the Launcher where Sessions live while roma is still root [fence:main-writes-the-launcher-roots-before-the-drop]', async () => {
+    const why =
+      'ADR-0036: the Launcher takes no path from roma and trusts only a roots file root owns ' +
+      'and nobody else can write. Once roma is node it can write no such file, and a Launcher ' +
+      'without one refuses every Session.'
+    const { env } = keyed()
+    const told: string[] = []
+    const fake = launcher()
+    const root: RootSystem = {
+      ...rootThatLeavesKeysReadable(),
+      becomeUser: () => {
+        told.push(fake.roots === null ? 'dropped before the roots' : 'dropped after the roots')
+        throw new Error('stop here')
+      },
+    }
+
+    await expect(startConfiguredRoma(env, () => {}, root, fake)).rejects.toThrow(ContainmentRefused)
+    expect(told, why).toEqual(['dropped after the roots'])
+    expect(fake.roots, why).toEqual({
+      work: MINIMAL.ROMA_WORK_ROOT,
+      config: MINIMAL.ROMA_CLAUDE_CONFIG_DIR,
+      shim: MINIMAL.ROMA_SHIM_DIR,
+    })
   })
 })
 
@@ -127,12 +159,17 @@ describe('the network roma is started on', () => {
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
   })
 
-  const notRoot: RootSystem = {
-    uid: () => 1000,
-    becomeUser: () => {},
-    procOwner: () => 1000,
-    canRead: () => true,
-    nodeFlags: () => [],
+  const rootThatDrops = (): RootSystem => {
+    let uid = 0
+    return {
+      uid: () => uid,
+      becomeUser: () => {
+        uid = 1000
+      },
+      procOwner: () => 0,
+      canRead: () => false,
+      nodeFlags: () => ['--disable-sigusr1'],
+    }
   }
 
   function behindGateway() {
@@ -155,10 +192,16 @@ describe('the network roma is started on', () => {
     const routed: Gateway[] = []
     const logged: unknown[] = []
 
-    const started = startConfiguredRoma(env, (record) => logged.push(record), notRoot, {
-      probe: () => Promise.resolve(true),
-      route: (gateway) => routed.push(gateway),
-    })
+    const started = startConfiguredRoma(
+      env,
+      (record) => logged.push(record),
+      rootThatDrops(),
+      launcher(),
+      {
+        probe: () => Promise.resolve(true),
+        route: (gateway) => routed.push(gateway),
+      },
+    )
 
     await expect(started).rejects.toThrow(EgressRefused)
     await expect(started).rejects.toThrow(/--internal/)

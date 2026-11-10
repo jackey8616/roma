@@ -31,6 +31,7 @@ import { WorkRoot } from './work-root.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { TaskQueue } from './task-queue.js'
 import { flush, type FakeClaudeProcess } from '../test/support/fake-claude.js'
+import { FakeLauncher } from '../test/support/fake-launcher.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
 import { romaFixture, teardownRoma, type RomaFixture } from '../test/support/roma-fixture.js'
 import {
@@ -126,6 +127,7 @@ function newCore({
   const efforts = chosenEfforts({ workRoot: work, pinnedEffort: PINNED_EFFORT })
   const cavemen = chosenCavemen({ workRoot: work, pinnedCaveman: pinnedCaveman ?? CAVEMAN_OFF })
   const poolLog: PoolLogRecord[] = []
+  const launcher = new FakeLauncher(workRoot, claude.spawn)
   const pool = new SessionPool({
     workRoot: work,
     models,
@@ -144,6 +146,7 @@ function newCore({
       }),
     },
     spawn: claude.spawn,
+    launcher,
     log: (record) => poolLog.push(record),
     ...(options.retryBudget === undefined ? {} : { retryBudget: options.retryBudget }),
   })
@@ -211,6 +214,7 @@ function newCore({
     cavemen,
     claude,
     core,
+    launcher,
     efforts,
     log,
     models,
@@ -2633,7 +2637,8 @@ describe('the first thing roma says in a Session', () => {
     const cwd = join(workRoot, sessionIdFor(KEY))
     const aged = (Date.now() - 8 * 24 * 60 * 60_000) / 1000
     utimesSync(cwd, aged, aged)
-    expect(pool.reclaimIdleWorkDirs()).toEqual([sessionIdFor(KEY)])
+    utimesSync(`${cwd}.used`, aged, aged)
+    expect(await pool.reclaimIdleWorkDirs()).toEqual([sessionIdFor(KEY)])
 
     await say('and now')
 
@@ -4290,6 +4295,29 @@ describe('what somebody sent along with a message', () => {
     expect(textOf(proc.sent.at(0)), why).toContain(
       `<enclosure path="./.enclosures/${file}" name="screenshot.png" />`,
     )
+  })
+
+  it('is written by the Launcher as the Seat of a Session already resident [fence:core-encloses-as-the-seat]', async () => {
+    const why =
+      'ADR-0036: a Working Directory is its Seat’s, and roma, as node, can write nothing into ' +
+      'it. roma makes the Session resident first and hands the bytes to roma-launch enclose ' +
+      'for that Seat; writing as root instead is one symlink from writing anywhere.'
+    const { claude, core, launcher, procFor } = newCore()
+
+    const task = core.handle(withEnclosures('what is this?', [sent('screenshot.png', 'PNG')]))
+    const proc = await spawned(procFor)
+    feed(proc, OK)
+    await task
+
+    expect(claude.spawns, why).toHaveLength(1)
+    expect(launcher.enclosed, why).toEqual([
+      {
+        seat: claude.spawns[0]?.seat?.seat,
+        sessionId: sessionIdFor(KEY),
+        name: expect.stringMatching(/^[0-9a-f-]{36}\.png$/),
+      },
+    ])
+    expect(textOf(proc.sent.at(0)), why).toContain(`./.enclosures/${launcher.enclosed[0]?.name}`)
   })
 
   it('redeems it once, and not before the Session is known', async () => {

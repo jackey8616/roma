@@ -4,7 +4,7 @@ import { buildEnv } from './build-env.js'
 import type { Turn } from './claude-session.js'
 import { SessionPool, type PoolLogRecord } from './session-pool.js'
 import type { ClaudeEvent } from './stream-events.js'
-import { liveWorkRoot, sharedWindowCredential } from '../test/support/live-claude.js'
+import { liveSpawn, liveWorkRoot, sharedWindowCredential } from '../test/support/live-claude.js'
 import { WorkRoot } from './work-root.js'
 
 const FIRST_CODEWORD = 'ZARQUON-7413'
@@ -83,6 +83,7 @@ describe('whether an appended system prompt survives a --resume', () => {
             }),
         },
         announcements: [briefed],
+        spawn: liveSpawn,
         log: (record) => log.push(record),
       })
       pool.on('event', (_sessionId, event) => noteBuild(event))

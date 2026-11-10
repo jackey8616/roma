@@ -63,6 +63,25 @@ COPY src ./src
 RUN npm run build
 
 # ---------------------------------------------------------------------------
+# Launcher: the one program that is root after boot (ADR-0036).
+#
+# Built on the runtime's own base so it links against the glibc it will run on,
+# and with every warning an error: a truncated path in a setuid program is a
+# wrong directory, not a cosmetic problem. The compiler stays in this stage.
+# ---------------------------------------------------------------------------
+FROM node:22-slim AS launcher
+
+RUN apt-get update \
+  && apt-get install --no-install-recommends --yes gcc libc6-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY launcher/roma-launch.c /src/roma-launch.c
+RUN mkdir -p /out \
+  && gcc -std=c11 -O2 -Wall -Wextra -Werror -Wconversion -Wshadow -Wformat=2 \
+       -D_FORTIFY_SOURCE=2 -fstack-protector-strong -fPIE -pie -Wl,-z,relro,-z,now \
+       -o /out/roma-launch /src/roma-launch.c
+
+# ---------------------------------------------------------------------------
 # Runtime: `dist/`, the dependencies it imports, and an agent's userland.
 # ---------------------------------------------------------------------------
 FROM node:22-slim AS runtime
@@ -213,9 +232,14 @@ ENV HOME=/home/node \
 # `/run/roma` is made here for a different reason again: roma creates it at boot
 # if it is missing, and it cannot, because `/run` belongs to root and roma is
 # `node`.
+#
+# The work root, the Claude config root and `/run/roma` are 0711 because every
+# Seat passes through them to its own Session and its own socket, and must not
+# list anyone else's (ADR-0036). The audit root is no Seat's business at all.
 RUN mkdir -p /var/lib/roma/work /var/lib/roma/claude /var/lib/roma/audit /run/roma \
   && chown -R node:node /var/lib/roma /run/roma \
-  && chmod 0700 /run/roma
+  && chmod 0711 /run/roma /var/lib/roma/work /var/lib/roma/claude \
+  && chmod 0700 /var/lib/roma/audit
 
 # No `USER node`, and that is the containment rather than a lapse of it
 # (ADR-0032, GHSA-v52v-hcv8-cr23). roma starts as root for exactly as long as it
@@ -232,6 +256,23 @@ RUN mkdir -p /var/lib/roma/work /var/lib/roma/claude /var/lib/roma/audit /run/ro
 # that reads roma's memory regardless of what the kernel says; roma refuses to
 # start as root without it. `scripts/verify-image.sh` proves all of it against
 # the built image.
+# The Seats, the uid a parked Session belongs to, and the Launcher that moves a
+# Session between them (ADR-0036). Each Seat has a group of its own and no
+# other, so the Launcher — executable by group `node` only — is refused to every
+# agent by the kernel. `/run/roma-launch` is where roma, while still root,
+# writes the roots the Launcher derives every path from.
+RUN groupadd --gid 19999 roma-parked \
+  && useradd --uid 19999 --gid 19999 --no-create-home --home-dir /nonexistent \
+       --shell /usr/sbin/nologin roma-parked \
+  && for i in $(seq 0 15); do \
+       n="$(printf '%02d' "${i}")"; id=$((20000 + i)); \
+       groupadd --gid "${id}" "roma-seat-${n}" \
+       && useradd --uid "${id}" --gid "${id}" --no-create-home --home-dir /nonexistent \
+            --shell /usr/sbin/nologin "roma-seat-${n}" || exit 1; \
+     done \
+  && mkdir -p /run/roma-launch && chmod 0755 /run/roma-launch
+COPY --from=launcher --chown=root:node --chmod=4750 /out/roma-launch /usr/local/libexec/roma-launch
+
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "--disable-sigusr1", "/app/dist/channels/main.js"]
 

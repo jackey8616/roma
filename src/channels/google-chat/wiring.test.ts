@@ -87,7 +87,7 @@ async function boot({
       bind(new GoogleChatAdapter({ api }), new PubSubTransport({ subscription, log: () => {} })),
     ],
     ...fixture.dirs,
-    spawn: fixture.claude.spawn,
+    launcher: fixture.launcher,
     log: (record) => log.push(record as ShimLogRecord),
     selfCheckTimeoutMs: 1_000,
   })

@@ -604,7 +604,9 @@ export class Core {
       const enclosures =
         relay !== null || message.enclosures.length === 0
           ? []
-          : await writeEnclosures(message.enclosures, this.#workRoot.sessionDir(sessionId))
+          : await writeEnclosures(message.enclosures, (name, content) =>
+              this.#pool.enclose(sessionId, this.#credential, name, content),
+            )
 
       instruction = await this.#drive(
         task,
