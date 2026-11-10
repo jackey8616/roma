@@ -25,19 +25,19 @@ ever existed. Every response in `src/cloud/google-cloud-minter.test.ts` is
 written from Google's documentation, and only a real service account can settle
 whether Google behaves this way.
 
-**One thing §8 asks for that is not built.** It says a failed boot proof is "one
-of the problems the single `readConfiguration` refusal reports". `readConfiguration`
-is synchronous and the proof is a network round trip, so what was built instead
-refuses in that same *shape* — a `ConfigurationMissing` from `startRoma` — rather
-than joining that same *message*. A deployment with both a missing audit root and
-a revoked key therefore still boots twice. Everything a key file can be wrong
-about short of being revoked — unreadable, empty, not JSON, not a service account
-key — is caught by `readCloudEnv` and does join the single refusal, so only the
-revoked case diverges. The forge's own boot proof has had the identical property
-since ADR-0008, so this is the existing shape rather than a new exception. (That
-proof was `minter.installation()` until ADR-0020; it is now the `code` Reach's
-`prove()`, and the gap this paragraph describes moved with it and did not close.) Closing it means `readConfiguration` collecting problems rather than
-throwing them, which changes how every reader reports and was not in scope here.
+**§8's single refusal is built, as of #103.** It was not at first: `readConfiguration`
+was synchronous and the proof is a network round trip, so a failed proof refused in
+the same *shape* — a `ConfigurationMissing` from `startRoma` — rather than in the same
+*message*, and a deployment with both a missing audit root and a revoked key booted
+twice. `readConfiguration` now collects its problems rather than throwing them;
+`startConfiguredRoma` drops root, proves every Reach it can (still one at a time,
+`code` first, ADR-0020 §4) and checks `ROMA_CODEX_HOME` as `node` (#218), adding what
+each finds to the same list, and refuses once. A refusal of another kind — the
+forge's own errors, a containment, isolation or egress refusal, or the filesystem
+refusing roma at the audit root — passes through
+unchanged when it is the only thing wrong and joins the one `ConfigurationMissing`
+when it is not. `startRoma` takes the accounts already proved, so nothing is proved
+twice. Enforced by `fence:main-one-refusal-across-live-checks`.
 
 **This record has been reversed twice and merged once, all in the session that
 wrote it.** The history matters, because what overturned it both times was

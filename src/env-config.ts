@@ -1,6 +1,7 @@
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import type { Credential } from './build-env.js'
 import { CAVEMAN_MENU, isPinnableCaveman, OFF_MENU_WENYAN } from './caveman.js'
+import { readCodexHome } from './codex-home.js'
 import { EFFORT_MENU, isPinnableEffort, ULTRACODE } from './effort-menu.js'
 import type { LauncherRoots } from './launcher.js'
 import type { StartRomaOptions } from './startup.js'
@@ -42,6 +43,23 @@ export function unconfigured(env: Environment, names: readonly string[]): boolea
   return names.every((name) => envValue(env, name) === null)
 }
 
+export interface Configuration<Channels, MinterConfig, CloudConfig, DocumentConfig> {
+  readonly roma: RomaEnv
+  readonly channels: Channels
+  readonly minterEnv: MinterConfig
+  readonly cloudEnv: CloudConfig | null
+  readonly documentEnv: DocumentConfig | null
+  readonly codexHome: string | null
+}
+
+export type ConfigurationRead<Channels, MinterConfig, CloudConfig, DocumentConfig> = Omit<
+  Configuration<Channels, MinterConfig, CloudConfig, DocumentConfig>,
+  'roma' | 'minterEnv'
+> & {
+  readonly roma: RomaEnv | null
+  readonly minterEnv: MinterConfig | null
+}
+
 export function readConfiguration<
   Channels extends Record<string, ReadChannelEnv<unknown>>,
   MinterConfig,
@@ -53,14 +71,13 @@ export function readConfiguration<
   readMinterEnv: (env: Environment) => MinterConfig,
   readCloudEnv: (env: Environment) => CloudConfig | null,
   readDocumentEnv: (env: Environment) => DocumentConfig | null,
-): {
-  roma: RomaEnv
-  channels: { readonly [Name in keyof Channels]: ReturnType<Channels[Name]> }
-  minterEnv: MinterConfig
-  cloudEnv: CloudConfig | null
-  documentEnv: DocumentConfig | null
-} {
-  const problems: string[] = []
+  problems: string[],
+): ConfigurationRead<
+  { readonly [Name in keyof Channels]: ReturnType<Channels[Name]> },
+  MinterConfig,
+  CloudConfig,
+  DocumentConfig
+> {
   const roma = attempted(() => readRomaEnv(env), problems)
 
   const beforeChannels = problems.length
@@ -74,19 +91,26 @@ export function readConfiguration<
     )
   }
 
-  const minterEnv = attempted(() => readMinterEnv(env), problems)
-  const cloudEnv = attempted(() => readCloudEnv(env), problems)
-  const documentEnv = attempted(() => readDocumentEnv(env), problems)
-  if (problems.length > 0) throw new ConfigurationMissing(problems)
   return {
-    roma: certain(roma),
+    roma,
     channels: Object.fromEntries(channels) as {
       [Name in keyof Channels]: ReturnType<Channels[Name]>
     },
-    minterEnv: certain(minterEnv),
-    cloudEnv,
-    documentEnv,
+    minterEnv: attempted(() => readMinterEnv(env), problems),
+    cloudEnv: attempted(() => readCloudEnv(env), problems),
+    documentEnv: attempted(() => readDocumentEnv(env), problems),
+    codexHome: readCodexHome(env, problems),
   }
+}
+
+export function refuseIfAny(problems: readonly string[]): void {
+  if (problems.length > 0) throw new ConfigurationMissing(problems)
+}
+
+export function complete<Channels, MinterConfig, CloudConfig, DocumentConfig>(
+  read: ConfigurationRead<Channels, MinterConfig, CloudConfig, DocumentConfig>,
+): Configuration<Channels, MinterConfig, CloudConfig, DocumentConfig> {
+  return { ...read, roma: certain(read.roma), minterEnv: certain(read.minterEnv) }
 }
 
 export function certain<T>(value: T | null): T {
@@ -99,7 +123,7 @@ function within(root: string, path: string): boolean {
   return step === '' || (step !== '..' && !step.startsWith(`..${sep}`) && !isAbsolute(step))
 }
 
-function attempted<T>(read: () => T, problems: string[]): T | null {
+export function attempted<T>(read: () => T, problems: string[]): T | null {
   try {
     return read()
   } catch (error) {

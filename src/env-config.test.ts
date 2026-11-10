@@ -6,9 +6,11 @@ import { CAVEMAN_MENU, OFF_MENU_WENYAN } from './caveman.js'
 import { readDiscordEnv } from './channels/discord/env-config.js'
 import { readChatEnv } from './channels/google-chat/env-config.js'
 import {
+  complete,
   ConfigurationMissing,
   readConfiguration,
   readRomaEnv,
+  refuseIfAny,
   type Environment,
 } from './env-config.js'
 
@@ -300,8 +302,68 @@ describe('the Core, its Channels and its Minter, read as one configuration', () 
 
   const CHANNELS = { first: readChannel('FIRST'), second: readChannel('SECOND') }
 
-  it('hands back all five parts', () => {
-    const { roma, channels, minterEnv, cloudEnv, documentEnv } = readConfiguration(
+  const readWhole = <MinterConfig>(
+    env: Environment,
+    channels: typeof CHANNELS | Parameters<typeof readConfiguration>[1],
+    minter: (env: Environment) => MinterConfig,
+    cloud: typeof readCloud,
+    document: typeof readDocument,
+  ) => {
+    const problems: string[] = []
+    const read = readConfiguration(env, channels, minter, cloud, document, problems)
+    refuseIfAny(problems)
+    return complete(read)
+  }
+
+  it('collects what is wrong rather than refusing, so a later check can add to the same refusal', () => {
+    const problems: string[] = ['something a later check found.']
+    const read = readConfiguration(
+      { FIRST_THING: 'yes', MINTER_THING: 'yes' },
+      CHANNELS,
+      readMinter,
+      readCloud,
+      readDocument,
+      problems,
+    )
+
+    expect(read.roma).toBeNull()
+    expect(read.minterEnv).toEqual({ thing: 'yes' })
+    expect(problems).toEqual([
+      'something a later check found.',
+      'CLAUDE_CODE_OAUTH_TOKEN is not set.',
+      'ROMA_WORK_ROOT is not set.',
+      'ROMA_AUDIT_ROOT is not set.',
+      'ROMA_CLAUDE_CONFIG_DIR is not set.',
+      'ROMA_SHIM_DIR is not set.',
+    ])
+  })
+
+  it('reads ROMA_CODEX_HOME with the rest, and names a relative one in the same refusal', () => {
+    expect(
+      readWhole(
+        { ...MINIMAL, FIRST_THING: 'yes', MINTER_THING: 'yes', ROMA_CODEX_HOME: '/var/lib/codex' },
+        CHANNELS,
+        readMinter,
+        readCloud,
+        readDocument,
+      ).codexHome,
+    ).toBe('/var/lib/codex')
+
+    const problems: string[] = []
+    readConfiguration(
+      { FIRST_THING: 'yes', MINTER_THING: 'yes', ROMA_CODEX_HOME: 'codex' },
+      CHANNELS,
+      readMinter,
+      readCloud,
+      readDocument,
+      problems,
+    )
+    expect(problems).toContain('ROMA_CODEX_HOME is "codex", which is not an absolute path.')
+    expect(problems).toContain('ROMA_AUDIT_ROOT is not set.')
+  })
+
+  it('hands back all six parts', () => {
+    const { roma, channels, minterEnv, cloudEnv, documentEnv, codexHome } = readWhole(
       {
         ...MINIMAL,
         FIRST_THING: 'yes',
@@ -320,10 +382,11 @@ describe('the Core, its Channels and its Minter, read as one configuration', () 
     expect(minterEnv).toEqual({ thing: 'also yes' })
     expect(cloudEnv).toEqual({ thing: 'and yes' })
     expect(documentEnv).toEqual({ thing: 'yes again' })
+    expect(codexHome).toBeNull()
   })
 
   it('starts perfectly well with nothing to say about the cloud or the documents', () => {
-    const { cloudEnv, documentEnv } = readConfiguration(
+    const { cloudEnv, documentEnv } = readWhole(
       { ...MINIMAL, FIRST_THING: 'yes', MINTER_THING: 'also yes' },
       CHANNELS,
       readMinter,
@@ -336,7 +399,7 @@ describe('the Core, its Channels and its Minter, read as one configuration', () 
   })
 
   it('serves one Channel without the other being configured at all', () => {
-    const { channels } = readConfiguration(
+    const { channels } = readWhole(
       { ...MINIMAL, SECOND_THING: 'yes', MINTER_THING: 'also yes' },
       CHANNELS,
       readMinter,
@@ -350,13 +413,7 @@ describe('the Core, its Channels and its Minter, read as one configuration', () 
 
   it('refuses a deployment that configured no Channel at all', () => {
     expect(() =>
-      readConfiguration(
-        { ...MINIMAL, MINTER_THING: 'yes' },
-        CHANNELS,
-        readMinter,
-        readCloud,
-        readDocument,
-      ),
+      readWhole({ ...MINIMAL, MINTER_THING: 'yes' }, CHANNELS, readMinter, readCloud, readDocument),
     ).toThrow(/at least one of: first, second/)
   })
 
@@ -367,7 +424,7 @@ describe('the Core, its Channels and its Minter, read as one configuration', () 
       'half of one plainly meant to serve it, and telling it to configure another sends it to a ' +
       'Channel it never wanted (ADR-0028).'
     try {
-      readConfiguration(
+      readWhole(
         { ...MINIMAL, FIRST_SPARE: 'set', MINTER_THING: 'yes' },
         CHANNELS,
         readMinter,
@@ -388,7 +445,7 @@ describe('the Core, its Channels and its Minter, read as one configuration', () 
       'undefined configuration with nothing said (#31).'
     expect(
       () =>
-        readConfiguration(
+        readWhole(
           { ...MINIMAL, FIRST_THING: 'yes' },
           CHANNELS,
           () => null,
@@ -401,7 +458,7 @@ describe('the Core, its Channels and its Minter, read as one configuration', () 
 
   it('refuses once, with what is wrong with any of them', () => {
     try {
-      readConfiguration(
+      readWhole(
         { FIRST_SPARE: 'set', CLOUD_THING: 'broken', DOCUMENT_THING: 'broken' },
         CHANNELS,
         readMinter,
@@ -432,7 +489,7 @@ describe('the Core, its Channels and its Minter, read as one configuration', () 
       'the problem (#31).'
     expect(
       () =>
-        readConfiguration(
+        readWhole(
           MINIMAL,
           {
             first: () => {

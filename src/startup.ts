@@ -76,6 +76,7 @@ export interface StartRomaOptions {
   readonly auditRoot: string
   readonly configDir: string
   readonly reaches: Reaches
+  readonly proved?: ProvedReaches
   readonly shims: ShimsOptions
   readonly model?: string
   readonly effort?: string
@@ -111,6 +112,30 @@ export interface Roma {
   shutdown(): Promise<void>
 }
 
+export type ProvedReaches = ReadonlyMap<CredentialWanted, string | null>
+
+export interface ReachProving {
+  readonly proved: ProvedReaches
+  readonly refused: unknown
+}
+
+export async function proveReaches(
+  reaches: Reaches,
+  log?: OperatorLog<ReachLogRecord>,
+): Promise<ReachProving> {
+  const proved = new Map<CredentialWanted, string | null>()
+  for (const reach of eachReach(reaches)) {
+    try {
+      const { account } = await reach.prove()
+      proved.set(reach.credential, account)
+      log?.({ event: 'reach', credential: reach.credential, account })
+    } catch (error) {
+      return { proved, refused: error }
+    }
+  }
+  return { proved, refused: null }
+}
+
 export async function startRoma(options: StartRomaOptions): Promise<Roma> {
   const { anthropicApi, egress } = options
   const proxy = await CredentialProxy.listen({
@@ -141,6 +166,7 @@ async function startBehind(
     auditRoot,
     configDir,
     reaches,
+    proved: alreadyProved,
     shims,
     model,
     effort,
@@ -152,12 +178,7 @@ async function startBehind(
     selfCheckTimeoutMs,
   }: StartRomaOptions,
 ): Promise<Roma> {
-  const proved = new Map<CredentialWanted, string | null>()
-  for (const reach of eachReach(reaches)) {
-    const { account } = await reach.prove()
-    proved.set(reach.credential, account)
-    log?.({ event: 'reach', credential: reach.credential, account })
-  }
+  const proved = alreadyProved ?? (await provedOrRefused(reaches, log))
 
   const pinnedModel = model ?? PINNED_MODEL
   const pinnedEffort = effort ?? PINNED_EFFORT
@@ -334,9 +355,18 @@ async function startBehind(
   }
 }
 
+async function provedOrRefused(
+  reaches: Reaches,
+  log: OperatorLog<ReachLogRecord> | undefined,
+): Promise<ProvedReaches> {
+  const { proved, refused } = await proveReaches(reaches, log)
+  if (refused !== null) throw refused
+  return proved
+}
+
 function servedReaches(
   reaches: Reaches,
-  proved: ReadonlyMap<CredentialWanted, string | null>,
+  proved: ProvedReaches,
   log: OperatorLog<ReachLogRecord> | undefined,
 ): ServedReaches {
   const served = (reach: Reach): ServedReach => {

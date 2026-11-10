@@ -72,6 +72,17 @@ describe('what is wrong with a CODEX_HOME', () => {
     expect(codexHomeProblems(root)).toHaveLength(1)
   })
 
+  it.skipIf(process.getuid?.() === 0)('names an auth.json roma cannot read and write', () => {
+    const auth = join(root, 'auth.json')
+    writeFileSync(auth, '{}')
+    chmodSync(auth, 0o000)
+    try {
+      expect(codexHomeProblems(root)).toEqual([expect.stringContaining(`${auth} is there`)])
+    } finally {
+      chmodSync(auth, 0o600)
+    }
+  })
+
   it.skipIf(process.getuid?.() === 0)('names a directory roma cannot write to', () => {
     writeFileSync(join(root, 'auth.json'), '{}')
     chmodSync(root, 0o500)
