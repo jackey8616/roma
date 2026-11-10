@@ -133,6 +133,10 @@ Two rules about when that record changes, both found in review:
   ends. A Task that compacts and then waits on the Shared Window can be cut off by
   a restart, and a reset that waited for the Task to end would be lost. Enforced
   by `fence:core-nearly-full-reset-on-the-boundary`.
+- **A warning belongs to the fill it was given in.** Each Session keeps an
+  in-process count of Compactions. A warning still being posted when a Compaction
+  lands is not written back once its post finishes, so it cannot silence the
+  warning for the next fill. Enforced by `fence:core-nearly-full-belongs-to-its-fill`.
 
 A Relay never carries the warning: `/compact` is the remedy, and a free Relay's
 reply is Claude Code's own.

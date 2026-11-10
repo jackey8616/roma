@@ -4424,6 +4424,46 @@ describe('a context that is nearly full', () => {
     await task
   })
 
+  it('does not let a warning still being posted outlive a Compaction [fence:core-nearly-full-belongs-to-its-fill]', async () => {
+    const why =
+      'A warning is remembered only if no Compaction happened while it was being posted ' +
+      '(ADR-0040): otherwise a slow post finishing after a /compact writes the record ' +
+      'back, and the next time the context fills nobody is told.'
+    const shared = newCore()
+    let release: () => void = () => {}
+    const delivered: OutboundInstruction[] = []
+    const core = coreOver(
+      shared,
+      channelThat((instruction) => {
+        delivered.push(instruction)
+        if (instruction.kind === 'result' && instruction.contextPercent === 85) {
+          return new Promise<void>((resolve) => {
+            release = resolve
+          })
+        }
+      }),
+    )
+    const say = async (text: string, events: readonly ClaudeEvent[]) => {
+      const task = core.handle(ingress(text))
+      await flush()
+      feed(shared.procFor(KEY), events)
+      return { task }
+    }
+
+    const slow = await say('hello', withContextHeld(OK, FULL))
+    await flush()
+    await (
+      await say('/compact', COMPACTED_MANUALLY)
+    ).task
+    release()
+    await slow.task
+    await (
+      await say('again', withContextHeld(OK, FULL + 10_000))
+    ).task
+
+    expect(delivered.at(-1), why).toMatchObject({ kind: 'result', contextPercent: 86 })
+  })
+
   it('says it again once a Compaction has emptied the context and it fills up again', async () => {
     const { adapter, say } = newCore()
 

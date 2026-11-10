@@ -150,6 +150,11 @@ interface RunningTask extends TaskAddress {
   parked: Parked | null
 }
 
+interface Warned {
+  readonly sessionId: string
+  readonly fill: number
+}
+
 interface Parked {
   readonly wake: (resumption: Resumption) => void
   readonly timer: NodeJS.Timeout
@@ -177,7 +182,8 @@ export class Core {
   #interrupting = false
   readonly #notices = new Set<Promise<void>>()
   readonly #openings = new Map<string, Promise<void>>()
-  readonly #warning = new Set<string>()
+  readonly #warning = new Map<string, number>()
+  readonly #fills = new Map<string, number>()
 
   constructor({
     channel,
@@ -658,7 +664,7 @@ export class Core {
 
     let instruction: OutboundInstruction
     let running: RunningTask | null = null
-    let warned: string | null = null
+    let warned: Warned | null = null
     const attempts = new Attempts(this.#credential)
     try {
       const sessionId = this.#sessions.sessionFor(conversationKey)
@@ -698,7 +704,7 @@ export class Core {
       const contextPercent = this.#contextWarning(task, instruction)
       if (contextPercent !== null && instruction.kind === 'result') {
         instruction = { ...instruction, contextPercent }
-        warned = task.sessionId
+        warned = { sessionId: task.sessionId, fill: this.#fillOf(task.sessionId) }
       }
     } catch (error) {
       instruction = { kind: 'failure', ...address, reason: reasonFor(error) }
@@ -747,7 +753,9 @@ export class Core {
       await this.#answer(unanswered, instruction)
       if (warned !== null) this.#rememberWarned(warned)
     } finally {
-      if (warned !== null) this.#warning.delete(warned)
+      if (warned !== null && this.#warning.get(warned.sessionId) === warned.fill) {
+        this.#warning.delete(warned.sessionId)
+      }
     }
   }
 
@@ -900,7 +908,8 @@ export class Core {
   #contextWarning(task: RunningTask, instruction: OutboundInstruction): number | null {
     if (task.relay !== null || instruction.kind !== 'result') return null
     const percent = nearlyFull(task.contextHeld, task.contextWindow)
-    if (percent === null || this.#warning.has(task.sessionId)) return null
+    const fill = this.#fillOf(task.sessionId)
+    if (percent === null || this.#warning.get(task.sessionId) === fill) return null
     try {
       if (this.#workRoot.readRecord(this.#workRoot.contextWarnedRecord(task.sessionId)) !== null) {
         return null
@@ -908,17 +917,23 @@ export class Core {
     } catch {
       return null
     }
-    this.#warning.add(task.sessionId)
+    this.#warning.set(task.sessionId, fill)
     return percent
   }
 
-  #rememberWarned(sessionId: string): void {
+  #fillOf(sessionId: string): number {
+    return this.#fills.get(sessionId) ?? 0
+  }
+
+  #rememberWarned({ sessionId, fill }: Warned): void {
+    if (this.#fillOf(sessionId) !== fill) return
     try {
       this.#workRoot.writeRecord(this.#workRoot.contextWarnedRecord(sessionId), '')
     } catch {}
   }
 
   #forgetWarned(sessionId: string): void {
+    this.#fills.set(sessionId, this.#fillOf(sessionId) + 1)
     try {
       this.#workRoot.forgetRecord(this.#workRoot.contextWarnedRecord(sessionId))
     } catch {}
