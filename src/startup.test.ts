@@ -1026,6 +1026,14 @@ describe('whether a Task used the Cloud Reach', () => {
   })
 })
 
+const CREDENTIALS = ['code', 'cloud', 'documents'] as const
+
+const OWN_TOKEN = {
+  code: /^token-/,
+  cloud: /^cloud-token-/,
+  documents: /^document-token-/,
+} as const
+
 describe('putting a credential in front of a Session’s tools', () => {
   it('believes the socket a request came in on, never the Session it names [fence:shim-identity-is-the-socket]', async () => {
     const why =
@@ -1033,7 +1041,10 @@ describe('putting a credential in front of a Session’s tools', () => {
       'lease says which Session holds the Seat. A request that names another Session is one ' +
       'agent asking for a credential as somebody else, which puts its use on their Audit ' +
       'Record; one on a Seat nobody holds is an agent that outlived its lease.'
-    const roma = boot({ cloudMinter: new FakeCloudMinter() })
+    const roma = boot({
+      cloudMinter: new FakeCloudMinter(),
+      documentMinter: new FakeDocumentMinter(),
+    })
     await roma.answerProbe()
     const { core } = await roma.starting
     const other = 'conversation-two'
@@ -1053,35 +1064,85 @@ describe('putting a credential in front of a Session’s tools', () => {
     for (let waited = 0; waited < 100 && seatOf(other) === undefined; waited++) await flush()
     const seatOfFirst = seatOf(KEY)
     const seatOfSecond = seatOf(other)
-    const asking = { operation: 'get', credential: 'cloud' } as const
-
-    const spoofed = await askMinter(seatSocketPathIn(roma.shims.dir, seatOfSecond ?? -1), {
-      ...asking,
-      session: sessionIdFor(KEY),
-    })
-    const unheld = await askMinter(seatSocketPathIn(roma.shims.dir, 9), {
-      ...asking,
-      session: sessionIdFor(KEY),
-    })
-    const own = await askMinter(seatSocketPathIn(roma.shims.dir, seatOfFirst ?? -1), {
-      ...asking,
-      session: sessionIdFor(KEY),
-    })
+    const asked = []
+    for (const credential of CREDENTIALS) {
+      const asking = { operation: 'get', credential, session: sessionIdFor(KEY) } as const
+      asked.push({
+        credential,
+        spoofed: (await askMinter(seatSocketPathIn(roma.shims.dir, seatOfSecond ?? -1), asking))
+          .token,
+        unheld: (await askMinter(seatSocketPathIn(roma.shims.dir, 9), asking)).token,
+        own: (await askMinter(seatSocketPathIn(roma.shims.dir, seatOfFirst ?? -1), asking)).token,
+      })
+    }
     feed(roma.procFor(KEY), OK)
     feed(roma.procFor(other), OK)
     await Promise.all([first, second])
 
     expect([seatOfFirst, seatOfSecond], why).toEqual([0, 1])
-    expect(spoofed.token, why).toBeNull()
-    expect(unheld.token, why).toBeNull()
-    expect(own.token, why).toMatch(/^cloud-token-/)
-    expect(roma.log, why).toContainEqual({
-      event: 'credential-refused',
-      claimed: sessionIdFor(KEY),
-      holder: sessionIdFor(other),
-      path: null,
-      credential: 'cloud',
+    for (const { credential, spoofed, unheld, own } of asked) {
+      expect(spoofed, `${credential}: ${why}`).toBeNull()
+      expect(unheld, `${credential}: ${why}`).toBeNull()
+      expect(own, `${credential}: ${why}`).toMatch(OWN_TOKEN[credential])
+      expect(roma.log, `${credential}: ${why}`).toContainEqual({
+        event: 'credential-refused',
+        claimed: sessionIdFor(KEY),
+        holder: sessionIdFor(other),
+        path: null,
+        credential,
+      })
+      expect(roma.log, `${credential}: ${why}`).toContainEqual(
+        expect.objectContaining({ event: 'credential', sessionId: sessionIdFor(KEY), credential }),
+      )
+    }
+    expect(roma.log, why).not.toContainEqual(
+      expect.objectContaining({ event: 'credential', sessionId: sessionIdFor(other) }),
+    )
+  })
+
+  it('puts nothing on the Audit Record of a Session another Seat claims to be [fence:shim-refused-claim-marks-no-audit]', async () => {
+    const why =
+      'GHSA-4vw6-r2rj-xcqf: a refused claim must leave the claimed Session’s Task without ' +
+      'cloudReach or documentReach, or the forgery still lands on the victim’s Audit Record.'
+    const roma = boot({
+      cloudMinter: new FakeCloudMinter(),
+      documentMinter: new FakeDocumentMinter(),
     })
+    await roma.answerProbe()
+    const { core, audit } = await roma.starting
+    const forger = 'conversation-two'
+    const message = (conversationKey: string) => ({
+      conversationKey,
+      caller: conversationKey,
+      callerName: conversationKey,
+      text: 'hello',
+      enclosures: [],
+      quotation: null,
+    })
+    const victimTask = core.handle(message(KEY))
+    const forgerTask = core.handle(message(forger))
+    const seatOf = (conversationKey: string) =>
+      roma.claude.spawns.find((spawn) => spawn.seat?.sessionId === sessionIdFor(conversationKey))
+        ?.seat?.seat
+    for (let waited = 0; waited < 100 && seatOf(forger) === undefined; waited++) await flush()
+    for (const credential of ['cloud', 'documents'] as const) {
+      await askMinter(seatSocketPathIn(roma.shims.dir, seatOf(forger) ?? -1), {
+        operation: 'get',
+        credential,
+        session: sessionIdFor(KEY),
+      })
+    }
+    feed(roma.procFor(KEY), OK)
+    feed(roma.procFor(forger), OK)
+    await Promise.all([victimTask, forgerTask])
+
+    const records = audit.readMonth(monthOf(new Date()))
+    expect(records, why).toHaveLength(2)
+    for (const caller of [KEY, forger]) {
+      expect(records, `${caller}: ${why}`).toContainEqual(
+        expect.objectContaining({ caller, cloudReach: false, documentReach: false }),
+      )
+    }
   })
 
   it('tells every Session what it can reach', async () => {

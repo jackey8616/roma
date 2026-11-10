@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { askMinter } from './shim-client.js'
 import { socketPathIn, type CredentialWanted } from './shim-protocol.js'
 import { NO_CLOUD_REACH } from './cloud/reach.js'
+import { FreshTokens } from './fresh-tokens.js'
 import { ShimServer, type ServedReaches, type ShimLogRecord } from './shim-server.js'
 import { FakeCloudMinter, FakeMinter, fakeServedReaches } from '../test/support/fake-minter.js'
 
@@ -370,5 +371,53 @@ describe('the socket itself', () => {
     servers = servers.filter((other) => other !== server)
 
     expect(existsSync(path)).toBe(false)
+  })
+})
+
+describe('when a credential is written down', () => {
+  it('names the Task running once the token is in hand [fence:shim-attributes-at-service]', async () => {
+    const why =
+      'The Task a credential is attributed to must be looked up once the token is in hand, ' +
+      'never before the mint is awaited (GHSA-4vw6-r2rj-xcqf). A mint can take seconds; a ' +
+      'Task that ends in that time would be marked for a token it never saw, and the next ' +
+      'one missed.'
+    let running: string | null = 'task-1'
+    let release: () => void = () => {}
+    const minted = new Promise<void>((done) => (release = done))
+    const gated = {
+      mint: async () => {
+        await minted
+        return { token: 'gated-token', expiresAt: Date.now() + 3_600_000 }
+      },
+    }
+    const dir = mkdtempSync(join(tmpdir(), 'roma-shim-server-'))
+    dirs.push(dir)
+    const credited: (string | null)[] = []
+    const log: ShimLogRecord[] = []
+    const server = await ShimServer.listen({
+      socketPath: socketPathIn(dir),
+      reaches: {
+        ...fakeServedReaches(),
+        cloud: { account: null, tokens: new FreshTokens({ minter: gated }) },
+      },
+      onCredential: (taskId) => credited.push(taskId),
+      taskFor: () => running,
+      log: (record) => log.push(record),
+    })
+    servers.push(server)
+
+    const asking = askMinter(server.socketPath, {
+      session: SESSION,
+      operation: 'get',
+      credential: 'cloud',
+    })
+    await sleep(20)
+    running = 'task-2'
+    release()
+    const answer = await asking
+
+    expect(answer.token, why).toBe('gated-token')
+    expect(credited, why).toEqual(['task-2'])
+    expect(log, why).toEqual([expect.objectContaining({ event: 'credential', taskId: 'task-2' })])
   })
 })

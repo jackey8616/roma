@@ -149,31 +149,31 @@ export class ShimServer {
         return { token: null, reason: 'this socket does not belong to that Session.' }
       }
     }
-    const taskId = this.#taskFor(sessionId)
-    const where = { sessionId, taskId, path, credential } as const
+    const where = () => ({ sessionId, taskId: this.#taskFor(sessionId), path, credential }) as const
     const reach = this.#reaches[credential]
 
     if (request.operation === 'erase') {
       if ('tokens' in reach && typeof request.token === 'string' && request.token !== '') {
         reach.tokens.discard(request.token)
       }
-      this.#log({ event: 'credential-rejected', ...where })
+      this.#log({ event: 'credential-rejected', ...where() })
       return { token: null }
     }
 
     if (!('tokens' in reach)) {
-      this.#log({ event: 'credential-failed', ...where, reason: reach.unavailable })
+      this.#log({ event: 'credential-failed', ...where(), reason: reach.unavailable })
       return { token: null, reason: reach.unavailable }
     }
 
     try {
       const { token, expiresAt } = await reach.tokens.fresh()
-      this.#onCredential(taskId, credential, path)
-      this.#log({ event: 'credential', ...where })
+      const served = where()
+      this.#onCredential(served.taskId, credential, path)
+      this.#log({ event: 'credential', ...served })
       return { token, expiresAt, account: reach.account }
     } catch (error) {
       const reason = reasonOf(error)
-      this.#log({ event: 'credential-failed', ...where, reason })
+      this.#log({ event: 'credential-failed', ...where(), reason })
       return { token: null, reason }
     }
   }
