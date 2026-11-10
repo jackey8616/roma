@@ -122,3 +122,23 @@ the seeded path left out):
   `models_cache.json`, `cache/`, `plugins/`, `shell_snapshots/`, and
   **`thread-writer-locks/`** — a lock directory, which is where hermes-agent's "rollout
   locked by a killed app-server" resume failure lives. #151 and #155 should read it.
+
+## Re-check on 0.167.0
+
+Date: 2026-11-10. The pin moved from 0.165.0 to 0.167.0, the latest stable build
+(`rust-v0.167.0`, 2026-11-06). Everything above was measured on 0.165.0; this is what
+was checked again, and what was not.
+
+- **The schema.** `codex app-server generate-ts` on both builds, diffed. Every change is
+  additive, and none touches what the harness reads: `initialize`, `thread/start`,
+  `turn/start`, `turn/completed`, `item/completed`'s `agentMessage`,
+  `thread/tokenUsage/updated` and `TokenUsageBreakdown` are identical. New are optional
+  `startedAtMs`/`completedAtMs` on every `ThreadItem`, an optional
+  `requiredHumanApproval` capability on `initialize` (experimental, not sent), a
+  `thread/section/changed` notification (the harness ignores notifications it does not
+  read), a `fileId` form of audio input, and account-level usage fields.
+- **The handshake.** Q1 again, free, against a scratch `CODEX_HOME`: the same reply
+  shape, with `codexHome` the scratch directory and the user agent
+  `roma/0.167.0 (…) (roma; 0.10.0)`.
+- **Not re-run: Q3's paid Turn.** It spends Codex's Shared Window and needs a seeded
+  credential. `npm run test:codex-live` on 0.167.0 is what would close it.

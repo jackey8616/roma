@@ -68,7 +68,7 @@ if [ -z "${codex_declared}" ] || [ "${codex_declared}" = '<no value>' ]; then
   exit 1
 fi
 
-# `codex --version` prints `codex-cli 0.165.0`; the version is the second word.
+# `codex --version` prints `codex-cli 0.167.0`; the version is the second word.
 codex_installed="$(docker run --rm --entrypoint codex "${image}" --version | awk '{ print $2 }')"
 
 if [ "${codex_installed}" != "${codex_declared}" ]; then

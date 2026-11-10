@@ -48,14 +48,14 @@ describe('the handshake', () => {
     ])
 
     reply(proc(), 1, {
-      userAgent: 'roma/0.165.0',
+      userAgent: 'roma/0.167.0',
       codexHome: '/var/lib/roma/codex',
       platformFamily: 'unix',
       platformOs: 'linux',
     })
 
     await expect(initialized).resolves.toEqual({
-      userAgent: 'roma/0.165.0',
+      userAgent: 'roma/0.167.0',
       codexHome: '/var/lib/roma/codex',
     })
     expect(proc().sent.at(-1)).toEqual({ method: 'initialized' })

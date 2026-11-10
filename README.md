@@ -13,7 +13,8 @@ channel-agnostic core) and ADR-0004 (Google Chat) before changing anything here.
   the measurements in `docs/` were taken on v2.1.220 and seam 2 re-verified them on
   v2.1.319 — which is why the image pins the same version exactly, and why moving it is a
   re-verification event (ADR-0007).
-- **Codex 0.165.0** on `PATH`, for the Codex live tests, on the same terms (ADR-0026).
+- **Codex 0.167.0** on `PATH`, for the Codex live tests, on the same terms (ADR-0026): the
+  measurements in `docs/` were taken on 0.165.0, and 0.167.0 was re-checked against them.
 - **Docker**, only to build or run the image.
 
 ```bash

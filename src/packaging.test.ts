@@ -7,7 +7,7 @@ const CLAUDE_CODE_VERSION = '2.1.319'
 
 const GH_VERSION = '2.96.0'
 
-const CODEX_VERSION = '0.165.0'
+const CODEX_VERSION = '0.167.0'
 
 describe('the image carries its own Claude Code, pinned exactly', () => {
   it('installs the version every measurement in this repo was taken against', () => {

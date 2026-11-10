@@ -146,8 +146,9 @@ argument transfers:
 - **The build.** The image carries a pinned Codex, the app-server protocol
   requires a floor in any case, and moving the pin is a re-verification
   event. ADR-0007's reasoning, second instance; the drift watch extends to
-  the second pin. The first pin is 0.165.0, the latest stable build on the day
-  it was measured.
+  the second pin. The first pin was 0.165.0, the latest stable build on the day
+  it was measured; it moved to 0.167.0, the latest stable build on
+  2026-11-10, on the re-check in `docs/codex-app-server-verification.md`.
 - **The model.** `gpt-5.6-sol`, one per deployment, sent on every
   `thread/start` — the protocol takes `model` per call — with the roma-written
   `config.toml` in `CODEX_HOME` as the backstop. Not Codex's own default,

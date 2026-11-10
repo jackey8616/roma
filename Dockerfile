@@ -28,7 +28,7 @@ ARG CLAUDE_CODE_VERSION=2.1.319
 # Carried by every image, including the ones whose deployment configures no
 # Codex: the binary is inert without a `CODEX_HOME`, and an image that differed
 # by deployment would be two images to verify.
-ARG CODEX_VERSION=0.165.0
+ARG CODEX_VERSION=0.167.0
 
 # The GitHub CLI the image carries, and the checksum of the tarball it comes in.
 #
