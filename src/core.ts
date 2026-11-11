@@ -719,10 +719,7 @@ export class Core {
     } catch (error) {
       instruction = { kind: 'failure', ...address, reason: reasonFor(error) }
     } finally {
-      if (running !== null) {
-        await this.#grantsSettled(taskId)
-        this.#running.delete(running)
-      }
+      if (running !== null) this.#running.delete(running)
     }
 
     try {
@@ -794,7 +791,13 @@ export class Core {
       try {
         turn = await this.#queue.run(
           task.sessionId,
-          () => this.#runTurn(task, paidBy, text, reporter),
+          async () => {
+            try {
+              return await this.#runTurn(task, paidBy, text, reporter)
+            } finally {
+              await this.#grantsSettled(taskId)
+            }
+          },
           {
             notice: (position) => reporter.update({ phase: 'queued', position }),
             taskId,

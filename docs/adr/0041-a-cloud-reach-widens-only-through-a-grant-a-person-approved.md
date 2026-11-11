@@ -174,12 +174,16 @@ Google either way. Enforced by `fence:cloud-grant-recorded-even-if-the-seat-move
 
 That is not enough on its own, because Google can answer after the Task's Turn has
 ended — a `/stop`, or a slow PAM — and by then the Task has left the running set and
-written its Audit Record. So a Task waits for the Cloud Grant requests it began before
-it does either: roma marks a request begun before it asks Google and finished whatever
-Google answers. The wait is bounded at 30 seconds, since a Task holds its place in the
-Task Queue while it waits, and a request still unanswered then is in the Operator Log
-when it does answer, and in Google's. Enforced by
-`fence:cloud-grant-answered-after-the-task-ended` and `fence:cloud-grant-wait-is-bounded`. Unlike `cloudReach` (ADR-0015 §10), roma does know what was asked for
+written its Audit Record. So roma marks a request begun before it asks Google and
+finished whatever Google answers, and every Turn of a Task, however it ends, waits for
+the requests its Task began before it gives up its slot in the Task Queue. The wait is
+inside the slot, so the Conversation's next Task cannot run and answer first while it
+lasts; waiting after the slot was released put replies out of order. Enforced by
+`fence:cloud-grant-answered-after-the-task-ended` and
+`fence:cloud-grant-wait-holds-the-queue`. The wait is bounded at 30 seconds, since it
+holds the Conversation's next Task, and a request still unanswered then is in the
+Operator Log when it does answer, and in Google's. Enforced by
+`fence:cloud-grant-wait-is-bounded`. Unlike `cloudReach` (ADR-0015 §10), roma does know what was asked for
 here, because it made the request. It records the request, not the use: what the
 roles were used for is in Google's log, under the Cloud Reach's name.
 
