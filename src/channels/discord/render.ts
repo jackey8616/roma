@@ -1,6 +1,7 @@
 import type { OutboundInstruction, TaskProgress } from '../../channel-adapter.js'
 import type { Command } from '../../commands.js'
 import { withNearlyFull } from '../../context-fill.js'
+import { grantNotice } from '../../grants.js'
 import { progressPhrase } from '../../progress-phrase.js'
 
 export const MAX_TEXT = 2000
@@ -25,6 +26,11 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
       return split(instruction.reason, MAX_TEXT)
     case 'choice':
       return split(instruction.text, MAX_TEXT)
+    case 'cloud-grant': {
+      const { lines, approveAt } = grantNotice(instruction)
+      const approve = approveAt === null ? [] : [`Approve or deny it in Google Cloud: ${approveAt}`]
+      return split([...lines, ...approve].join('\n'), MAX_TEXT)
+    }
     case 'stopped':
       return ['Stopped.']
     case 'interrupted':

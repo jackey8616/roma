@@ -16,7 +16,7 @@ import {
 import { githubReach } from '../../github/reach.js'
 import { cloudReach, noCloudReach } from '../../cloud/reach.js'
 import { documentReach, noDocumentReach } from '../../documents/reach.js'
-import type { Reach } from '../../reach.js'
+import type { CloudReach, Reach } from '../../reach.js'
 import { askMinter } from '../../shim-client.js'
 import { socketPathIn } from '../../shim-protocol.js'
 import type { ShimLogRecord } from '../../shim-server.js'
@@ -54,7 +54,7 @@ let fixtures: RomaFixture[] = []
 async function boot({
   cloud,
   documents,
-}: { cloud?: Reach<'cloud'>; documents?: Reach<'documents'> } = {}) {
+}: { cloud?: CloudReach; documents?: Reach<'documents'> } = {}) {
   const fixture = romaFixture('wiring')
   fixtures.push(fixture)
 

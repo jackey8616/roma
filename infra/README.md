@@ -224,6 +224,69 @@ metadata server (ADR-0035) — which is also why roma there needs `GOOGLE_APPLIC
 as a key file. Either way, that is an argument for keeping the account above at the
 `pubsub.subscriber` it has today and nothing more.
 
+### Widening it for a while: Cloud Grants
+
+Optional, and the way to keep the roles above narrow (ADR-0041). Wider roles sit behind
+Privileged Access Manager entitlements on which the Cloud Reach is a requester and a person
+is an approver. The agent asks with `roma-cloud-grant`, roma requests the grant as the Cloud
+Reach with the Task stamped on the justification and posts what was asked for to the
+Conversation, and the approver approves it in Google Cloud. PAM takes the roles away when
+it ends. roma creates no entitlement and approves nothing; everything below is the
+deployment's decision, made here where it can be audited.
+
+Once per scope, let PAM's organization service agent change IAM policy there. Without it,
+creating an entitlement answers `FAILED_PRECONDITION`:
+
+```bash
+gcloud services enable privilegedaccessmanager.googleapis.com --project=THE_AGENTS_PROJECT
+
+gcloud projects add-iam-policy-binding THE_AGENTS_PROJECT \
+  --member="serviceAccount:service-org-ORG_NUMBER@gcp-sa-pam.iam.gserviceaccount.com" \
+  --role="roles/privilegedaccessmanager.serviceAgent" --condition=None
+```
+
+Then one entitlement per kind of work. The Cloud Reach is the only eligible requester, a
+person is the approver, and each role carries its own condition. An entitlement with no
+manual approval step refuses roma's boot, because PAM would grant it the moment it was asked.
+The `gcloud pam` commands are still alpha, so this is the REST call:
+
+```bash
+cat > entitlement.json <<'EOF'
+{
+  "eligibleUsers": [{ "principals": [
+    "serviceAccount:roma-cloud-reach@THE_AGENTS_PROJECT.iam.gserviceaccount.com" ] }],
+  "approvalWorkflow": { "manualApprovals": { "requireApproverJustification": false,
+    "steps": [{ "approvers": [{ "principals": ["user:approver@example.com"] }],
+                "approvalsNeeded": 1 }] } },
+  "privilegedAccess": { "gcpIamAccess": {
+    "resourceType": "cloudresourcemanager.googleapis.com/Project",
+    "resource": "//cloudresourcemanager.googleapis.com/projects/THE_AGENTS_PROJECT",
+    "roleBindings": [{ "role": "roles/storage.objectViewer",
+      "conditionExpression": "resource.name == \"projects/_/buckets/B\" || resource.name.startsWith(\"projects/_/buckets/B/\")" }] } },
+  "maxRequestDuration": "3600s",
+  "requesterJustificationConfig": { "unstructured": {} }
+}
+EOF
+
+curl -X POST -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" -d @entitlement.json \
+  "https://privilegedaccessmanager.googleapis.com/v1/projects/THE_AGENTS_PROJECT/locations/global/entitlements?entitlementId=read-the-exports"
+```
+
+Write a bucket condition as an equality or a prefix ending in `/`. A bare
+`startsWith("projects/_/buckets/B")` also matches `B-prod`.
+
+Then name the scopes roma should look in:
+
+```bash
+export ROMA_CLOUD_GRANT_SCOPES=projects/THE_AGENTS_PROJECT
+```
+
+At boot roma asks PAM, as the Cloud Reach, what it may request there. That needs no IAM role
+on the Cloud Reach. roma announces the entitlements to every Session and refuses to start if
+a scope has none or any of them needs no approval. A grant lasts at least 30 minutes and at
+most what the entitlement allows. While it lasts, every Conversation has its roles.
+
 ## The agent's Document Reach and its Depot
 
 Separate from everything above, and **this directory creates none of it either**. Half of it

@@ -11,6 +11,13 @@ Credentials out of it. The Minter port gained a cloud half, `FreshTokens` (which
 was `InstallationTokens`) now serves both credentials from one piece of expiry
 arithmetic, and the socket answers a second kind of request.
 
+**Extended 2026-11-11 by ADR-0041**, which leaves every decision here standing. The
+Cloud Reach is still one identity reached by every Conversation, and its roles are still
+the boundary. They may now be widened for a while by a Cloud Grant, which a person approves
+in Google Cloud's Privileged Access Manager and which roma requests as the Cloud Reach and
+never approves. §10's yes-or-no field is unchanged; the grants a Task asked for are a
+second field, because there roma does know what was asked for.
+
 **Amended 2026-08-02 by ADR-0020**, which renames the shape rather than the
 decision. There is no `Minter` port with a cloud half any more: `MintsTokens` is
 the port, and what sits on top of it is a **Reach** — one per credential, of which

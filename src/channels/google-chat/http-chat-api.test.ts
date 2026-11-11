@@ -304,3 +304,27 @@ describe('what Chat refused', () => {
     expect(refusalOf(error)).toBe(error)
   })
 })
+
+describe('a button that opens a page', () => {
+  it('goes out as a link and not as an action roma would be sent [fence:gchat-grant-button-only-opens-a-link]', async () => {
+    const why =
+      'The Cloud Grant button opens Google Cloud and does nothing else (ADR-0041 §6). As a ' +
+      'card action it would come back to roma as a press, and the only thing roma could do ' +
+      'with a press is approve — which roma must never be able to do.'
+    const { api, last } = recording()
+
+    await api.post({
+      space: SPACE,
+      thread: null,
+      text: 'roma asked for a Cloud Grant.',
+      actions: [{ label: 'Review it in Google Cloud', url: 'https://console.example.test/a' }],
+    })
+
+    expect(buttonWidgetsOf(last()?.body)[0]?.buttonList.buttons, why).toEqual([
+      {
+        text: 'Review it in Google Cloud',
+        onClick: { openLink: { url: 'https://console.example.test/a' } },
+      },
+    ])
+  })
+})

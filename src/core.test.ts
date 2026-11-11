@@ -1,11 +1,14 @@
 import {
   appendFileSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -37,6 +40,12 @@ import { SessionPool, type PoolLogRecord } from './session-pool.js'
 import { WorkRoot } from './work-root.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { TaskQueue } from './task-queue.js'
+import type { Entitlement, Grant, GrantAsked } from './grants.js'
+import { GrantUse } from './reach-use.js'
+import { askMinter } from './shim-client.js'
+import { socketPathIn } from './shim-protocol.js'
+import { ShimServer } from './shim-server.js'
+import { fakeServedReaches } from '../test/support/fake-minter.js'
 import { flush, type FakeRuntimeProcess } from '../test/support/fake-runtime.js'
 import { FakeLauncher } from '../test/support/fake-launcher.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
@@ -103,6 +112,8 @@ const EVERY_CORE_OPTION: Record<keyof CoreOptions, true> = {
   overflow: true,
   usedCloudReach: true,
   usedDocumentReach: true,
+  requestedCloudGrants: true,
+  grantsSettled: true,
   log: true,
 }
 
@@ -122,6 +133,8 @@ function newCore({
   pinnedCaveman?: string
   usedCloudReach?: (taskId: string) => boolean
   usedDocumentReach?: (taskId: string) => boolean
+  requestedCloudGrants?: (taskId: string) => readonly string[]
+  grantsSettled?: (taskId: string) => Promise<void>
 } = {}) {
   const fixture = romaFixture(
     'core',
@@ -183,6 +196,10 @@ function newCore({
     ...(options.usedDocumentReach === undefined
       ? {}
       : { usedDocumentReach: options.usedDocumentReach }),
+    ...(options.requestedCloudGrants === undefined
+      ? {}
+      : { requestedCloudGrants: options.requestedCloudGrants }),
+    ...(options.grantsSettled === undefined ? {} : { grantsSettled: options.grantsSettled }),
   })
 
   const say = async (
@@ -4762,5 +4779,286 @@ describe('the message a message quotes', () => {
       type: 'user',
       message: { content: [{ text: '<from>Ada (users/17)</from>\n\nfix the CI' }] },
     })
+  })
+})
+
+describe('a Cloud Grant asked for during a Task', () => {
+  const ASKED = {
+    grant: {
+      name: 'projects/p1/locations/global/entitlements/read/grants/g1',
+      state: 'APPROVAL_AWAITED',
+      entitlement: 'projects/p1/locations/global/entitlements/read',
+      approveAt: 'https://console.example.test/approve',
+      bindings: [],
+      resource: null,
+    },
+    entitlement: {
+      name: 'projects/p1/locations/global/entitlements/read',
+      bindings: [{ role: 'roles/storage.objectViewer', condition: null }],
+      maxDurationS: 3600,
+    },
+    durationS: 1800,
+    justification: 'roma Task t: read the export',
+  }
+
+  it('is told to the Conversation the Task came from, by roma and not the model [fence:core-tells-the-cloud-grant]', async () => {
+    const why =
+      'roma posts the Cloud Grant itself, from what PAM answered, the moment it is requested ' +
+      '(ADR-0041 §6). Left to the model, the approver learns of it only if a Turn remembers ' +
+      'to say so, and reads the roles in words the model chose.'
+    const { adapter, core, start } = newCore()
+
+    const { task, proc } = await start('hello')
+    const taskId = taskIdOf(adapter)
+
+    expect(await core.grantAsked(taskId, ASKED), why).toBe(true)
+    expect(adapter.instructions.at(-1), why).toEqual({
+      kind: 'cloud-grant',
+      taskId,
+      conversationKey: KEY,
+      caller: 'users/17',
+      callerName: 'Ada',
+      ...ASKED,
+    })
+    feed(proc, OK)
+    await task
+  })
+
+  it('is not told anywhere when no Task of this Core asked for it', async () => {
+    const { adapter, core } = newCore()
+
+    expect(await core.grantAsked('a-task-of-another-channel', ASKED)).toBe(false)
+    expect(adapter.instructions).toEqual([])
+  })
+
+  it('goes on the Audit Record, and is left off one that asked for none', async () => {
+    const asked = new Map([['first', ['projects/p1/locations/global/entitlements/read/grants/g1']]])
+    let tasks = 0
+    const { audit, say } = newCore({
+      requestedCloudGrants: () => asked.get(tasks++ === 0 ? 'first' : 'second') ?? [],
+    })
+
+    await say('hello')
+    await say('again')
+
+    expect(recordsIn(audit).map((record) => record.cloudGrants)).toEqual([
+      ['projects/p1/locations/global/entitlements/read/grants/g1'],
+      undefined,
+    ])
+  })
+
+  it('tells and audits a grant Google answers after the Turn ended [fence:cloud-grant-answered-after-the-task-ended]', async () => {
+    const why =
+      'A Task’s Turn waits for its Cloud Grant requests to settle before it gives up its Task ' +
+      'Queue slot, and so before the Audit Record is written (ADR-0041 §7). Otherwise a grant PAM answers after the Turn — a ' +
+      '/stop, a slow PAM — exists in Google and is neither told nor audited.'
+    const found: Entitlement = ASKED.entitlement
+    const made: Grant = ASKED.grant
+    const grantUse = new GrantUse()
+    const { adapter, audit, core, queue, start } = newCore({
+      requestedCloudGrants: (taskId) => grantUse.takeRequestedBy(taskId),
+      grantsSettled: (taskId) => grantUse.settled(taskId),
+    })
+    let answerFromGoogle: () => void = () => {}
+    const google = new Promise<void>((answered) => {
+      answerFromGoogle = answered
+    })
+    const asked: GrantAsked[] = []
+    const dir = mkdtempSync(join(tmpdir(), 'roma-core-grant-'))
+    const server = await ShimServer.listen({
+      socketPath: socketPathIn(dir),
+      reaches: fakeServedReaches(),
+      taskFor: (sessionId) => queue.taskFor(sessionId),
+      grants: {
+        requests: {
+          entitlements: () => [found],
+          request: async (grant) => {
+            asked.push(grant)
+            await google
+            return made
+          },
+          status: () => Promise.resolve(made),
+        },
+      },
+      beginGrant: (taskId) => grantUse.begin(taskId),
+      onGrant: (taskId, told) => {
+        grantUse.requested(taskId, told.grant.name)
+        void core.grantAsked(taskId, told)
+      },
+      log: () => {},
+    })
+    try {
+      const { task, proc } = await start('hello')
+      const answer = askMinter(server.socketPath, {
+        session: sessionIdFor(KEY),
+        operation: 'grant',
+        credential: 'cloud',
+        grant: { entitlement: found.name, durationS: 1800, justification: 'read the export' },
+      })
+      for (let tries = 0; asked.length === 0 && tries < 100; tries++) await sleep(5)
+      expect(asked).toHaveLength(1)
+
+      feed(proc, OK)
+      await flush()
+      answerFromGoogle()
+      await answer
+      await task
+
+      expect(
+        adapter.instructions.filter(({ kind }) => kind === 'cloud-grant'),
+        why,
+      ).toHaveLength(1)
+      expect(
+        recordsIn(audit).map(({ cloudGrants }) => cloudGrants),
+        why,
+      ).toEqual([[made.name]])
+    } finally {
+      await server.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('holds the Conversation’s next Task while it waits, so replies keep their order [fence:cloud-grant-wait-holds-the-queue]', async () => {
+    const why =
+      'The wait for a Cloud Grant request happens inside the Task Queue slot (ADR-0041 §7). ' +
+      'Waiting after the slot is released lets the same Conversation’s next Task run and ' +
+      'answer first, so replies arrive out of order.'
+    const found: Entitlement = ASKED.entitlement
+    const made: Grant = ASKED.grant
+    const grantUse = new GrantUse()
+    const { adapter, core, queue, procFor } = newCore({
+      requestedCloudGrants: (taskId) => grantUse.takeRequestedBy(taskId),
+      grantsSettled: (taskId) => grantUse.settled(taskId),
+    })
+    let answerFromGoogle: () => void = () => {}
+    const google = new Promise<void>((answered) => {
+      answerFromGoogle = answered
+    })
+    let asked = 0
+    const dir = mkdtempSync(join(tmpdir(), 'roma-core-grant-order-'))
+    const server = await ShimServer.listen({
+      socketPath: socketPathIn(dir),
+      reaches: fakeServedReaches(),
+      taskFor: (sessionId) => queue.taskFor(sessionId),
+      grants: {
+        requests: {
+          entitlements: () => [found],
+          request: async () => {
+            asked++
+            await google
+            return made
+          },
+          status: () => Promise.resolve(made),
+        },
+      },
+      beginGrant: (taskId) => grantUse.begin(taskId),
+      onGrant: (taskId, told) => {
+        grantUse.requested(taskId, told.grant.name)
+        void core.grantAsked(taskId, told)
+      },
+      log: () => {},
+    })
+    try {
+      const first = core.handle(ingress('first'))
+      const second = core.handle(ingress('second'))
+      await flush()
+      const proc = procFor(KEY)
+      const answer = askMinter(server.socketPath, {
+        session: sessionIdFor(KEY),
+        operation: 'grant',
+        credential: 'cloud',
+        grant: { entitlement: found.name, durationS: 1800, justification: 'read the export' },
+      })
+      for (let tries = 0; asked === 0 && tries < 100; tries++) await sleep(5)
+
+      feed(proc, OK)
+      await flush()
+      expect(proc.sent, why).toHaveLength(1)
+
+      answerFromGoogle()
+      await answer
+      await first
+      await flush()
+      feed(proc, THREE_TURNS.turn(3))
+      await second
+
+      expect(
+        adapter.instructions
+          .filter((instruction) => instruction.kind === 'result')
+          .map((instruction) => (instruction.kind === 'result' ? instruction.text : '')),
+        why,
+      ).toEqual([expect.stringContaining('This conversation is on'), 'ok', '47'])
+    } finally {
+      await server.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('tells and audits a second grant asked for while the Turn waits on the first', async () => {
+    const found: Entitlement = ASKED.entitlement
+    const grantUse = new GrantUse()
+    const { adapter, audit, core, queue, start } = newCore({
+      requestedCloudGrants: (taskId) => grantUse.takeRequestedBy(taskId),
+      grantsSettled: (taskId) => grantUse.settled(taskId),
+    })
+    const answers: (() => void)[] = []
+    let asked = 0
+    const dir = mkdtempSync(join(tmpdir(), 'roma-core-grant-late-'))
+    const server = await ShimServer.listen({
+      socketPath: socketPathIn(dir),
+      reaches: fakeServedReaches(),
+      taskFor: (sessionId) => queue.taskFor(sessionId),
+      grants: {
+        requests: {
+          entitlements: () => [found],
+          request: async () => {
+            const n = ++asked
+            await new Promise<void>((answered) => answers.push(answered))
+            return { ...ASKED.grant, name: `${found.name}/grants/g${String(n)}` }
+          },
+          status: () => Promise.resolve(ASKED.grant),
+        },
+      },
+      beginGrant: (taskId) => grantUse.begin(taskId),
+      onGrant: (taskId, told) => {
+        grantUse.requested(taskId, told.grant.name)
+        void core.grantAsked(taskId, told)
+      },
+      log: () => {},
+    })
+    const ask = () =>
+      askMinter(server.socketPath, {
+        session: sessionIdFor(KEY),
+        operation: 'grant',
+        credential: 'cloud',
+        grant: { entitlement: found.name, durationS: 1800, justification: 'read the export' },
+      })
+    const until = async (wanted: number) => {
+      for (let tries = 0; asked < wanted && tries < 100; tries++) await sleep(5)
+      expect(asked).toBe(wanted)
+    }
+    try {
+      const { task, proc } = await start('hello')
+      const first = ask()
+      await until(1)
+      feed(proc, OK)
+      await flush()
+      const second = ask()
+      await until(2)
+      answers[0]?.()
+      await first
+      await flush()
+      answers[1]?.()
+      await second
+      await task
+
+      expect(adapter.instructions.filter(({ kind }) => kind === 'cloud-grant')).toHaveLength(2)
+      expect(recordsIn(audit).map(({ cloudGrants }) => cloudGrants)).toEqual([
+        [`${found.name}/grants/g1`, `${found.name}/grants/g2`],
+      ])
+    } finally {
+      await server.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

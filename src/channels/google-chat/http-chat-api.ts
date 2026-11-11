@@ -73,15 +73,18 @@ function cardFor(actions: readonly ChatAction[]): unknown {
               buttonList: {
                 buttons: actions.map((action) => ({
                   text: action.label,
-                  onClick: {
-                    action: {
-                      function: action.action,
-                      parameters: Object.entries(action.parameters).map(([key, value]) => ({
-                        key,
-                        value,
-                      })),
-                    },
-                  },
+                  onClick:
+                    'url' in action
+                      ? { openLink: { url: action.url } }
+                      : {
+                          action: {
+                            function: action.action,
+                            parameters: Object.entries(action.parameters).map(([key, value]) => ({
+                              key,
+                              value,
+                            })),
+                          },
+                        },
                 })),
               },
             },

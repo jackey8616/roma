@@ -1,11 +1,17 @@
+import type { Grant, GrantAsked } from './grants.js'
+
 export type CredentialWanted = 'code' | 'cloud' | 'documents'
+
+export type ShimOperation = 'get' | 'erase' | 'grant' | 'grant-status'
 
 export interface ShimRequest {
   readonly session: string
-  readonly operation: 'get' | 'erase'
+  readonly operation: ShimOperation
   readonly path?: string | null
   readonly token?: string | null
   readonly credential?: CredentialWanted
+  readonly grant?: GrantAsked | null
+  readonly grantName?: string | null
 }
 
 export interface ShimResponse {
@@ -13,6 +19,7 @@ export interface ShimResponse {
   readonly reason?: string
   readonly expiresAt?: number
   readonly account?: string | null
+  readonly grant?: Grant
 }
 
 export const MINTER_SOCKET_VAR = 'ROMA_MINTER_SOCKET'

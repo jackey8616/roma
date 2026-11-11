@@ -1,4 +1,5 @@
 import type { Command } from './commands.js'
+import type { CloudGrantAsked } from './grants.js'
 
 export interface PendingEnclosure {
   readonly name: string
@@ -91,6 +92,9 @@ export type OutboundInstruction = TaskAddress &
         readonly command: Exclude<Command, 'model'>
         readonly carriedOut: boolean
       }
+    | ({
+        readonly kind: 'cloud-grant'
+      } & CloudGrantAsked)
     | {
         readonly kind: 'choice'
         readonly text: string

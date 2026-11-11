@@ -1,4 +1,5 @@
 import { connect } from 'node:net'
+import type { Grant } from './grants.js'
 import { reasonOf } from './operator-log.js'
 import {
   MINTER_SOCKET_VAR,
@@ -82,11 +83,23 @@ export async function credentialFor(
 function readResponse(body: string): ShimResponse {
   const parsed: unknown = JSON.parse(body)
   if (typeof parsed !== 'object' || parsed === null) throw new Error('roma answered with nonsense')
-  const { token, reason, expiresAt, account } = parsed as Record<string, unknown>
+  const { token, reason, expiresAt, account, grant } = parsed as Record<string, unknown>
   return {
     token: typeof token === 'string' ? token : null,
     ...(typeof reason === 'string' ? { reason } : {}),
     ...(typeof expiresAt === 'number' ? { expiresAt } : {}),
     ...(typeof account === 'string' || account === null ? { account } : {}),
+    ...(isGrant(grant) ? { grant } : {}),
   }
+}
+
+function isGrant(value: unknown): value is Grant {
+  if (typeof value !== 'object' || value === null) return false
+  const { name, state, entitlement, approveAt } = value as Record<string, unknown>
+  return (
+    typeof name === 'string' &&
+    typeof state === 'string' &&
+    typeof entitlement === 'string' &&
+    (typeof approveAt === 'string' || approveAt === null)
+  )
 }

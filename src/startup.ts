@@ -7,7 +7,7 @@ import { CAVEMAN_OFF } from './caveman.js'
 import { PINNED_EFFORT, PINNED_MODEL } from './claude-session.js'
 import type { CredentialEnvs } from './session-pool.js'
 import type { RetryBudget } from './config.js'
-import { ReachUse } from './reach-use.js'
+import { GrantUse, ReachUse } from './reach-use.js'
 import { Core, type CoreLogRecord, type CoreOptions } from './core.js'
 import { CredentialProxy, type Fronted } from './credential-proxy.js'
 import { allows } from './egress/allowlist.js'
@@ -257,6 +257,8 @@ async function startBehind(
   )
   const cloudUse = new ReachUse()
   const documentUse = new ReachUse()
+  const grantUse = new GrantUse()
+  const cores: Core[] = []
   const served = servedReaches(reaches, proved, log)
   const holders: { pool: SessionPool | null } = { pool: null }
   const shimServers: ShimServer[] = []
@@ -270,6 +272,12 @@ async function startBehind(
           if (credential === 'documents') documentUse.minted(taskId)
         },
         taskFor: (sessionId) => queue.taskFor(sessionId),
+        grants: reaches.cloud.grants,
+        beginGrant: (taskId) => grantUse.begin(taskId),
+        onGrant: (taskId, asked) => {
+          grantUse.requested(taskId, asked.grant.name)
+          for (const core of cores) void core.grantAsked(taskId, asked)
+        },
         holder: () => holders.pool?.sessionOn(seat) ?? null,
         lease: () => holders.pool?.leaseOn(seat) ?? null,
         ...(log === undefined ? {} : { log }),
@@ -330,13 +338,19 @@ async function startBehind(
     credential: credential.kind,
     usedCloudReach: (taskId) => cloudUse.takeUsedBy(taskId),
     usedDocumentReach: (taskId) => documentUse.takeUsedBy(taskId),
+    requestedCloudGrants: (taskId) => grantUse.takeRequestedBy(taskId),
+    grantsSettled: (taskId) => grantUse.settled(taskId),
     ...(overflow === undefined ? {} : { overflow: { monthlyCapUsd: overflow.monthlyCapUsd } }),
     ...(log === undefined ? {} : { log }),
   }
 
   return {
     channels: channels.map((binding) =>
-      binding.coreOver((channel) => new Core({ channel, ...shared })),
+      binding.coreOver((channel) => {
+        const core = new Core({ channel, ...shared })
+        cores.push(core)
+        return core
+      }),
     ),
     pool,
     queue,

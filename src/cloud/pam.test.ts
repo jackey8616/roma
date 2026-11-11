@@ -1,0 +1,321 @@
+import { describe, expect, it } from 'vitest'
+import {
+  approvalsFor,
+  entitlementFrom,
+  GrantRefused,
+  isGrantScope,
+  needsAPerson,
+  PAM_API,
+  PamGrants,
+  secondsOf,
+} from './pam.js'
+
+interface Call {
+  readonly url: string
+  readonly method: string
+  readonly authorization: string | null
+  readonly body: unknown
+}
+
+const ENTITLEMENT = 'projects/p1/locations/global/entitlements/read-bucket'
+
+const APPROVED_BY_A_PERSON = {
+  manualApprovals: {
+    requireApproverJustification: false,
+    steps: [{ approvers: [{ principals: ['user:alice@example.com'] }], approvalsNeeded: 1 }],
+  },
+}
+
+const RAW_ENTITLEMENT = {
+  name: ENTITLEMENT,
+  maxRequestDuration: '3600s',
+  approvalWorkflow: APPROVED_BY_A_PERSON,
+  privilegedAccess: {
+    gcpIamAccess: {
+      resourceType: 'cloudresourcemanager.googleapis.com/Project',
+      resource: '//cloudresourcemanager.googleapis.com/projects/p1',
+      roleBindings: [
+        {
+          role: 'roles/storage.objectViewer',
+          conditionExpression: 'resource.name == "projects/_/buckets/b"',
+        },
+      ],
+    },
+  },
+}
+
+function pam(reply: (call: Call) => { status?: number; body: unknown }, scopes = ['projects/p1']) {
+  const calls: Call[] = []
+  let minted = 0
+  const fetch: typeof globalThis.fetch = (input, init) => {
+    const call = {
+      url: String(input),
+      method: init?.method ?? 'GET',
+      authorization: new Headers(init?.headers).get('authorization'),
+      body: init?.body === undefined ? undefined : JSON.parse(String(init.body)),
+    }
+    calls.push(call)
+    const { status = 200, body } = reply(call)
+    return Promise.resolve(new Response(JSON.stringify(body), { status }))
+  }
+  const grants = new PamGrants({
+    minter: {
+      mint: () => {
+        minted += 1
+        return Promise.resolve({
+          token: `ya29.t${String(minted)}`,
+          expiresAt: Date.now() + 3600_000,
+        })
+      },
+    },
+    scopes,
+    fetch,
+  })
+  return { grants, calls, minted: () => minted }
+}
+
+describe('finding what the Cloud Reach may request', () => {
+  it('asks PAM, as the Cloud Reach, for what it is a requester of', async () => {
+    const { grants, calls } = pam(() => ({ body: { entitlements: [RAW_ENTITLEMENT] } }))
+
+    expect(await grants.find()).toEqual([
+      {
+        name: ENTITLEMENT,
+        bindings: [
+          {
+            role: 'roles/storage.objectViewer',
+            condition: 'resource.name == "projects/_/buckets/b"',
+          },
+        ],
+        maxDurationS: 3600,
+      },
+    ])
+    const url = new URL(calls[0]!.url)
+    expect(`${url.origin}${url.pathname}`).toBe(
+      `${PAM_API}/projects/p1/locations/global/entitlements:search`,
+    )
+    expect(url.searchParams.get('callerAccessType')).toBe('GRANT_REQUESTER')
+    expect(calls[0]!.authorization).toBe('Bearer ya29.t1')
+  })
+
+  it('follows every page', async () => {
+    const { grants, calls } = pam(({ url }) =>
+      new URL(url).searchParams.get('pageToken') === null
+        ? { body: { entitlements: [RAW_ENTITLEMENT], nextPageToken: 'next' } }
+        : { body: { entitlements: [{ ...RAW_ENTITLEMENT, name: `${ENTITLEMENT}-2` }] } },
+    )
+
+    expect((await grants.find()).map(({ name }) => name)).toEqual([ENTITLEMENT, `${ENTITLEMENT}-2`])
+    expect(calls).toHaveLength(2)
+  })
+
+  it('refuses a scope where the Cloud Reach may request nothing', async () => {
+    const { grants } = pam(() => ({ body: {} }))
+
+    await expect(grants.find()).rejects.toThrow('eligible for no entitlement in projects/p1')
+  })
+
+  it('says what Google said when it refuses', async () => {
+    const { grants } = pam(() => ({ status: 403, body: { error: { message: 'denied' } } }))
+
+    await expect(grants.find()).rejects.toBeInstanceOf(GrantRefused)
+  })
+
+  it('reuses one Cloud Token across calls', async () => {
+    const { grants, minted } = pam(
+      () => ({ body: { entitlements: [RAW_ENTITLEMENT] } }),
+      ['projects/p1', 'projects/p2'],
+    )
+
+    await grants.find()
+
+    expect(minted()).toBe(1)
+  })
+
+  it('will not list entitlements it has not found yet', () => {
+    const { grants } = pam(() => ({ body: {} }))
+
+    expect(() => grants.entitlements()).toThrow('before finding them')
+  })
+})
+
+describe('requesting a grant', () => {
+  it('posts the duration and the justification it was handed, unchanged', async () => {
+    const { grants, calls } = pam(() => ({
+      body: { name: `${ENTITLEMENT}/grants/g1`, state: 'APPROVAL_AWAITED' },
+    }))
+
+    const grant = await grants.request({
+      entitlement: ENTITLEMENT,
+      durationS: 1800,
+      justification: 'roma Task t1: read the export',
+    })
+
+    expect(calls[0]).toMatchObject({
+      url: `${PAM_API}/${ENTITLEMENT}/grants`,
+      method: 'POST',
+      body: {
+        requestedDuration: '1800s',
+        justification: { unstructuredJustification: 'roma Task t1: read the export' },
+      },
+    })
+    expect(grant).toEqual({
+      name: `${ENTITLEMENT}/grants/g1`,
+      state: 'APPROVAL_AWAITED',
+      entitlement: ENTITLEMENT,
+      approveAt: 'https://console.cloud.google.com/iam-admin/pam/grants/approvals?project=p1',
+      bindings: [],
+      resource: null,
+    })
+  })
+
+  it('says how a grant stands by searching what it requested, since a requester may not get one [fence:cloud-grant-status-searches-what-it-requested]', async () => {
+    const { grants, calls } = pam(() => ({
+      body: {
+        grants: [
+          { name: `${ENTITLEMENT}/grants/other`, state: 'ENDED' },
+          { name: `${ENTITLEMENT}/grants/g1`, state: 'ACTIVE' },
+        ],
+      },
+    }))
+
+    expect(
+      (await grants.status(`${ENTITLEMENT}/grants/g1`)).state,
+      'Measured 2026-11-11: the Cloud Reach as requester is refused grants.get with 403 and ' +
+        'may call grants:search with HAD_CREATED (ADR-0041). Asked by get, every status fails.',
+    ).toBe('ACTIVE')
+    const url = new URL(calls[0]!.url)
+    expect(`${url.origin}${url.pathname}`).toBe(`${PAM_API}/${ENTITLEMENT}/grants:search`)
+    expect(url.searchParams.get('callerRelationship')).toBe('HAD_CREATED')
+  })
+
+  it('follows pages until it finds the grant', async () => {
+    const { grants, calls } = pam(({ url }) =>
+      new URL(url).searchParams.get('pageToken') === null
+        ? {
+            body: {
+              grants: [{ name: `${ENTITLEMENT}/grants/a`, state: 'ENDED' }],
+              nextPageToken: 'n',
+            },
+          }
+        : { body: { grants: [{ name: `${ENTITLEMENT}/grants/g1`, state: 'ACTIVE' }] } },
+    )
+
+    expect((await grants.status(`${ENTITLEMENT}/grants/g1`)).state).toBe('ACTIVE')
+    expect(calls).toHaveLength(2)
+  })
+
+  it('says so when the Cloud Reach requested no grant by that name', async () => {
+    const { grants } = pam(() => ({ body: { grants: [] } }))
+
+    await expect(grants.status(`${ENTITLEMENT}/grants/g1`)).rejects.toThrow('lists no grant named')
+  })
+
+  it('passes a refusal on as one', async () => {
+    const { grants } = pam(() => ({ status: 400, body: { error: { message: 'too long' } } }))
+
+    await expect(
+      grants.request({ entitlement: ENTITLEMENT, durationS: 1800, justification: 'x' }),
+    ).rejects.toThrow('Google refused to request a grant')
+  })
+})
+
+describe('reading what Google says', () => {
+  it('reads a duration in seconds, and nothing else', () => {
+    expect(secondsOf('3600s')).toBe(3600)
+    expect(secondsOf('3600.5s')).toBe(3600)
+    expect(secondsOf('1h')).toBeNull()
+    expect(secondsOf(3600)).toBeNull()
+  })
+
+  it('drops an entitlement it cannot read', () => {
+    expect(entitlementFrom({ name: ENTITLEMENT })).toBeNull()
+  })
+
+  it('takes projects, folders and organizations as scopes, and nothing else', () => {
+    expect(isGrantScope('projects/p1')).toBe(true)
+    expect(isGrantScope('folders/123')).toBe(true)
+    expect(isGrantScope('organizations/9')).toBe(true)
+    expect(isGrantScope('projects/p1/locations/global')).toBe(false)
+    expect(isGrantScope('buckets/b')).toBe(false)
+  })
+
+  it('points at the console page where a person approves', () => {
+    expect(approvalsFor('folders/12/locations/global/entitlements/e/grants/g')).toBe(
+      'https://console.cloud.google.com/iam-admin/pam/grants/approvals?folder=12',
+    )
+    expect(approvalsFor('organizations/9/locations/global')).toBe(
+      'https://console.cloud.google.com/iam-admin/pam/grants/approvals?organizationId=9',
+    )
+  })
+})
+
+describe('only what a person must approve', () => {
+  it('refuses to boot on an entitlement that needs nobody to approve it [fence:cloud-grant-only-where-a-person-approves]', async () => {
+    const { grants } = pam(() => ({
+      body: {
+        entitlements: [
+          RAW_ENTITLEMENT,
+          { ...RAW_ENTITLEMENT, name: `${ENTITLEMENT}-self-serve`, approvalWorkflow: null },
+        ],
+      },
+    }))
+
+    await expect(
+      grants.find(),
+      'PAM grants an entitlement with no approval workflow the moment it is requested. ' +
+        'ADR-0041 §3 widens the Reach only once a person approved, so roma will not boot ' +
+        'knowing it could ask for one.',
+    ).rejects.toThrow(`${ENTITLEMENT}-self-serve, which needs no person to approve it`)
+  })
+
+  it('takes a manual step that names its approvers, and nothing short of one', () => {
+    expect(needsAPerson(APPROVED_BY_A_PERSON)).toBe(true)
+    expect(needsAPerson(null)).toBe(false)
+    expect(needsAPerson({})).toBe(false)
+    expect(needsAPerson({ manualApprovals: { steps: [] } })).toBe(false)
+    expect(needsAPerson({ manualApprovals: { steps: [{ approvers: [] }] } })).toBe(false)
+    expect(
+      needsAPerson({ manualApprovals: { steps: [{ approvers: [{ principals: [] }] }] } }),
+    ).toBe(false)
+    expect(
+      needsAPerson({
+        manualApprovals: {
+          steps: [{ approvers: [{ principals: ['user:a@example.com'] }], approvalsNeeded: 0 }],
+        },
+      }),
+    ).toBe(false)
+  })
+})
+
+describe('what a grant says it gives', () => {
+  it('reads each role with its own condition, and the resource, off the grant', async () => {
+    const { grants } = pam(() => ({
+      body: {
+        name: `${ENTITLEMENT}/grants/g1`,
+        state: 'APPROVAL_AWAITED',
+        privilegedAccess: {
+          gcpIamAccess: {
+            resource: '//cloudresourcemanager.googleapis.com/projects/p1',
+            roleBindings: [
+              { role: 'roles/storage.objectViewer', conditionExpression: 'resource.name == "x"' },
+              { role: 'roles/storage.objectAdmin' },
+            ],
+          },
+        },
+      },
+    }))
+
+    const grant = await grants.request({
+      entitlement: ENTITLEMENT,
+      durationS: 1800,
+      justification: 'x',
+    })
+
+    expect(grant.bindings).toEqual([
+      { role: 'roles/storage.objectViewer', condition: 'resource.name == "x"' },
+      { role: 'roles/storage.objectAdmin', condition: null },
+    ])
+    expect(grant.resource).toBe('//cloudresourcemanager.googleapis.com/projects/p1')
+  })
+})

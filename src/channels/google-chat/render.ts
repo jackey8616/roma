@@ -1,11 +1,14 @@
 import type { OutboundInstruction, TaskProgress } from '../../channel-adapter.js'
 import type { Command } from '../../commands.js'
 import { withNearlyFull } from '../../context-fill.js'
+import { grantNotice } from '../../grants.js'
 import { progressPhrase } from '../../progress-phrase.js'
 
 export const MAX_TEXT = 4096
 
 export const OVERFLOW_BUTTON = 'Run it on metered billing'
+
+export const REVIEW_GRANT_BUTTON = 'Review it in Google Cloud'
 
 type NotProgress<T> = T extends { readonly kind: 'progress' } ? never : T
 export type TaskOutcome = NotProgress<OutboundInstruction>
@@ -28,6 +31,8 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
       return split(to, instruction.reason)
     case 'choice':
       return split(to, instruction.text)
+    case 'cloud-grant':
+      return split(to, grantNotice(instruction).lines.join('\n'))
     case 'stopped':
       return [`${to}Stopped.`]
     case 'interrupted':
