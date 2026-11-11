@@ -21,6 +21,10 @@ function isFigure(value: unknown): boolean {
   return value === null || (typeof value === 'number' && Number.isFinite(value))
 }
 
+function isGrantList(value: unknown): boolean {
+  return Array.isArray(value) && value.every((grant) => typeof grant === 'string' && grant !== '')
+}
+
 function isCompaction(value: unknown): boolean {
   if (typeof value !== 'object' || value === null) return false
   const { trigger, preTokens, postTokens } = value as Record<string, unknown>
@@ -65,6 +69,7 @@ export interface AuditRecord {
   readonly outputTokens?: number | null
   readonly cloudReach?: boolean
   readonly documentReach?: boolean
+  readonly cloudGrants?: readonly string[]
   readonly compaction?: Compaction
   readonly apiKeySource: string | null
 }
@@ -268,6 +273,7 @@ function readRecord(line: string): AuditRecord | null {
   if (record['documentReach'] !== undefined && typeof record['documentReach'] !== 'boolean') {
     return null
   }
+  if (record['cloudGrants'] !== undefined && !isGrantList(record['cloudGrants'])) return null
   if (record['compaction'] !== undefined && !isCompaction(record['compaction'])) return null
   if (!CREDENTIALS.includes(record['credential'] as CredentialKind)) return null
   if (record['runtime'] !== undefined && !RUNTIMES.includes(record['runtime'] as Runtime)) {

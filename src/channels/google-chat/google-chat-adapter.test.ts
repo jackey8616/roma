@@ -5,7 +5,7 @@ import { readCommand } from '../../commands.js'
 import { EFFORT_NAMES } from '../../effort-menu.js'
 import { MENU_NAMES } from '../../model-menu.js'
 import { sessionIdFor } from '../../session-id.js'
-import { ChatRefusal } from './chat-api.js'
+import { ChatRefusal, type ChatPress } from './chat-api.js'
 import {
   ATTEMPTS,
   GoogleChatAdapter,
@@ -13,7 +13,7 @@ import {
   RETRY_FLOOR_MS,
 } from './google-chat-adapter.js'
 import type { ChatEvent, ChatEventLogRecord } from './chat-events.js'
-import { INTERRUPTED, MAX_TEXT } from './render.js'
+import { INTERRUPTED, MAX_TEXT, REVIEW_GRANT_BUTTON } from './render.js'
 import { RecordingChatApi } from '../../../test/support/recording-chat-api.js'
 
 const SPACE = 'spaces/AAAA'
@@ -1245,7 +1245,10 @@ describe('choosing a model, an effort or a Caveman by pressing', () => {
       for (const action of actions) {
         const pressed = adapter.toIngress({
           ...press('unread', 'unread'),
-          common: { invokedFunction: action.action, parameters: action.parameters },
+          common: {
+            invokedFunction: (action as ChatPress).action,
+            parameters: (action as ChatPress).parameters,
+          },
         })
         expect(readCommand(pressed?.text ?? ''), MENUS_WHY).toEqual({
           command: chooses,
@@ -1329,5 +1332,46 @@ describe('choosing a model, an effort or a Caveman by pressing', () => {
     for (const message of api.messages.slice(0, -1)) {
       expect(message.posted.actions, why).toBeUndefined()
     }
+  })
+})
+
+describe('a Cloud Grant roma asked for', () => {
+  const GRANT = {
+    kind: 'cloud-grant',
+    grant: {
+      name: 'projects/p1/locations/global/entitlements/read/grants/g1',
+      state: 'APPROVAL_AWAITED',
+      entitlement: 'projects/p1/locations/global/entitlements/read',
+      approveAt: 'https://console.cloud.google.com/iam-admin/pam/grants/approvals?project=p1',
+    },
+    entitlement: {
+      name: 'projects/p1/locations/global/entitlements/read',
+      roles: ['roles/storage.objectViewer'],
+      conditions: ['resource.name == "projects/_/buckets/b"'],
+      maxDurationS: 3600,
+    },
+    durationS: 1800,
+    justification: 'roma Task t: read the export',
+  } as const
+
+  it('posts what was asked for, with a button that opens Google Cloud’s approval page', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, GRANT))
+
+    const posted = api.messages[0]?.posted
+    expect(posted?.actions).toEqual([{ label: REVIEW_GRANT_BUTTON, url: GRANT.grant.approveAt }])
+    expect(posted?.text).toContain('roles/storage.objectViewer')
+    expect(posted?.text).toContain('Only where: resource.name == "projects/_/buckets/b"')
+    expect(posted?.text).toContain('For: 30m')
+    expect(posted?.text).toContain('written by the agent and not checked by roma')
+  })
+
+  it('posts no button when there is no page to send anybody to', async () => {
+    const { adapter, api } = newAdapter()
+
+    await adapter.deliver(to(THREAD, { ...GRANT, grant: { ...GRANT.grant, approveAt: null } }))
+
+    expect(api.messages[0]?.posted.actions).toBeUndefined()
   })
 })

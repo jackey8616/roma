@@ -1,3 +1,4 @@
+import type { Grants } from './grants.js'
 import type { CredentialWanted } from './shim-protocol.js'
 
 export interface MintedToken {
@@ -30,9 +31,11 @@ export type UnavailableReach<C extends CredentialWanted = CredentialWanted> = Re
 export type Reach<C extends CredentialWanted = CredentialWanted> =
   AvailableReach<C> | UnavailableReach<C>
 
+export type CloudReach = Reach<'cloud'> & { readonly grants: Grants }
+
 export interface Reaches {
   readonly code: AvailableReach<'code'>
-  readonly cloud: Reach<'cloud'>
+  readonly cloud: CloudReach
   readonly documents: Reach<'documents'>
 }
 

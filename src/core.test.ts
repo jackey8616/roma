@@ -103,6 +103,7 @@ const EVERY_CORE_OPTION: Record<keyof CoreOptions, true> = {
   overflow: true,
   usedCloudReach: true,
   usedDocumentReach: true,
+  requestedCloudGrants: true,
   log: true,
 }
 
@@ -122,6 +123,7 @@ function newCore({
   pinnedCaveman?: string
   usedCloudReach?: (taskId: string) => boolean
   usedDocumentReach?: (taskId: string) => boolean
+  requestedCloudGrants?: (taskId: string) => readonly string[]
 } = {}) {
   const fixture = romaFixture(
     'core',
@@ -183,6 +185,9 @@ function newCore({
     ...(options.usedDocumentReach === undefined
       ? {}
       : { usedDocumentReach: options.usedDocumentReach }),
+    ...(options.requestedCloudGrants === undefined
+      ? {}
+      : { requestedCloudGrants: options.requestedCloudGrants }),
   })
 
   const say = async (
@@ -4762,5 +4767,70 @@ describe('the message a message quotes', () => {
       type: 'user',
       message: { content: [{ text: '<from>Ada (users/17)</from>\n\nfix the CI' }] },
     })
+  })
+})
+
+describe('a Cloud Grant asked for during a Task', () => {
+  const ASKED = {
+    grant: {
+      name: 'projects/p1/locations/global/entitlements/read/grants/g1',
+      state: 'APPROVAL_AWAITED',
+      entitlement: 'projects/p1/locations/global/entitlements/read',
+      approveAt: 'https://console.example.test/approve',
+    },
+    entitlement: {
+      name: 'projects/p1/locations/global/entitlements/read',
+      roles: ['roles/storage.objectViewer'],
+      conditions: [],
+      maxDurationS: 3600,
+    },
+    durationS: 1800,
+    justification: 'roma Task t: read the export',
+  }
+
+  it('is told to the Conversation the Task came from, by roma and not the model [fence:core-tells-the-cloud-grant]', async () => {
+    const why =
+      'roma posts the Cloud Grant itself, from what PAM answered, the moment it is requested ' +
+      '(ADR-0041 §6). Left to the model, the approver learns of it only if a Turn remembers ' +
+      'to say so, and reads the roles in words the model chose.'
+    const { adapter, core, start } = newCore()
+
+    const { task, proc } = await start('hello')
+    const taskId = taskIdOf(adapter)
+
+    expect(await core.grantAsked(taskId, ASKED), why).toBe(true)
+    expect(adapter.instructions.at(-1), why).toEqual({
+      kind: 'cloud-grant',
+      taskId,
+      conversationKey: KEY,
+      caller: 'users/17',
+      callerName: 'Ada',
+      ...ASKED,
+    })
+    feed(proc, OK)
+    await task
+  })
+
+  it('is not told anywhere when no Task of this Core asked for it', async () => {
+    const { adapter, core } = newCore()
+
+    expect(await core.grantAsked('a-task-of-another-channel', ASKED)).toBe(false)
+    expect(adapter.instructions).toEqual([])
+  })
+
+  it('goes on the Audit Record, and is left off one that asked for none', async () => {
+    const asked = new Map([['first', ['projects/p1/locations/global/entitlements/read/grants/g1']]])
+    let tasks = 0
+    const { audit, say } = newCore({
+      requestedCloudGrants: () => asked.get(tasks++ === 0 ? 'first' : 'second') ?? [],
+    })
+
+    await say('hello')
+    await say('again')
+
+    expect(recordsIn(audit).map((record) => record.cloudGrants)).toEqual([
+      ['projects/p1/locations/global/entitlements/read/grants/g1'],
+      undefined,
+    ])
   })
 })

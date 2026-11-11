@@ -10,6 +10,7 @@ import {
 } from './audit-log.js'
 import type { CredentialKind } from './build-env.js'
 import { attributed, relayed } from './attribution.js'
+import type { CloudGrantAsked } from './grants.js'
 import {
   CAVEMAN_NAMES,
   CAVEMAN_NOT_PINNED,
@@ -123,6 +124,7 @@ export interface CoreOptions {
   readonly overflow?: OverflowOptions
   readonly usedCloudReach?: (taskId: string) => boolean
   readonly usedDocumentReach?: (taskId: string) => boolean
+  readonly requestedCloudGrants?: (taskId: string) => readonly string[]
   readonly log?: CoreLog
 }
 
@@ -176,6 +178,7 @@ export class Core {
   readonly #overflow: OverflowOptions | null
   readonly #usedCloudReach: (taskId: string) => boolean
   readonly #usedDocumentReach: (taskId: string) => boolean
+  readonly #requestedCloudGrants: (taskId: string) => readonly string[]
   readonly #log: CoreLog
   readonly #running = new Set<RunningTask>()
   readonly #unanswered = new Set<Unanswered>()
@@ -200,6 +203,7 @@ export class Core {
     overflow,
     usedCloudReach,
     usedDocumentReach,
+    requestedCloudGrants,
     log,
   }: CoreOptions) {
     if (!channel.capabilities.stableConversationKey) {
@@ -219,6 +223,7 @@ export class Core {
     this.#overflow = overflow ?? null
     this.#usedCloudReach = usedCloudReach ?? (() => false)
     this.#usedDocumentReach = usedDocumentReach ?? (() => false)
+    this.#requestedCloudGrants = requestedCloudGrants ?? (() => [])
     this.#log = log ?? writeToStderr
   }
 
@@ -395,6 +400,7 @@ export class Core {
       outputTokens: turn === null ? 0 : turn.outputTokens,
       cloudReach: this.#usedCloudReach(taskId),
       documentReach: this.#usedDocumentReach(taskId),
+      ...grantsOnRecord(this.#requestedCloudGrants(taskId)),
       apiKeySource: null,
     })
 
@@ -718,6 +724,7 @@ export class Core {
       const outcome = outcomeOf(instruction)
       const cloudReach = this.#usedCloudReach(taskId)
       const documentReach = this.#usedDocumentReach(taskId)
+      const cloudGrants = grantsOnRecord(this.#requestedCloudGrants(taskId))
       for (const credential of [
         answeredOn,
         ...attempts.credentials().filter((c) => c !== answeredOn),
@@ -745,6 +752,7 @@ export class Core {
           outputTokens: paid.outputTokens,
           cloudReach,
           documentReach,
+          ...cloudGrants,
           ...(paid.compaction === null ? {} : { compaction: paid.compaction }),
           apiKeySource: attempts.apiKeySource(),
         })
@@ -835,6 +843,13 @@ export class Core {
     this.#unpark(task)
 
     return resumption !== 'stopped'
+  }
+
+  async grantAsked(taskId: string, asked: CloudGrantAsked): Promise<boolean> {
+    const task = [...this.#running].find((candidate) => candidate.taskId === taskId)
+    if (task === undefined) return false
+    await this.#tell(task, { kind: 'cloud-grant', ...addressOf(task), ...asked })
+    return true
   }
 
   async takeOverflow(taskId: string): Promise<boolean> {
@@ -1194,6 +1209,10 @@ class TaskStopped extends Error {
     super('Task stopped before its Turn began')
     this.name = 'TaskStopped'
   }
+}
+
+function grantsOnRecord(grants: readonly string[]): { readonly cloudGrants?: readonly string[] } {
+  return grants.length === 0 ? {} : { cloudGrants: grants }
 }
 
 function addressOf({ taskId, conversationKey, caller, callerName }: TaskAddress): TaskAddress {

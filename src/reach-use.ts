@@ -9,3 +9,19 @@ export class ReachUse {
     return this.#tasks.delete(taskId)
   }
 }
+
+export class GrantUse {
+  readonly #tasks = new Map<string, string[]>()
+
+  requested(taskId: string, grant: string): void {
+    const grants = this.#tasks.get(taskId)
+    if (grants === undefined) this.#tasks.set(taskId, [grant])
+    else grants.push(grant)
+  }
+
+  takeRequestedBy(taskId: string): readonly string[] {
+    const grants = this.#tasks.get(taskId) ?? []
+    this.#tasks.delete(taskId)
+    return grants
+  }
+}

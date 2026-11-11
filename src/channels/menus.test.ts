@@ -10,7 +10,7 @@ import {
   readChosenOption as readDiscordChoice,
   type DiscordEvent,
 } from './discord/discord-events.js'
-import type { ChatAction } from './google-chat/chat-api.js'
+import type { ChatAction, ChatPress } from './google-chat/chat-api.js'
 import { readChosenOption as readChatChoice, type ChatEvent } from './google-chat/chat-events.js'
 import { GoogleChatAdapter } from './google-chat/google-chat-adapter.js'
 
@@ -76,7 +76,10 @@ function pressed(button: ChatAction): string | null {
     user: { name: CHAT_CALLER, displayName: 'Ada' },
     space: { name: CHAT_SPACE, type: 'ROOM', spaceType: 'SPACE' },
     message: { name: `${CHAT_SPACE}/messages/msg-9`, thread: { name: CHAT_THREAD } },
-    common: { invokedFunction: button.action, parameters: button.parameters },
+    common: {
+      invokedFunction: (button as ChatPress).action,
+      parameters: (button as ChatPress).parameters,
+    },
   }
   return readChatChoice(event)?.text ?? null
 }

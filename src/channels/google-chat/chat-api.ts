@@ -1,8 +1,15 @@
-export interface ChatAction {
+export interface ChatPress {
   readonly label: string
   readonly action: string
   readonly parameters: Readonly<Record<string, string>>
 }
+
+export interface ChatLink {
+  readonly label: string
+  readonly url: string
+}
+
+export type ChatAction = ChatPress | ChatLink
 
 export interface ChatMessage {
   readonly space: string

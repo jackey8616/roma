@@ -833,6 +833,26 @@ _Avoid_: Credential Shim (see above), helper (that is `git`'s word, and the
 Shims' to refuse), SDK, client library, wrapper, and describing it as how an
 agent reaches the cloud — it is one way, and the cheap one
 
+**Cloud Grant**:
+More roles for the Cloud Reach for a while, which a person approved. roma requests
+one as the Cloud Reach, from an entitlement the deployment set up in Google Cloud,
+with the Task stamped on its justification; somebody the entitlement names approves
+it in Google Cloud; and it ends on its own (ADR-0041). It widens the Cloud Reach,
+not one Conversation's share of it, so while it lasts every Conversation has its
+roles. roma asks and never decides: nothing in roma approves or denies one.
+_Avoid_: elevation, escalation (both read as something roma takes; this is something
+a person gives), permission request, PAM grant (that is Google's object, and a Cloud
+Grant is the one roma requested for its Reach), and saying a Caller was granted
+anything — the Cloud Reach was
+
+**Cloud Grant Shortcut**:
+The command roma provides for asking for a Cloud Grant and for seeing how one
+stands, `roma-cloud-grant`. The Cloud Shortcut's sibling and the same in what it is
+not: it is not a boundary, since the agent holds a Cloud Token and can call Google
+itself. What the long way round loses is the Task on the justification, and with it
+the line from Google's log back to a person.
+_Avoid_: approval command (it cannot approve), helper, wrapper
+
 ### Reaching the documents
 
 **Document Reach**:

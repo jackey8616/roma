@@ -7,7 +7,7 @@ import type { Depot, DocumentMinter } from '../../src/documents/depot.js'
 import { documentReach, noDocumentReach, NO_DOCUMENT_REACH } from '../../src/documents/reach.js'
 import { FreshTokens } from '../../src/fresh-tokens.js'
 import type { Installation, InstallationMinter } from '../../src/github/installation.js'
-import type { AvailableReach, MintedToken, Reach, Reaches } from '../../src/reach.js'
+import type { AvailableReach, CloudReach, MintedToken, Reach, Reaches } from '../../src/reach.js'
 import type { ServedReaches } from '../../src/shim-server.js'
 import type { ShimsOptions } from '../../src/startup.js'
 
@@ -166,7 +166,7 @@ export function fakeCodeReach(minter: FakeMinter = new FakeMinter()): AvailableR
   }
 }
 
-export function fakeCloudReach(minter: FakeCloudMinter | null): Reach<'cloud'> {
+export function fakeCloudReach(minter: FakeCloudMinter | null): CloudReach {
   if (minter === null) return noCloudReach()
   return { ...cloudReach(minter), announce: () => `acts as ${minter.account}` }
 }

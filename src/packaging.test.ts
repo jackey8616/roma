@@ -68,6 +68,10 @@ describe('the image carries a Cloud Shortcut and no cloud CLI', () => {
     expect(dockerfile()).toMatch(/cloud-token\.js[^\n]*> \/usr\/local\/bin\/roma-cloud-token/)
   })
 
+  it('puts the Cloud Grant Shortcut on PATH beside it', () => {
+    expect(dockerfile()).toMatch(/cloud-grant\.js[^\n]*> \/usr\/local\/bin\/roma-cloud-grant/)
+  })
+
   it('installs no cloud CLI, by any route', () => {
     expect(dockerfile()).not.toMatch(/\bgcloud\b/)
     expect(dockerfile()).not.toMatch(/google-cloud-(cli|sdk)/)

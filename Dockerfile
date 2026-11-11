@@ -184,6 +184,14 @@ RUN printf '#!/bin/sh\nexec node /app/dist/github/gh-shim.js "$@"\n' > /usr/loca
 RUN printf '#!/bin/sh\nexec node /app/dist/cloud/cloud-token.js "$@"\n' > /usr/local/bin/roma-cloud-token \
   && chmod 0755 /usr/local/bin/roma-cloud-token
 
+# The Cloud Grant Shortcut (ADR-0041). It asks roma to request a Cloud Grant as
+# the Cloud Reach, with the Task stamped on, and to say how one stands. It can
+# ask and never approve: a person approves in Google Cloud. Installed on every
+# image for the reason the Cloud Shortcut is — where there is nothing to ask
+# for, it says so in one sentence rather than being missing from PATH.
+RUN printf '#!/bin/sh\nexec node /app/dist/cloud/cloud-grant.js "$@"\n' > /usr/local/bin/roma-cloud-grant \
+  && chmod 0755 /usr/local/bin/roma-cloud-grant
+
 # The Document Shortcut, on the same three lines and every word of the reasoning
 # above (ADR-0022 §4). Installed on every image, including the ones whose
 # deployment has no Document Reach, where it answers in one sentence that there

@@ -19,7 +19,7 @@ import {
   type ChatEventLogRecord,
 } from './chat-events.js'
 import type { OperatorLog } from '../../operator-log.js'
-import { OVERFLOW_BUTTON, outcomeMessages, progressText } from './render.js'
+import { OVERFLOW_BUTTON, outcomeMessages, progressText, REVIEW_GRANT_BUTTON } from './render.js'
 
 export const ATTEMPTS = 3
 
@@ -94,7 +94,9 @@ export class GoogleChatAdapter implements ChannelAdapter<ChatEvent> {
         ? [this.#offer(taskId)]
         : instruction.kind === 'choice'
           ? this.#choices(instruction.chooses, instruction.options)
-          : undefined
+          : instruction.kind === 'cloud-grant' && instruction.grant.approveAt !== null
+            ? [{ label: REVIEW_GRANT_BUTTON, url: instruction.grant.approveAt }]
+            : undefined
 
     const messages = outcomeMessages(instruction)
     for (const [at, text] of messages.entries()) {

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ConfigurationMissing } from '../env-config.js'
-import { CLOUD_KEY_FILE_VAR, readCloudEnv } from './env-config.js'
+import { CLOUD_GRANT_SCOPES_VAR, CLOUD_KEY_FILE_VAR, readCloudEnv } from './env-config.js'
 
 let dirs: string[] = []
 
@@ -41,6 +41,7 @@ describe('a deployment with a Cloud Reach', () => {
       account: 'agent@a-project.iam.gserviceaccount.com',
       privateKey: A_KEY.private_key,
       tokenEndpoint: 'https://oauth2.googleapis.com/token',
+      grantScopes: [],
     })
   })
 
@@ -108,5 +109,37 @@ describe('a Cloud Reach that was meant and does not work [fence:cloud-refuses-on
     const named = keyFile('not json at all')
 
     expect(() => readCloudEnv({ [CLOUD_KEY_FILE_VAR]: named })).toThrow(named)
+  })
+})
+
+describe('a deployment whose Cloud Reach may be widened by a Cloud Grant', () => {
+  it('reads the scopes it may look for entitlements in', () => {
+    const path = keyFile(JSON.stringify(A_KEY))
+
+    expect(
+      readCloudEnv({
+        [CLOUD_KEY_FILE_VAR]: path,
+        [CLOUD_GRANT_SCOPES_VAR]: ' projects/p1, folders/12 ,projects/p1,',
+      })?.grantScopes,
+    ).toEqual(['projects/p1', 'folders/12'])
+  })
+
+  it('refuses a scope that is not a project, folder or organization', () => {
+    const path = keyFile(JSON.stringify(A_KEY))
+
+    expect(() =>
+      readCloudEnv({
+        [CLOUD_KEY_FILE_VAR]: path,
+        [CLOUD_GRANT_SCOPES_VAR]: 'projects/p1,buckets/b',
+      }),
+    ).toThrow(ConfigurationMissing)
+  })
+
+  it('refuses scopes without a Cloud Reach to widen [fence:cloud-grant-scopes-need-a-cloud-reach]', () => {
+    expect(
+      () => readCloudEnv({ [CLOUD_GRANT_SCOPES_VAR]: 'projects/p1' }),
+      'A Cloud Grant is requested as the Cloud Reach (ADR-0041 §2). Scopes with no key would ' +
+        'boot a deployment that announces nothing and silently grants nothing.',
+    ).toThrow(ConfigurationMissing)
   })
 })
