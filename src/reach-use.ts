@@ -10,8 +10,47 @@ export class ReachUse {
   }
 }
 
+export const GRANT_SETTLE_MS = 30_000
+
+export interface GrantUseOptions {
+  readonly settleMs?: number
+  readonly wait?: (ms: number) => Promise<void>
+}
+
 export class GrantUse {
   readonly #tasks = new Map<string, string[]>()
+  readonly #pending = new Map<string, Set<Promise<void>>>()
+  readonly #settleMs: number
+  readonly #wait: (ms: number) => Promise<void>
+
+  constructor({
+    settleMs = GRANT_SETTLE_MS,
+    wait = (ms) => new Promise((done) => setTimeout(done, ms).unref()),
+  }: GrantUseOptions = {}) {
+    this.#settleMs = settleMs
+    this.#wait = wait
+  }
+
+  begin(taskId: string): () => void {
+    let finish: () => void = () => {}
+    const finished = new Promise<void>((done) => {
+      finish = done
+    })
+    const pending = this.#pending.get(taskId) ?? new Set<Promise<void>>()
+    pending.add(finished)
+    this.#pending.set(taskId, pending)
+    return () => {
+      finish()
+      pending.delete(finished)
+      if (pending.size === 0 && this.#pending.get(taskId) === pending) this.#pending.delete(taskId)
+    }
+  }
+
+  async settled(taskId: string): Promise<void> {
+    const pending = this.#pending.get(taskId)
+    if (pending === undefined || pending.size === 0) return
+    await Promise.race([Promise.all(pending), this.#wait(this.#settleMs)])
+  }
 
   requested(taskId: string, grant: string): void {
     const grants = this.#tasks.get(taskId)

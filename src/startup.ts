@@ -273,6 +273,7 @@ async function startBehind(
         },
         taskFor: (sessionId) => queue.taskFor(sessionId),
         grants: reaches.cloud.grants,
+        beginGrant: (taskId) => grantUse.begin(taskId),
         onGrant: (taskId, asked) => {
           grantUse.requested(taskId, asked.grant.name)
           for (const core of cores) void core.grantAsked(taskId, asked)
@@ -338,6 +339,7 @@ async function startBehind(
     usedCloudReach: (taskId) => cloudUse.takeUsedBy(taskId),
     usedDocumentReach: (taskId) => documentUse.takeUsedBy(taskId),
     requestedCloudGrants: (taskId) => grantUse.takeRequestedBy(taskId),
+    grantsSettled: (taskId) => grantUse.settled(taskId),
     ...(overflow === undefined ? {} : { overflow: { monthlyCapUsd: overflow.monthlyCapUsd } }),
     ...(log === undefined ? {} : { log }),
   }

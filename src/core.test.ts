@@ -1,11 +1,14 @@
 import {
   appendFileSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -37,6 +40,12 @@ import { SessionPool, type PoolLogRecord } from './session-pool.js'
 import { WorkRoot } from './work-root.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { TaskQueue } from './task-queue.js'
+import type { Entitlement, Grant, GrantAsked } from './grants.js'
+import { GrantUse } from './reach-use.js'
+import { askMinter } from './shim-client.js'
+import { socketPathIn } from './shim-protocol.js'
+import { ShimServer } from './shim-server.js'
+import { fakeServedReaches } from '../test/support/fake-minter.js'
 import { flush, type FakeRuntimeProcess } from '../test/support/fake-runtime.js'
 import { FakeLauncher } from '../test/support/fake-launcher.js'
 import { RecordingAdapter } from '../test/support/recording-adapter.js'
@@ -104,6 +113,7 @@ const EVERY_CORE_OPTION: Record<keyof CoreOptions, true> = {
   usedCloudReach: true,
   usedDocumentReach: true,
   requestedCloudGrants: true,
+  grantsSettled: true,
   log: true,
 }
 
@@ -124,6 +134,7 @@ function newCore({
   usedCloudReach?: (taskId: string) => boolean
   usedDocumentReach?: (taskId: string) => boolean
   requestedCloudGrants?: (taskId: string) => readonly string[]
+  grantsSettled?: (taskId: string) => Promise<void>
 } = {}) {
   const fixture = romaFixture(
     'core',
@@ -188,6 +199,7 @@ function newCore({
     ...(options.requestedCloudGrants === undefined
       ? {}
       : { requestedCloudGrants: options.requestedCloudGrants }),
+    ...(options.grantsSettled === undefined ? {} : { grantsSettled: options.grantsSettled }),
   })
 
   const say = async (
@@ -4833,5 +4845,76 @@ describe('a Cloud Grant asked for during a Task', () => {
       ['projects/p1/locations/global/entitlements/read/grants/g1'],
       undefined,
     ])
+  })
+
+  it('tells and audits a grant Google answers after the Turn ended [fence:cloud-grant-answered-after-the-task-ended]', async () => {
+    const why =
+      'A Task waits for its Cloud Grant requests to settle before it leaves the running set and ' +
+      'writes its Audit Record (ADR-0041 §7). Otherwise a grant PAM answers after the Turn — a ' +
+      '/stop, a slow PAM — exists in Google and is neither told nor audited.'
+    const found: Entitlement = ASKED.entitlement
+    const made: Grant = ASKED.grant
+    const grantUse = new GrantUse()
+    const { adapter, audit, core, queue, start } = newCore({
+      requestedCloudGrants: (taskId) => grantUse.takeRequestedBy(taskId),
+      grantsSettled: (taskId) => grantUse.settled(taskId),
+    })
+    let answerFromGoogle: () => void = () => {}
+    const google = new Promise<void>((answered) => {
+      answerFromGoogle = answered
+    })
+    const asked: GrantAsked[] = []
+    const dir = mkdtempSync(join(tmpdir(), 'roma-core-grant-'))
+    const server = await ShimServer.listen({
+      socketPath: socketPathIn(dir),
+      reaches: fakeServedReaches(),
+      taskFor: (sessionId) => queue.taskFor(sessionId),
+      grants: {
+        requests: {
+          entitlements: () => [found],
+          request: async (grant) => {
+            asked.push(grant)
+            await google
+            return made
+          },
+          status: () => Promise.resolve(made),
+        },
+      },
+      beginGrant: (taskId) => grantUse.begin(taskId),
+      onGrant: (taskId, told) => {
+        grantUse.requested(taskId, told.grant.name)
+        void core.grantAsked(taskId, told)
+      },
+      log: () => {},
+    })
+    try {
+      const { task, proc } = await start('hello')
+      const answer = askMinter(server.socketPath, {
+        session: sessionIdFor(KEY),
+        operation: 'grant',
+        credential: 'cloud',
+        grant: { entitlement: found.name, durationS: 1800, justification: 'read the export' },
+      })
+      for (let tries = 0; asked.length === 0 && tries < 100; tries++) await sleep(5)
+      expect(asked).toHaveLength(1)
+
+      feed(proc, OK)
+      await flush()
+      answerFromGoogle()
+      await answer
+      await task
+
+      expect(
+        adapter.instructions.filter(({ kind }) => kind === 'cloud-grant'),
+        why,
+      ).toHaveLength(1)
+      expect(
+        recordsIn(audit).map(({ cloudGrants }) => cloudGrants),
+        why,
+      ).toEqual([[made.name]])
+    } finally {
+      await server.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

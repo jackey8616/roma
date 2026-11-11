@@ -170,7 +170,16 @@ which moves the decision out of Google's audit trail and into roma.
 `cloudGrants` lists the grants roma requested for a Task, and is absent when there
 were none. A grant PAM made is recorded and told even when the Seat that asked has
 moved on to another Session by the time Google answers, because the grant exists in
-Google either way. Enforced by `fence:cloud-grant-recorded-even-if-the-seat-moved`. Unlike `cloudReach` (ADR-0015 §10), roma does know what was asked for
+Google either way. Enforced by `fence:cloud-grant-recorded-even-if-the-seat-moved`.
+
+That is not enough on its own, because Google can answer after the Task's Turn has
+ended — a `/stop`, or a slow PAM — and by then the Task has left the running set and
+written its Audit Record. So a Task waits for the Cloud Grant requests it began before
+it does either: roma marks a request begun before it asks Google and finished whatever
+Google answers. The wait is bounded at 30 seconds, since a Task holds its place in the
+Task Queue while it waits, and a request still unanswered then is in the Operator Log
+when it does answer, and in Google's. Enforced by
+`fence:cloud-grant-answered-after-the-task-ended` and `fence:cloud-grant-wait-is-bounded`. Unlike `cloudReach` (ADR-0015 §10), roma does know what was asked for
 here, because it made the request. It records the request, not the use: what the
 roles were used for is in Google's log, under the Cloud Reach's name.
 

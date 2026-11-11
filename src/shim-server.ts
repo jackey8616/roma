@@ -84,6 +84,7 @@ export interface ShimServerOptions {
   readonly log?: OperatorLog<ShimLogRecord>
   readonly grants?: Grants
   readonly onGrant?: (taskId: string, asked: CloudGrantAsked) => void
+  readonly beginGrant?: (taskId: string) => () => void
 }
 
 const NO_CLOUD_GRANTS: Grants = { unavailable: 'This roma has no Cloud Grants to ask for.' }
@@ -103,6 +104,7 @@ export class ShimServer {
   readonly #log: OperatorLog<ShimLogRecord>
   readonly #grants: Grants
   readonly #onGrant: (taskId: string, asked: CloudGrantAsked) => void
+  readonly #beginGrant: (taskId: string) => () => void
   readonly #open = new Set<Socket>()
 
   private constructor(options: ShimServerOptions, server: Server) {
@@ -116,6 +118,7 @@ export class ShimServer {
     this.#log = options.log ?? writeToStderr
     this.#grants = options.grants ?? NO_CLOUD_GRANTS
     this.#onGrant = options.onGrant ?? (() => {})
+    this.#beginGrant = options.beginGrant ?? (() => () => {})
   }
 
   static async listen(options: ShimServerOptions): Promise<ShimServer> {
@@ -264,6 +267,7 @@ export class ShimServer {
       asked = () => grants.requests.status(named.ok)
     }
 
+    const done = told !== null && taskId !== null ? this.#beginGrant(taskId) : () => {}
     try {
       const grant = await asked()
       if (told !== null && taskId !== null) this.#onGrant(taskId, told(grant))
@@ -280,6 +284,8 @@ export class ShimServer {
     } catch (error) {
       if (!heldNow()) return refuse(this.#holder?.() ?? null)
       return refused(reasonOf(error))
+    } finally {
+      done()
     }
   }
 }

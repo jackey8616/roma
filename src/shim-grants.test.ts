@@ -85,12 +85,18 @@ async function listening({
   const log: ShimLogRecord[] = []
   const granted: [string, string][] = []
   const told: CloudGrantAsked[] = []
+  const begun: string[] = []
+  const finished: string[] = []
   const server = await ShimServer.listen({
     socketPath: socketPathIn(dir),
     reaches: fakeServedReaches(),
     taskFor,
     ...(holder === undefined ? {} : { holder }),
     ...(grants === undefined ? {} : { grants }),
+    beginGrant: (taskId) => {
+      begun.push(taskId)
+      return () => finished.push(taskId)
+    },
     onGrant: (taskId, asked) => {
       granted.push([taskId, asked.grant.name])
       told.push(asked)
@@ -98,7 +104,7 @@ async function listening({
     log: (record) => log.push(record),
   })
   servers.push(server)
-  return { server, log, granted, told }
+  return { server, log, granted, told, begun, finished }
 }
 
 const REQUEST = {
@@ -237,5 +243,25 @@ describe('asking roma for a Cloud Grant', () => {
         'Session, so the Conversation is told and the Audit Record lists it (ADR-0041 §6, §7).',
     ).toEqual([['task-7', `${ENTITLEMENT}/grants/g1`]])
     expect(log).toContainEqual(expect.objectContaining({ event: 'cloud-grant' }))
+  })
+
+  it('marks a request begun before Google is asked and finished whatever it answers', async () => {
+    const requests = new FakeRequests()
+    requests.failWith = new Error('Google refused to request a grant, with 500')
+    const { server, begun, finished } = await listening({ grants: { requests } })
+
+    await askMinter(server.socketPath, REQUEST)
+
+    expect(begun).toEqual(['task-7'])
+    expect(finished).toEqual(['task-7'])
+  })
+
+  it('marks nothing for a request roma refused before asking Google', async () => {
+    const requests = new FakeRequests()
+    const { server, begun } = await listening({ grants: { requests }, taskFor: () => null })
+
+    await askMinter(server.socketPath, REQUEST)
+
+    expect(begun).toEqual([])
   })
 })

@@ -125,6 +125,7 @@ export interface CoreOptions {
   readonly usedCloudReach?: (taskId: string) => boolean
   readonly usedDocumentReach?: (taskId: string) => boolean
   readonly requestedCloudGrants?: (taskId: string) => readonly string[]
+  readonly grantsSettled?: (taskId: string) => Promise<void>
   readonly log?: CoreLog
 }
 
@@ -179,6 +180,7 @@ export class Core {
   readonly #usedCloudReach: (taskId: string) => boolean
   readonly #usedDocumentReach: (taskId: string) => boolean
   readonly #requestedCloudGrants: (taskId: string) => readonly string[]
+  readonly #grantsSettled: (taskId: string) => Promise<void>
   readonly #log: CoreLog
   readonly #running = new Set<RunningTask>()
   readonly #unanswered = new Set<Unanswered>()
@@ -204,6 +206,7 @@ export class Core {
     usedCloudReach,
     usedDocumentReach,
     requestedCloudGrants,
+    grantsSettled,
     log,
   }: CoreOptions) {
     if (!channel.capabilities.stableConversationKey) {
@@ -224,6 +227,7 @@ export class Core {
     this.#usedCloudReach = usedCloudReach ?? (() => false)
     this.#usedDocumentReach = usedDocumentReach ?? (() => false)
     this.#requestedCloudGrants = requestedCloudGrants ?? (() => [])
+    this.#grantsSettled = grantsSettled ?? (() => Promise.resolve())
     this.#log = log ?? writeToStderr
   }
 
@@ -715,7 +719,10 @@ export class Core {
     } catch (error) {
       instruction = { kind: 'failure', ...address, reason: reasonFor(error) }
     } finally {
-      if (running !== null) this.#running.delete(running)
+      if (running !== null) {
+        await this.#grantsSettled(taskId)
+        this.#running.delete(running)
+      }
     }
 
     try {
