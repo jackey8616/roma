@@ -4993,4 +4993,72 @@ describe('a Cloud Grant asked for during a Task', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  it('tells and audits a second grant asked for while the Turn waits on the first', async () => {
+    const found: Entitlement = ASKED.entitlement
+    const grantUse = new GrantUse()
+    const { adapter, audit, core, queue, start } = newCore({
+      requestedCloudGrants: (taskId) => grantUse.takeRequestedBy(taskId),
+      grantsSettled: (taskId) => grantUse.settled(taskId),
+    })
+    const answers: (() => void)[] = []
+    let asked = 0
+    const dir = mkdtempSync(join(tmpdir(), 'roma-core-grant-late-'))
+    const server = await ShimServer.listen({
+      socketPath: socketPathIn(dir),
+      reaches: fakeServedReaches(),
+      taskFor: (sessionId) => queue.taskFor(sessionId),
+      grants: {
+        requests: {
+          entitlements: () => [found],
+          request: async () => {
+            const n = ++asked
+            await new Promise<void>((answered) => answers.push(answered))
+            return { ...ASKED.grant, name: `${found.name}/grants/g${String(n)}` }
+          },
+          status: () => Promise.resolve(ASKED.grant),
+        },
+      },
+      beginGrant: (taskId) => grantUse.begin(taskId),
+      onGrant: (taskId, told) => {
+        grantUse.requested(taskId, told.grant.name)
+        void core.grantAsked(taskId, told)
+      },
+      log: () => {},
+    })
+    const ask = () =>
+      askMinter(server.socketPath, {
+        session: sessionIdFor(KEY),
+        operation: 'grant',
+        credential: 'cloud',
+        grant: { entitlement: found.name, durationS: 1800, justification: 'read the export' },
+      })
+    const until = async (wanted: number) => {
+      for (let tries = 0; asked < wanted && tries < 100; tries++) await sleep(5)
+      expect(asked).toBe(wanted)
+    }
+    try {
+      const { task, proc } = await start('hello')
+      const first = ask()
+      await until(1)
+      feed(proc, OK)
+      await flush()
+      const second = ask()
+      await until(2)
+      answers[0]?.()
+      await first
+      await flush()
+      answers[1]?.()
+      await second
+      await task
+
+      expect(adapter.instructions.filter(({ kind }) => kind === 'cloud-grant')).toHaveLength(2)
+      expect(recordsIn(audit).map(({ cloudGrants }) => cloudGrants)).toEqual([
+        [`${found.name}/grants/g1`, `${found.name}/grants/g2`],
+      ])
+    } finally {
+      await server.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })

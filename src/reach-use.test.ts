@@ -65,4 +65,46 @@ describe('waiting for a Task’s Cloud Grant requests', () => {
 
     await expect(use.settled('t')).resolves.toBeUndefined()
   })
+
+  it('also waits for a request begun while it was already waiting [fence:cloud-grant-wait-takes-late-requests]', async () => {
+    const use = new GrantUse({ wait: () => new Promise(() => {}) })
+    const first = use.begin('t')
+    let settled = false
+    const waiting = use.settled('t').then(() => {
+      settled = true
+    })
+    const second = use.begin('t')
+
+    first()
+    for (let i = 0; i < 5; i++) await Promise.resolve()
+
+    expect(
+      settled,
+      'A Task can begin another Cloud Grant request while its Turn waits for the first. ' +
+        'Waiting only on the requests there were when the wait began loses the later grant ' +
+        'from the notice and the Audit Record (ADR-0041 §7).',
+    ).toBe(false)
+    second()
+    await waiting
+    expect(settled).toBe(true)
+  })
+
+  it('keeps one deadline across every request it waits for', async () => {
+    let deadlines = 0
+    const use = new GrantUse({
+      wait: () => {
+        deadlines++
+        return new Promise(() => {})
+      },
+    })
+    const first = use.begin('t')
+    const waiting = use.settled('t')
+    const second = use.begin('t')
+    first()
+    for (let i = 0; i < 5; i++) await Promise.resolve()
+    second()
+    await waiting
+
+    expect(deadlines).toBe(1)
+  })
 })

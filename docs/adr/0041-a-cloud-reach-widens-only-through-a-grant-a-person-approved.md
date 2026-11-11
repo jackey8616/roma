@@ -180,7 +180,11 @@ the requests its Task began before it gives up its slot in the Task Queue. The w
 inside the slot, so the Conversation's next Task cannot run and answer first while it
 lasts; waiting after the slot was released put replies out of order. Enforced by
 `fence:cloud-grant-answered-after-the-task-ended` and
-`fence:cloud-grant-wait-holds-the-queue`. The wait is bounded at 30 seconds, since it
+`fence:cloud-grant-wait-holds-the-queue`. A request the Task begins while its Turn
+is already waiting is waited for too, under the same deadline. Enforced by
+`fence:cloud-grant-wait-takes-late-requests`. Once the slot is given up the Session
+runs no Task, so a request that arrives after it is refused before Google is asked
+(§4), and there is no grant for anybody to miss. The wait is bounded at 30 seconds, since it
 holds the Conversation's next Task, and a request still unanswered then is in the
 Operator Log when it does answer, and in Google's. Enforced by
 `fence:cloud-grant-wait-is-bounded`. Unlike `cloudReach` (ADR-0015 §10), roma does know what was asked for

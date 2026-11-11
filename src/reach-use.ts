@@ -47,9 +47,14 @@ export class GrantUse {
   }
 
   async settled(taskId: string): Promise<void> {
-    const pending = this.#pending.get(taskId)
-    if (pending === undefined || pending.size === 0) return
-    await Promise.race([Promise.all(pending), this.#wait(this.#settleMs)])
+    let late: Promise<'late'> | null = null
+    for (;;) {
+      const pending = this.#pending.get(taskId)
+      if (pending === undefined || pending.size === 0) return
+      late ??= this.#wait(this.#settleMs).then(() => 'late' as const)
+      const outcome = await Promise.race([Promise.all(pending).then(() => 'done' as const), late])
+      if (outcome === 'late') return
+    }
   }
 
   requested(taskId: string, grant: string): void {
