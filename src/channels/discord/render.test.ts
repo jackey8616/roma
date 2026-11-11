@@ -12,11 +12,12 @@ const GRANT = {
     state: 'APPROVAL_AWAITED',
     entitlement: 'projects/p1/locations/global/entitlements/read',
     approveAt: 'https://console.example.test/approve',
+    bindings: [],
+    resource: null,
   },
   entitlement: {
     name: 'projects/p1/locations/global/entitlements/read',
-    roles: ['roles/storage.objectViewer'],
-    conditions: [],
+    bindings: [{ role: 'roles/storage.objectViewer', condition: null }],
     maxDurationS: 3600,
   },
   durationS: 7200,
@@ -29,7 +30,7 @@ describe('a Cloud Grant on Discord', () => {
 
     expect(text).toContain('Entitlement: projects/p1/locations/global/entitlements/read')
     expect(text).toContain('For: 2h')
-    expect(text).not.toContain('Only where')
+    expect(text).toContain('roles/storage.objectViewer, with no condition')
     expect(text).toContain(
       'Approve or deny it in Google Cloud: https://console.example.test/approve',
     )

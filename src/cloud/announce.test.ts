@@ -40,8 +40,9 @@ describe('telling a Session it can reach the cloud', () => {
 describe('announcing what a Cloud Grant may widen', () => {
   const READ = {
     name: 'projects/p1/locations/global/entitlements/read-bucket',
-    roles: ['roles/storage.objectViewer'],
-    conditions: ['resource.name == "projects/_/buckets/b"'],
+    bindings: [
+      { role: 'roles/storage.objectViewer', condition: 'resource.name == "projects/_/buckets/b"' },
+    ],
     maxDurationS: 3600,
   }
 
@@ -55,16 +56,16 @@ describe('announcing what a Cloud Grant may widen', () => {
       {
         ...READ,
         name: 'folders/1/locations/global/entitlements/x',
-        conditions: [],
+        bindings: [{ role: 'roles/storage.objectAdmin', condition: null }],
         maxDurationS: 5400,
       },
     ])
 
     expect(said).toContain(
-      '`projects/p1/locations/global/entitlements/read-bucket`: roles/storage.objectViewer, only where resource.name == "projects/_/buckets/b"; at most 1h',
+      '`projects/p1/locations/global/entitlements/read-bucket` (at most 1h): roles/storage.objectViewer, only where resource.name == "projects/_/buckets/b"',
     )
     expect(said).toContain(
-      '`folders/1/locations/global/entitlements/x`: roles/storage.objectViewer; at most 90m',
+      '`folders/1/locations/global/entitlements/x` (at most 90m): roles/storage.objectAdmin, with no condition',
     )
   })
 

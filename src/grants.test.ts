@@ -11,8 +11,9 @@ import {
 
 const READ_BUCKET: Entitlement = {
   name: 'projects/p1/locations/global/entitlements/read-bucket',
-  roles: ['roles/storage.objectViewer'],
-  conditions: ['resource.name == "projects/_/buckets/b"'],
+  bindings: [
+    { role: 'roles/storage.objectViewer', condition: 'resource.name == "projects/_/buckets/b"' },
+  ],
   maxDurationS: 3600,
 }
 
@@ -23,8 +24,7 @@ const READ_BUCKET_ELSEWHERE: Entitlement = {
 
 const DEPLOY: Entitlement = {
   name: 'projects/p1/locations/global/entitlements/deploy',
-  roles: ['roles/run.developer'],
-  conditions: [],
+  bindings: [{ role: 'roles/run.developer', condition: null }],
   maxDurationS: 7200,
 }
 
@@ -138,25 +138,86 @@ describe('asking after a grant', () => {
 })
 
 describe('what roma says about a Cloud Grant it asked for', () => {
-  it('says nothing is widened yet, and marks the justification as the agent’s', () => {
-    const { lines, approveAt } = grantNotice({
-      grant: {
-        name: `${READ_BUCKET.name}/grants/g1`,
-        state: 'APPROVAL_AWAITED',
-        entitlement: READ_BUCKET.name,
-        approveAt: 'https://console.example.test/approve',
-      },
-      entitlement: READ_BUCKET,
+  const GRANT = {
+    name: `${READ_BUCKET.name}/grants/g1`,
+    state: 'APPROVAL_AWAITED',
+    entitlement: READ_BUCKET.name,
+    approveAt: 'https://console.example.test/approve',
+    bindings: READ_BUCKET.bindings,
+    resource: '//cloudresourcemanager.googleapis.com/projects/p1',
+  }
+  const noticed = (grant = GRANT, entitlement = READ_BUCKET) =>
+    grantNotice({
+      grant,
+      entitlement,
       durationS: 5400,
       justification: 'roma Task t: read the export',
     })
 
+  it('says nothing is widened yet, and marks the justification as the agent’s', () => {
+    const { lines, approveAt } = noticed()
+
     expect(lines[0]).toContain('Nothing is widened until a person approves it')
+    expect(lines).toContain('• On: //cloudresourcemanager.googleapis.com/projects/p1')
     expect(lines).toContain('• For: 90m')
     expect(lines).toContain('• State: APPROVAL_AWAITED')
     expect(lines.at(-1)).toBe(
       '• Justification, written by the agent and not checked by roma: roma Task t: read the export',
     )
     expect(approveAt).toBe('https://console.example.test/approve')
+  })
+
+  it('tells the approver every Conversation gets the roles [fence:cloud-grant-notice-says-every-conversation]', () => {
+    expect(
+      noticed().lines.join('\n'),
+      'A Cloud Grant widens the Reach for every Conversation (ADR-0041 §1), and the approver ' +
+        'reads only the notice. Said only to the agent, the person deciding never learns it.',
+    ).toMatch(/every Conversation with this roma has these roles/)
+  })
+
+  it('shows the roles Google put on the grant, not the ones roma found at boot [fence:cloud-grant-notice-shows-what-google-granted]', () => {
+    const widened = [{ role: 'roles/storage.objectAdmin', condition: null }]
+
+    const lines = noticed({ ...GRANT, bindings: widened }).lines
+
+    expect(
+      lines,
+      'An entitlement can be widened after roma booted. The notice is what a person approves ' +
+        'from, so it says what PAM answered for this grant (ADR-0041 §6).',
+    ).toContain('• roles/storage.objectAdmin, with no condition')
+    expect(lines.join('\n')).not.toContain('objectViewer')
+  })
+
+  it('falls back to the entitlement as found, and says so, when Google named no roles', () => {
+    const lines = noticed({ ...GRANT, bindings: [] }).lines
+
+    expect(lines).toContain(
+      '• roles/storage.objectViewer, only where resource.name == "projects/_/buckets/b"',
+    )
+    expect(lines.join('\n')).toContain('as roma found it at boot')
+  })
+
+  it('keeps each role with its own condition [fence:cloud-grant-condition-stays-with-its-role]', () => {
+    const lines = noticed({
+      ...GRANT,
+      bindings: [
+        {
+          role: 'roles/storage.objectViewer',
+          condition: 'resource.name == "projects/_/buckets/b"',
+        },
+        { role: 'roles/storage.objectAdmin', condition: null },
+      ],
+    }).lines
+
+    expect(
+      lines,
+      'A condition binds one role binding in PAM. Joined across roles, an unconditioned admin ' +
+        'role reads as if the viewer’s bucket limit applied to it too.',
+    ).toEqual(
+      expect.arrayContaining([
+        '• roles/storage.objectViewer, only where resource.name == "projects/_/buckets/b"',
+        '• roles/storage.objectAdmin, with no condition',
+      ]),
+    )
   })
 })

@@ -266,7 +266,6 @@ export class ShimServer {
 
     try {
       const grant = await asked()
-      if (!heldNow()) return refuse(this.#holder?.() ?? null)
       if (told !== null && taskId !== null) this.#onGrant(taskId, told(grant))
       this.#log({
         event: 'cloud-grant',
@@ -276,6 +275,7 @@ export class ShimServer {
         grant: grant.name,
         state: grant.state,
       })
+      if (!heldNow()) return refuse(this.#holder?.() ?? null)
       return { token: null, grant }
     } catch (error) {
       if (!heldNow()) return refuse(this.#holder?.() ?? null)

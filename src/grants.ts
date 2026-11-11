@@ -1,7 +1,11 @@
+export interface RoleBinding {
+  readonly role: string
+  readonly condition: string | null
+}
+
 export interface Entitlement {
   readonly name: string
-  readonly roles: readonly string[]
-  readonly conditions: readonly string[]
+  readonly bindings: readonly RoleBinding[]
   readonly maxDurationS: number
 }
 
@@ -16,6 +20,8 @@ export interface Grant {
   readonly state: string
   readonly entitlement: string
   readonly approveAt: string | null
+  readonly bindings: readonly RoleBinding[]
+  readonly resource: string | null
 }
 
 export interface CloudGrantAsked {
@@ -130,15 +136,23 @@ export function grantNotice({ grant, entitlement, durationS, justification }: Cl
   readonly lines: readonly string[]
   readonly approveAt: string | null
 } {
+  const fromGrant = grant.bindings.length > 0
+  const bindings = fromGrant ? grant.bindings : entitlement.bindings
   return {
     lines: [
       'roma asked Google Cloud for a Cloud Grant for this task. Nothing is widened until a ' +
         'person approves it there.',
+      'While it lasts, every Conversation with this roma has these roles, not only this one.',
       `• Entitlement: ${entitlement.name}`,
-      `• Roles: ${entitlement.roles.join(', ') || 'none named'}`,
-      ...(entitlement.conditions.length === 0
+      ...(grant.resource === null ? [] : [`• On: ${grant.resource}`]),
+      ...(bindings.length === 0
+        ? ['• Roles: none named']
+        : bindings.map((binding) => `• ${bindingWords(binding)}`)),
+      ...(fromGrant
         ? []
-        : [`• Only where: ${entitlement.conditions.join(' and ')}`]),
+        : [
+            '• (Google named no roles on the grant, so these are the entitlement’s as roma found it at boot.)',
+          ]),
       `• For: ${durationWords(durationS)}`,
       `• State: ${grant.state}`,
       `• Grant: ${grant.name}`,
@@ -146,6 +160,10 @@ export function grantNotice({ grant, entitlement, durationS, justification }: Cl
     ],
     approveAt: grant.approveAt,
   }
+}
+
+export function bindingWords({ role, condition }: RoleBinding): string {
+  return condition === null ? `${role}, with no condition` : `${role}, only where ${condition}`
 }
 
 function durationWords(seconds: number): string {

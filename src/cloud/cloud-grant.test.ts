@@ -23,7 +23,7 @@ afterEach(async () => {
 
 function grantsAsked(): { grants: Grants; asked: GrantAsked[] } {
   const asked: GrantAsked[] = []
-  const found: Entitlement = { name: ENTITLEMENT, roles: [], conditions: [], maxDurationS: 3600 }
+  const found: Entitlement = { name: ENTITLEMENT, bindings: [], maxDurationS: 3600 }
   return {
     asked,
     grants: {
@@ -36,10 +36,19 @@ function grantsAsked(): { grants: Grants; asked: GrantAsked[] } {
             state: 'APPROVAL_AWAITED',
             entitlement: ENTITLEMENT,
             approveAt: 'https://console.example.test/approve',
+            bindings: [],
+            resource: null,
           })
         },
         status: (name: string): Promise<Grant> =>
-          Promise.resolve({ name, state: 'ACTIVE', entitlement: ENTITLEMENT, approveAt: null }),
+          Promise.resolve({
+            name,
+            state: 'ACTIVE',
+            entitlement: ENTITLEMENT,
+            approveAt: null,
+            bindings: [],
+            resource: null,
+          }),
       },
     },
   }

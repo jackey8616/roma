@@ -1343,11 +1343,22 @@ describe('a Cloud Grant roma asked for', () => {
       state: 'APPROVAL_AWAITED',
       entitlement: 'projects/p1/locations/global/entitlements/read',
       approveAt: 'https://console.cloud.google.com/iam-admin/pam/grants/approvals?project=p1',
+      bindings: [
+        {
+          role: 'roles/storage.objectViewer',
+          condition: 'resource.name == "projects/_/buckets/b"',
+        },
+      ],
+      resource: '//cloudresourcemanager.googleapis.com/projects/p1',
     },
     entitlement: {
       name: 'projects/p1/locations/global/entitlements/read',
-      roles: ['roles/storage.objectViewer'],
-      conditions: ['resource.name == "projects/_/buckets/b"'],
+      bindings: [
+        {
+          role: 'roles/storage.objectViewer',
+          condition: 'resource.name == "projects/_/buckets/b"',
+        },
+      ],
       maxDurationS: 3600,
     },
     durationS: 1800,
@@ -1361,8 +1372,10 @@ describe('a Cloud Grant roma asked for', () => {
 
     const posted = api.messages[0]?.posted
     expect(posted?.actions).toEqual([{ label: REVIEW_GRANT_BUTTON, url: GRANT.grant.approveAt }])
-    expect(posted?.text).toContain('roles/storage.objectViewer')
-    expect(posted?.text).toContain('Only where: resource.name == "projects/_/buckets/b"')
+    expect(posted?.text).toContain(
+      'roles/storage.objectViewer, only where resource.name == "projects/_/buckets/b"',
+    )
+    expect(posted?.text).toContain('every Conversation with this roma has these roles')
     expect(posted?.text).toContain('For: 30m')
     expect(posted?.text).toContain('written by the agent and not checked by roma')
   })

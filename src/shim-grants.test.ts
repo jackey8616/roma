@@ -20,8 +20,7 @@ const ENTITLEMENT = 'projects/p1/locations/global/entitlements/read-bucket'
 
 const FOUND: Entitlement = {
   name: ENTITLEMENT,
-  roles: ['roles/storage.objectViewer'],
-  conditions: [],
+  bindings: [{ role: 'roles/storage.objectViewer', condition: null }],
   maxDurationS: 3600,
 }
 
@@ -29,6 +28,7 @@ class FakeRequests implements RequestsGrants {
   readonly asked: GrantAsked[] = []
   readonly looked: string[] = []
   failWith: Error | null = null
+  onRequest: () => void = () => {}
 
   entitlements(): readonly Entitlement[] {
     return [FOUND]
@@ -36,18 +36,28 @@ class FakeRequests implements RequestsGrants {
 
   request(asked: GrantAsked): Promise<Grant> {
     this.asked.push(asked)
+    this.onRequest()
     if (this.failWith !== null) return Promise.reject(this.failWith)
     return Promise.resolve({
       name: `${asked.entitlement}/grants/g1`,
       state: 'APPROVAL_AWAITED',
       entitlement: asked.entitlement,
       approveAt: 'https://console.example.test/approve',
+      bindings: FOUND.bindings,
+      resource: null,
     })
   }
 
   status(name: string): Promise<Grant> {
     this.looked.push(name)
-    return Promise.resolve({ name, state: 'ACTIVE', entitlement: ENTITLEMENT, approveAt: null })
+    return Promise.resolve({
+      name,
+      state: 'ACTIVE',
+      entitlement: ENTITLEMENT,
+      approveAt: null,
+      bindings: [],
+      resource: null,
+    })
   }
 }
 
@@ -125,6 +135,8 @@ describe('asking roma for a Cloud Grant', () => {
         state: 'APPROVAL_AWAITED',
         entitlement: ENTITLEMENT,
         approveAt: 'https://console.example.test/approve',
+        bindings: FOUND.bindings,
+        resource: null,
       },
     })
     expect(granted).toEqual([['task-7', `${ENTITLEMENT}/grants/g1`]])
@@ -206,5 +218,24 @@ describe('asking roma for a Cloud Grant', () => {
 
     expect(answer.reason).toContain('does not belong to that Session')
     expect(requests.asked).toEqual([])
+  })
+
+  it('records a grant Google made even when the Seat moved on meanwhile [fence:cloud-grant-recorded-even-if-the-seat-moved]', async () => {
+    const requests = new FakeRequests()
+    let holder: string = SESSION
+    requests.onRequest = () => {
+      holder = 'the-next-session'
+    }
+    const { server, granted, log } = await listening({ grants: { requests }, holder: () => holder })
+
+    const answer = await askMinter(server.socketPath, REQUEST)
+
+    expect(answer.reason).toContain('does not belong to that Session')
+    expect(
+      granted,
+      'Once PAM has made the grant it exists in Google whether or not this Seat still holds the ' +
+        'Session, so the Conversation is told and the Audit Record lists it (ADR-0041 §6, §7).',
+    ).toEqual([['task-7', `${ENTITLEMENT}/grants/g1`]])
+    expect(log).toContainEqual(expect.objectContaining({ event: 'cloud-grant' }))
   })
 })

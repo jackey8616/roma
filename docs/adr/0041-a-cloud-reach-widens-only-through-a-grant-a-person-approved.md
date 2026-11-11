@@ -104,7 +104,12 @@ Enforced by `fence:cloud-grant-only-from-what-roma-found`.
 
 ### 3. A person approves, in Google Cloud, and roma never approves or denies
 
-The approver is whoever the entitlement names. roma has no code that approves or
+The approver is whoever the entitlement names, and there must be one. PAM grants an
+entitlement with no approval workflow the moment it is asked, so roma refuses to boot
+when it may request one: every entitlement it keeps has a manual step naming its
+approvers. Enforced by `fence:cloud-grant-only-where-a-person-approves`.
+
+roma has no code that approves or
 denies a grant, so it cannot become the approver of its own requests even if an
 entitlement listed the Cloud Reach among its approvers, which PAM allows as a preview.
 Enforced by `fence:roma-never-approves-a-cloud-grant`.
@@ -135,10 +140,20 @@ nothing. Enforced by `fence:cloud-grant-announced-as-a-request`.
 ### 6. roma tells the Conversation itself, and its button only opens a page
 
 When roma has requested a Cloud Grant it posts, to the Conversation the Task came
-from, what PAM answered: the entitlement, its roles and conditions, the duration,
-the state and the grant. The justification is shown as the agent's and not roma's.
-No model writes it and no Turn has to remember to send it. Enforced by
-`fence:core-tells-the-cloud-grant`.
+from, what PAM answered: the entitlement, the resource, each role with its own
+condition, the duration, the state and the grant. The justification is shown as the
+agent's and not roma's. No model writes it and no Turn has to remember to send it.
+Enforced by `fence:core-tells-the-cloud-grant`.
+
+The roles are the ones PAM put on this grant, not the ones roma found at boot, since
+an entitlement can be widened in between; only when Google names none does the notice
+fall back to the entitlement as found, and it says so. Enforced by
+`fence:cloud-grant-notice-shows-what-google-granted`. A condition stays with its role,
+because in PAM it binds one role binding, and joined across roles an unconditioned
+role would read as limited. Enforced by `fence:cloud-grant-condition-stays-with-its-role`.
+The notice also tells the approver that every Conversation has the roles while the
+grant lasts, since the approver reads the notice and not the announcement. Enforced by
+`fence:cloud-grant-notice-says-every-conversation`.
 
 On Google Chat it carries one button, which opens Google Cloud's approval page. It
 is a link, never a card action, because an action comes back to roma as a press
@@ -153,7 +168,9 @@ which moves the decision out of Google's audit trail and into roma.
 ### 7. The Audit Record names the grants a Task asked for
 
 `cloudGrants` lists the grants roma requested for a Task, and is absent when there
-were none. Unlike `cloudReach` (ADR-0015 §10), roma does know what was asked for
+were none. A grant PAM made is recorded and told even when the Seat that asked has
+moved on to another Session by the time Google answers, because the grant exists in
+Google either way. Enforced by `fence:cloud-grant-recorded-even-if-the-seat-moved`. Unlike `cloudReach` (ADR-0015 §10), roma does know what was asked for
 here, because it made the request. It records the request, not the use: what the
 roles were used for is in Google's log, under the Cloud Reach's name.
 

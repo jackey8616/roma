@@ -4,6 +4,7 @@ import {
   entitlementFrom,
   GrantRefused,
   isGrantScope,
+  needsAPerson,
   PAM_API,
   PamGrants,
   secondsOf,
@@ -18,9 +19,17 @@ interface Call {
 
 const ENTITLEMENT = 'projects/p1/locations/global/entitlements/read-bucket'
 
+const APPROVED_BY_A_PERSON = {
+  manualApprovals: {
+    requireApproverJustification: false,
+    steps: [{ approvers: [{ principals: ['user:alice@example.com'] }], approvalsNeeded: 1 }],
+  },
+}
+
 const RAW_ENTITLEMENT = {
   name: ENTITLEMENT,
   maxRequestDuration: '3600s',
+  approvalWorkflow: APPROVED_BY_A_PERSON,
   privilegedAccess: {
     gcpIamAccess: {
       resourceType: 'cloudresourcemanager.googleapis.com/Project',
@@ -72,8 +81,12 @@ describe('finding what the Cloud Reach may request', () => {
     expect(await grants.find()).toEqual([
       {
         name: ENTITLEMENT,
-        roles: ['roles/storage.objectViewer'],
-        conditions: ['resource.name == "projects/_/buckets/b"'],
+        bindings: [
+          {
+            role: 'roles/storage.objectViewer',
+            condition: 'resource.name == "projects/_/buckets/b"',
+          },
+        ],
         maxDurationS: 3600,
       },
     ])
@@ -151,6 +164,8 @@ describe('requesting a grant', () => {
       state: 'APPROVAL_AWAITED',
       entitlement: ENTITLEMENT,
       approveAt: 'https://console.cloud.google.com/iam-admin/pam/grants/approvals?project=p1',
+      bindings: [],
+      resource: null,
     })
   })
 
@@ -199,5 +214,71 @@ describe('reading what Google says', () => {
     expect(approvalsFor('organizations/9/locations/global')).toBe(
       'https://console.cloud.google.com/iam-admin/pam/grants/approvals?organizationId=9',
     )
+  })
+})
+
+describe('only what a person must approve', () => {
+  it('refuses to boot on an entitlement that needs nobody to approve it [fence:cloud-grant-only-where-a-person-approves]', async () => {
+    const { grants } = pam(() => ({
+      body: {
+        entitlements: [
+          RAW_ENTITLEMENT,
+          { ...RAW_ENTITLEMENT, name: `${ENTITLEMENT}-self-serve`, approvalWorkflow: null },
+        ],
+      },
+    }))
+
+    await expect(
+      grants.find(),
+      'PAM grants an entitlement with no approval workflow the moment it is requested. ' +
+        'ADR-0041 §3 widens the Reach only once a person approved, so roma will not boot ' +
+        'knowing it could ask for one.',
+    ).rejects.toThrow(`${ENTITLEMENT}-self-serve, which needs no person to approve it`)
+  })
+
+  it('takes a manual step that names its approvers, and nothing short of one', () => {
+    expect(needsAPerson(APPROVED_BY_A_PERSON)).toBe(true)
+    expect(needsAPerson(null)).toBe(false)
+    expect(needsAPerson({})).toBe(false)
+    expect(needsAPerson({ manualApprovals: { steps: [] } })).toBe(false)
+    expect(needsAPerson({ manualApprovals: { steps: [{ approvers: [] }] } })).toBe(false)
+    expect(
+      needsAPerson({ manualApprovals: { steps: [{ approvers: [{ principals: [] }] }] } }),
+    ).toBe(false)
+    expect(
+      needsAPerson({
+        manualApprovals: {
+          steps: [{ approvers: [{ principals: ['user:a@example.com'] }], approvalsNeeded: 0 }],
+        },
+      }),
+    ).toBe(false)
+  })
+})
+
+describe('what a grant says it gives', () => {
+  it('reads each role with its own condition, and the resource, off the grant', async () => {
+    const { grants } = pam(() => ({
+      body: {
+        name: `${ENTITLEMENT}/grants/g1`,
+        state: 'APPROVAL_AWAITED',
+        privilegedAccess: {
+          gcpIamAccess: {
+            resource: '//cloudresourcemanager.googleapis.com/projects/p1',
+            roleBindings: [
+              { role: 'roles/storage.objectViewer', conditionExpression: 'resource.name == "x"' },
+              { role: 'roles/storage.objectAdmin' },
+            ],
+          },
+        },
+      },
+    }))
+
+    const grant = await grants.status(`${ENTITLEMENT}/grants/g1`)
+
+    expect(grant.bindings).toEqual([
+      { role: 'roles/storage.objectViewer', condition: 'resource.name == "x"' },
+      { role: 'roles/storage.objectAdmin', condition: null },
+    ])
+    expect(grant.resource).toBe('//cloudresourcemanager.googleapis.com/projects/p1')
   })
 })

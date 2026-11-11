@@ -1,5 +1,5 @@
 import { FreshTokens } from '../fresh-tokens.js'
-import type { Entitlement, Grant, GrantAsked, RequestsGrants } from '../grants.js'
+import type { Entitlement, Grant, GrantAsked, RequestsGrants, RoleBinding } from '../grants.js'
 import type { MintsTokens } from '../reach.js'
 
 export const PAM_API = 'https://privilegedaccessmanager.googleapis.com/v1'
@@ -42,12 +42,18 @@ export function secondsOf(duration: unknown): number | null {
   return match === null ? null : Number(match[1])
 }
 
+interface RawAccess {
+  readonly gcpIamAccess?: {
+    readonly resource?: unknown
+    readonly roleBindings?: readonly RawBinding[]
+  }
+}
+
 interface RawEntitlement {
   readonly name?: unknown
   readonly maxRequestDuration?: unknown
-  readonly privilegedAccess?: {
-    readonly gcpIamAccess?: { readonly roleBindings?: readonly RawBinding[] }
-  }
+  readonly privilegedAccess?: RawAccess
+  readonly approvalWorkflow?: unknown
 }
 
 interface RawBinding {
@@ -55,36 +61,75 @@ interface RawBinding {
   readonly conditionExpression?: unknown
 }
 
+function bindingsOf(access: RawAccess | undefined): RoleBinding[] {
+  return (access?.gcpIamAccess?.roleBindings ?? []).flatMap(({ role, conditionExpression }) =>
+    typeof role === 'string' && role !== ''
+      ? [
+          {
+            role,
+            condition:
+              typeof conditionExpression === 'string' && conditionExpression !== ''
+                ? conditionExpression
+                : null,
+          },
+        ]
+      : [],
+  )
+}
+
+function resourceOf(access: RawAccess | undefined): string | null {
+  const resource = access?.gcpIamAccess?.resource
+  return typeof resource === 'string' && resource !== '' ? resource : null
+}
+
+export function needsAPerson(approvalWorkflow: unknown): boolean {
+  if (typeof approvalWorkflow !== 'object' || approvalWorkflow === null) return false
+  const manual = (approvalWorkflow as { manualApprovals?: unknown }).manualApprovals
+  if (typeof manual !== 'object' || manual === null) return false
+  const steps = (manual as { steps?: unknown }).steps
+  if (!Array.isArray(steps) || steps.length === 0) return false
+  return steps.every((step: unknown) => {
+    if (typeof step !== 'object' || step === null) return false
+    const { approvers, approvalsNeeded } = step as {
+      approvers?: unknown
+      approvalsNeeded?: unknown
+    }
+    const named =
+      Array.isArray(approvers) &&
+      approvers.some((approver: unknown) => {
+        const principals = (approver as { principals?: unknown } | null)?.principals
+        return Array.isArray(principals) && principals.length > 0
+      })
+    return (
+      named &&
+      (approvalsNeeded === undefined ||
+        (typeof approvalsNeeded === 'number' && approvalsNeeded >= 1))
+    )
+  })
+}
+
 export function entitlementFrom(raw: RawEntitlement): Entitlement | null {
   const maxDurationS = secondsOf(raw.maxRequestDuration)
   if (typeof raw.name !== 'string' || raw.name === '' || maxDurationS === null) return null
-  const bindings = raw.privilegedAccess?.gcpIamAccess?.roleBindings ?? []
-  return {
-    name: raw.name,
-    roles: bindings.flatMap(({ role }) => (typeof role === 'string' ? [role] : [])),
-    conditions: bindings.flatMap(({ conditionExpression }) =>
-      typeof conditionExpression === 'string' && conditionExpression !== ''
-        ? [conditionExpression]
-        : [],
-    ),
-    maxDurationS,
-  }
+  return { name: raw.name, bindings: bindingsOf(raw.privilegedAccess), maxDurationS }
 }
 
 function grantFrom(raw: unknown): Grant {
-  const { name, state } = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<
-    string,
-    unknown
-  >
+  const { name, state, privilegedAccess } = (
+    typeof raw === 'object' && raw !== null ? raw : {}
+  ) as Record<string, unknown>
   if (typeof name !== 'string' || name === '') {
     throw new Error('Google answered about a grant without naming it.')
   }
   const at = name.indexOf('/grants/')
+  const access = privilegedAccess as RawAccess | undefined
   return {
     name,
     state: typeof state === 'string' && state !== '' ? state : 'STATE_UNSPECIFIED',
     entitlement: at === -1 ? name : name.slice(0, at),
     approveAt: approvalsFor(name),
+    bindings: bindingsOf(access),
+    resource: resourceOf(access),
   }
 }
 
@@ -113,8 +158,9 @@ export class PamGrants implements RequestsGrants {
 
   async find(): Promise<readonly Entitlement[]> {
     const found: Entitlement[] = []
+    const unapproved: string[] = []
     for (const scope of this.scopes) {
-      const inScope = await this.#search(scope)
+      const inScope = await this.#search(scope, unapproved)
       if (inScope.length === 0) {
         throw new Error(
           `roma's Cloud Reach is eligible for no entitlement in ${scope}. Either the scope is ` +
@@ -122,6 +168,15 @@ export class PamGrants implements RequestsGrants {
         )
       }
       found.push(...inScope)
+    }
+    if (unapproved.length > 0) {
+      throw new Error(
+        `roma's Cloud Reach may request ${unapproved.join(', ')}, which ` +
+          (unapproved.length === 1 ? 'needs' : 'need') +
+          ' no person to approve it. A Cloud Grant widens the Reach only once a person has ' +
+          'approved it, so give each one a manual approval step naming its approvers, or stop ' +
+          'naming the Cloud Reach as somebody who may request it.',
+      )
     }
     this.#found = found
     return found
@@ -153,7 +208,7 @@ export class PamGrants implements RequestsGrants {
     return grantFrom(await response.json())
   }
 
-  async #search(scope: string): Promise<Entitlement[]> {
+  async #search(scope: string, unapproved: string[]): Promise<Entitlement[]> {
     const found: Entitlement[] = []
     let page: string | null = null
     do {
@@ -174,7 +229,9 @@ export class PamGrants implements RequestsGrants {
       const listed = Array.isArray(body.entitlements) ? (body.entitlements as RawEntitlement[]) : []
       for (const raw of listed) {
         const entitlement = entitlementFrom(raw)
-        if (entitlement !== null) found.push(entitlement)
+        if (entitlement === null) continue
+        if (needsAPerson(raw.approvalWorkflow)) found.push(entitlement)
+        else unapproved.push(entitlement.name)
       }
       page =
         typeof body.nextPageToken === 'string' && body.nextPageToken !== ''

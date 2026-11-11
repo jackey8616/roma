@@ -1,4 +1,4 @@
-import type { Entitlement } from '../grants.js'
+import { bindingWords, type Entitlement } from '../grants.js'
 
 export const CLOUD_SHORTCUT = 'roma-cloud-token'
 
@@ -51,9 +51,9 @@ function announceGrants(entitlements: readonly Entitlement[]): string[] {
   ]
 }
 
-function described({ name, roles, conditions, maxDurationS }: Entitlement): string {
-  const where = conditions.length === 0 ? '' : `, only where ${conditions.join(' and ')}`
-  return `- \`${name}\`: ${roles.join(', ') || 'no roles'}${where}; at most ${hours(maxDurationS)}`
+function described({ name, bindings, maxDurationS }: Entitlement): string {
+  const roles = bindings.length === 0 ? 'no roles' : bindings.map(bindingWords).join('; ')
+  return `- \`${name}\` (at most ${hours(maxDurationS)}): ${roles}`
 }
 
 function hours(seconds: number): string {
