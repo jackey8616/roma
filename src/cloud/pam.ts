@@ -201,11 +201,33 @@ export class PamGrants implements RequestsGrants {
   }
 
   async status(name: string): Promise<Grant> {
-    const response = await this.#call(`${PAM_API}/${name}`, { method: 'GET' })
-    if (!response.ok) {
-      throw new GrantRefused(`say how ${name} stands`, response.status, await response.text())
-    }
-    return grantFrom(await response.json())
+    const at = name.indexOf('/grants/')
+    if (at === -1) throw new Error(`"${name}" does not name a grant.`)
+    const entitlement = name.slice(0, at)
+    let page: string | null = null
+    do {
+      const query = new URLSearchParams({ callerRelationship: 'HAD_CREATED', pageSize: '100' })
+      if (page !== null) query.set('pageToken', page)
+      const response = await this.#call(
+        `${PAM_API}/${entitlement}/grants:search?${query.toString()}`,
+        { method: 'GET' },
+      )
+      if (!response.ok) {
+        throw new GrantRefused(`say how ${name} stands`, response.status, await response.text())
+      }
+      const body = (await response.json()) as { grants?: unknown; nextPageToken?: unknown }
+      const listed: unknown[] = Array.isArray(body.grants) ? body.grants : []
+      const found = listed.find((grant) => (grant as { name?: unknown } | null)?.name === name)
+      if (found !== undefined) return grantFrom(found)
+      page =
+        typeof body.nextPageToken === 'string' && body.nextPageToken !== ''
+          ? body.nextPageToken
+          : null
+    } while (page !== null)
+    throw new Error(
+      `Google lists no grant named ${name} among those roma's Cloud Reach requested, so ` +
+        'either it was requested some other way or the name is wrong.',
+    )
   }
 
   async #search(scope: string, unapproved: string[]): Promise<Entitlement[]> {

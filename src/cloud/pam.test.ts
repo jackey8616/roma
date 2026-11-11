@@ -169,13 +169,46 @@ describe('requesting a grant', () => {
     })
   })
 
-  it('says how a grant stands', async () => {
+  it('says how a grant stands by searching what it requested, since a requester may not get one [fence:cloud-grant-status-searches-what-it-requested]', async () => {
     const { grants, calls } = pam(() => ({
-      body: { name: `${ENTITLEMENT}/grants/g1`, state: 'ACTIVE' },
+      body: {
+        grants: [
+          { name: `${ENTITLEMENT}/grants/other`, state: 'ENDED' },
+          { name: `${ENTITLEMENT}/grants/g1`, state: 'ACTIVE' },
+        ],
+      },
     }))
 
+    expect(
+      (await grants.status(`${ENTITLEMENT}/grants/g1`)).state,
+      'Measured 2026-11-11: the Cloud Reach as requester is refused grants.get with 403 and ' +
+        'may call grants:search with HAD_CREATED (ADR-0041). Asked by get, every status fails.',
+    ).toBe('ACTIVE')
+    const url = new URL(calls[0]!.url)
+    expect(`${url.origin}${url.pathname}`).toBe(`${PAM_API}/${ENTITLEMENT}/grants:search`)
+    expect(url.searchParams.get('callerRelationship')).toBe('HAD_CREATED')
+  })
+
+  it('follows pages until it finds the grant', async () => {
+    const { grants, calls } = pam(({ url }) =>
+      new URL(url).searchParams.get('pageToken') === null
+        ? {
+            body: {
+              grants: [{ name: `${ENTITLEMENT}/grants/a`, state: 'ENDED' }],
+              nextPageToken: 'n',
+            },
+          }
+        : { body: { grants: [{ name: `${ENTITLEMENT}/grants/g1`, state: 'ACTIVE' }] } },
+    )
+
     expect((await grants.status(`${ENTITLEMENT}/grants/g1`)).state).toBe('ACTIVE')
-    expect(calls[0]).toMatchObject({ url: `${PAM_API}/${ENTITLEMENT}/grants/g1`, method: 'GET' })
+    expect(calls).toHaveLength(2)
+  })
+
+  it('says so when the Cloud Reach requested no grant by that name', async () => {
+    const { grants } = pam(() => ({ body: { grants: [] } }))
+
+    await expect(grants.status(`${ENTITLEMENT}/grants/g1`)).rejects.toThrow('lists no grant named')
   })
 
   it('passes a refusal on as one', async () => {
@@ -273,7 +306,11 @@ describe('what a grant says it gives', () => {
       },
     }))
 
-    const grant = await grants.status(`${ENTITLEMENT}/grants/g1`)
+    const grant = await grants.request({
+      entitlement: ENTITLEMENT,
+      durationS: 1800,
+      justification: 'x',
+    })
 
     expect(grant.bindings).toEqual([
       { role: 'roles/storage.objectViewer', condition: 'resource.name == "x"' },

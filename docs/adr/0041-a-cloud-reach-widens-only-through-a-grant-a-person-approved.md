@@ -37,14 +37,29 @@ account the user grants with their own credential — and found it working and w
 the grant took 77 s to take effect, and the expired binding stayed in the resource's
 policy, where only the user could remove it.
 
+**Measured through roma's own code (2026-11-11)**, in the same scratch project, with a
+service account key as the Cloud Reach and `ROMA_CLOUD_GRANT_SCOPES=projects/…`.
+`cloudReachFrom`, `prove`, `ShimServer` and `roma-cloud-grant` ran against the real PAM,
+with no Channel or model:
+
+| what | measured |
+| --- | --- |
+| `entitlements:search` as the Cloud Reach, with no IAM role | 200 |
+| an entitlement with no approval workflow in scope | boot refused, naming it |
+| `createGrant` as roma sends it | accepted, `APPROVAL_AWAITED` |
+| `privilegedAccess` on the answer | present, so the notice shows the grant's own roles, each with its own condition |
+| **`grants.get` on its own grant, as the requester** | **403, `privilegedaccessmanager.grants.get` denied** |
+| `grants:search` with `callerRelationship=HAD_CREATED` | 200, the grant is listed with its state |
+| a person approving in the console, then `status` | `ACTIVE` |
+| the Cloud Token roma mints, with two bindings on two buckets | read in the viewer bucket 200, delete there 403, list the creator bucket 403, create there 200 |
+
+The 403 on `grants.get` is why `status` searches the grants the Cloud Reach requested
+rather than getting one. Enforced by `fence:cloud-grant-status-searches-what-it-requested`.
+
 **Not measured:**
 
-- That roma's own requests behave as the hand-made ones did. No Cloud Reach has
-  existed (ADR-0015), so none has requested a grant.
-- Whether a requester needs any IAM role to call `entitlements:search` with
-  `callerAccessType=GRANT_REQUESTER`, or `grants.get` on its own grant. The
-  reference names a scope and no permission. Boot fails loudly if the first is
-  refused, so a deployment finds out at once.
+- A Cloud Grant asked for by an agent in a Conversation, with its notice posted to Chat.
+  The pieces between them are unit-tested; no deployment has run them together.
 - That the console address roma links to opens the approval page for a folder or an
   organization. The project form is the one the console showed.
 - How long a justification Google accepts. roma stops at 1,000 characters.
