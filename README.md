@@ -145,6 +145,15 @@ deployments have none and are unaffected; see `ROMA_CLOUD_KEY_FILE` below and
   -v /path/to/cloud-reach.json:/run/secrets/cloud-reach.json:ro \
 ```
 
+Add one more to let that Cloud Reach be widened **for a while**, by a person approving a
+**Cloud Grant** in Google Cloud's Privileged Access Manager, so its standing roles can stay
+narrow. Also optional; see `ROMA_CLOUD_GRANT_SCOPES` below and `infra/README.md` for the
+entitlements it needs (ADR-0041).
+
+```bash
+  -e ROMA_CLOUD_GRANT_SCOPES=projects/THE_AGENTS_PROJECT \
+```
+
 Add three more to give it a **Document Reach** — the identity it writes the team's files as,
 and the **Depot** it writes them into. Also optional, also unaffecting to deployments without
 one, and **both variables or neither**: a key with no Depot has nowhere to write and a Depot
@@ -215,6 +224,14 @@ names its own reversal trigger — if writing the API calls by hand costs more i
 That command is installed on **every** image, including the ones whose deployment has no
 Cloud Reach, where it exits non-zero saying so. Omitting it would be `command not found`,
 which a model reads as a broken `PATH` and spends a Turn investigating.
+
+`roma-cloud-grant` sits beside it. `request ENTITLEMENT DURATION JUSTIFICATION` asks roma to
+request a Cloud Grant as the Cloud Reach, with the Task stamped on the justification. roma
+answers with the grant, its state and the page where a person approves it, and posts what
+was asked for to the Conversation itself, with no model involved. `status GRANT` says how one
+stands. It can ask and never approve: nothing in roma approves or denies a grant (ADR-0041).
+It is installed on every image for the same reason, and says so where a deployment has
+nothing to ask for.
 
 `roma-document-token` is the same three lines for the same reason, one product along: a
 Document Token on stdout, `--json` for its expiry and the account, installed on every image

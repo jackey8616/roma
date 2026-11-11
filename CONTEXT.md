@@ -1006,7 +1006,10 @@ that would mean reading the Transcript. The Cloud Reach is a yes or a no and
 never a count: one Cloud Token does unlimited work for an hour, so a number would
 be read as a measure of activity roma does not have — and on that side even the
 destination is not free, since a request for a Cloud Token carries none
-(ADR-0015). The Document Reach is the
+(ADR-0015). A Cloud Grant is the exception, and it is a list rather than a yes or
+a no: roma made the request, so it knows which grants a Task asked for, and the
+Task id on each justification leads from Google's log back to this record
+(ADR-0041). The Document Reach is the
 same yes or no for the same reasons, and it answers a question the other one does
 not have to: a Depot is shared by every Conversation, and Google's own record of
 what happened there names the one account and never the person, so this is the only
