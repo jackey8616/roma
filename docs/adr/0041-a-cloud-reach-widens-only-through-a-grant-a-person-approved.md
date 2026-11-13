@@ -160,6 +160,15 @@ condition, the duration, the state and the grant. The justification is shown as 
 agent's and not roma's. No model writes it and no Turn has to remember to send it.
 Enforced by `fence:core-tells-the-cloud-grant`.
 
+The justification is shown on one line, inside one code span, with its backticks
+replaced by `ˋ`. Without that, text after a newline left the label and read as roma's
+own words, and `<url|text>` or `<users/all>` became a link or a mention (#227). Every
+line break folds to a space, the span cannot be closed early, and both Channels show
+what is inside it as the characters it is. Enforced by
+`fence:cloud-grant-justification-stays-literal`. A notice too long for one message is
+cut between lines, never inside the span, which Discord's 2,000 characters otherwise
+allowed. Enforced by `fence:discord-grant-justification-not-split`.
+
 The roles are the ones PAM put on this grant, not the ones roma found at boot, since
 an entitlement can be widened in between; only when Google names none does the notice
 fall back to the entitlement as found, and it says so. Enforced by

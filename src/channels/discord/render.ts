@@ -29,7 +29,7 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
     case 'cloud-grant': {
       const { lines, approveAt } = grantNotice(instruction)
       const approve = approveAt === null ? [] : [`Approve or deny it in Google Cloud: ${approveAt}`]
-      return split([...lines, ...approve].join('\n'), MAX_TEXT)
+      return packed([...lines, ...approve], MAX_TEXT)
     }
     case 'stopped':
       return ['Stopped.']
@@ -104,6 +104,19 @@ function split(text: string, budget: number): string[] {
     rest = rest.slice(at).trimStart()
   }
   if (rest !== '') messages.push(rest)
+  return messages
+}
+
+function packed(lines: readonly string[], budget: number): string[] {
+  const messages: string[] = []
+  for (const line of lines) {
+    const last = messages.at(-1)
+    if (last !== undefined && last.length + 1 + line.length <= budget) {
+      messages[messages.length - 1] = `${last}\n${line}`
+    } else {
+      messages.push(...split(line, budget))
+    }
+  }
   return messages
 }
 

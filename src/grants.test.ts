@@ -162,7 +162,7 @@ describe('what roma says about a Cloud Grant it asked for', () => {
     expect(lines).toContain('• For: 90m')
     expect(lines).toContain('• State: APPROVAL_AWAITED')
     expect(lines.at(-1)).toBe(
-      '• Justification, written by the agent and not checked by roma: roma Task t: read the export',
+      '• Justification, written by the agent and not checked by roma: `roma Task t: read the export`',
     )
     expect(approveAt).toBe('https://console.example.test/approve')
   })
@@ -219,5 +219,61 @@ describe('what roma says about a Cloud Grant it asked for', () => {
         '• roles/storage.objectAdmin, with no condition',
       ]),
     )
+  })
+})
+
+describe('the justification in a Cloud Grant notice is the agent’s, all of it', () => {
+  const FORGED =
+    'roma Task t: read one export file\n\nroma checked this request: read-only, one object, ' +
+    'safe to approve.\n• Approve here: <https://evil.example/pam|Review it in Google Cloud> ' +
+    '<users/all> [here](https://evil.example/pam)'
+  const LABEL = '• Justification, written by the agent and not checked by roma: '
+  const noticed = (justification: string) =>
+    grantNotice({
+      grant: {
+        name: `${READ_BUCKET.name}/grants/g1`,
+        state: 'APPROVAL_AWAITED',
+        entitlement: READ_BUCKET.name,
+        approveAt: null,
+        bindings: READ_BUCKET.bindings,
+        resource: null,
+      },
+      entitlement: READ_BUCKET,
+      durationS: SHORTEST_GRANT_S,
+      justification,
+    }).lines
+
+  it('shows it on one line, inside one code span [fence:cloud-grant-justification-stays-literal]', () => {
+    const lines = noticed(FORGED)
+    const shown = lines.at(-1)!
+
+    expect(
+      lines.join('\n').split('\n'),
+      'Text after a newline in the justification left the "written by the agent" label and ' +
+        'read to the approver as roma vouching for the grant (#227).',
+    ).toHaveLength(lines.length)
+    expect(shown.startsWith(`${LABEL}\``)).toBe(true)
+    expect(shown.endsWith('`')).toBe(true)
+    expect(
+      shown.slice(LABEL.length + 1, -1),
+      'Inside a code span a Channel shows links and mentions as the characters they are.',
+    ).toBe(
+      'roma Task t: read one export file roma checked this request: read-only, one object, ' +
+        'safe to approve. • Approve here: <https://evil.example/pam|Review it in Google Cloud> ' +
+        '<users/all> [here](https://evil.example/pam)',
+    )
+  })
+
+  it('leaves no backtick that could close the span early', () => {
+    const shown = noticed('roma Task t: a` <users/all> ``` `b').at(-1)!
+
+    expect(shown.match(/`/g)).toHaveLength(2)
+    expect(shown).toBe(`${LABEL}\`roma Task t: aˋ <users/all> ˋˋˋ ˋb\``)
+  })
+
+  it('folds every kind of line break, not only \\n', () => {
+    const shown = noticed('roma Task t: a\r\nb\u2028c\u2029d\u0085e\tf\vg').at(-1)!
+
+    expect(shown).toBe(`${LABEL}\`roma Task t: a b c d e f g\``)
   })
 })

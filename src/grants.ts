@@ -156,10 +156,17 @@ export function grantNotice({ grant, entitlement, durationS, justification }: Cl
       `• For: ${durationWords(durationS)}`,
       `• State: ${grant.state}`,
       `• Grant: ${grant.name}`,
-      `• Justification, written by the agent and not checked by roma: ${justification}`,
+      `• Justification, written by the agent and not checked by roma: ${literal(justification)}`,
     ],
     approveAt: grant.approveAt,
   }
+}
+
+export function literal(text: string): string {
+  return `\`${text
+    .replace(/[\s\u0085]+/g, ' ')
+    .trim()
+    .replaceAll('`', 'ˋ')}\``
 }
 
 export function bindingWords({ role, condition }: RoleBinding): string {
