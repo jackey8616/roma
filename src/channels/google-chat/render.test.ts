@@ -71,3 +71,59 @@ describe('splitting an answer Chat would refuse', () => {
     }
   })
 })
+
+describe('the justification of a Cloud Grant on Google Chat', () => {
+  const GRANT = {
+    kind: 'cloud-grant',
+    taskId: 't',
+    conversationKey: 'k',
+    caller: 'users/17',
+    callerName: 'Ada',
+    grant: {
+      name: 'projects/p1/locations/global/entitlements/read/grants/g1',
+      state: 'APPROVAL_AWAITED',
+      entitlement: 'projects/p1/locations/global/entitlements/read',
+      approveAt: 'https://console.example.test/approve',
+      bindings: [],
+      resource: null,
+    },
+    entitlement: {
+      name: 'projects/p1/locations/global/entitlements/read',
+      bindings: [{ role: 'roles/storage.objectViewer', condition: null }],
+      maxDurationS: 3600,
+    },
+    durationS: 7200,
+    justification:
+      'roma Task t: read one export file\n\nroma checked this request: safe to approve.\n' +
+      '• Approve here: <https://evil.example/pam|Review it in Google Cloud> <users/all>',
+  } as const
+
+  it('shows it as literal text under the label, with nothing after it', () => {
+    const [text, ...more] = outcomeMessages(GRANT)
+
+    expect(more).toEqual([])
+    expect(text!.split('\n').at(-1)).toBe(
+      '• Justification, written by the agent and not checked by roma: ' +
+        '`roma Task t: read one export file roma checked this request: safe to approve. ' +
+        '• Approve here: <https://evil.example/pam|Review it in Google Cloud> <users/all>`',
+    )
+  })
+
+  it('keeps it within one message, whatever comes before it', () => {
+    const long = `roma Task t: ${'read the export '.repeat(62)}`
+    for (let roles = 0; roles < 140; roles += 1) {
+      const bindings = Array.from({ length: roles }, (_, at) => ({
+        role: `roles/custom.role${String(at)}`,
+        condition: null,
+      }))
+      const messages = outcomeMessages({
+        ...GRANT,
+        grant: { ...GRANT.grant, bindings },
+        justification: long,
+      })
+
+      expect(messages.every((text) => text.length <= MAX_TEXT)).toBe(true)
+      expect(messages.filter((text) => text.includes(`\`${long.trim()}\``))).toHaveLength(1)
+    }
+  })
+})

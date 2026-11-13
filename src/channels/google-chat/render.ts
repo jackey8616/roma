@@ -32,7 +32,7 @@ export function outcomeMessages(instruction: TaskOutcome): string[] {
     case 'choice':
       return split(to, instruction.text)
     case 'cloud-grant':
-      return split(to, grantNotice(instruction).lines.join('\n'))
+      return packed(to, grantNotice(instruction).lines)
     case 'stopped':
       return [`${to}Stopped.`]
     case 'interrupted':
@@ -103,6 +103,21 @@ function split(prefix: string, text: string): string[] {
     rest = rest.slice(at).trimStart()
   }
   if (rest !== '') messages.push(rest)
+  return messages
+}
+
+function packed(prefix: string, lines: readonly string[]): string[] {
+  const messages: string[] = []
+  for (const line of lines) {
+    const last = messages.at(-1)
+    if (last === undefined) {
+      messages.push(...split(prefix, line))
+    } else if (last.length + 1 + line.length <= MAX_TEXT) {
+      messages[messages.length - 1] = `${last}\n${line}`
+    } else {
+      messages.push(...split('', line))
+    }
+  }
   return messages
 }
 
