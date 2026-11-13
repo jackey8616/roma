@@ -144,6 +144,36 @@ export const THREE_TURNS = recordedStream('three-turns-one-process')
 
 export const OK: readonly ClaudeEvent[] = THREE_TURNS.turn(1)
 
+export const BACKGROUND = recordedStream('background-task-woken-turn')
+
+export const BACKGROUND_SENDS = {
+  launching: '8ac5287d-f1f2-4e3c-a283-c656f3e2d564',
+  midTurn: '911244a1-debd-48eb-b24a-ff9170b3dd48',
+} as const
+
+export function echoing(
+  events: readonly ClaudeEvent[],
+  recorded: string,
+  sent: string,
+): ClaudeEvent[] {
+  const swap = (value: unknown): unknown => (value === recorded ? sent : value)
+  return events.map((event) => {
+    if (event.type === 'result') {
+      const uuids = event['user_message_uuids']
+      return {
+        ...event,
+        ...('user_message_uuid' in event
+          ? { user_message_uuid: swap(event['user_message_uuid']) }
+          : {}),
+        ...(Array.isArray(uuids) ? { user_message_uuids: uuids.map(swap) } : {}),
+      }
+    }
+    if (event.type === 'user' && event['isReplay'] === true)
+      return { ...event, uuid: swap(event['uuid']) }
+    return event
+  })
+}
+
 export function withInit(
   events: readonly ClaudeEvent[],
   patch: Record<string, unknown>,

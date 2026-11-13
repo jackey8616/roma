@@ -5,11 +5,22 @@ import {
   TranscriptNotFound,
   TurnFailedError,
   wasInterrupted,
+  type LateResult,
   type Turn,
+  type UnsolicitedTurn,
 } from './claude-session.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { FakeRuntime } from '../test/support/fake-runtime.js'
-import { feed, recordedStream, withTotalCostUsd } from '../test/support/recorded-stream.js'
+import {
+  BACKGROUND,
+  BACKGROUND_SENDS,
+  echoing,
+  feed,
+  kindOf,
+  OK,
+  recordedStream,
+  withTotalCostUsd,
+} from '../test/support/recorded-stream.js'
 
 const SESSION_ID = '11111111-2222-3333-4444-555555555555'
 
@@ -215,6 +226,7 @@ describe('completing a Turn', () => {
         message: { role: 'user', content: [{ type: 'text', text: 'reply with ok' }] },
         parent_tool_use_id: null,
         session_id: SESSION_ID,
+        uuid: expect.stringMatching(/^[0-9a-f-]{36}$/),
       },
     ])
   })
@@ -739,3 +751,218 @@ const UNREPORTED_IS_NULL =
   'baseline where it was (ADR-0003, ADR-0018). Zero says the Turn was free or did no model ' +
   'work; a build that quietly stopped reporting would then record every Task in roma as ' +
   'free and retire the Relay drift check, where null is a Turn nobody can price.'
+
+describe('a Turn Claude Code starts on its own when a background Task finishes', () => {
+  const events = BACKGROUND.events
+  const launched = events.findIndex((event) => event.type === 'result')
+  const wokenInit = events.findIndex(
+    (event, at) => at > launched && kindOf(event) === 'system/init',
+  )
+  const lastQuiet = events.findLastIndex(
+    (event) =>
+      kindOf(event) === 'system/background_tasks_changed' &&
+      (event['tasks'] as readonly unknown[]).length === 0,
+  )
+
+  function uuidSent(session: { claude: FakeRuntime }, at: number): string {
+    return session.claude.process.sent[at]?.['uuid'] as string
+  }
+
+  it('answers each send with the result that echoes its uuid, and hands the rest on [fence:session-result-binds-to-its-send]', async () => {
+    const why =
+      'A result settles a send only when it echoes that send’s uuid (#234). Recorded on 2.1.319: ' +
+      'a second message written while the Turn a finished Task woke is running used to be ' +
+      'settled with that Turn’s text, and its own answer arrived with nothing pending and was ' +
+      'dropped, as was the Task’s result.'
+    const made = newSession()
+    const { claude, session } = made
+    const unsolicited: UnsolicitedTurn[] = []
+    session.on('unsolicited', (turn) => unsolicited.push(turn))
+    session.start()
+
+    const first = session.send('launch it in the background')
+    const launching = uuidSent(made, 0)
+    feed(
+      claude.process,
+      echoing(events.slice(0, wokenInit + 1), BACKGROUND_SENDS.launching, launching),
+    )
+    expect((await first).text, why).toBe('LAUNCHED')
+
+    const second = session.send('answer me now')
+    feed(
+      claude.process,
+      echoing(events.slice(wokenInit + 1), BACKGROUND_SENDS.midTurn, uuidSent(made, 1)),
+    )
+
+    expect((await second).text, why).toBe('SECOND-ANSWER 06365739')
+    expect(
+      unsolicited.map(({ origin, launchedBy, text }) => ({ origin, launchedBy, text })),
+      why,
+    ).toEqual([
+      {
+        origin: 'task-notification',
+        launchedBy: launching,
+        text: expect.stringContaining('subagent'),
+      },
+      {
+        origin: 'task-notification',
+        launchedBy: launching,
+        text: 'BACKGROUND-RESULT 06365739 SUBAGENT-DONE-06365739',
+      },
+    ])
+  })
+
+  it('credits a Task started inside a woken Turn to that Turn’s launcher, not to the send waiting behind it [fence:session-woken-turn-task-belongs-to-its-launcher]', async () => {
+    const why =
+      'A Task the woken Turn starts belongs to whoever launched the Task that woke it. The send ' +
+      'pending meanwhile is still queued behind that Turn, so crediting it would address the ' +
+      'new Task’s result to the wrong Caller (#235 review).'
+    const made = newSession()
+    const { claude, session } = made
+    const unsolicited: UnsolicitedTurn[] = []
+    session.on('unsolicited', (turn) => unsolicited.push(turn))
+    session.start()
+
+    const first = session.send('launch it in the background')
+    const launching = uuidSent(made, 0)
+    feed(
+      claude.process,
+      echoing(events.slice(0, wokenInit + 1), BACKGROUND_SENDS.launching, launching),
+    )
+    await first
+
+    const second = session.send('answer me now')
+    const started = events.find(
+      (event) => kindOf(event) === 'system/task_started' && event['parent_task_id'] === undefined,
+    ) as ClaudeEvent
+    const notified = events.find(
+      (event) => kindOf(event) === 'system/task_notification',
+    ) as ClaudeEvent
+    const woken = events.findLast((event) => event.type === 'result') as ClaudeEvent
+    feed(claude.process, [{ ...started, task_id: 'spawned-in-woken-turn', run_id: 'run-spawned' }])
+    feed(
+      claude.process,
+      echoing(events.slice(wokenInit + 1), BACKGROUND_SENDS.midTurn, uuidSent(made, 1)),
+    )
+    await second
+    feed(claude.process, [
+      { ...notified, task_id: 'spawned-in-woken-turn', run_id: 'run-spawned' },
+      events[wokenInit] as ClaudeEvent,
+      {
+        ...woken,
+        result: 'SPAWNED-RESULT',
+        origin: { kind: 'task-notification', runId: 'run-spawned' },
+      },
+    ])
+
+    expect(unsolicited.find((turn) => turn.text === 'SPAWNED-RESULT')?.launchedBy, why).toBe(
+      launching,
+    )
+  })
+
+  it('keeps the launcher of a notification still waiting when an earlier woken Turn ends [fence:session-queued-notification-keeps-its-launcher]', async () => {
+    const why =
+      'Notifications that arrive while a woken Turn runs wait their turn. Ending one woken Turn ' +
+      'must not forget who launched the Task behind the next, or a Task that Turn starts is ' +
+      'addressed to whoever wrote last (#235 review).'
+    const made = newSession()
+    const { claude, session } = made
+    const unsolicited: UnsolicitedTurn[] = []
+    session.on('unsolicited', (turn) => unsolicited.push(turn))
+    session.start()
+    const started = events.find(
+      (event) => kindOf(event) === 'system/task_started' && event['parent_task_id'] === undefined,
+    ) as ClaudeEvent
+    const notified = events.find(
+      (event) => kindOf(event) === 'system/task_notification',
+    ) as ClaudeEvent
+    const wokenResult = events.findIndex((event, at) => at > wokenInit && event.type === 'result')
+    const answered = events.findIndex((event, at) => at > wokenResult && event.type === 'result')
+    const woken = events[wokenResult] as ClaudeEvent
+
+    const first = session.send('launch two in the background')
+    const launching = uuidSent(made, 0)
+    feed(claude.process, [
+      ...echoing(events.slice(0, launched), BACKGROUND_SENDS.launching, launching),
+      { ...started, task_id: 'second-task', run_id: 'run-second' },
+      ...echoing([events[launched] as ClaudeEvent], BACKGROUND_SENDS.launching, launching),
+    ])
+    await first
+    feed(claude.process, events.slice(launched + 1, wokenInit + 1))
+
+    const second = session.send('answer me now')
+    feed(claude.process, [
+      { ...notified, task_id: 'second-task', run_id: 'run-second' },
+      ...events.slice(wokenInit + 1, wokenResult + 1),
+      ...echoing(
+        events.slice(wokenResult + 1, answered + 1),
+        BACKGROUND_SENDS.midTurn,
+        uuidSent(made, 1),
+      ),
+    ])
+    await second
+    feed(claude.process, [
+      events[wokenInit] as ClaudeEvent,
+      { ...started, task_id: 'spawned-later', run_id: 'run-spawned' },
+      {
+        ...woken,
+        result: 'SECOND-TASK-RESULT',
+        origin: { kind: 'task-notification', runId: 'run-second' },
+      },
+      { ...notified, task_id: 'spawned-later', run_id: 'run-spawned' },
+      events[wokenInit] as ClaudeEvent,
+      {
+        ...woken,
+        result: 'SPAWNED-RESULT',
+        origin: { kind: 'task-notification', runId: 'run-spawned' },
+      },
+    ])
+
+    expect(
+      unsolicited
+        .filter((turn) => turn.text === 'SECOND-TASK-RESULT' || turn.text === 'SPAWNED-RESULT')
+        .map((turn) => turn.launchedBy),
+      why,
+    ).toEqual([launching, launching])
+  })
+
+  it('stays busy from a background Task until the Turn it wakes has ended [fence:session-busy-while-background-work]', () => {
+    const why =
+      'A Session with a background Task, a woken Turn, or a Task’s notification whose Turn has ' +
+      'not yet begun is busy, so neither the idle reap nor an eviction ends it (#234). The ' +
+      'notification and the woken Turn’s init were 12 to 107ms apart in every recording.'
+    const { claude, session } = newSession()
+    session.start()
+    void session.send('launch it in the background').catch(() => {})
+    expect(session.backgroundBusy, why).toBe(false)
+
+    feed(claude.process, events.slice(0, launched + 1))
+    expect(session.backgroundBusy, why).toBe(true)
+
+    feed(claude.process, events.slice(launched + 1, lastQuiet + 1))
+    expect(session.backgroundBusy, why).toBe(true)
+
+    feed(claude.process, events.slice(lastQuiet + 1))
+    expect(session.backgroundBusy, why).toBe(false)
+  })
+
+  it('does not hand on a result whose send was already answered [fence:session-late-result-is-not-a-reply]', async () => {
+    const why =
+      'A result that arrives after its send already failed is not a Turn Claude Code started: ' +
+      'handing it on would answer one message twice (#234).'
+    const { claude, session } = newSession()
+    const unsolicited: UnsolicitedTurn[] = []
+    const late: LateResult[] = []
+    session.on('unsolicited', (turn) => unsolicited.push(turn))
+    session.on('late', (result) => late.push(result))
+    session.start()
+
+    const turn = session.send('hello')
+    claude.process.emitError(new Error('pipe broke'))
+    await expect(turn).rejects.toThrow('pipe broke')
+    feed(claude.process, OK)
+
+    expect(unsolicited, why).toEqual([])
+    expect(late, why).toEqual([{ resultIndex: null, isError: false }])
+  })
+})

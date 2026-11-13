@@ -25,7 +25,13 @@ import type {
   OutboundInstruction,
   TaskAddress,
 } from './channel-adapter.js'
-import { TranscriptNotFound, TurnFailedError, wasInterrupted, type Turn } from './claude-session.js'
+import {
+  TranscriptNotFound,
+  TurnFailedError,
+  wasInterrupted,
+  type Turn,
+  type UnsolicitedTurn,
+} from './claude-session.js'
 import { readCommand, type Command, type CommandRequest } from './commands.js'
 import { manualSeverityOf, severityOf, type CompactionSeverity } from './compaction.js'
 import { nearlyFull } from './context-fill.js'
@@ -105,6 +111,27 @@ export type CoreLogRecord =
       readonly event: 'task-interrupted'
       readonly taskId: string
       readonly conversationKey: string
+    }
+  | {
+      readonly event: 'result-unsolicited'
+      readonly sessionId: string
+      readonly resultIndex: number | null
+      readonly origin: string | null
+      readonly taskId: string
+      readonly conversationKey: string
+    }
+  | {
+      readonly event: 'result-empty'
+      readonly sessionId: string
+      readonly resultIndex: number | null
+      readonly origin: string | null
+    }
+  | {
+      readonly event: 'result-undelivered'
+      readonly sessionId: string
+      readonly resultIndex: number | null
+      readonly origin: string | null
+      readonly reason: string
     }
 
 export type CoreLog = OperatorLog<CoreLogRecord>
@@ -189,6 +216,8 @@ export class Core {
   readonly #openings = new Map<string, Promise<void>>()
   readonly #warning = new Map<string, number>()
   readonly #fills = new Map<string, number>()
+  readonly #conversations = new Map<string, TaskAddress>()
+  readonly #askers = new Map<string, TaskAddress>()
 
   constructor({
     channel,
@@ -229,6 +258,41 @@ export class Core {
     this.#requestedCloudGrants = requestedCloudGrants ?? (() => [])
     this.#grantsSettled = grantsSettled ?? (() => Promise.resolve())
     this.#log = log ?? writeToStderr
+    pool.on('unsolicited', (sessionId, turn) => void this.#deliverUnsolicited(sessionId, turn))
+  }
+
+  async #deliverUnsolicited(sessionId: string, turn: UnsolicitedTurn): Promise<void> {
+    const address =
+      (turn.launchedBy === null ? undefined : this.#askers.get(turn.launchedBy)) ??
+      this.#conversations.get(sessionId)
+    const seen = { sessionId, resultIndex: turn.resultIndex, origin: turn.origin }
+    if (address === undefined) {
+      this.#log({ event: 'result-undelivered', ...seen, reason: 'no-conversation' })
+      return
+    }
+    if (turn.text === '' && !turn.isError) {
+      this.#log({ event: 'result-empty', ...seen })
+      return
+    }
+    const taskId = randomUUID()
+    const instruction: OutboundInstruction = turn.isError
+      ? { kind: 'failure', ...address, taskId, reason: turn.text || ROMA_FAILED }
+      : { kind: 'result', ...address, taskId, text: turn.text }
+    try {
+      await this.#deliverAfter(this.#openings.get(sessionId), instruction)
+      this.#log({
+        event: 'result-unsolicited',
+        ...seen,
+        taskId,
+        conversationKey: address.conversationKey,
+      })
+    } catch (error) {
+      this.#log({
+        event: 'result-undelivered',
+        ...seen,
+        reason: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 
   async handle(message: IngressMessage): Promise<void> {
@@ -678,6 +742,7 @@ export class Core {
     const attempts = new Attempts(this.#credential)
     try {
       const sessionId = this.#sessions.sessionFor(conversationKey)
+      this.#conversations.set(sessionId, address)
       const task: RunningTask = {
         ...address,
         sessionId,
@@ -1036,8 +1101,12 @@ export class Core {
       if (contextWindow !== null) task.contextWindow = contextWindow
       reporter.observe(event)
     }
-    const onTurnStart = (id: string): void => {
+    const onTurnStart = (id: string, _text: string, uuid: string): void => {
       if (id !== sessionId) return
+      this.#askers.set(uuid, addressOf(task))
+      if (this.#askers.size > ASKERS_KEPT) {
+        this.#askers.delete(this.#askers.keys().next().value as string)
+      }
       attempts.sent()
       task.caveman = this.#pool.cavemanOn(sessionId)
       if (task.stopped) this.#pool.interrupt(sessionId)
@@ -1056,6 +1125,8 @@ export class Core {
 const EVERY_SESSION_RUNS_ON: Runtime = 'claude-code'
 
 const ROMA_FAILED = 'roma could not run this Task.'
+
+const ASKERS_KEPT = 1_000
 
 const ROMA_FAILED_COMMAND = 'roma could not carry out that command.'
 
