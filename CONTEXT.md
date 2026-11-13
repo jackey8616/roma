@@ -122,12 +122,13 @@ nothing in it at all. One kind of request carries none of them, though: a Relay
 goes on the wire as a command and has nowhere to name a file, so an Enclosure
 sent with one is never fetched — bytes paid for and then mentioned to nobody is
 the alternative, and the request there is the command (ADR-0018).
-One may name **who it came from**, and nearly none of them do: the Caller Marker
+One may name **who it came from**, and today none of them do: the Caller Marker
 above the message already says who sent it, so that is written only where the
-answer is somebody else — a Quotation of a forwarded message brings its own, and
-"the screenshot Ada sent" and "the screenshot Ada forwarded from Bob" are
-otherwise one sentence (ADR-0021). A Channel that cannot say who forwarded it
-collapses those two back into one, and Discord is such a Channel (ADR-0029).
+answer is somebody else — an attachment a Quotation brought, where "the
+screenshot Ada sent" and "the screenshot Ada forwarded from Bob" would otherwise
+be one sentence. Chat's snapshot carries no attachments, so a Quotation there
+brings none (ADR-0021). Discord cannot say who forwarded one, so it collapses the
+two back into one (ADR-0029).
 _Avoid_: attachment (that is the Channel's word for the thing upstream, and the
 two are not the same object — an Enclosure is named by roma and the Channel's is
 not), file (so is everything else in a Working Directory), upload, payload

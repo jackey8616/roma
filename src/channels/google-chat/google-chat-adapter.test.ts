@@ -403,46 +403,44 @@ describe('the message a message quotes', () => {
     expect(message?.quotation?.text, why).toBe('the deploy failed at step 3')
   })
 
-  it('carries a quoted message’s attachment as an Enclosure, marked as theirs', async () => {
+  it('reads no Enclosure out of a quoted message [fence:gchat-quotation-carries-no-enclosure]', () => {
+    const why =
+      'Chat’s quotedMessageSnapshot has no attachment field on either delivery path, measured in ' +
+      '#122: a quoted image arrives as its words or as nothing (ADR-0021 §5). Reading one out of ' +
+      'the snapshot would be code that encodes a reading measured false.'
     const { adapter, api } = newAdapter()
     api.holds('attachments/att-1', 'PNG')
 
     const message = adapter.toIngress(
-      inSpace('what is this?', quoting({ ...SAID, attachments: [UPLOADED] })),
-    )
-
-    expect(message?.enclosures.map(({ name, from }) => ({ name, from }))).toEqual([
-      { name: 'screenshot.png', from: 'users/99' },
-    ])
-    expect(api.downloads).toEqual([])
-    expect(await message?.enclosures[0]?.redeem()).toEqual(new TextEncoder().encode('PNG'))
-  })
-
-  it('keeps the Caller’s own Enclosures ahead of the quoted message’s', () => {
-    const { adapter } = newAdapter()
-
-    const message = adapter.toIngress(
       inSpace('mine and theirs', {
         attachment: [IN_DRIVE],
-        ...quoting({ ...SAID, attachments: [UPLOADED] }),
+        ...quoting({ ...SAID, attachment: [UPLOADED], attachments: [UPLOADED] }),
       }),
     )
 
-    expect(message?.enclosures.map(({ name, from }) => ({ name, from }))).toEqual([
-      { name: 'design.fig', from: null },
-      { name: 'screenshot.png', from: 'users/99' },
-    ])
+    expect(
+      message?.enclosures.map(({ name, from }) => ({ name, from })),
+      why,
+    ).toEqual([{ name: 'design.fig', from: null }])
+    expect(message?.quotation, why).toEqual({
+      text: 'the deploy failed at step 3',
+      author: 'users/99',
+    })
   })
 
-  it('makes no empty quotation out of a snapshot with no words', () => {
-    const { adapter } = newAdapter()
+  it('says so when a quoted message carried only a sender, as a quoted picture with no words does', () => {
+    const { adapter, logged } = newAdapter()
 
-    const message = adapter.toIngress(
-      inSpace('look', quoting({ sender: 'users/99', attachments: [UPLOADED] })),
-    )
+    const message = adapter.toIngress(inSpace('look', quoting({ sender: 'users/99' })))
 
     expect(message?.quotation).toBeNull()
-    expect(message?.enclosures).toHaveLength(1)
+    expect(message?.enclosures).toEqual([])
+    expect(logged).toEqual([
+      {
+        event: 'quote-unread',
+        keys: ['name', 'lastUpdateTime', 'quotedMessageSnapshot', 'quotedMessageSnapshot.sender'],
+      },
+    ])
   })
 
   it('says so when a quoted message arrived and nothing was read out of it', () => {

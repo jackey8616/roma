@@ -70,6 +70,13 @@ subscribe to nothing and answer nobody, so it refuses instead. There are two, Go
 and Discord, and one process serves however many there are: one Core each, over one pool,
 one queue, one Audit Log and one Work Root (ADR-0028).
 
+On Google Chat, **attach an image to the message that addresses roma.** Quoting a
+message carries its words and never its picture: Chat shows the image in the quote
+preview, roma answers about the text, and no log line records that a picture was
+dropped. Forwarding a message with an attachment to roma does worse. Chat sends roma
+no event at all, so the sender sees "not responding" and roma logs nothing (ADR-0021,
+#122).
+
 Discord answers in **plain text**, not embeds and not an attached file: a long answer
 inside a card is worse at the two things a separate Result exists for, being searched for
 and being quoted, and Discord's search reads message content while no part of an embed can

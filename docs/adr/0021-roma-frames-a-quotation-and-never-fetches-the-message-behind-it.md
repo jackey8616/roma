@@ -7,14 +7,29 @@ Date: 2026-08-03
 Accepted, and implemented by the change that carries it. Nothing here was
 measured and nothing here cost money.
 
-**Unverified in one specific way, and the way matters.** Every fact below about
-Chat's payload is read from the API's own discovery document, which describes the
-*Message resource*. What an interaction event delivered over Pub/Sub actually
-carries is a separate question, and ADR-0004 already says the reference does not
-pin it down. So the single reading everything here rests on — that the quoted
-words arrive in the event — is one nobody has seen hold. §6 is what makes a wrong
-reading loud instead of silent, and the verification is tracked as its own issue,
-the way ADR-0011's was as #93.
+**Written unverified, and since measured (#122, 2026-08-03).** Every fact below
+about Chat's payload was first read from the API's own discovery document, which
+describes the *Message resource*, and the reading everything here rests on — that
+the quoted words arrive in a Pub/Sub interaction event — was one nobody had seen
+hold. #122 captured the raw events beside roma's own on 0.6.0 and **it holds**:
+`quotedMessageMetadata` arrives, its `quotedMessageSnapshot` carries `sender` and
+`text` on both `REPLY` and `FORWARD`, and `spaces.messages.get` returns a snapshot
+with exactly the same fields, so the event is not a reduced copy of the resource.
+`sender` is a display name rather than a `users/…` resource name, which printing
+it and never parsing it already allowed for.
+
+**One reading was false, and it was §5's.** The snapshot has **no attachment
+field**, on either delivery path, so a quoted message's attachments never reach
+roma. Forwarding a message that carries an attachment produces **no event at
+all**: the sender sees Chat's red "not responding" and roma writes no Operator
+Log line. §5 is rewritten below rather than marked, because the decision it
+recorded was about a field that does not exist.
+
+#122 also measured the second of §1's reasons, which had been read from the
+documentation: under `chat.bot`, `spaces.messages.get` returns 200 for the
+message that addressed the app and **403** for the message it quoted. So "the
+snapshot and never the link" is, under `chat.bot`, the only reading available
+and not only the preferred one.
 
 **Extends ADR-0009's Caller Marker** rather than amending it. The rule that
 roma's part is the tagged prefix and comes first is unchanged; §2 is what it took
@@ -158,7 +173,8 @@ Quotation.
   forwarding chose to, and roma cannot prevent — or detect — a paste.
 - **Not reading `quoteType` removes a guess.** It defaults to `REPLY` when unset,
   and both fields roma reads are populated for both types, so reading it would
-  add a third assumption about a payload nobody has seen for no behaviour.
+  add a third assumption about a payload nobody had seen, for no behaviour.
+  #122 has since seen both fields populated for both types.
 
 `forwardedMetadata.spaceDisplayName` is deliberately **not** carried. For a
 forwarded DM it holds the other participant's name rather than a space's, so
@@ -166,37 +182,71 @@ forwarded DM it holds the other participant's name rather than a space's, so
 misleads in a knowable fraction of cases is worse than no fact. Enforced by
 `fence:gchat-forward-names-no-space`.
 
-### 5. A quoted message's attachments are ordinary Enclosures, marked with whose
+### 5. A quoted message's attachments do not reach roma, and roma does not look for them
 
-Chat's snapshot carries the quoted message's attachments for a forward. They
-become Enclosures like any other, fetched over `media.download` — which accepts
-`chat.bot`, the scope roma already posts and downloads under.
+*Rewritten 2026-11-13 (#221) after #122 measured the reading this section was
+built on.* It used to say that Chat's snapshot carries the quoted message's
+attachments for a forward, and that roma would make them Enclosures marked with
+whose they were. **The snapshot has no attachment field on any path that was
+measured**:
 
-**This does not contradict §1.** What roma never fetches is the quoted *message*;
-bytes are not it, and they travel the same path the Caller's own attachments have
-travelled since ADR-0011.
+| Quoted or forwarded | Event? | snapshot keys |
+| --- | --- | --- |
+| quote, text only | yes | `sender`, `text` |
+| quote, attachment only | yes | `sender` |
+| quote, attachment and text | yes | `sender`, `text` |
+| forward, text only | yes | `sender`, `text`, `formattedText` |
+| forward, attachment and text | **none** | — |
 
-Where the ref turns out not to be roma's to redeem, the Task ends with the reason
-and the person can paste the file directly. That is not a new failure mode: it is
-exactly what `driveDataRef` already does, and ADR-0011 calls it the normal path
-for a Channel with an unreachable class of attachment rather than an edge case.
+So the Chat Adapter reads no Enclosure out of a Quotation. Reading one would be
+code that cannot run, and it would encode a reading measured false. Enforced by
+`fence:gchat-quotation-carries-no-enclosure`.
 
-An Enclosure that arrived this way carries **who it came from**, and one the
-Caller attached carries nothing. Without that, "the screenshot Ada sent" and "the
-screenshot Ada forwarded from Bob" are one sentence in the Working Directory and
-one tag in front of the agent — ADR-0009's misattribution, one level down. The
-Caller's own stay unmarked because the Caller Marker above the message already
-names them.
+**Nothing in the payload says an attachment was dropped.** Quoting a captioned
+image gives a snapshot of exactly the shape a text-only quote gives, so roma
+cannot warn, cannot log and cannot tell the Conversation what it is missing.
+Chat's own client still shows the image in the quote preview, which is why this
+is the hardest kind of gap for somebody to diagnose for themselves. A forward of
+an attachment is worse: Chat sends roma nothing, so nothing in roma can see it.
+
+**Every remedy is closed**, and #122 measured each one:
+
+- reading the attachment out of the snapshot — the field does not exist;
+- following `quotedMessageMetadata.name` to the quoted message — `403` under
+  `chat.bot`, and §1 would refuse it anyway;
+- widening to `chat.app.messages.readonly` — an administrator's approval, and it
+  buys the app every message it was never addressed in, for a picture.
+
+Fetching only when `quote-unread` fires was weighed and rejected for a worse
+reason than the 403. It would fix an uncaptioned image and not a captioned one,
+and captioning is the more common habit. People would learn that quoting pictures
+works and then be quietly wrong, and a half-fix that is inconsistent is worse
+than a gap that is consistent.
+
+**What is left is telling people.** The README says that an image has to be
+attached to the message that addresses roma.
+
+`PendingEnclosure.from` stays, because the Core and the agent's tag still need
+somewhere to say who an Enclosure came from. No Channel roma serves fills it
+today: Chat sends no quoted attachments and Discord cannot say who forwarded
+(ADR-0029).
 
 ### 6. Reading nothing out of a quoted message is an Operator Log line
 
 `quote-unread`, carrying the keys that arrived and never the content — the
 `attachment-unread` record's argument, applied to the reading that most needs it.
 
-The snapshot is where this whole decision's weight sits and it is the one part
-nobody has seen. If it is absent from interaction events, roma answers every
-quoted message as though the quotation were not there, which is precisely the
-behaviour this ADR replaces. That failure has to be visible to somebody.
+The snapshot is where this whole decision's weight sits, and when this was
+written it was the one part nobody had seen. If it is absent from interaction
+events, roma answers every quoted message as though the quotation were not
+there, which is precisely the behaviour this ADR replaces. That failure has to be
+visible to somebody. #122 found it present; the line still fires for a quoted
+picture with no words, which arrives as `sender` alone.
+
+**The line has a blind spot that roma cannot close.** It fires when no Quotation
+forms, so a quoted captioned image forms one from the caption and logs nothing
+while its picture is dropped. §5 says why no payload field could tell the two
+apart.
 
 The snapshot's own keys are carried under their path, because "no snapshot in the
 payload" and "a snapshot roma cannot read" are different faults with different
@@ -230,8 +280,12 @@ repairs, and the keys are what tell them apart.
   a Transcript roma never deletes (ADR-0006). That is the Caller's decision to
   make and roma's to record, and it is no different from pasting — but the record
   is permanent and is named here because nothing else would name it.
-- The reading is unverified against a real Workspace. §6 is the instrument; a
-  `ready-for-human` issue is the record.
+- The reading was unverified against a real Workspace when this was accepted.
+  §6 was the instrument and #122 the record; it measured §1–§4 holding and §5
+  false.
+- **A quotation always opens a new Conversation.** #122 saw every quotation
+  arrive as its own top-level message, with `threadReply` unset, in a new thread
+  rather than the quoted message's.
 
 ## Alternatives considered
 

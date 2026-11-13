@@ -41,9 +41,9 @@ export function readIngressMessage(
   if (conversationKey === null) return null
 
   const text = (asString(message['argumentText']) ?? asString(message['text']) ?? '').trim()
-  const quoted = readQuotation(message, download, log)
-  const enclosures = [...readEnclosures(message, null, download, log), ...quoted.enclosures]
-  if (text === '' && enclosures.length === 0 && quoted.quotation === null) return null
+  const quotation = readQuotation(message, log)
+  const enclosures = readEnclosures(message, download, log)
+  if (text === '' && enclosures.length === 0 && quotation === null) return null
 
   return {
     conversationKey,
@@ -51,7 +51,7 @@ export function readIngressMessage(
     callerName,
     text,
     enclosures,
-    quotation: quoted.quotation,
+    quotation,
   }
 }
 
@@ -71,28 +71,18 @@ function conversationKeyOf(
   return direct || thread === null ? spaceName : thread
 }
 
-interface QuotedMessage {
-  readonly quotation: Quotation | null
-  readonly enclosures: readonly PendingEnclosure[]
-}
-
-const NOTHING_QUOTED: QuotedMessage = { quotation: null, enclosures: [] }
-
 function readQuotation(
   message: Readonly<Record<string, unknown>>,
-  download: DownloadAttachment | undefined,
   log: OperatorLog<ChatEventLogRecord> | undefined,
-): QuotedMessage {
+): Quotation | null {
   const metadata = asRecord(message['quotedMessageMetadata'])
-  if (metadata === null) return NOTHING_QUOTED
+  if (metadata === null) return null
 
   const snapshot = asRecord(metadata['quotedMessageSnapshot'])
-  const author = asString(snapshot?.['sender'])
   const text = (asString(snapshot?.['text']) ?? '').trim()
-  const enclosures = snapshot === null ? [] : readEnclosures(snapshot, author, download, log)
-  const quotation = text === '' ? null : { text, author }
+  const quotation = text === '' ? null : { text, author: asString(snapshot?.['sender']) }
 
-  if (quotation === null && enclosures.length === 0) {
+  if (quotation === null) {
     log?.({
       event: 'quote-unread',
       keys: [
@@ -104,7 +94,7 @@ function readQuotation(
     })
   }
 
-  return { quotation, enclosures }
+  return quotation
 }
 
 export interface ReadOptions {
@@ -114,7 +104,6 @@ export interface ReadOptions {
 
 function readEnclosures(
   message: Readonly<Record<string, unknown>>,
-  from: string | null,
   download: DownloadAttachment | undefined,
   log: OperatorLog<ChatEventLogRecord> | undefined,
 ): readonly PendingEnclosure[] {
@@ -129,7 +118,7 @@ function readEnclosures(
 
     const resourceName = asString(asRecord(attachment['attachmentDataRef'])?.['resourceName'])
     if (resourceName !== null && download !== undefined) {
-      enclosures.push({ name, from, redeem: () => download(resourceName) })
+      enclosures.push({ name, from: null, redeem: () => download(resourceName) })
       continue
     }
 
@@ -137,7 +126,7 @@ function readEnclosures(
     if (driveFileId !== null) {
       enclosures.push({
         name,
-        from,
+        from: null,
         redeem: () =>
           Promise.reject(
             new Error(

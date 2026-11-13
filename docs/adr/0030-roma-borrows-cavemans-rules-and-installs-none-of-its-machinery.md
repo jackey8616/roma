@@ -28,8 +28,10 @@ for making it: the Audit Record now carries the level and the Turn's output
 tokens, which is what lets a deployment answer agenda item 1 from its own months
 rather than from a synthetic prompt, and `src/append-on-resume.live.test.ts` is
 item 5's. That one has since been spent, and it is the only claim in this file
-that has moved from assumed to measured: **the append survives a `--resume` on
-2.1.220**, so a Caveman applies for as long as a Session lives. The agenda at the
+that has moved from assumed to measured: **the append survives a `--resume`**,
+so a Caveman applies for as long as a Session lives. That was measured on 2.1.220.
+On 2.1.319, the build the image now pins, it holds only because every spawn
+passes `--system-prompt-snapshot off` (#214, amended below). The agenda at the
 end is shorter by one item and longer by another, both from the same re-reading —
 see *Verification status*.
 
@@ -55,58 +57,61 @@ ADR-0029 are about Channels and touch nothing here.
 Read rather than run, with one exception, and the exception is the load-bearing
 one. The readings about Claude Code taken off the binary — the two immediately
 below, on where a skill is found and what an uninvoked one costs — are off the
-pinned build, **2.1.220**, the version `Dockerfile` and `src/packaging.test.ts`
+pinned build, **2.1.319**, the version `Dockerfile` and `src/packaging.test.ts`
 both carry. The **Measured** ones after them are off `jackey8616/caveman` at its
 pinned commit — readings about a third-party repository, which no Claude Code
 version dates. The last **Measured** block is neither: it is a run, two real
-Turns against the Shared Window, and it names 2.1.220 for itself rather than
-inheriting it from this paragraph.
+Turns against the Shared Window, and it names its own build rather than
+inheriting one from this paragraph.
 
-The two were first taken on 2.1.227 and have been re-taken here, because a
-reading inherited from the build next door is not evidence about the build roma
-ships, and ADR-0007's pin is what makes that a requirement rather than a
-courtesy. The pin was checked rather than assumed: #160 reports npm's `latest`
-at 2.1.226 and is open, unacted on, and asks for nothing — declining that check
-is a normal outcome, and 2.1.220 is what the image installs until somebody
-decides otherwise.
+**Re-taken 2026-11-13 on 2.1.319 (#221).** The two were first taken on 2.1.227,
+re-taken on 2.1.220 when that was the pin (#184), and re-taken again here after
+#214 moved the pin to 2.1.319 without re-reading them. A reading inherited from
+another build is not evidence about the build roma ships, and ADR-0007's pin is
+what makes that a requirement rather than a courtesy. #160, which asked for the
+pin to move, is closed by #214.
 
-**The method changed, because the artefact did.** 2.1.220's npm package is a
-500-byte `bin/claude.exe` and a postinstall that copies a native binary over it,
-so there is no bundle to open: the quotes below are the JavaScript embedded in
-`@anthropic-ai/claude-code-linux-x64@2.1.220`, recovered with `strings` and
-`grep -a`. Minified names therefore differ from the 2.1.227 quotes this section
-used to carry — `O8` is `fn` here — and that is not a finding, because a build
-renames them for free. Behaviour moving is the finding, and where it moved it is
-said so below.
+**The method.** The npm package for a platform is the native binary itself, so
+there is no bundle to open: the quotes below are the JavaScript embedded in
+`@anthropic-ai/claude-code-linux-x64@2.1.319`, found with `grep -a` and read
+around each hit. Minified names differ from build to build — `fn` on 2.1.220 is
+`Ue` here — and that is not a finding, because a build renames them for free.
+Behaviour moving is the finding, and where it moved it is said so below.
 
 **Measured — where Claude Code looks for a skill.**
 
 ```js
-function Akl(){return process.env.CLAUDE_CONFIG_DIR}
-fn=Vr(()=>(Akl()??dye.join(Tkl.homedir(),".claude")).normalize("NFC"),Akl)
+function Ecn(){return process.env.CLAUDE_CONFIG_DIR}
+var Ue=f(()=>(Ecn()??u(D(),".claude")).normalize("NFC"),Ecn)
+function of(){return Kae()?null:Ue()}
+function U7e(){let e=of();return e===null?null:ke(e,"skills")}
 …
-let t=E_.join(fn(),"skills"),r=E_.join(cB(),".claude","skills"),n=J$t("skills",e);
-w(`Loading skills from: managed=${r}, user=${t}, project=[${n.join(", ")}]`)
+let s=U7e(),h=Lg(YS(),".claude","skills"),…,S=await rde("skills",e),…
+t(`Loading skills from: managed=${h}, user=${s??"none"}, project=[${S.join(", ")}]`)
 ```
 
-A user skill lives under `CLAUDE_CONFIG_DIR`, which for roma is
-`ROMA_CLAUDE_CONFIG_DIR` — the volume the README requires be durable and
-ADR-0006 forbids roma to delete from. That reading holds unchanged; 2.1.220
-splits the environment read from its fallback where 2.1.227 inlined the two, and
-lands on the same directory.
+`D` is `os.homedir`. A user skill lives under `CLAUDE_CONFIG_DIR`, which for roma
+is `ROMA_CLAUDE_CONFIG_DIR` — the volume the README requires be durable and
+ADR-0006 forbids roma to delete from. That reading holds unchanged. What is new
+on 2.1.319 is that the user directory can be `none`: `Kae()` is the host's
+`isDiskless()`, a mode roma does not run in, so for roma it lands on the same
+directory as before.
 
-The project reading holds as well, and **this file stated it narrower than the
-resolver it was describing** — which is what re-reading it turned up. `project`
-is a list rather than a path, and `n.join(", ")` was saying so on 2.1.227 too:
+The project reading holds as well. It was first stated narrower than the
+resolver it was describing, which the 2.1.220 re-read turned up: `project` is a
+list rather than a path.
 
 ```js
-function J$t(e,t){let r=nX.resolve(xap.homedir()).normalize("NFC"),n=P2_(t),o=nX.resolve(t),i=[];while(!0){if(pv(o)===pv(r))break;let s=nX.join(o,".claude",e);try{Cap.statSync(s),i.push(s)}catch(l){…}if(n&&pv(o)===pv(n))break;let a=nX.dirname(o);if(a===o)break;o=a}return i}
+async function rde(e,n){let r=lo()??n;if(r===null||q())return[];let s=rYe(g1o()).normalize("NFC"),h=k1o(r),y=rYe(r),S=[];while(!0){if(Ap(y)===Ap(s))break;if(S.push(OF(y,".claude",e)),h&&Ap(y)===Ap(h))break;let Y=h1o(y);if(Y===y)break;y=Y}let w=await Promise.all(S.map((Y)=>HSe(Y).then(…))),H=[];for(let Y of w){…if(Y.exists){H.push(ke);continue}…else if(E(ne)==="ENFILE")t(`getProjectDirsUpToHome: stat ${ke} hit ENFILE …`)…}…}
 ```
 
-Its own error path names it `getProjectDirsUpToHome`. So a project skill is
-resolved under `<cwd>/.claude` **and under every ancestor of it**, stopping at
-the home directory, at the enclosing git repository's root — `P2_`, which is
-null outside a repository — or at `/`.
+`g1o` is `os.homedir`, `h1o` is `path.dirname`, and `HSe` is `stat`. The error
+path still names it `getProjectDirsUpToHome`. So a project skill is resolved
+under `<cwd>/.claude` **and under every ancestor of it**, stopping at the home
+directory, at the enclosing git repository's root (`k1o`, which is null outside
+a repository), or at `/`. 2.1.319 stats the candidates in parallel rather than
+one by one, and adds a start point the launcher may override (`lo()`, the host's
+`projectConfigRoot`). Neither changes where the climb goes for roma.
 
 For roma that is not a detail. `HOME` is `/home/node`, `ROMA_WORK_ROOT` defaults
 to `/var/lib/roma/work`, and a Working Directory is `<work root>/<sessionId>`
@@ -133,19 +138,19 @@ roma load a skill out of `/var/lib/roma/.claude/skills`, and the agenda below
 gains that question.
 
 **Measured — what an installed skill costs when nothing invokes it.** The
-evidence this file cited for that — `/skills` rendering each entry as
-`… · ${K} description tokens` — **is not in the pinned build.** The string
-`description tokens` does not occur in the 2.1.220 binary at all. The claim is
-re-established on better evidence, which is the listing itself rather than a
-counter drawn beside it:
+evidence this file first cited for that — `/skills` rendering each entry as
+`… · ${K} description tokens` — was not in 2.1.220, and the string
+`description tokens` does not occur in the 2.1.319 binary either. The claim
+rests on better evidence, which is the listing itself rather than a counter
+drawn beside it. On 2.1.319:
 
 ```js
-function DMt(e){return e.whenToUse?`${e.description} - ${e.whenToUse}`:e.description}
-function Why(e){let t=DMt(e),r=RMt();return t.length>r?t.slice(0,r-1)+"\u2026":t}
-function qhy(e){…return `- ${e.name}: ${Why(e)}`}
-function RMt(){return eo().skillListingMaxDescChars??Uhy}
+var tRr=1e5,nRr=1536;function B3t(){return yt().skillListingMaxDescChars??nRr}
 …
-Uhy=1536
+function oIt(e){return e.whenToUse?`${e.description} - ${e.whenToUse}`:e.description}
+…
+function rRr(e){let n=oIt(e),r=B3t();return n.length>r?n.slice(0,r-1)+"\u2026":n}
+function V_n(e,n,r,s,h=e){…if(hMe(He)==="name-only"){…let Xe=`- ${He.name}`;…}let Ye=`- ${j3t(He,h)}`;return{cmd:He,nameOnly:Ye,full:`${Ye}: ${rRr(He)}`}}…}
 ```
 
 An entry is `- name: description`, truncated at `skillListingMaxDescChars`,
@@ -158,7 +163,13 @@ and the 4,107 is not carried at all. This is a stronger reading than the one it
 replaces: a UI counter said what the build believed, and this is the string the
 model is sent.
 
-2.1.220 also takes a per-skill `name-only` override, which lists a skill without
+2.1.319 adds a cap on the **whole** listing, `skillListingBudgetFraction`
+(*"default: 0.01 = 1%"* of the context window, in characters). Over it, some
+descriptions are shortened to the name alone. That can only make an uninvoked
+skill cheaper, so the reading stands.
+
+2.1.220 also took a per-skill `name-only` override, and 2.1.319 still does
+(`skillOverrides`), which lists a skill without
 its description. It does not rescue the installed-skill alternative below: it
 would save the 404 characters by removing the only thing that could ever elect
 the skill.
@@ -559,7 +570,8 @@ Ordered by how much falls if the answer is no.
    the answer decides whether this image has a skill-shaped hole in it. Read off
    the binary, never run. This replaces the item asking whether the readings
    above held on 2.1.220 — they were re-read against it, which is how this
-   question got asked.
+   question got asked, and re-read again on 2.1.319, where the climb is
+   unchanged.
 3. **Is the append inside the cached prefix?** Decides whether the per-spawn cost
    is paid once or every Turn. Nothing in this repository has read Claude Code's
    request construction; this would be the first.
