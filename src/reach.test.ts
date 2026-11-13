@@ -95,6 +95,22 @@ describe('a deployment with no key [fence:reach-no-key-is-a-reach-that-says-so]'
   })
 })
 
+describe('a Cloud Reach with no grant scopes [fence:cloud-grant-no-scopes-claims-no-ceiling]', () => {
+  const WHY =
+    'With ROMA_CLOUD_GRANT_SCOPES unset roma asks PAM nothing, and the agent can still ask PAM ' +
+    'directly with the Cloud Reach’s own token (ADR-0041 §3). Saying the Reach has no way to ' +
+    'ask for more tells the agent and its readers a ceiling roma does not hold (#228).'
+
+  it('says roma asks for none, and not that the Reach cannot be widened', () => {
+    const { grants } = cloudReach(new FakeCloudMinter())
+    const said = 'unavailable' in grants ? grants.unavailable : ''
+
+    expect(said, WHY).toContain('ROMA_CLOUD_GRANT_SCOPES')
+    expect(said, WHY).toMatch(/not something roma decides or checks/)
+    expect(said, WHY).not.toMatch(/no way to ask for more/)
+  })
+})
+
 describe('one Reach per credential [fence:reach-one-per-credential]', () => {
   it('cannot be assembled without the forge', () => {
     const { cloud, documents } = fakeReaches()

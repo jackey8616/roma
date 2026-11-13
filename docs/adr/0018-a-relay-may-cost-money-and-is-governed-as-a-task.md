@@ -42,11 +42,14 @@ repair is also deferred rather than lost: a Session that genuinely cannot be
 reduced fails the *next* ordinary message on the auto path, where the code is a
 code and ADR-0019's machinery reads it properly.
 
-**#118 is therefore half-answered and stays open.** The noise is gone; what is
-left is whether the manual path can be keyed on anything at all, and that is a
-measurement rather than a design — the cheapest version is provoking one
-`exhausted` and reading what the stream does with a `V7`, which is the spend #98
-judged not worth making and this ADR still does not.
+**#118 was therefore half-answered, and its open half moved to #121.** The noise
+is gone; what was left is whether the manual path can be keyed on anything at
+all, and that is a measurement rather than a design. #121 took it over and closed
+it: nothing on stdout tells a manual `exhausted` from too few groups, so a failed
+`/compact` now writes an `unexplained` Operator Log line carrying Claude Code's
+sentence verbatim, except for the one sentence measured benign. The operator
+"not at all" above is therefore no longer true; the Caller is still told only
+Claude Code's own sentence. ADR-0019 is where that is recorded.
 
 Two smaller inventions came with the reply and are recorded rather than assumed.
 This ADR specifies one sentence — "Compacted: 31,953 → 1,764 tokens" — and the

@@ -14,8 +14,9 @@ export const NO_CLOUD_GRANT_FOR_NO_REACH =
   'This roma has no Cloud Reach, so there is nothing a Cloud Grant could widen.'
 
 export const NO_CLOUD_GRANT_SCOPES =
-  `This roma's Cloud Reach is not widened by Cloud Grants: nobody set ${CLOUD_GRANT_SCOPES_VAR}, ` +
-  'so it has the roles it was given and no way to ask for more.'
+  `This roma asks for no Cloud Grants: nobody set ${CLOUD_GRANT_SCOPES_VAR}, so ` +
+  'roma-cloud-grant has nothing to request. What the Cloud Reach may be granted ' +
+  'in Google Cloud some other way is not something roma decides or checks.'
 
 export function cloudReach(
   minter: CloudMinter,

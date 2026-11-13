@@ -4,7 +4,8 @@ Date: 2026-07-30
 
 ## Status
 
-Accepted, and implemented in #92. What is still unverified is #93.
+Accepted, and implemented in #92. #93, the half that was unverified, was
+measured in production and closed: see *Verification status*.
 
 Extends ADR-0003's inbound contract, which reduced a Channel event to "a key, an
 identity, and some text". The reduction stands; what changes is that *some text*
@@ -19,8 +20,9 @@ fetched from GitHub; it is what somebody sent.
 
 ### Verification status
 
-Two premises are verified and one is not, and the difference matters enough to
-say before the decision rather than after it.
+Two premises were verified and one was not when this was accepted, and the
+difference mattered enough to say before the decision rather than after it. The
+third has since been measured (#93).
 
 **Verified**: everything this ADR claims about roma. `toIngress` is synchronous
 (`serve.ts:285`), the Working Directory is `join(workRoot, sessionId)` and the
@@ -36,13 +38,34 @@ pin moves. The run also settled something this ADR argued for rather than
 measured: given the marker and no instruction to open anything, the agent went
 and read the file.
 
-**Not verified**: that roma can obtain the bytes from Google Chat at all. An
-attachment arrives as one of two things, and they are not equally reachable —
-`attachmentDataRef` is Chat's own storage and is fetched with the app's
-credentials, while `driveDataRef` points into the *sender's* Drive, which roma
-has no scope for and no consent from. If the second is unreachable, this ADR
-still holds and the refusal path below is the one that carries it. Implementation
-starts by finding out, not by building.
+**Verified, in production (#93)**: that roma can obtain the bytes from Google
+Chat. This was the premise left open, because an attachment arrives as one of two
+things and they are not equally reachable. `attachmentDataRef` is Chat's own
+storage, fetched with the app's credentials. `driveDataRef` points into the
+*sender's* Drive, which roma has no scope for and no consent from.
+
+- **`attachmentDataRef` works.** Raw Pub/Sub events captured beside roma's own
+  carry `message.attachment[]` as an array with
+  `attachmentDataRef.resourceName`, and `chat.bot` redeems it through
+  `GET /v1/media/{resourceName}?alt=media`, which is what `HttpChatApi.download`
+  sends. On 0.5.0 a 1.1 MB image was fetched whole, and on 0.6.0 two images were
+  fetched, one on a brand-new thread's first message (#105's condition) and one
+  on a resume. Each was a screenshot of a freshly generated six-digit number under
+  a renamed file, and the agent read both numbers correctly with `Read` twice and
+  `Bash` never.
+- **`driveDataRef` is unreachable, and there is nothing to try.** A Drive file
+  arrives with `source: "DRIVE_FILE"` and `driveDataRef.driveFileId`, and with no
+  `attachmentDataRef`, no `downloadUri` and no `thumbnailUri`. So no scope roma
+  lacks is the only obstacle: the payload has no ref an implementation could
+  redeem. The same file also appears a second time as a `RICH_LINK` annotation;
+  reading `attachment[]` alone is right. The refusal path below is the one that
+  carries it, as this section expected: Chat showed the Drive sentence, the Audit
+  Record was `outcome: failure` with `turnMs: null`, and no `spawn` was logged.
+
+Three fields the reader does not use were seen and left alone: `downloadUri`
+(whether it accepts the app's credentials, or expires, was not tested), `source`
+(a direct discriminator where the code infers the same fact from which ref is
+present), and `thumbnailUri`.
 
 ## Context
 

@@ -14,6 +14,13 @@ here compares, parses or decides anything by a Caller.
 only code that knows the grants are Google's Privileged Access Manager (PAM);
 `roma-cloud-grant` is the Cloud Grant Shortcut.
 
+**Amended 2026-11-13 (#228)**, in §3 and §4, after a containment review of 0.12.0.
+Both sections claimed more than the code gives. The boundary is the Cloud Reach's
+identity in Google Cloud, which roma checks only in the scopes it was named and
+only at boot. The stamp is a search aid, and proving a grant came from a Task
+goes through `cloudGrants`. The decisions are unchanged; what changed is what
+they are said to guarantee.
+
 ### Verification status
 
 **Measured, in a scratch project (2026-11-11), by hand rather than through roma.**
@@ -120,28 +127,81 @@ Enforced by `fence:cloud-grant-only-from-what-roma-found`.
 ### 3. A person approves, in Google Cloud, and roma never approves or denies
 
 The approver is whoever the entitlement names, and there must be one. PAM grants an
-entitlement with no approval workflow the moment it is asked, so roma refuses to boot
-when it may request one: every entitlement it keeps has a manual step naming its
-approvers. Enforced by `fence:cloud-grant-only-where-a-person-approves`.
+entitlement with no approval workflow the moment it is asked.
 
-roma has no code that approves or
-denies a grant, so it cannot become the approver of its own requests even if an
-entitlement listed the Cloud Reach among its approvers, which PAM allows as a preview.
-Enforced by `fence:roma-never-approves-a-cloud-grant`.
+**The boundary is the Cloud Reach's identity, not roma.** The agent holds a Cloud
+Token for that identity (§4), and so can ask PAM for anything the identity is
+eligible for, without going through roma. So the condition this whole decision
+needs is a deployment's to keep, in Google Cloud: **every entitlement the Cloud
+Reach may request, in any scope and at any time, has an approval step whose
+approvers are people.** One that does not is a way to widen the Reach that nobody
+approves.
+
+roma checks part of that, and the part is narrow. At boot, `PamGrants.find`
+refuses to start if an entitlement in `ROMA_CLOUD_GRANT_SCOPES` has no manual
+approval step, or a step that names no approvers. Enforced by
+`fence:cloud-grant-only-where-a-person-approves`. It does not see:
+
+- an entitlement in a scope it was not named;
+- an entitlement created or changed after boot (§2);
+- anything at all when `ROMA_CLOUD_GRANT_SCOPES` is unset, because then roma asks
+  PAM nothing. The announcement says roma asks for no grant, and not that the
+  Reach cannot be widened. Enforced by
+  `fence:cloud-grant-no-scopes-claims-no-ceiling`;
+- whether the principals an approval step names are people. `needsAPerson` checks
+  that a step names some, and PAM accepts a service account as an approver when
+  automated approvals are on
+  (https://docs.cloud.google.com/iam/docs/pam-configure-settings).
+
+roma has no code that approves or denies a grant. Enforced by
+`fence:roma-never-approves-a-cloud-grant`. That keeps roma's own code out of the
+approval path; **it is not what stops the agent approving its own grant.** The
+agent holds the Cloud Reach's token, and an entitlement could list the Cloud Reach
+among its approvers. What stops that is Google's rule that a requester cannot
+approve their own request
+(https://docs.cloud.google.com/iam/docs/pam-approve-deny-grants).
 
 ### 4. roma stamps the Task on the justification, and that is not a boundary
 
-The agent writes the justification and roma puts `roma Task <id>:` in front of it.
-The Task id joins Google's audit log to roma's Audit Record, which already names the
-Caller, so a grant can be traced to a person without roma writing a Caller anywhere
-new. A Session running no Task cannot ask at all. Enforced by
-`fence:cloud-grant-carries-its-task`.
+The agent writes the justification and roma puts `roma Task <id>:` in front of it,
+so a person reading Google's log can find the Task in roma's Audit Record, which
+already names the Caller. A Session running no Task cannot ask through roma at all.
+Enforced by `fence:cloud-grant-carries-its-task`.
 
-It is not a boundary. The agent holds a Cloud Token for the same identity and can
-call PAM itself. What that costs it is the stamp: a grant whose justification does
-not begin with a Task was requested around roma, and that is visible in Google's
-log. The Cloud Grant Shortcut, like the Cloud Shortcut (ADR-0015 §6), makes the
-ordinary path the traceable one.
+**The stamp is a search aid, and it proves nothing.** It is string concatenation
+(`stampedFor`), and PAM stores the justification as free text. The agent holds a
+Cloud Token for the same identity: the Cloud Reach's own `cloud-platform` token,
+not narrowed for the agent. With a Cloud Reach configured, the agent's egress
+allowlist includes `*.googleapis.com`, and that includes PAM's API. So it can call
+PAM itself and write `roma Task <id>:` in front of its own justification, with a
+real Task id. A missing stamp can show that a request was made around roma; a
+stamp that is there shows nothing.
+
+**What does tie a grant to a Task is the grant's name in `cloudGrants`** (§7).
+roma writes it into that Task's Audit Record only for a grant it requested itself,
+from the name PAM returned, and a request made directly to PAM never reaches that
+code. To trace a grant, look for its name in `cloudGrants`.
+
+**A name missing from `cloudGrants` is not proof on its own.** The Task waits at
+most 30 seconds for PAM to answer (§7). A grant PAM makes after that is not in the
+Task's Audit Record, which was already written. It is still in the Operator Log:
+roma writes a `cloud-grant` line with `operation: 'grant'`, carrying the Task id
+and the grant's name, for every answer it gets, however late. A status check
+writes a `cloud-grant` line too, so a trace filters on `operation`.
+
+**A name in neither is not proof either.** roma logs the grant's name only once it
+has read PAM's answer. If PAM made the grant and the answer was lost on the way
+back, roma writes `cloud-grant-refused`, which has no grant name. So the two
+records show which grants roma requested and saw answered. They cannot show that
+roma did not request some other grant.
+
+The Cloud Grant Shortcut, like the Cloud Shortcut (ADR-0015 §6), makes the
+ordinary path the one that can be traced.
+
+Leaving PAM's host out of the agent's allowlist was considered and not done. It
+would not be a boundary, since the token works anywhere it can be carried. The
+allowlist also matches by suffix and has no way to leave one host out of a
+wildcard.
 
 ### 5. The agent is told what it may ask for, and to end the Turn while a person decides
 
@@ -225,4 +285,8 @@ roles were used for is in Google's log, under the Cloud Reach's name.
 - A Cloud Grant is shared: while it is active, every Conversation has its roles. That
   is ADR-0015's model, and the approver is told so on the notice that asks them.
 - An entitlement added after boot is not seen until roma restarts, as a rotated key
-  is not (ADR-0015 §3).
+  is not (ADR-0015 §3). The agent can still request it directly, so whether it has a
+  person approving it is the deployment's to keep, not roma's (§3).
+- A deployment that leaves `ROMA_CLOUD_GRANT_SCOPES` unset has turned off the Cloud
+  Grant Shortcut, not PAM. If the Cloud Reach is eligible for an entitlement
+  anywhere, the agent can ask for it, and roma checks none of them.
