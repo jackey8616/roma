@@ -142,6 +142,8 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
   readonly #launchers = new Map<string, string>()
   #turnOpen = false
   #waking = false
+  #turnOwner: string | null = null
+  #wokenBy: string | null = null
   #stdoutBuffer = ''
   #controlRequests = 0
   #cumulativeCostUsd = 0
@@ -346,6 +348,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
         this.emit('late', { resultIndex, isError: result.isError })
         return
       }
+      this.#wokenBy = null
       const runId = originRunId(event)
       const taskId = runId === null ? undefined : this.#runs.get(runId)
       this.emit('unsolicited', {
@@ -388,11 +391,20 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
   }
 
   #track(event: ClaudeEvent): void {
+    if (
+      event.type === 'user' &&
+      event['isReplay'] === true &&
+      event['parent_tool_use_id'] === null &&
+      typeof event['uuid'] === 'string'
+    ) {
+      this.#turnOwner = event['uuid']
+    }
     if (event.type !== 'system') return
     const subtype = event['subtype']
     if (subtype === 'init') {
       this.#turnOpen = true
       this.#waking = false
+      this.#turnOwner = this.#wokenBy
     }
     if (subtype === 'background_tasks_changed' && Array.isArray(event['tasks'])) {
       this.#background = new Set(
@@ -407,7 +419,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
       const parent = typeof event['parent_task_id'] === 'string' ? event['parent_task_id'] : null
       this.#parents.set(taskId, parent)
       if (typeof event['run_id'] === 'string') this.#runs.set(event['run_id'], taskId)
-      const by = parent === null ? this.#pending?.uuid : this.#launchers.get(parent)
+      const by = parent === null ? (this.#turnOwner ?? undefined) : this.#launchers.get(parent)
       if (by !== undefined && !this.#launchers.has(taskId)) this.#launchers.set(taskId, by)
     }
     if (
@@ -416,6 +428,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
       (this.#parents.get(taskId) ?? null) === null
     ) {
       this.#waking = true
+      this.#wokenBy = this.#launchers.get(taskId) ?? null
     }
   }
 

@@ -65,8 +65,15 @@ result whose `origin.kind` is `task-notification`.
 
 ### 3. A woken result goes to the Caller who launched the Task
 
-`ClaudeSession` remembers, per `task_id`, the uuid of the send that was pending when the
-Task started. A nested Task takes its parent's. The result's `origin.runId` leads back
+`ClaudeSession` remembers, per `task_id`, whose Turn started the Task:
+
+- a user Turn belongs to the uuid on its replayed user message;
+- a woken Turn belongs to whoever launched the Task whose notification woke it;
+- a nested Task takes its parent's launcher.
+
+The send pending at the time is not used. During a woken Turn that send is still queued
+behind the Turn, and crediting it would address the new Task's result to the wrong
+Caller. This was found in review of #235. The result's `origin.runId` leads back
 through `run_id` to that `task_id`. `Core` remembers the address of each recent send's
 Task, keeping the last 1,000, and falls back to the Session's last Conversation address.
 
@@ -92,6 +99,7 @@ Session, as it already skips a busy one.
   roma could not deliver.
 
 Enforced by `fence:session-result-binds-to-its-send`,
+`fence:session-woken-turn-task-belongs-to-its-launcher`,
 `fence:session-busy-while-background-work`, `fence:session-late-result-is-not-a-reply`,
 `fence:pool-background-work-is-never-reaped`, `fence:pool-background-work-is-never-evicted`
 and `fence:core-woken-result-reaches-its-launcher`.

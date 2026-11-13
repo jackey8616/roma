@@ -812,6 +812,54 @@ describe('a Turn Claude Code starts on its own when a background Task finishes',
     ])
   })
 
+  it('credits a Task started inside a woken Turn to that Turn’s launcher, not to the send waiting behind it [fence:session-woken-turn-task-belongs-to-its-launcher]', async () => {
+    const why =
+      'A Task the woken Turn starts belongs to whoever launched the Task that woke it. The send ' +
+      'pending meanwhile is still queued behind that Turn, so crediting it would address the ' +
+      'new Task’s result to the wrong Caller (#235 review).'
+    const made = newSession()
+    const { claude, session } = made
+    const unsolicited: UnsolicitedTurn[] = []
+    session.on('unsolicited', (turn) => unsolicited.push(turn))
+    session.start()
+
+    const first = session.send('launch it in the background')
+    const launching = uuidSent(made, 0)
+    feed(
+      claude.process,
+      echoing(events.slice(0, wokenInit + 1), BACKGROUND_SENDS.launching, launching),
+    )
+    await first
+
+    const second = session.send('answer me now')
+    const started = events.find(
+      (event) => kindOf(event) === 'system/task_started' && event['parent_task_id'] === undefined,
+    ) as ClaudeEvent
+    const notified = events.find(
+      (event) => kindOf(event) === 'system/task_notification',
+    ) as ClaudeEvent
+    const woken = events.findLast((event) => event.type === 'result') as ClaudeEvent
+    feed(claude.process, [{ ...started, task_id: 'spawned-in-woken-turn', run_id: 'run-spawned' }])
+    feed(
+      claude.process,
+      echoing(events.slice(wokenInit + 1), BACKGROUND_SENDS.midTurn, uuidSent(made, 1)),
+    )
+    await second
+    feed(claude.process, [
+      { ...notified, task_id: 'spawned-in-woken-turn', run_id: 'run-spawned' },
+      events[wokenInit] as ClaudeEvent,
+      {
+        ...woken,
+        result: 'SPAWNED-RESULT',
+        origin: { kind: 'task-notification', runId: 'run-spawned' },
+      },
+    ])
+
+    expect(unsolicited.find((turn) => turn.text === 'SPAWNED-RESULT')?.launchedBy, why).toBe(
+      launching,
+    )
+  })
+
   it('stays busy from a background Task until the Turn it wakes has ended [fence:session-busy-while-background-work]', () => {
     const why =
       'A Session with a background Task, a woken Turn, or a Task’s notification whose Turn has ' +
