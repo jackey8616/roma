@@ -143,7 +143,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
   #turnOpen = false
   #waking = false
   #turnOwner: string | null = null
-  #wokenBy: string | null = null
+  readonly #notified = new Map<string, string | null>()
   #stdoutBuffer = ''
   #controlRequests = 0
   #cumulativeCostUsd = 0
@@ -348,8 +348,8 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
         this.emit('late', { resultIndex, isError: result.isError })
         return
       }
-      this.#wokenBy = null
       const runId = originRunId(event)
+      this.#notified.delete(runId ?? (this.#notified.keys().next().value as string))
       const taskId = runId === null ? undefined : this.#runs.get(runId)
       this.emit('unsolicited', {
         text: result.text ?? '',
@@ -404,7 +404,7 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     if (subtype === 'init') {
       this.#turnOpen = true
       this.#waking = false
-      this.#turnOwner = this.#wokenBy
+      this.#turnOwner = this.#notified.values().next().value ?? null
     }
     if (subtype === 'background_tasks_changed' && Array.isArray(event['tasks'])) {
       this.#background = new Set(
@@ -428,7 +428,8 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
       (this.#parents.get(taskId) ?? null) === null
     ) {
       this.#waking = true
-      this.#wokenBy = this.#launchers.get(taskId) ?? null
+      const runId = typeof event['run_id'] === 'string' ? event['run_id'] : taskId
+      this.#notified.set(runId, this.#launchers.get(taskId) ?? null)
     }
   }
 

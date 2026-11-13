@@ -68,7 +68,9 @@ result whose `origin.kind` is `task-notification`.
 `ClaudeSession` remembers, per `task_id`, whose Turn started the Task:
 
 - a user Turn belongs to the uuid on its replayed user message;
-- a woken Turn belongs to whoever launched the Task whose notification woke it;
+- a woken Turn belongs to whoever launched the Task behind the oldest notification not yet
+  answered. Notifications wait in `run_id` order, and a woken Turn's result removes only
+  the one its `origin.runId` names;
 - a nested Task takes its parent's launcher.
 
 The send pending at the time is not used. During a woken Turn that send is still queued
@@ -100,6 +102,7 @@ Session, as it already skips a busy one.
 
 Enforced by `fence:session-result-binds-to-its-send`,
 `fence:session-woken-turn-task-belongs-to-its-launcher`,
+`fence:session-queued-notification-keeps-its-launcher`,
 `fence:session-busy-while-background-work`, `fence:session-late-result-is-not-a-reply`,
 `fence:pool-background-work-is-never-reaped`, `fence:pool-background-work-is-never-evicted`
 and `fence:core-woken-result-reaches-its-launcher`.
