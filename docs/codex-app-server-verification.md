@@ -150,3 +150,20 @@ was checked again, and what was not.
   99,533 bytes, against about 94 kB. The home held the same databases at the same
   versions as Q2 (`state_5`, `logs_2`, `goals_1`, `memories_1`, `queue_1`,
   `thread_history_1`) and `thread-writer-locks/`.
+
+## Re-pin to `gpt-6-astra` (#236)
+
+Date: 2026-11-13, on 0.167.0 (`codex-cli 0.167.0`, `darwin-arm64`, npm), against the
+same directly logged-in `CODEX_HOME` as the 0.167.0 re-check.
+
+- **The name.** `model/list` with `includeHidden`, free. The account is offered
+  `gpt-6-astra` by that exact id, not hidden and not the account default
+  (`gpt-6.1-sol`), with efforts `low` to `ultra` and a default of **`medium`**, where
+  `gpt-5.6-sol`'s is `low`. The list is the account's, served at call time, not the
+  build's; #157 reads the build. `gpt-6.1-astra` is not offered, and a string search
+  finds it neither in the build's `codex` binary nor in `openai/codex`'s source.
+- **Q3's paid Turn, again**, spending Codex's Shared Window: four assertions passing, so
+  `ThreadStartResponse` reported `gpt-6-astra`. Its `reasoningEffort` was not captured,
+  because Vitest did not print the logged response; the rollout's `turn_context` names
+  `gpt-6-astra` and no effort.
+- **Not measured here**: that the model answering is the one named. That is #152's.

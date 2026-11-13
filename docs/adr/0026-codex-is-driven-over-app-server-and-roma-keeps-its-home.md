@@ -32,6 +32,11 @@ as every other configuration problem (ADR-0015 §8, #103). The writability half 
 after the drop to `node` (ADR-0032), since root can write anywhere. Enforced by
 `fence:main-checks-codex-home-after-drop`.
 
+**Amended 2026-11-13** by #236. The Pinned Model moves from `gpt-5.6-sol` to
+`gpt-6-astra`, and the Pinned Effort's default is read for the Pinned Model,
+because the build reports it per model. Measured in
+`docs/codex-app-server-verification.md` *Re-pin to `gpt-6-astra` (#236)*.
+
 The spike that the design this pull request previously proposed gated
 construction on survives here as that agenda, extended by one item the review
 of that draft asked for: the pinned build's own reasoning-effort levels, which
@@ -156,7 +161,8 @@ argument transfers:
   the second pin. The first pin was 0.165.0, the latest stable build on the day
   it was measured; it moved to 0.167.0, the latest stable build on
   2026-11-10, on the re-check in `docs/codex-app-server-verification.md`.
-- **The model.** `gpt-5.6-sol`, one per deployment, sent on every
+- **The model.** `gpt-6-astra` (**Amended** — from `gpt-5.6-sol`), one per
+  deployment, sent on every
   `thread/start` — the protocol takes `model` per call — with the roma-written
   `config.toml` in `CODEX_HOME` as the backstop. Not Codex's own default,
   which never runs: this is what roma insists on, ADR-0003's sentence
@@ -170,7 +176,9 @@ argument transfers:
   at a level roma cannot state — measured, and the outcome this pin exists to
   rule out. The default is the pinned build's own default,
   measured at pin time; the env override is validated at startup as
-  `ROMA_EFFORT` is.
+  `ROMA_EFFORT` is. **Amended — the build reports that default per model**,
+  so it is read for the Pinned Model on the pinned build, and moves when either
+  does.
 - **The Startup Self-Check.** Blocking on every Runtime the deployment
   configured: a real handshake and a probe Turn proving the credential
   resolves and the pinned model is what answers, before anything that could
