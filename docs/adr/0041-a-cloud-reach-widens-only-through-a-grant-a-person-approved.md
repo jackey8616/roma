@@ -180,8 +180,15 @@ stamp that is there shows nothing.
 **What does tie a grant to a Task is the grant's name in `cloudGrants`** (§7).
 roma writes it into that Task's Audit Record only for a grant it requested itself,
 from the name PAM returned, and a request made directly to PAM never reaches that
-code. To trace a grant, look for its name in `cloudGrants`. If no Audit Record
-carries the name, roma did not request that grant.
+code. To trace a grant, look for its name in `cloudGrants`.
+
+**A name missing from `cloudGrants` is not proof on its own.** The Task waits at
+most 30 seconds for PAM to answer (§7). A grant PAM makes after that is not in the
+Task's Audit Record, which was already written. It is still in the Operator Log:
+roma writes a `cloud-grant` line, carrying the Task id and the grant's name, for
+every answer it gets, however late. So a grant roma requested is named in
+`cloudGrants` or in a `cloud-grant` line. A grant named in neither, over a period
+whose Operator Log was kept, was not requested by roma.
 
 The Cloud Grant Shortcut, like the Cloud Shortcut (ADR-0015 §6), makes the
 ordinary path the one that can be traced.
