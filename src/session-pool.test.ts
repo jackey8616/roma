@@ -17,6 +17,9 @@ import type { Turn } from './claude-session.js'
 import { FakeRuntime, flush, type FakeRuntimeProcess } from '../test/support/fake-runtime.js'
 import { FakeLauncher } from '../test/support/fake-launcher.js'
 import {
+  BACKGROUND,
+  BACKGROUND_SENDS,
+  echoing,
   feed,
   OK,
   recordedStream,
@@ -1655,5 +1658,44 @@ describe('every Resident Session holds a Seat of its own', () => {
     await flush()
 
     await expect(pool.send(B, 'hello')).rejects.toThrow(/quarantined/)
+  })
+})
+
+describe('a Session whose background Task is still running', () => {
+  const events = BACKGROUND.events
+  const launched = events.findIndex((event) => event.type === 'result')
+  const BACKGROUND_WORK =
+    'A Session with a background Task in flight, or the Turn its notification wakes, is never ' +
+    'reaped or evicted (#234): ending it loses the Task and the result its finish would write.'
+
+  async function launch(pool: SessionPool, proc: () => FakeRuntimeProcess): Promise<void> {
+    const turn = pool.send(A, 'launch it in the background')
+    await flush()
+    const sent = proc().sent[0]?.['uuid'] as string
+    feed(proc(), echoing(events.slice(0, launched + 1), BACKGROUND_SENDS.launching, sent))
+    await turn
+  }
+
+  it('is not reaped while its Task runs, and is once the Task has reported [fence:pool-background-work-is-never-reaped]', async () => {
+    const { pool, processFor, log } = newPool()
+    await launch(pool, () => processFor(A))
+
+    await vi.advanceTimersByTimeAsync(60 * MINUTE)
+    expect(pool.residents, BACKGROUND_WORK).toEqual([A])
+    expect(processFor(A).signals, BACKGROUND_WORK).toEqual([])
+    expect(log, BACKGROUND_WORK).toContainEqual({ event: 'reap-deferred', sessionId: A })
+
+    feed(processFor(A), events.slice(launched + 1))
+    await vi.advanceTimersByTimeAsync(15 * MINUTE)
+    expect(pool.residents, BACKGROUND_WORK).toEqual([])
+  })
+
+  it('refuses another Session the last slot rather than evicting it [fence:pool-background-work-is-never-evicted]', async () => {
+    const { pool, processFor } = newPool({ maxResident: 1 })
+    await launch(pool, () => processFor(A))
+
+    await expect(pool.send(B, 'hello'), BACKGROUND_WORK).rejects.toThrow(/busy/)
+    expect(processFor(A).signals, BACKGROUND_WORK).toEqual([])
+    expect(pool.residents, BACKGROUND_WORK).toEqual([A])
   })
 })

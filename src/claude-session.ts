@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import {
   spawnRuntimeProcess,
@@ -45,6 +46,23 @@ export class TurnFailedError extends Error {
   }
 }
 
+export interface UnsolicitedTurn {
+  readonly text: string
+  readonly costUsd: number | null
+  readonly outputTokens: number | null
+  readonly isError: boolean
+  readonly subtype: string
+  readonly origin: string | null
+  readonly resultIndex: number | null
+  readonly launchedBy: string | null
+  readonly result: ClaudeEvent
+}
+
+export interface LateResult {
+  readonly resultIndex: number | null
+  readonly isError: boolean
+}
+
 export const NO_CONVERSATION = /no conversation found/i
 
 export class TranscriptNotFound extends TurnFailedError {
@@ -80,16 +98,19 @@ export interface ClaudeSessionOptions {
 }
 
 export interface ClaudeSessionEvents {
-  'turn-start': [text: string]
+  'turn-start': [text: string, uuid: string]
   'turn-end': [turn: Turn]
+  unsolicited: [turn: UnsolicitedTurn]
+  late: [late: LateResult]
   event: [event: ClaudeEvent]
   stderr: [chunk: string]
   exit: [exit: RuntimeProcessExit]
 }
 
 interface PendingTurn {
+  readonly uuid: string
   readonly startedAt: number
-  readonly assistantText: string[]
+  assistantText: string[]
   readonly settle: (turn: Turn) => void
   readonly fail: (error: Error) => void
 }
@@ -115,6 +136,12 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
   #process: RuntimeProcess | null = null
   #exit: RuntimeProcessExit | null = null
   #pending: PendingTurn | null = null
+  #background = new Set<string>()
+  readonly #parents = new Map<string, string | null>()
+  readonly #runs = new Map<string, string>()
+  readonly #launchers = new Map<string, string>()
+  #turnOpen = false
+  #waking = false
   #stdoutBuffer = ''
   #controlRequests = 0
   #cumulativeCostUsd = 0
@@ -138,6 +165,10 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
 
   get pid(): number | undefined {
     return this.#process?.pid
+  }
+
+  get backgroundBusy(): boolean {
+    return this.#background.size > 0 || this.#turnOpen || this.#waking
   }
 
   get cumulativeCostUsd(): number {
@@ -193,8 +224,10 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
       throw new Error(`Session ${this.sessionId} already has a Turn in flight`)
     }
 
+    const uuid = randomUUID()
     const turn = new Promise<Turn>((resolve, reject) => {
       this.#pending = {
+        uuid,
         startedAt: Date.now(),
         assistantText: [],
         settle: resolve,
@@ -207,8 +240,9 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
       message: { role: 'user', content: [{ type: 'text', text }] },
       parent_tool_use_id: null,
       session_id: this.sessionId,
+      uuid,
     })
-    this.emit('turn-start', text)
+    this.emit('turn-start', text, uuid)
 
     return await turn
   }
@@ -278,9 +312,11 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     }
 
     this.emit('event', event)
+    this.#track(event)
 
     const result = readTerminalResult(event)
     if (result === null) return
+    this.#turnOpen = false
 
     const previousTotalUsd = this.#cumulativeCostUsd
     if (result.cumulativeCostUsd !== null) this.#cumulativeCostUsd = result.cumulativeCostUsd
@@ -288,7 +324,6 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     if (result.cumulativeOutputTokens !== null) {
       this.#outputTokenMark = Math.max(previousMark, result.cumulativeOutputTokens)
     }
-    if (pending === null) return
 
     const own = result.sinceLastResult
     const delta =
@@ -297,16 +332,40 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
         : result.cumulativeCostUsd === null
           ? null
           : result.cumulativeCostUsd - previousTotalUsd
+    const outputTokens =
+      own !== null
+        ? own.outputTokens
+        : result.cumulativeOutputTokens === null
+          ? null
+          : Math.max(0, result.cumulativeOutputTokens - previousMark)
+
+    if (pending === null || !answers(event, pending.uuid)) {
+      if (pending !== null) pending.assistantText = []
+      const resultIndex = typeof event['result_index'] === 'number' ? event['result_index'] : null
+      if (originKind(event) !== 'task-notification') {
+        this.emit('late', { resultIndex, isError: result.isError })
+        return
+      }
+      const runId = originRunId(event)
+      const taskId = runId === null ? undefined : this.#runs.get(runId)
+      this.emit('unsolicited', {
+        text: result.text ?? '',
+        costUsd: delta,
+        outputTokens,
+        isError: result.isError,
+        subtype: result.subtype,
+        origin: originKind(event),
+        resultIndex,
+        launchedBy: (taskId === undefined ? undefined : this.#launchers.get(taskId)) ?? null,
+        result: event,
+      })
+      return
+    }
 
     const turn: Turn = {
       text: result.text ?? pending.assistantText.join(''),
       costUsd: delta,
-      outputTokens:
-        own !== null
-          ? own.outputTokens
-          : result.cumulativeOutputTokens === null
-            ? null
-            : Math.max(0, result.cumulativeOutputTokens - previousMark),
+      outputTokens,
       durationMs: Date.now() - pending.startedAt,
       isError: result.isError,
       subtype: result.subtype,
@@ -328,6 +387,38 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     )
   }
 
+  #track(event: ClaudeEvent): void {
+    if (event.type !== 'system') return
+    const subtype = event['subtype']
+    if (subtype === 'init') {
+      this.#turnOpen = true
+      this.#waking = false
+    }
+    if (subtype === 'background_tasks_changed' && Array.isArray(event['tasks'])) {
+      this.#background = new Set(
+        (event['tasks'] as readonly Readonly<Record<string, unknown>>[])
+          .filter((task) => task['ambient'] !== true && typeof task['task_id'] === 'string')
+          .map((task) => task['task_id'] as string),
+      )
+    }
+    const taskId = typeof event['task_id'] === 'string' ? event['task_id'] : null
+    if (taskId === null) return
+    if (subtype === 'task_started') {
+      const parent = typeof event['parent_task_id'] === 'string' ? event['parent_task_id'] : null
+      this.#parents.set(taskId, parent)
+      if (typeof event['run_id'] === 'string') this.#runs.set(event['run_id'], taskId)
+      const by = parent === null ? this.#pending?.uuid : this.#launchers.get(parent)
+      if (by !== undefined && !this.#launchers.has(taskId)) this.#launchers.set(taskId, by)
+    }
+    if (
+      subtype === 'task_notification' &&
+      event['ambient'] !== true &&
+      (this.#parents.get(taskId) ?? null) === null
+    ) {
+      this.#waking = true
+    }
+  }
+
   #onExit(exit: RuntimeProcessExit): void {
     this.#exit = exit
     this.#failPending(new ClaudeExitedError(exit))
@@ -340,4 +431,29 @@ export class ClaudeSession extends EventEmitter<ClaudeSessionEvents> {
     this.#pending = null
     pending.fail(error)
   }
+}
+
+function originOf(event: ClaudeEvent): Readonly<Record<string, unknown>> | null {
+  const origin = event['origin']
+  return typeof origin === 'object' && origin !== null
+    ? (origin as Readonly<Record<string, unknown>>)
+    : null
+}
+
+function originKind(event: ClaudeEvent): string | null {
+  const kind = originOf(event)?.['kind']
+  return typeof kind === 'string' ? kind : null
+}
+
+function originRunId(event: ClaudeEvent): string | null {
+  const runId = originOf(event)?.['runId']
+  return typeof runId === 'string' ? runId : null
+}
+
+function answers(event: ClaudeEvent, uuid: string): boolean {
+  const consumed = event['user_message_uuids']
+  if (Array.isArray(consumed)) return consumed.includes(uuid)
+  const echoed = event['user_message_uuid']
+  if (typeof echoed === 'string') return echoed === uuid
+  return originKind(event) !== 'task-notification'
 }

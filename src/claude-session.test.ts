@@ -5,11 +5,22 @@ import {
   TranscriptNotFound,
   TurnFailedError,
   wasInterrupted,
+  type LateResult,
   type Turn,
+  type UnsolicitedTurn,
 } from './claude-session.js'
 import type { ClaudeEvent } from './stream-events.js'
 import { FakeRuntime } from '../test/support/fake-runtime.js'
-import { feed, recordedStream, withTotalCostUsd } from '../test/support/recorded-stream.js'
+import {
+  BACKGROUND,
+  BACKGROUND_SENDS,
+  echoing,
+  feed,
+  kindOf,
+  OK,
+  recordedStream,
+  withTotalCostUsd,
+} from '../test/support/recorded-stream.js'
 
 const SESSION_ID = '11111111-2222-3333-4444-555555555555'
 
@@ -215,6 +226,7 @@ describe('completing a Turn', () => {
         message: { role: 'user', content: [{ type: 'text', text: 'reply with ok' }] },
         parent_tool_use_id: null,
         session_id: SESSION_ID,
+        uuid: expect.stringMatching(/^[0-9a-f-]{36}$/),
       },
     ])
   })
@@ -739,3 +751,104 @@ const UNREPORTED_IS_NULL =
   'baseline where it was (ADR-0003, ADR-0018). Zero says the Turn was free or did no model ' +
   'work; a build that quietly stopped reporting would then record every Task in roma as ' +
   'free and retire the Relay drift check, where null is a Turn nobody can price.'
+
+describe('a Turn Claude Code starts on its own when a background Task finishes', () => {
+  const events = BACKGROUND.events
+  const launched = events.findIndex((event) => event.type === 'result')
+  const wokenInit = events.findIndex(
+    (event, at) => at > launched && kindOf(event) === 'system/init',
+  )
+  const lastQuiet = events.findLastIndex(
+    (event) =>
+      kindOf(event) === 'system/background_tasks_changed' &&
+      (event['tasks'] as readonly unknown[]).length === 0,
+  )
+
+  function uuidSent(session: { claude: FakeRuntime }, at: number): string {
+    return session.claude.process.sent[at]?.['uuid'] as string
+  }
+
+  it('answers each send with the result that echoes its uuid, and hands the rest on [fence:session-result-binds-to-its-send]', async () => {
+    const why =
+      'A result settles a send only when it echoes that send’s uuid (#234). Recorded on 2.1.319: ' +
+      'a second message written while the Turn a finished Task woke is running used to be ' +
+      'settled with that Turn’s text, and its own answer arrived with nothing pending and was ' +
+      'dropped, as was the Task’s result.'
+    const made = newSession()
+    const { claude, session } = made
+    const unsolicited: UnsolicitedTurn[] = []
+    session.on('unsolicited', (turn) => unsolicited.push(turn))
+    session.start()
+
+    const first = session.send('launch it in the background')
+    const launching = uuidSent(made, 0)
+    feed(
+      claude.process,
+      echoing(events.slice(0, wokenInit + 1), BACKGROUND_SENDS.launching, launching),
+    )
+    expect((await first).text, why).toBe('LAUNCHED')
+
+    const second = session.send('answer me now')
+    feed(
+      claude.process,
+      echoing(events.slice(wokenInit + 1), BACKGROUND_SENDS.midTurn, uuidSent(made, 1)),
+    )
+
+    expect((await second).text, why).toBe('SECOND-ANSWER 06365739')
+    expect(
+      unsolicited.map(({ origin, launchedBy, text }) => ({ origin, launchedBy, text })),
+      why,
+    ).toEqual([
+      {
+        origin: 'task-notification',
+        launchedBy: launching,
+        text: expect.stringContaining('subagent'),
+      },
+      {
+        origin: 'task-notification',
+        launchedBy: launching,
+        text: 'BACKGROUND-RESULT 06365739 SUBAGENT-DONE-06365739',
+      },
+    ])
+  })
+
+  it('stays busy from a background Task until the Turn it wakes has ended [fence:session-busy-while-background-work]', () => {
+    const why =
+      'A Session with a background Task, a woken Turn, or a Task’s notification whose Turn has ' +
+      'not yet begun is busy, so neither the idle reap nor an eviction ends it (#234). The ' +
+      'notification and the woken Turn’s init were 12 to 107ms apart in every recording.'
+    const { claude, session } = newSession()
+    session.start()
+    void session.send('launch it in the background').catch(() => {})
+    expect(session.backgroundBusy, why).toBe(false)
+
+    feed(claude.process, events.slice(0, launched + 1))
+    expect(session.backgroundBusy, why).toBe(true)
+
+    feed(claude.process, events.slice(launched + 1, lastQuiet + 1))
+    expect(session.backgroundBusy, why).toBe(true)
+
+    feed(claude.process, events.slice(lastQuiet + 1))
+    expect(session.backgroundBusy, why).toBe(false)
+  })
+
+  it('does not hand on a result whose send was already answered [fence:session-late-result-is-not-a-reply]', async () => {
+    const why =
+      'A result that arrives after its send already failed is not a Turn Claude Code started: ' +
+      'handing it on would answer one message twice (#234).'
+    const { claude, session } = newSession()
+    const unsolicited: UnsolicitedTurn[] = []
+    const late: LateResult[] = []
+    session.on('unsolicited', (turn) => unsolicited.push(turn))
+    session.on('late', (result) => late.push(result))
+    session.start()
+
+    const turn = session.send('hello')
+    claude.process.emitError(new Error('pipe broke'))
+    await expect(turn).rejects.toThrow('pipe broke')
+    feed(claude.process, OK)
+
+    expect(unsolicited, why).toEqual([])
+    expect(late, why).toEqual([{ resultIndex: null, isError: false }])
+  })
+})

@@ -58,9 +58,13 @@ import {
   COMPACTION_FAILED,
   MANUAL_COMPACTION_REFUSED,
   NEARLY_SPENT,
+  BACKGROUND,
+  BACKGROUND_SENDS,
+  echoing,
   FAILED,
   FAILED_OUTRIGHT,
   feed,
+  kindOf,
   GENERATING,
   ofKind,
   OK,
@@ -5060,5 +5064,57 @@ describe('a Cloud Grant asked for during a Task', () => {
       await server.close()
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('a result from a Turn Claude Code started itself', () => {
+  it('reaches whoever launched the Task, and a message sent meanwhile gets its own answer [fence:core-woken-result-reaches-its-launcher]', async () => {
+    const why =
+      'A background Task’s result goes to the Caller whose message launched it, in that ' +
+      'Conversation, and a message written while the woken Turn runs is answered with its own ' +
+      'answer (#234). Recorded on 2.1.319, 0.12.0 posted the woken Turn’s text to the second ' +
+      'Caller and dropped both that Caller’s answer and the Task’s result.'
+    const events = BACKGROUND.events
+    const launched = events.findIndex((event) => event.type === 'result')
+    const wokenInit = events.findIndex(
+      (event, at) => at > launched && kindOf(event) === 'system/init',
+    )
+    const { adapter, core, procFor } = newCore()
+
+    const first = core.handle(ingress('launch it in the background'))
+    await flush()
+    const proc = procFor(KEY)
+    const launching = proc.sent[0]?.['uuid'] as string
+    feed(proc, echoing(events.slice(0, wokenInit + 1), BACKGROUND_SENDS.launching, launching))
+    await first
+
+    const second = core.handle(ingress('answer me now', KEY, BOB))
+    await flush()
+    const midTurn = proc.sent[1]?.['uuid'] as string
+    feed(proc, echoing(events.slice(wokenInit + 1), BACKGROUND_SENDS.midTurn, midTurn))
+    await second
+    await flush()
+
+    const results = adapter.instructions
+      .filter((instruction) => instruction.kind === 'result')
+      .map((instruction) => ({
+        conversationKey: instruction.conversationKey,
+        caller: instruction.caller,
+        text: instruction.kind === 'result' ? instruction.text : '',
+      }))
+    expect(results, why).toHaveLength(5)
+    expect(results, why).toEqual(
+      expect.arrayContaining([
+        { conversationKey: KEY, caller: 'users/17', text: expect.stringContaining(PINNED_MODEL) },
+        { conversationKey: KEY, caller: 'users/17', text: 'LAUNCHED' },
+        { conversationKey: KEY, caller: 'users/17', text: expect.stringContaining('subagent') },
+        { conversationKey: KEY, caller: BOB.caller, text: 'SECOND-ANSWER 06365739' },
+        {
+          conversationKey: KEY,
+          caller: 'users/17',
+          text: 'BACKGROUND-RESULT 06365739 SUBAGENT-DONE-06365739',
+        },
+      ]),
+    )
   })
 })

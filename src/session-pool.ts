@@ -15,6 +15,7 @@ import {
   TERMINATE_GRACE_MS,
   TranscriptNotFound,
   type Turn,
+  type UnsolicitedTurn,
 } from './claude-session.js'
 import type { CredentialKind } from './build-env.js'
 import { defaultConfig, type RetryBudget } from './config.js'
@@ -100,6 +101,20 @@ export type PoolLogRecord =
       readonly sessionId: string
       readonly reason: string
     }
+  | { readonly event: 'reap-deferred'; readonly sessionId: string }
+  | {
+      readonly event: 'result-late'
+      readonly sessionId: string
+      readonly resultIndex: number | null
+      readonly isError: boolean
+    }
+  | {
+      readonly event: 'result-undelivered'
+      readonly sessionId: string
+      readonly resultIndex: number | null
+      readonly origin: string | null
+      readonly reason: string
+    }
 
 interface Correction {
   readonly event: 'resume-lost' | 'transcript-survived'
@@ -176,8 +191,9 @@ export interface SessionPoolOptions {
 
 export interface SessionPoolEvents {
   event: [sessionId: string, event: ClaudeEvent]
-  'turn-start': [sessionId: string, text: string]
+  'turn-start': [sessionId: string, text: string, uuid: string]
   'turn-end': [sessionId: string, turn: Turn]
+  unsolicited: [sessionId: string, turn: UnsolicitedTurn]
 }
 
 interface RetryWatch {
@@ -485,8 +501,19 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       const retry = readApiRetry(event)
       if (retry !== null) this.#onRetry(resident, retry)
     })
-    session.on('turn-start', (text) => this.emit('turn-start', sessionId, text))
+    session.on('turn-start', (text, uuid) => this.emit('turn-start', sessionId, text, uuid))
     session.on('turn-end', (turn) => this.emit('turn-end', sessionId, turn))
+    session.on('late', (late) => this.#log({ event: 'result-late', sessionId, ...late }))
+    session.on('unsolicited', (turn) => {
+      if (this.emit('unsolicited', sessionId, turn)) return
+      this.#log({
+        event: 'result-undelivered',
+        sessionId,
+        resultIndex: turn.resultIndex,
+        origin: turn.origin,
+        reason: 'no-listener',
+      })
+    })
     session.on('stderr', (chunk) => {
       resident.stderr += chunk
     })
@@ -541,7 +568,9 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
       this.#residents.size > 0 &&
       this.#residents.size >= Math.min(this.#maxResident, this.#seats.size)
     ) {
-      const victim = [...this.#residents.values()].find((resident) => !resident.busy)
+      const victim = [...this.#residents.values()].find(
+        (resident) => !resident.busy && !resident.session.backgroundBusy,
+      )
       if (victim === undefined) {
         throw new Error(`every one of the ${this.#residents.size} resident Sessions is busy`)
       }
@@ -644,6 +673,11 @@ export class SessionPool extends EventEmitter<SessionPoolEvents> {
   #scheduleReap(resident: Resident): void {
     this.#cancelReap(resident)
     const timer = setTimeout(() => {
+      if (resident.session.backgroundBusy) {
+        this.#log({ event: 'reap-deferred', sessionId: resident.sessionId })
+        this.#scheduleReap(resident)
+        return
+      }
       void this.#retire(resident, 'reap').catch(() => {})
     }, IDLE_REAP_MS)
     timer.unref?.()
