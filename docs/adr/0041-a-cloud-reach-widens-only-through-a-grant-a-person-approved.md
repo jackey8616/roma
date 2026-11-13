@@ -185,10 +185,15 @@ code. To trace a grant, look for its name in `cloudGrants`.
 **A name missing from `cloudGrants` is not proof on its own.** The Task waits at
 most 30 seconds for PAM to answer (§7). A grant PAM makes after that is not in the
 Task's Audit Record, which was already written. It is still in the Operator Log:
-roma writes a `cloud-grant` line, carrying the Task id and the grant's name, for
-every answer it gets, however late. So a grant roma requested is named in
-`cloudGrants` or in a `cloud-grant` line. A grant named in neither, over a period
-whose Operator Log was kept, was not requested by roma.
+roma writes a `cloud-grant` line with `operation: 'grant'`, carrying the Task id
+and the grant's name, for every answer it gets, however late. A status check
+writes a `cloud-grant` line too, so a trace filters on `operation`.
+
+**A name in neither is not proof either.** roma logs the grant's name only once it
+has read PAM's answer. If PAM made the grant and the answer was lost on the way
+back, roma writes `cloud-grant-refused`, which has no grant name. So the two
+records show which grants roma requested and saw answered. They cannot show that
+roma did not request some other grant.
 
 The Cloud Grant Shortcut, like the Cloud Shortcut (ADR-0015 §6), makes the
 ordinary path the one that can be traced.
