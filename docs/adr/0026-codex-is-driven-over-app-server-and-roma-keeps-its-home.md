@@ -32,6 +32,16 @@ as every other configuration problem (ADR-0015 §8, #103). The writability half 
 after the drop to `node` (ADR-0032), since root can write anywhere. Enforced by
 `fence:main-checks-codex-home-after-drop`.
 
+**Amended 2026-11-16** by #217. *The pins* said the drift watch extends to the
+second pin; now it does. `.github/workflows/codex-drift.yml` compares
+`ARG CODEX_VERSION` against the `latest` dist-tag of `@openai/codex` weekly. It
+runs the job `claude-code-drift.yml` runs, from `pin-drift.yml`, so the report
+is the same notify-only one, naming the Codex live tests and Codex's Shared
+Window, and it files under a `codex-drift` label of its own. It opens no pull
+request, for ADR-0007's reason. A pin the drift check knows with no weekly,
+one-at-a-time caller passing it to that job fails the free run. Enforced by
+`fence:drift-watches-every-pin`.
+
 The spike that the design this pull request previously proposed gated
 construction on survives here as that agenda, extended by one item the review
 of that draft asked for: the pinned build's own reasoning-effort levels, which

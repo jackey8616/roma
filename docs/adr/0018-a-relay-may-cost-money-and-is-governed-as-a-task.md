@@ -323,7 +323,7 @@ it.
 The rename is mechanical: `src/readouts.ts`, its test, `Core.#runReadout`,
 `attributedReadout`, `AuditKind`, `AuditTotal.readouts`, and the `CONTEXT.md`
 entry. No behaviour moves with it. The file keeps the line naming Claude Code
-2.1.220, so `scripts/claude-code-drift.ts` goes on listing it under what rests
+2.1.220, so `scripts/check-pin-drift.ts` goes on listing it under what rests
 on the pin.
 
 ### The membership rule: a Relay changes nothing roma holds a belief about
