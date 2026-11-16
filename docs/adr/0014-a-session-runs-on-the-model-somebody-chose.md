@@ -386,7 +386,7 @@ deploy that added it.
 ### The Menu is tied to the pin, twice
 
 **In the drift report, by naming the version.** The file holding the Menu carries
-the pinned Claude Code version, so `scripts/claude-code-drift.ts` — which greps
+the pinned Claude Code version, so `scripts/check-pin-drift.ts` — which greps
 the working tree for files naming the pin and reports them under "What currently
 rests on 2.1.220" — lists it without being taught to. `src/readouts.ts` gets the
 same line, which closes the gap ADR-0012 recorded and left open:
@@ -483,9 +483,9 @@ has never been on an Audit Record. Record the model first, then look.
 
 **A free-run check that greps the alias table out of the bundle.** Rejected. It
 would block a release, which is more than the drift report does, but it watches a
-minified object literal with no stability contract — and `claude-code-drift.ts`
-opens with the argument against it: "a check that passes forever while watching
-nothing, and a green tick reads as 'the pin is current'". The version that fails
+minified object literal with no stability contract — and ADR-0007 gives the
+argument against it: a drift check that swallowed its own failures "would pass
+forever while watching nothing, and a green tick reads as 'the pin is current'". The version that fails
 loudly instead fails on every unrelated reshuffle of that literal, and a check
 people mute is a check that has stopped watching.
 
