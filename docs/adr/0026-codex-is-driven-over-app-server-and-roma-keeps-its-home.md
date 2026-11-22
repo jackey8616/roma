@@ -34,7 +34,8 @@ after the drop to `node` (ADR-0032), since root can write anywhere. Enforced by
 
 **Amended 2026-11-13** by #236. The Pinned Model moves from `gpt-5.6-sol` to
 `gpt-6-astra`, and the Pinned Effort's default is read for the Pinned Model,
-because the build reports it per model. Measured in
+because it differs per model. The account's `model/list` reports it; the build's
+own reading is #157's. Measured in
 `docs/codex-app-server-verification.md` *Re-pin to `gpt-6-astra` (#236)*.
 
 The spike that the design this pull request previously proposed gated
@@ -176,9 +177,10 @@ argument transfers:
   at a level roma cannot state — measured, and the outcome this pin exists to
   rule out. The default is the pinned build's own default,
   measured at pin time; the env override is validated at startup as
-  `ROMA_EFFORT` is. **Amended — the build reports that default per model**,
-  so it is read for the Pinned Model on the pinned build, and moves when either
-  does.
+  `ROMA_EFFORT` is. **Amended — that default differs per model**, so it is
+  read for the Pinned Model, and moves when the model or the build does. So far
+  it is read off the account's `model/list`, served at call time, not off the
+  build; reading the build is #157's.
 - **The Startup Self-Check.** Blocking on every Runtime the deployment
   configured: a real handshake and a probe Turn proving the credential
   resolves and the pinned model is what answers, before anything that could
