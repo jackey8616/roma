@@ -67,6 +67,8 @@ describe('a write to a Runtime whose stdin has closed [fence:runtime-stdin-error
       env: { PATH: '/usr/bin:/bin' },
     })
     const exit = exitOf(process)
+    const reported: Error[] = []
+    process.onError((error) => reported.push(error))
 
     const caught = await uncaughtWhile(async () => {
       await stderrSaysClosed(process)
@@ -75,6 +77,7 @@ describe('a write to a Runtime whose stdin has closed [fence:runtime-stdin-error
     })
 
     expect(caught, why).toEqual([])
+    expect(reported, why).toEqual([])
     expect(await exit, why).toEqual({ code: 0, signal: null })
   })
 })
