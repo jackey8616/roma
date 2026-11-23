@@ -1,25 +1,14 @@
 name: codex-drift
 
-# Does anybody know the Codex pin has fallen behind?
-#
-# `Dockerfile` pins Codex exactly, and ADR-0026 *The pins* makes moving it a
-# re-verification event for ADR-0007's reason: every Codex reading in `docs/` is
-# evidence about that build, and the Codex live tests that would re-establish them
-# spend Codex's Shared Window and do not run in CI. So this is the Claude Code
-# watch again — `claude-code-drift.yml` says why it is notify-only, weekly and
-# dispatchable — with the same job, from `pin-drift.yml`, and a label of its own.
 on:
   schedule:
     - cron: '0 7 * * 1'
   workflow_dispatch:
 
-# The same grant as `claude-code-drift.yml`, for the same one report.
 permissions:
   contents: read
   issues: write
 
-# Its own group: the two watches file under different labels, so they never race
-# each other, only themselves.
 concurrency:
   group: codex-drift
   cancel-in-progress: false

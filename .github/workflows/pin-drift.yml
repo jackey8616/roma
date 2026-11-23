@@ -1,15 +1,5 @@
 name: pin-drift
 
-# The job both drift watches run: `claude-code-drift.yml` for the Claude Code pin
-# and `codex-drift.yml` for the Codex one. Called, never triggered — the callers
-# own the schedule, the grant and the concurrency, and keep the paths their run
-# history is filed under.
-#
-# This reports and does nothing else. It never edits a pin, and it opens no pull
-# request: a bump PR would read as routine maintenance while silently invalidating
-# every measurement in `docs/` about that Runtime, and CI would go green, because
-# no live test runs there. A green check on a diff that moves a pin is worse than
-# no check at all — it launders an unverified claim into an approved one.
 on:
   workflow_call:
     inputs:
@@ -22,8 +12,6 @@ jobs:
   drift:
     name: is the ${{ inputs.pin }} pin still the published version?
     runs-on: ubuntu-latest
-    # Restated rather than inherited, so a caller that granted less fails at the
-    # start of the run instead of at the first `gh` call.
     permissions:
       contents: read
       issues: write
@@ -35,17 +23,8 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      # For `tsx`, which is what runs the check. The alternative — the comparison
-      # inline in this file — would put the parsing of the `ARG` line somewhere the
-      # free run cannot reach it, and the failure this check most plausibly dies of
-      # is a regex that quietly stops matching.
       - run: npm ci
 
-      # Reads the pin out of the `Dockerfile`, asks the registry, and sets
-      # `drift`. It ends the run red rather than quiet on an unknown pin, an
-      # unresolvable pin, an unparseable `ARG`, a missing `Dockerfile` or a failed
-      # lookup — only a successful comparison is allowed to be silent, and only
-      # when the versions match.
       - id: check
         env:
           PIN: ${{ inputs.pin }}
@@ -53,10 +32,6 @@ jobs:
 
       - name: open or update the drift report
         if: steps.check.outputs.drift == 'true'
-        # Through the environment rather than interpolated into the script, the way
-        # `release.yml` passes a refname: a title built from a version is a title
-        # that could contain a quote, and `--title '${{ … }}'` is a step that runs
-        # whatever closed it.
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

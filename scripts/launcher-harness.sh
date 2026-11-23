@@ -1,9 +1,4 @@
 #!/bin/sh
-# Runs inside the image, as root, with nothing else running: ADR-0036's Launcher
-# asked what it does, one line per check, "PASS <name>" or "FAIL <name>".
-# `scripts/verify-image.sh` section 10 runs it and requires every line to pass.
-# Fake data only. roma's own part — writing the roots file while root, making
-# /run/roma traversable, listening on the Seat sockets — is played here by hand.
 
 set -u
 

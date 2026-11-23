@@ -1,17 +1,3 @@
-# The base image and the actions, and nothing else.
-#
-# npm is deliberately absent. The dependency that matters most in this repository
-# is Claude Code, and it is not in `package.json` — it is a pinned `npm install
-# --global` in the Dockerfile, which no ecosystem here watches. That is the
-# decision, not an oversight: an automated bump would look like routine
-# maintenance while silently invalidating every measurement in `docs/`, and CI
-# would pass, because seam 2 does not run there. Moving that pin is a
-# re-verification event a human does on purpose (ADR-0006).
-#
-# Something does watch for it going stale, and deliberately not from here:
-# `.github/workflows/claude-code-drift.yml` compares the `ARG` against the
-# published version weekly and files a notify-only issue. It opens no pull
-# request, because a bump PR is the artifact this file exists to refuse.
 version: 2
 updates:
   - package-ecosystem: docker

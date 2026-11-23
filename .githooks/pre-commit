@@ -1,5 +1,4 @@
 #!/bin/sh
-# Enforced by `fence:no-verify-is-refused`.
 set -e
 
 want="$(cat "$(git rev-parse --show-toplevel)/.nvmrc")"

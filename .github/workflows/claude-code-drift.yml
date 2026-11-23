@@ -1,46 +1,18 @@
 name: claude-code-drift
 
-# Does anybody know the pin has fallen behind?
-#
-# `Dockerfile` pins Claude Code exactly, and ADR-0007 makes moving that pin a
-# re-verification event a human does on purpose rather than a dependency bump —
-# which is why `.github/dependabot.yml` is the base image and the actions only.
-# What was missing is anybody finding out. Until this file, the answer was that
-# somebody happened to look.
-#
-# This reports and does nothing else. It never edits the pin, and it opens no pull
-# request: a bump PR would read as routine maintenance while silently invalidating
-# every measurement in `docs/`, and CI would go green, because seam 2 does not run
-# there. A green check on a diff that moves the pin is worse than no check at all —
-# it launders an unverified claim into an approved one.
-#
-# Weekly, matching the cadence `dependabot.yml` uses. Daily would re-report the
-# same declined fact seven times as often, and a check people mute is a check that
-# has stopped watching. `workflow_dispatch` is here because a scheduled workflow
-# cannot otherwise be run before its first Monday, and because a human who wants
-# the answer now should not have to wait for one.
 on:
   schedule:
     - cron: '0 7 * * 1'
   workflow_dispatch:
 
-# `issues: write` is the whole of what this needs, and it is used to file one
-# report. No `contents: write`: nothing here commits, and the pin is not this
-# workflow's to move. No Shared Window token — `src/packaging.test.ts` fails if any
-# workflow in this repository is ever handed one.
 permissions:
   contents: read
   issues: write
 
-# One at a time, and not cancelled. A scheduled run and a dispatched one that
-# overlapped would both look for an existing report, find none, and file two.
 concurrency:
   group: claude-code-drift
   cancel-in-progress: false
 
-# The job is `pin-drift.yml`'s, shared with `codex-drift.yml` so the two watches
-# cannot drift apart. This file keeps the trigger, the grant, the one-at-a-time
-# rule and its path, which its run history and `gh workflow run` are filed under.
 jobs:
   drift:
     uses: ./.github/workflows/pin-drift.yml
