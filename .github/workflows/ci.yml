@@ -102,7 +102,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      # For `tsx`, which is what runs the check. The same trade `claude-code-drift.yml`
+      # For `tsx`, which is what runs the check. The same trade `pin-drift.yml`
       # makes: the comparison written inline here would put the union somewhere the
       # free run cannot reach it, and what this check most plausibly dies of is a
       # union computed slightly wrong, reporting nothing, forever green.

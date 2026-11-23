@@ -315,8 +315,8 @@ it, which is now the only way a Session reaches the takes-none path; the tests
 for that path pin it rather than choose it.
 
 **It reports; it does not gate.** Nothing fails a build on it, nothing in CI
-watches it, and roma refuses nothing because of it. This is `claude-code-drift.ts`'s
-posture — "enumeration rather than enforcement" — and it is not modesty. While
+watches it, and roma refuses nothing because of it. This is the posture of ADR-0007's
+drift check, which enumerates rather than enforces, and it is not modesty. While
 writing this ADR the first version of the extractor opened its window too wide,
 read into the neighbouring function, and reported `claude-mythos-5` as
 unsupported when it is on the allowing branch. That failure was silent and would
@@ -409,7 +409,7 @@ Optional rather than required for the reason `callerName` and `kind` are:
 total, and the month's total is what the Overflow cap is enforced against.
 
 **The Menu and the Matrix are tied to the pin by naming the version.** The file
-holding them carries the pinned Claude Code version, so `claude-code-drift.ts`'s
+holding them carries the pinned Claude Code version, so `check-pin-drift.ts`'s
 working-tree sweep lists it under what rests on 2.1.220 without being taught to.
 `src/readouts.ts` and `src/model-menu.ts` already carry that line. This is the
 third, and the re-audit list is now long enough that "somebody remembers" has

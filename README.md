@@ -32,6 +32,7 @@ npm install
 | `npm run test:seam2` | **Spends money.** Drives a real `claude -p`. |
 | `npm run test:codex-live` | **Spends Codex's Shared Window.** Drives a real `codex app-server`. |
 | `npm run check:claude-code-drift` | Is the pinned Claude Code still the published one? Reports; changes nothing. |
+| `npm run check:codex-drift` | The same, for the pinned Codex. |
 | `npm run check:claude-code-effort-matrix` | Which models does the pinned Claude Code strip the effort from? Reads it out of the binary and prints the gates it read, for a person to check `EFFORT_MATRIX` against. Nothing consumes the output and nothing fails on it (ADR-0016). |
 | `npm run check:adr-collision` | Would merging this branch put two ADRs on one number? Reads the pull request's base branch, so it does nothing outside CI. |
 
@@ -183,7 +184,8 @@ ADR-0007 is why, and `src/packaging.test.ts` is what keeps it.
 Something does say when it has fallen behind. `.github/workflows/claude-code-drift.yml`
 compares the pin against what npm publishes, weekly, and files one issue when they differ —
 naming both versions, what re-verification would cost, and every file that currently rests
-on the pinned version. It opens no pull request and it edits nothing.
+on the pinned version. It opens no pull request and it edits nothing. `codex-drift.yml`
+runs the same job for the Codex pin, under a label of its own (ADR-0026 *The pins*).
 
 There is **no `latest` tag, and no `0.1` or `0`**. A tag that moves is a deployment whose
 Claude Code changes underneath it, which is the whole thing the pin exists to prevent, so
@@ -280,10 +282,11 @@ fifteen ADRs and been caught by somebody reading both times. Making the check *b
 merge rather than only go red is the same kind of setting: it has to be named in the
 required checks, which is a repository setting and not in this repo's files.
 
-One workflow is not a check. `claude-code-drift` runs weekly rather than on a commit,
-compares the `Dockerfile`'s pin against the published Claude Code, and files a notify-only
-issue when they differ. It ends red on an unreadable pin or a failed lookup, because a
-drift check that passes while watching nothing reads as "the pin is current".
+Two workflows are not checks. `claude-code-drift` and `codex-drift` run weekly rather than
+on a commit, compare the `Dockerfile`'s pin against the published Claude Code or Codex, and
+file a notify-only issue when they differ. They end red on an unreadable pin or a failed
+lookup, because a drift check that passes while watching nothing reads as "the pin is
+current".
 
 **Seam 2 never runs in CI** and no workflow is given a Shared Window token — roma is never
 booted there. What the image is checked against instead is `claude --version` inside it, and
