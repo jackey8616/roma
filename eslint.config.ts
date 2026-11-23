@@ -3,14 +3,7 @@ import { plugin } from './scripts/lint/plugin.js'
 
 export default tseslint.config(
   {
-    ignores: [
-      '.claude/skills/**',
-      '.claude/worktrees/**',
-      '**/fixtures/**',
-      'dist/**',
-      'coverage/**',
-      '.tmp/**',
-    ],
+    ignores: ['.claude/worktrees/**', '**/fixtures/**', 'dist/**', 'coverage/**', '.tmp/**'],
   },
   {
     files: ['**/*.{ts,mts,cts,js,mjs,cjs}'],
