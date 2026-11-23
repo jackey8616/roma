@@ -134,6 +134,7 @@ function wrap(
     throw new Error(`${command} spawned without piped stdio`)
   }
 
+  stdin.on('error', () => {})
   stdout.setEncoding('utf8')
   stderr.setEncoding('utf8')
 

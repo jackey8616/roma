@@ -32,6 +32,56 @@ const seated = (launcher: string) =>
 const exitOf = (process: ReturnType<typeof seated>): Promise<RuntimeProcessExit> =>
   new Promise((done) => process.onExit(done))
 
+const stderrSaysClosed = (process: ReturnType<typeof seated>): Promise<void> =>
+  new Promise((done) =>
+    process.onStderr((chunk) => {
+      if (chunk.includes('closed')) done()
+    }),
+  )
+
+const uncaughtWhile = async (run: () => Promise<unknown>): Promise<unknown[]> => {
+  const caught: unknown[] = []
+  const record = (error: unknown): void => {
+    caught.push(error)
+  }
+  globalThis.process.on('uncaughtException', record)
+  try {
+    await run()
+  } finally {
+    globalThis.process.off('uncaughtException', record)
+  }
+  return caught
+}
+
+describe('a write to a Runtime whose stdin has closed [fence:runtime-stdin-error-never-throws]', () => {
+  const why =
+    'A Runtime can close its stdin before roma sees it exit. The write that lands in between ' +
+    'fails with EPIPE, and an unhandled stdin error would end roma and every Session in it; ' +
+    'the exit event already tells ClaudeSession and CodexAppServer the Runtime is gone.'
+
+  it('passes without throwing, and the exit still arrives', async () => {
+    const process = spawnThrough('/nonexistent/roma-launch')({
+      command: 'sh',
+      args: ['-c', 'exec 0<&-; echo closed >&2; sleep 0.3'],
+      cwd: '/',
+      env: { PATH: '/usr/bin:/bin' },
+    })
+    const exit = exitOf(process)
+    const reported: Error[] = []
+    process.onError((error) => reported.push(error))
+
+    const caught = await uncaughtWhile(async () => {
+      await stderrSaysClosed(process)
+      process.write('{}\n')
+      await exit
+    })
+
+    expect(caught, why).toEqual([])
+    expect(reported, why).toEqual([])
+    expect(await exit, why).toEqual({ code: 0, signal: null })
+  })
+})
+
 describe('what the Launcher says on its report pipe', () => {
   it('counts a Seat as started once the Launcher says so, before the Runtime ends [fence:launcher-started-is-read-off-the-report]', async () => {
     const why =
