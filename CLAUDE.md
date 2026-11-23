@@ -3,7 +3,8 @@
 ## Building and testing
 
 Node 22 (`.nvmrc`), TypeScript, Vitest. `npm test` is the default run — fast, free, and
-safe to run as often as you like.
+safe to run as often as you like. Run `npm run lint` before finishing; it also bans comments in
+YAML and shell, by the ast-grep rules in `rules/`.
 
 **`npm run test:seam2` spends real money.** It drives a real `claude -p` against the
 Shared Window everybody shares. Run it when you have changed something the stream contract

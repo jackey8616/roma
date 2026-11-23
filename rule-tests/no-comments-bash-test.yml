@@ -1,0 +1,37 @@
+id: no-comments-bash
+valid:
+  - |
+    #!/usr/bin/env bash
+    set -e
+  - |
+    #!/bin/sh
+    set -e
+  - 'echo "# x"'
+  - "echo '# x'"
+  - 'echo a#b'
+invalid:
+  - |
+    # a comment
+    set -e
+  - 'set -e # trailing'
+  - |
+    #!/usr/bin/env bash
+    # after the shebang
+    set -e
+  - |
+    set -e
+    #!/bin/sh
+  - |
+    #!/usr/bin/env python3
+    set -e
+  - |
+    #!/bin/sh -x
+    set -e
+  - |
+    #!/bin/sh keep-until-v2
+    set -e
+  - |
+    f() {
+      #!/bin/sh
+      true
+    }

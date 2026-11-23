@@ -1,0 +1,20 @@
+id: no-comments-bash
+language: Bash
+severity: error
+message: Comments aren't allowed here. Say it in code.
+note: |
+  Rename or extract a function or variable so the name says it.
+  Put a behaviour in a test name, and a reason in docs/adr/.
+  Put the reason for a change in the commit message.
+  Tool directives allowed in this repo are listed in rules/no-comments-bash.yml.
+ignores:
+  - .claude/skills/**
+rule:
+  kind: comment
+  not:
+    any:
+      - all:
+          - regex: '^#!(/usr/bin/env bash|/bin/sh)$'
+          - inside: { kind: program }
+          - not: { follows: { regex: '[\s\S]' } }
+fix: ''

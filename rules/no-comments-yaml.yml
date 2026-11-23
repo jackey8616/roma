@@ -1,0 +1,14 @@
+id: no-comments-yaml
+language: Yaml
+severity: error
+message: Comments aren't allowed here. Say it in code.
+note: |
+  Rename a job, step or key so the name says it.
+  Put a behaviour in a test name, and a reason in docs/adr/.
+  Put the reason for a change in the commit message.
+  Tool directives allowed in this repo are listed in rules/no-comments-yaml.yml.
+ignores:
+  - .claude/skills/**
+rule:
+  kind: comment
+fix: ''

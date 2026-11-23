@@ -1,0 +1,5 @@
+ruleDirs: [rules]
+testConfigs:
+  - testDir: rule-tests
+languageGlobs:
+  bash: ['pre-commit']

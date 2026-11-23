@@ -1,0 +1,17 @@
+id: no-comments-yaml
+valid:
+  - 'name: ci'
+  - "run: echo '# x'"
+  - |
+    steps:
+      - run: "echo a # b"
+invalid:
+  - |
+    # a comment
+    name: ci
+  - 'name: ci # trailing'
+  - |
+    jobs:
+      checks:
+        # indented
+        runs-on: ubuntu-latest

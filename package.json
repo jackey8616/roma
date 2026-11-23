@@ -21,11 +21,12 @@
     "check:claude-code-drift": "tsx scripts/check-pin-drift.ts claude-code",
     "check:codex-drift": "tsx scripts/check-pin-drift.ts codex",
     "check:claude-code-effort-matrix": "tsx scripts/check-claude-code-effort-matrix.ts",
-    "lint": "eslint .",
+    "lint": "eslint . && ast-grep test --skip-snapshot-tests && ast-grep scan --no-ignore hidden --globs '!.git' && ! git grep -n --untracked 'ast-grep[-]ignore'",
     "check:adr-enforcers": "tsx scripts/check-adr-enforcers.ts",
     "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true"
   },
   "devDependencies": {
+    "@ast-grep/cli": "0.39.5",
     "@types/node": "^22.18.13",
     "eslint": "10.12.0",
     "jiti": "2.7.0",
