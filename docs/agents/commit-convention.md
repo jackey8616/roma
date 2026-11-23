@@ -48,7 +48,6 @@ Optional, but use one when the change sits in a recognisable area:
 
 | Scope     | Area                                             |
 | --------- | ------------------------------------------------ |
-| `skills`  | `.claude/skills/` and `skills-lock.json`         |
 | `agents`  | `docs/agents/`                                   |
 | `adr`     | `docs/adr/`                                      |
 | `context` | `CONTEXT.md` and the domain model                |
@@ -117,10 +116,6 @@ From this repo's own history, restated in the convention:
 
 ```
 docs(agents): document the GitHub MCP path for cloud containers
-```
-
-```
-build(skills): vendor mattpocock/skills into the repo
 ```
 
 ```

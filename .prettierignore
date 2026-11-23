@@ -2,11 +2,6 @@
 # `coverage/` and `.tmp/` are already out. What belongs here is the rest: paths git
 # tracks that Prettier still should not own.
 
-# Vendored from `mattpocock/skills` and pinned by `skills-lock.json`. Formatting these
-# puts a diff between every file and its upstream, which `npx skills update` then has
-# to merge through on every pull.
-.claude/skills/
-
 # npm's file, not ours. Prettier reformats it and the next `npm install` writes it
 # straight back, so `format:check` fails on a tree nobody edited.
 package-lock.json
