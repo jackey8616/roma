@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { codexHomeProblems, readCodexHome } from '../../src/codex-home.js'
 import { readDotEnv, SEAM2_ROOT } from './live-claude.js'
 
-export const PINNED_CODEX_MODEL = 'gpt-5.6-sol'
+export const PINNED_CODEX_MODEL = 'gpt-6-astra'
 
 export function seededCodexHome(): string {
   const unreadable: string[] = []
